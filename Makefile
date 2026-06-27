@@ -8,17 +8,30 @@ PNPM  ?= pnpm
 # Prepended for tools we shell out to that call `cargo` by name (e.g. tauri dev).
 CARGO_BIN := $(HOME)/.cargo/bin
 
+# Deterministic dev-server port per checkout: main -> 1420, each worktree hashes
+# to 1430-1529, so several `make dev` instances can run without colliding.
+AIM_DEV_PORT := $(shell \
+  if [ "$(notdir $(CURDIR))" = "ai-manager" ]; then echo 1420; else \
+    h=$$(printf '%s' '$(CURDIR)' | (md5 2>/dev/null || md5sum) | tr -dc '0-9a-f' | cut -c1-4); \
+    echo $$((1430 + 0x$$h % 100)); \
+  fi)
+
 .DEFAULT_GOAL := help
 
 # ---- main ----
 
 .PHONY: dev
 dev: desktop/node_modules ## Run the desktop app (installs deps + builds + hot-reload)
-	cd desktop && PATH="$(CARGO_BIN):$$PATH" $(PNPM) tauri dev
+	cd desktop && PATH="$(CARGO_BIN):$$PATH" AIM_DEV_PORT=$(AIM_DEV_PORT) \
+		$(PNPM) tauri dev --config '{"build":{"devUrl":"http://localhost:$(AIM_DEV_PORT)"}}'
 
 .PHONY: cli
 cli: ## Run the headless CLI (prints a live snapshot as JSON)
 	@$(CARGO) run -q -p aim-cli -- --json
+
+.PHONY: port
+port: ## Print this checkout's deterministic dev-server port
+	@echo $(AIM_DEV_PORT)
 
 # ---- quality ----
 

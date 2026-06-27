@@ -1,0 +1,16 @@
+# Archon config for ai-manager.
+# These workflows require the separate Archon CLI (https://github.com/.../Archon).
+# Without it, this directory is inert — the `.claude/skills/archon-dev` skill still
+# works standalone (it's just instructions Claude follows).
+
+worktree:
+  baseBranch: main
+  enabled: true
+
+assistants:
+  claude:
+    model: opus
+    settingSources: [project, user]
+  codex:
+    model: gpt-5.3-codex
+    modelReasoningEffort: medium

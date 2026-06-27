@@ -1,0 +1,94 @@
+# ai-manager idea-to-PR — the full Archon loop adapted from GitHubIssueTriager's
+# triager-idea-to-pr, with the Neon database phases removed (ai-manager has no DB)
+# and validation swapped to `make verify` (fmt + clippy -D warnings + test + cli).
+#
+# Input: a GitHub issue reference or a free-text feature description.
+# Output: a PR with the 5-reviewer fan-out complete.
+# Requires: the Archon CLI (the `archon-*` commands are Archon's bundled defaults).
+
+name: aim-idea-to-pr
+description: |
+  Use when: shipping a feature in ai-manager via the full Archon loop.
+  Triggers: "aim idea to pr", "idea to pr".
+  NOT for: quick fixes or plan-only runs.
+
+nodes:
+  - id: create-plan
+    command: archon-create-plan
+    context: fresh
+
+  - id: plan-setup
+    command: archon-plan-setup
+    depends_on: [create-plan]
+    context: fresh
+
+  - id: confirm-plan
+    command: archon-confirm-plan
+    depends_on: [plan-setup]
+    context: fresh
+
+  - id: implement-tasks
+    command: archon-implement-tasks
+    depends_on: [confirm-plan]
+    context: fresh
+    model: claude-opus-4-8[1m]
+
+  # ai-manager validation (replaces archon-validate / Neon-branch testing).
+  - id: validate
+    bash: |
+      set -e
+      make verify
+    depends_on: [implement-tasks]
+
+  - id: finalize-pr
+    command: archon-finalize-pr
+    depends_on: [validate]
+    context: fresh
+
+  - id: review-scope
+    command: archon-pr-review-scope
+    depends_on: [finalize-pr]
+    context: fresh
+
+  - id: sync
+    command: archon-sync-pr-with-main
+    depends_on: [review-scope]
+    context: fresh
+
+  # 5-agent review fan-out (parallel; all depend only on `sync`).
+  - id: code-review
+    command: archon-code-review-agent
+    depends_on: [sync]
+    context: fresh
+  - id: error-handling
+    command: archon-error-handling-agent
+    depends_on: [sync]
+    context: fresh
+  - id: test-coverage
+    command: archon-test-coverage-agent
+    depends_on: [sync]
+    context: fresh
+  - id: comment-quality
+    command: archon-comment-quality-agent
+    depends_on: [sync]
+    context: fresh
+  - id: docs-impact
+    command: archon-docs-impact-agent
+    depends_on: [sync]
+    context: fresh
+
+  - id: synthesize
+    command: archon-synthesize-review
+    depends_on: [code-review, error-handling, test-coverage, comment-quality, docs-impact]
+    trigger_rule: one_success
+    context: fresh
+
+  - id: implement-fixes
+    command: archon-implement-review-fixes
+    depends_on: [synthesize]
+    context: fresh
+
+  - id: workflow-summary
+    command: archon-workflow-summary
+    depends_on: [implement-fixes]
+    context: fresh

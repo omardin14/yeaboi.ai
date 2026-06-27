@@ -1,0 +1,42 @@
+# ai-manager comprehensive PR review — 5 parallel review agents + synthesis on the
+# current PR. Standalone version of the review tail of aim-idea-to-pr.
+# Requires: the Archon CLI (the `archon-*` commands are Archon's bundled defaults).
+#
+# For an in-session (no-CLI) equivalent, use the `/review-pr` command instead.
+
+name: aim-pr-review
+description: |
+  Use when: running a full multi-agent review on an existing PR.
+  Triggers: "comprehensive review", "full pr review", "aim pr review".
+
+nodes:
+  - id: review-scope
+    command: archon-pr-review-scope
+    context: fresh
+
+  - id: code-review
+    command: archon-code-review-agent
+    depends_on: [review-scope]
+    context: fresh
+  - id: error-handling
+    command: archon-error-handling-agent
+    depends_on: [review-scope]
+    context: fresh
+  - id: test-coverage
+    command: archon-test-coverage-agent
+    depends_on: [review-scope]
+    context: fresh
+  - id: comment-quality
+    command: archon-comment-quality-agent
+    depends_on: [review-scope]
+    context: fresh
+  - id: docs-impact
+    command: archon-docs-impact-agent
+    depends_on: [review-scope]
+    context: fresh
+
+  - id: synthesize
+    command: archon-synthesize-review
+    depends_on: [code-review, error-handling, test-coverage, comment-quality, docs-impact]
+    trigger_rule: one_success
+    context: fresh
