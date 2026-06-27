@@ -1,23 +1,33 @@
 import { useEffect, useState } from "react";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Snapshot } from "@/lib/bindings/Snapshot";
 import { getSnapshot, subscribeSnapshot } from "@/lib/api";
 import { SessionsTable } from "@/components/sessions-table";
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Initial fetch (typed command) + live updates (typed event).
+    // Outside Tauri (e.g. plain `vite` in a browser) the IPC bridge is absent —
+    // stay idle without treating that as an error. Any *other* failure below is
+    // a real fault and is surfaced, not swallowed.
+    const inTauri =
+      typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    if (!inTauri) return;
+
     getSnapshot()
       .then(setSnapshot)
-      .catch(() => {
-        /* not running under Tauri (e.g. plain `vite`) — stay in loading state */
-      });
+      .catch((e) => setError(`Failed to load snapshot: ${e}`));
 
-    const unlisten = subscribeSnapshot(setSnapshot);
-    return () => {
-      unlisten.then((stop) => stop()).catch(() => {});
-    };
+    let unlisten: UnlistenFn | undefined;
+    subscribeSnapshot(setSnapshot)
+      .then((stop) => {
+        unlisten = stop;
+      })
+      .catch((e) => setError(`Live updates unavailable: ${e}`));
+
+    return () => unlisten?.();
   }, []);
 
   const updatedAt =
@@ -42,6 +52,12 @@ function App() {
             <div>updated {updatedAt}</div>
           </div>
         </header>
+
+        {error && (
+          <div className="mb-4 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-400">
+            {error}
+          </div>
+        )}
 
         <SessionsTable snapshot={snapshot} />
       </div>

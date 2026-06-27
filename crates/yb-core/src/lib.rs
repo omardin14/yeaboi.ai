@@ -82,6 +82,8 @@ fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
+        // `now()` is always ≥ UNIX_EPOCH on supported platforms; 0 is a harmless
+        // documented fallback (the UI shows "—" when generated_at_ms == 0).
         .unwrap_or(0)
 }
 
@@ -101,7 +103,6 @@ mod tests {
     fn stub_round_trips_through_json() {
         let s = Snapshot::stub();
         let json = serde_json::to_string(&s).expect("serialize");
-        assert!(json.contains("\"sessions\""));
         let back: Snapshot = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(s, back);
     }

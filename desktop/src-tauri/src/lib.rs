@@ -1,4 +1,4 @@
-//! yeaboi.ai desktop (Tauri shell over the `aim-*` engine).
+//! yeaboi.ai desktop (Tauri shell over the `yb-*` engine).
 //!
 //! Phase 0 proves the Rust↔frontend seam with one typed command
 //! ([`get_snapshot`]) and one event (`snapshot-update`) that streams a stub
@@ -30,8 +30,8 @@ pub fn run() {
             let icon = app
                 .default_window_icon()
                 .cloned()
-                .expect("bundled default window icon");
-            tauri::tray::TrayIconBuilder::with_id("aim-tray")
+                .ok_or("bundled default window icon missing")?;
+            tauri::tray::TrayIconBuilder::with_id("yeaboi-tray")
                 .tooltip("yeaboi.ai")
                 .icon(icon)
                 .build(app)?;
@@ -42,7 +42,11 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 loop {
                     tokio::time::sleep(Duration::from_secs(1)).await;
-                    if handle.emit(SNAPSHOT_EVENT, Snapshot::stub_now()).is_err() {
+                    if let Err(err) = handle.emit(SNAPSHOT_EVENT, Snapshot::stub_now()) {
+                        // The only data pipeline just died — be loud rather than
+                        // silently freezing the UI. (Phase 1: emit a typed error
+                        // event so the frontend can surface it.)
+                        eprintln!("snapshot emit failed, stopping stream: {err}");
                         break;
                     }
                 }
@@ -50,5 +54,6 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
+        // fatal: the Tauri event loop failed to start — nothing to recover to.
         .expect("error while running tauri application");
 }

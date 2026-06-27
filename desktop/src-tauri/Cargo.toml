@@ -3,7 +3,7 @@ name = "yeaboi-desktop"
 version = "0.0.0"
 description = "yeaboi.ai desktop app (Tauri shell over the yb-* engine)"
 authors = ["dinho"]
-edition = "2021"
+edition.workspace = true
 
 [lib]
 # Keep the `_lib` suffix (unique vs the bin name; required on Windows).

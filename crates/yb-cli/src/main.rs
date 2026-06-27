@@ -29,8 +29,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Default and `--once` both render one human frame.
-    let _ = args.once;
+    // Default and `--once` both render one human frame (Phase 1 adds `--interval`).
     println!(
         "yeaboi.ai — {} session(s) @ {}ms",
         snap.sessions.len(),
