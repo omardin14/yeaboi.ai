@@ -1,0 +1,16 @@
+[package]
+name = "aim-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ai-manager headless CLI"
+
+[[bin]]
+name = "aim"
+path = "src/main.rs"
+
+[dependencies]
+aim-core = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

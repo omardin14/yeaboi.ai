@@ -1,0 +1,9 @@
+[package]
+name = "aim-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ai-manager typed git/gh wrappers"
+
+[dependencies]
+aim-exec = { workspace = true }

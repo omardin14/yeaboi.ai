@@ -1,0 +1,22 @@
+[package]
+name = "ai-manager-desktop"
+version = "0.0.0"
+description = "ai-manager desktop app (Tauri shell over the aim-* engine)"
+authors = ["dinho"]
+edition = "2021"
+
+[lib]
+# Keep the `_lib` suffix (unique vs the bin name; required on Windows).
+name = "desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+aim-core = { workspace = true }

@@ -1,0 +1,8 @@
+[package]
+name = "aim-exec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ai-manager external command runner (spawn/stream/detached)"
+
+[dependencies]
