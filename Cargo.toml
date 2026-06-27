@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/yb-core",
+    "crates/yb-proc",
+    "crates/yb-exec",
+    "crates/yb-git",
+    "crates/yb-worktree",
+    "crates/yb-agent",
+    "crates/yb-cli",
+    "desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+authors = ["dinho"]
+rust-version = "1.85"
+
+[workspace.dependencies]
+# internal crates
+yb-core = { path = "crates/yb-core" }
+yb-proc = { path = "crates/yb-proc" }
+yb-exec = { path = "crates/yb-exec" }
+yb-git = { path = "crates/yb-git" }
+yb-worktree = { path = "crates/yb-worktree" }
+yb-agent = { path = "crates/yb-agent" }
+
+# external (shared, pinned once for the whole workspace)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

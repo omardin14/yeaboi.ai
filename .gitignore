@@ -1,0 +1,21 @@
+# Rust
+/target
+**/target
+
+# Node / frontend
+node_modules/
+dist/
+desktop/dist/
+
+# Tauri
+desktop/src-tauri/gen/
+desktop/src-tauri/target/
+
+# Env / secrets
+.env
+.env.local
+*.local
+
+# OS / editor
+.DS_Store
+*.log

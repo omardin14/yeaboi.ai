@@ -1,0 +1,8 @@
+[package]
+name = "yb-exec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "yeaboi.ai external command runner (spawn/stream/detached)"
+
+[dependencies]

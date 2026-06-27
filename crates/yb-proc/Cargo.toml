@@ -1,0 +1,8 @@
+[package]
+name = "yb-proc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "yeaboi.ai process table, ports, and signals"
+
+[dependencies]

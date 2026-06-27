@@ -1,0 +1,9 @@
+[package]
+name = "yb-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "yeaboi.ai typed git/gh wrappers"
+
+[dependencies]
+yb-exec = { workspace = true }
