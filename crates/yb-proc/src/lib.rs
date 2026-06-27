@@ -3,13 +3,13 @@
 /// Crate marker used by Phase 0 to verify linkage; replaced by `ProcTable`,
 /// port enumeration, and `actions::sigterm` in Phase 1.
 pub fn placeholder() -> &'static str {
-    "aim-proc"
+    "yb-proc"
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn placeholder_name() {
-        assert_eq!(super::placeholder(), "aim-proc");
+        assert_eq!(super::placeholder(), "yb-proc");
     }
 }

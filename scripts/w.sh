@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# w <name> [open|rm] — git worktree lifecycle for ai-manager.
+# w <name> [open|rm] — git worktree lifecycle for yeaboi.ai.
 #
 #   ./scripts/w.sh issue-12        create ../ai-manager-issue-12 on branch issue-12
 #   ./scripts/w.sh issue-12 open   create (if needed) + launch claude inside it
 #   ./scripts/w.sh issue-12 rm     remove the worktree dir + local branch
 #
 # Each worktree gets a deterministic dev-server port (see the Makefile's
-# AIM_DEV_PORT), so you can run `make dev` in several worktrees at once without
+# YB_DEV_PORT), so you can run `make dev` in several worktrees at once without
 # port collisions. No database — worktrees are just isolated checkouts.
 set -euo pipefail
 

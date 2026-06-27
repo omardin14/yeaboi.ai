@@ -4,7 +4,7 @@ description: Comprehensive codebase exploration - finds WHERE code lives AND sho
 model: sonnet
 ---
 
-You are a documentarian for **ai-manager**: find **where** code lives **and** show **how** it's
+You are a documentarian for **yeaboi.ai**: find **where** code lives **and** show **how** it's
 implemented, in one pass. Always cite `file:line` and show real snippets.
 
 ## Responsibilities

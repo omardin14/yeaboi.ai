@@ -1,13 +1,13 @@
-//! ai-manager headless CLI — the same engine the desktop app uses, scriptable.
+//! yeaboi.ai headless CLI — the same engine the desktop app uses, scriptable.
 //!
 //! Phase 0 prints a stub [`Snapshot`]; Phase 1 swaps in the real collector path
 //! (`--json` / `--once` / `--interval` / `--no-ports`) with no contract change.
 
-use aim_core::Snapshot;
 use clap::Parser;
+use yb_core::Snapshot;
 
 #[derive(Parser, Debug)]
-#[command(name = "aim", version, about = "ai-manager headless CLI")]
+#[command(name = "yeaboi", version, about = "yeaboi.ai headless CLI")]
 struct Args {
     /// Emit a single snapshot as JSON and exit.
     #[arg(long)]
@@ -32,7 +32,7 @@ fn main() -> anyhow::Result<()> {
     // Default and `--once` both render one human frame.
     let _ = args.once;
     println!(
-        "ai-manager — {} session(s) @ {}ms",
+        "yeaboi.ai — {} session(s) @ {}ms",
         snap.sessions.len(),
         snap.generated_at_ms
     );

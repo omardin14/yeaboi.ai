@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ai-manager",
+  "productName": "yeaboi.ai",
   "version": "0.1.0",
-  "identifier": "com.dinho.ai-manager",
+  "identifier": "com.dinho.yeaboi.ai",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ai-manager",
+        "title": "yeaboi.ai",
         "width": 1100,
         "height": 720
       }

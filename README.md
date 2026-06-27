@@ -1,4 +1,4 @@
-# ai-manager
+# yeaboi.ai
 
 A fast **desktop app** (Tauri: Rust engine + React/Tailwind UI) that is the single pane of
 glass for your whole AI coding setup — a live monitor of every Claude/Codex session and sub-agent,
@@ -16,13 +16,13 @@ presentation-agnostic and also ships a headless CLI.
 
 ```
 crates/
-  aim-core   domain model (Snapshot/Session), collectors        (no UI/OS deps)
-  aim-proc   process table + ports + signals
-  aim-exec   external command runner
-  aim-git    typed git/gh wrappers
-  aim-worktree  worktree engine (decentralized, MD5 ports)
-  aim-agent  agent providers + review orchestrator
-  aim-cli    headless `aim` binary (--json/--once)
+  yb-core   domain model (Snapshot/Session), collectors        (no UI/OS deps)
+  yb-proc   process table + ports + signals
+  yb-exec   external command runner
+  yb-git    typed git/gh wrappers
+  yb-worktree  worktree engine (decentralized, MD5 ports)
+  yb-agent  agent providers + review orchestrator
+  yb-cli    headless `yeaboi` binary (--json/--once)
 desktop/     Tauri app (src-tauri Rust shell + React/Vite frontend)
 scripts/     w.sh — git worktree lifecycle
 CLAUDE.md    conventions for working on this repo
@@ -41,7 +41,7 @@ make dev    # desktop app — installs deps, builds, hot-reloads, opens the wind
 make cli    # headless — print a live snapshot as JSON
 ```
 
-The first `make dev` compiles the Tauri backend (~30–60s) and then opens the **ai-manager**
+The first `make dev` compiles the Tauri backend (~30–60s) and then opens the **yeaboi.ai**
 window: a sessions table that updates every second (stub data in Phase 0) plus a tray icon.
 Run `make cli` for a quick, GUI-free check that the engine works.
 
@@ -89,7 +89,7 @@ run `make dev` in several at once without collisions (`make port` prints the cur
 
 ### Conventions (the agents enforce these)
 
-- `aim-core` stays presentation-agnostic; nothing depends on a UI crate.
+- `yb-core` stays presentation-agnostic; nothing depends on a UI crate.
 - No `unwrap`/`expect`/`panic!` in runtime paths; never swallow errors.
 - Regenerate ts-rs bindings with `make gen-bindings` (CI fails if stale).
 - Conventional Commits; commits and PRs carry the Claude attribution trailers.

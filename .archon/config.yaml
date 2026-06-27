@@ -1,4 +1,4 @@
-# Archon config for ai-manager.
+# Archon config for yeaboi.ai.
 # These workflows require the separate Archon CLI (https://github.com/.../Archon).
 # Without it, this directory is inert — the `.claude/skills/archon-dev` skill still
 # works standalone (it's just instructions Claude follows).

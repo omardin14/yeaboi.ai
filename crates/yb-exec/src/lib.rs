@@ -3,13 +3,13 @@
 
 /// Crate marker used by Phase 0 to verify linkage; replaced by `Cmd` in Phase 1.
 pub fn placeholder() -> &'static str {
-    "aim-exec"
+    "yb-exec"
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn placeholder_name() {
-        assert_eq!(super::placeholder(), "aim-exec");
+        assert_eq!(super::placeholder(), "yb-exec");
     }
 }

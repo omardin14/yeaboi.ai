@@ -1,4 +1,4 @@
-//! ai-manager desktop (Tauri shell over the `aim-*` engine).
+//! yeaboi.ai desktop (Tauri shell over the `aim-*` engine).
 //!
 //! Phase 0 proves the Rust↔frontend seam with one typed command
 //! ([`get_snapshot`]) and one event (`snapshot-update`) that streams a stub
@@ -7,8 +7,8 @@
 
 use std::time::Duration;
 
-use aim_core::Snapshot;
 use tauri::Emitter;
+use yb_core::Snapshot;
 
 /// Event name carrying each new snapshot to the frontend.
 const SNAPSHOT_EVENT: &str = "snapshot-update";
@@ -32,7 +32,7 @@ pub fn run() {
                 .cloned()
                 .expect("bundled default window icon");
             tauri::tray::TrayIconBuilder::with_id("aim-tray")
-                .tooltip("ai-manager")
+                .tooltip("yeaboi.ai")
                 .icon(icon)
                 .build(app)?;
 

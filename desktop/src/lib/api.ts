@@ -1,5 +1,5 @@
 // Typed bridge to the Rust backend. The `Snapshot` type is generated from Rust
-// by ts-rs (see crates/aim-core); these thin wrappers give the command + event
+// by ts-rs (see crates/yb-core); these thin wrappers give the command + event
 // a typed surface. Phase 1 grows the surface (kill_session, worktree ops, …).
 
 import { invoke } from "@tauri-apps/api/core";

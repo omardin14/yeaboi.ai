@@ -1,16 +1,16 @@
 [package]
-name = "aim-cli"
+name = "yb-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ai-manager headless CLI"
+description = "yeaboi.ai headless CLI"
 
 [[bin]]
-name = "aim"
+name = "yeaboi"
 path = "src/main.rs"
 
 [dependencies]
-aim-core = { workspace = true }
+yb-core = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

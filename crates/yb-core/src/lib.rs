@@ -1,4 +1,4 @@
-//! Core domain model for ai-manager.
+//! Core domain model for yeaboi.ai.
 //!
 //! Presentation-agnostic: no UI, no OS-specific code. Both the Tauri desktop
 //! app and the headless CLI consume the same [`Snapshot`].
@@ -9,7 +9,7 @@
 //!
 //! TypeScript types are generated from these structs via `ts-rs` under the
 //! `ts` feature (enabled only when regenerating bindings, e.g.
-//! `cargo test -p aim-core --features ts`). The headless CLI never enables it.
+//! `cargo test -p yb-core --features ts`). The headless CLI never enables it.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +54,7 @@ impl Snapshot {
             sessions: vec![
                 SessionStub {
                     id: "stub-1".to_string(),
-                    project: "ai-manager".to_string(),
+                    project: "yeaboi.ai".to_string(),
                     status: "busy".to_string(),
                 },
                 SessionStub {

@@ -1,6 +1,6 @@
 # .archon
 
-Archon workflow definitions for ai-manager — multi-step pipelines (plan → implement →
+Archon workflow definitions for yeaboi.ai — multi-step pipelines (plan → implement →
 validate → PR → 5-agent review → fix).
 
 **These require the separate [Archon](https://github.com/) CLI to run.** Without it this

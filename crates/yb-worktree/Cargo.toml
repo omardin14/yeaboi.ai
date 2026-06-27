@@ -1,0 +1,11 @@
+[package]
+name = "yb-worktree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "yeaboi.ai worktree engine (decentralized, MD5 ports)"
+
+[dependencies]
+yb-exec = { workspace = true }
+yb-git = { workspace = true }
+yb-proc = { workspace = true }

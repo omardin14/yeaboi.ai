@@ -1,4 +1,4 @@
-# ai-manager — common tasks.
+# yeaboi.ai — common tasks.
 # You really only need two:  `make dev` (desktop app)  ·  `make cli` (headless).
 # Both set up everything themselves (cargo path, frontend deps, builds).
 
@@ -10,7 +10,7 @@ CARGO_BIN := $(HOME)/.cargo/bin
 
 # Deterministic dev-server port per checkout: main -> 1420, each worktree hashes
 # to 1430-1529, so several `make dev` instances can run without colliding.
-AIM_DEV_PORT := $(shell \
+YB_DEV_PORT := $(shell \
   if [ "$(notdir $(CURDIR))" = "ai-manager" ]; then echo 1420; else \
     h=$$(printf '%s' '$(CURDIR)' | (md5 2>/dev/null || md5sum) | tr -dc '0-9a-f' | cut -c1-4); \
     echo $$((1430 + 0x$$h % 100)); \
@@ -22,16 +22,16 @@ AIM_DEV_PORT := $(shell \
 
 .PHONY: dev
 dev: desktop/node_modules ## Run the desktop app (installs deps + builds + hot-reload)
-	cd desktop && PATH="$(CARGO_BIN):$$PATH" AIM_DEV_PORT=$(AIM_DEV_PORT) \
-		$(PNPM) tauri dev --config '{"build":{"devUrl":"http://localhost:$(AIM_DEV_PORT)"}}'
+	cd desktop && PATH="$(CARGO_BIN):$$PATH" YB_DEV_PORT=$(YB_DEV_PORT) \
+		$(PNPM) tauri dev --config '{"build":{"devUrl":"http://localhost:$(YB_DEV_PORT)"}}'
 
 .PHONY: cli
 cli: ## Run the headless CLI (prints a live snapshot as JSON)
-	@$(CARGO) run -q -p aim-cli -- --json
+	@$(CARGO) run -q -p yb-cli -- --json
 
 .PHONY: port
 port: ## Print this checkout's deterministic dev-server port
-	@echo $(AIM_DEV_PORT)
+	@echo $(YB_DEV_PORT)
 
 # ---- quality ----
 
@@ -56,7 +56,7 @@ build: ## Build the Rust workspace
 
 .PHONY: gen-bindings
 gen-bindings: ## Regenerate Rust->TS bindings (desktop/src/lib/bindings)
-	$(CARGO) test -p aim-core --features ts
+	$(CARGO) test -p yb-core --features ts
 
 .PHONY: verify
 verify: lint test cli ## Run everything CI runs
@@ -70,7 +70,7 @@ desktop/node_modules: desktop/package.json desktop/pnpm-lock.yaml
 
 .PHONY: help
 help: ## Show this help
-	@echo "ai-manager — run 'make dev' (desktop app) or 'make cli' (headless)."
+	@echo "yeaboi.ai — run 'make dev' (desktop app) or 'make cli' (headless)."
 	@echo
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'

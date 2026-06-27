@@ -1,7 +1,7 @@
 ---
 name: archon-dev
 description: |
-  The PRIMARY development workflow for ai-manager (Rust + Tauri).
+  The PRIMARY development workflow for yeaboi.ai (Rust + Tauri).
   Routes to 10 specialized cookbooks based on what the user is trying to do:
 
   RESEARCH    — "how does the ClaudeCollector work?", "where is Snapshot defined?",
@@ -100,7 +100,7 @@ All artifacts go to `.claude/archon/`. Create subdirectories as needed on first 
 
 ## Project commands
 
-ai-manager is a **Rust (Cargo workspace) + Tauri (pnpm) monorepo**. Prefer the `make` targets:
+yeaboi.ai is a **Rust (Cargo workspace) + Tauri (pnpm) monorepo**. Prefer the `make` targets:
 
 - **Validate**: `make verify` (= lint + test + cli), or individually
   `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,

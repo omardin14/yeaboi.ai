@@ -1,9 +1,9 @@
 [package]
-name = "aim-git"
+name = "yb-git"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ai-manager typed git/gh wrappers"
+description = "yeaboi.ai typed git/gh wrappers"
 
 [dependencies]
-aim-exec = { workspace = true }
+yb-exec = { workspace = true }

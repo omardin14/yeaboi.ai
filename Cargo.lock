@@ -18,69 +18,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-manager-desktop"
-version = "0.0.0"
-dependencies = [
- "aim-core",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
-]
-
-[[package]]
-name = "aim-agent"
-version = "0.0.0"
-dependencies = [
- "aim-exec",
-]
-
-[[package]]
-name = "aim-cli"
-version = "0.0.0"
-dependencies = [
- "aim-core",
- "anyhow",
- "clap",
- "serde_json",
-]
-
-[[package]]
-name = "aim-core"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "ts-rs",
-]
-
-[[package]]
-name = "aim-exec"
-version = "0.0.0"
-
-[[package]]
-name = "aim-git"
-version = "0.0.0"
-dependencies = [
- "aim-exec",
-]
-
-[[package]]
-name = "aim-proc"
-version = "0.0.0"
-
-[[package]]
-name = "aim-worktree"
-version = "0.0.0"
-dependencies = [
- "aim-exec",
- "aim-git",
- "aim-proc",
-]
-
-[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4926,6 +4863,69 @@ dependencies = [
  "libc",
  "once_cell",
  "pkg-config",
+]
+
+[[package]]
+name = "yb-agent"
+version = "0.0.0"
+dependencies = [
+ "yb-exec",
+]
+
+[[package]]
+name = "yb-cli"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "yb-core",
+]
+
+[[package]]
+name = "yb-core"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
+name = "yb-exec"
+version = "0.0.0"
+
+[[package]]
+name = "yb-git"
+version = "0.0.0"
+dependencies = [
+ "yb-exec",
+]
+
+[[package]]
+name = "yb-proc"
+version = "0.0.0"
+
+[[package]]
+name = "yb-worktree"
+version = "0.0.0"
+dependencies = [
+ "yb-exec",
+ "yb-git",
+ "yb-proc",
+]
+
+[[package]]
+name = "yeaboi-desktop"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "yb-core",
 ]
 
 [[package]]

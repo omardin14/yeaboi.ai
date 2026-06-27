@@ -1,0 +1,9 @@
+[package]
+name = "yb-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "yeaboi.ai agent providers + review orchestrator"
+
+[dependencies]
+yb-exec = { workspace = true }

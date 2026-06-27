@@ -1,4 +1,4 @@
-# ai-manager — project tracker
+# yeaboi.ai — project tracker
 
 A fast **desktop app (Tauri: Rust engine + React/Tailwind/shadcn UI)** that is the single pane of
 glass for your whole AI coding setup. Two halves:
@@ -19,7 +19,7 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 ---
 
 ## Phase 0 — Scaffolding ✅
-- [x] Cargo workspace + crate skeletons (`aim-core`, `aim-proc`, `aim-exec`, `aim-git`, `aim-worktree`, `aim-agent`, `aim-cli`)
+- [x] Cargo workspace + crate skeletons (`yb-core`, `yb-proc`, `yb-exec`, `yb-git`, `yb-worktree`, `yb-agent`, `yb-cli`)
 - [x] Tauri v2 app under `desktop/` (`src-tauri` Rust shell + React/Vite/TS + Tailwind v4 frontend)
 - [x] Shared TS types generated from Rust — **ts-rs** (tauri-specta v2 is still RC; ts-rs is stable). Bindings in `desktop/src/lib/bindings/`, regen via `make gen-bindings`
 - [x] CI: `cargo fmt`/`clippy -D warnings`/`test` (macOS) · bindings-freshness · `pnpm typecheck`/`test`/`build`
@@ -29,7 +29,7 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 
 ## Phase 1 — Monitor + worktrees + full PR/git loop (v1)
 
-### aim-core (data + collectors)
+### yb-core (data + collectors)
 - [ ] `model`: `Snapshot{projects,sessions,totals,warnings}`, `Project`, `Session`, `SubAgent`, `Port`, `ProcStats`, `ContextUsage`, enums
 - [ ] `model::windows` model→context-window table; `ContextUsage` token math (+ unit tests)
 - [ ] `Collector` trait + `Registry` (concurrent collect) + enrichment join (proc subtree + ports by pid)
@@ -40,12 +40,12 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [ ] `notify` fs-watch wrapper (dirty-path set)
 - [ ] `engine` — 1s tick loop + `watch<Arc<Snapshot>>`; idle skip
 
-### aim-proc
+### yb-proc
 - [ ] `sysinfo` `ProcTable` (cpu+mem+parent) + ppid subtree BFS
 - [ ] `lsof -Fpn` parser + 750ms timeout/degrade + orphan-port heuristic
 - [ ] `actions::sigterm(pid)` (nix, guards) + `free_port`
 
-### aim-cli (headless — build & validate the data path first)
+### yb-cli (headless — build & validate the data path first)
 - [ ] clap args: `--once`, `--json`, `--interval`, `--no-ports`
 - [ ] wire collectors → engine → JSON/once output
 
@@ -57,16 +57,16 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [ ] Native notifications + deep links (finish/blocked)
 - [ ] Permission/approval inbox — **detection only (read-only)**
 
-### aim-exec
+### yb-exec
 - [ ] `Cmd::output` / `Cmd::stream(tx,cancel)` / `spawn_detached(log,pid)` + pid files
 
-### aim-git
+### yb-git
 - [ ] `GitRepo` + `Gh` wrappers; types `PullRequest`/`MergeMethod`/`ReviewFinding`/`Conflict`/`RebaseOutcome`
 - [ ] PR ops: `pr_list/view/diff/find_existing/create/merge/comment/review`
 - [ ] Git ops: `push/current_branch/pull_rebase/rebase_continue/abort/merged_branches/list_conflicts`
 - [ ] Structured `GhError`/`GitError` → UI toasts
 
-### aim-worktree (decentralized, GitHubIssueTriager model)
+### yb-worktree (decentralized, GitHubIssueTriager model)
 - [ ] `project.toml` schema (`branch_rules`/`[ports]`/`[lifecycle]`/`[[services]]`/`[env]`) + global repo registry
 - [ ] `PortAllocator` — **MD5, byte-compatible with `assign-port.ts`** (+ determinism/range tests)
 - [ ] Branch derivation (regex→template) + tests
@@ -74,7 +74,7 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [ ] `.env` render (parent minus overrides); lifecycle setup/teardown (Neon branch / pg clone); honor Claude Code `WorktreeCreate/Remove` hooks
 - [ ] Detached service lifecycle + pid files
 
-### aim-agent
+### yb-agent
 - [ ] `AgentProvider` trait; `ClaudeProvider` (`claude -p --output-format json`); `CodexProvider`; tolerant JSON extraction
 - [ ] `ReviewOrchestrator` — 5-way fan-out (`Semaphore`), dedupe, synthesis (local default / opt-in 6th LLM)
 - [ ] Cross-PR + **cross-provider** (claude vs codex) variants
@@ -86,11 +86,11 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 ### v1 testing
 - [ ] Unit (context math, transcript incremental==oracle, sub-agent matching, branch derivation, port determinism, JSON extraction)
 - [ ] Collector fixtures (`tempfile`; trimmed `<pid>.json`, all-line-type `.jsonl`, in-test codex sqlite)
-- [ ] `aim-proc` parse tests + subtree + feature-gated sigterm
+- [ ] `yb-proc` parse tests + subtree + feature-gated sigterm
 - [ ] Frontend component tests (Vitest/RTL) + Playwright smoke; Tauri command tests
 - [ ] End-to-end manual against the live machine
 
-## Phase 2 — Insights & Suggestions + manager + search + PR/CI dashboard (`aim-insights`, `aim-config`)
+## Phase 2 — Insights & Suggestions + manager + search + PR/CI dashboard (`yb-insights`, `yb-config`)
 - [ ] `model→pricing` table; cost tracking ($/session/project/day/model) + leaderboards
 - [ ] Token-waste/context-thrash detection (cache-create vs read, near-full ctx, idle holding ctx, wide re-reads) with $ cost
 - [ ] Model-fit (cost): Opus-on-trivial-edits → Sonnet/Haiku + $ delta
@@ -98,26 +98,26 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [ ] Prompt effectiveness: heuristics always-on + opt-in LLM judge (key `C`)
 - [ ] Delivery: Insights tab + threshold nudges (config thresholds) + charts
 - [ ] Cron recommendations (surface only → feeds v5)
-- [ ] `aim-config`: view/diff/edit MCP servers, agents, commands, hooks, permissions, model defaults across Claude/Codex/Cursor/Copilot; per-project profiles; **`doctor`** (gh/neonctl/env prereqs)
+- [ ] `yb-config`: view/diff/edit MCP servers, agents, commands, hooks, permissions, model defaults across Claude/Codex/Cursor/Copilot; per-project profiles; **`doctor`** (gh/neonctl/env prereqs)
 - [ ] Transcript search: local SQLite FTS index (incremental) + notes + prompt library
 - [ ] Cross-repo PR/CI dashboard (`gh pr list`/`checks`) + red/green notify
 - [ ] Session attach (embedded xterm.js via `portable-pty`) + **permission approve** (v2)
 
-## Phase 3 — Workflows (harness) + standup/queue (`aim-workflow`)
+## Phase 3 — Workflows (harness) + standup/queue (`yb-workflow`)
 - [ ] YAML DAG engine: nodes (prompt/command/bash/script), `depends_on`, loops, approval gates; generalize the review fan-out
 - [ ] Standup/digest generator (transcripts + stats, optional LLM summary)
-- [ ] Task queue + batch ops across a project's worktrees (on workflow engine + `aim-worktree open`)
+- [ ] Task queue + batch ops across a project's worktrees (on workflow engine + `yb-worktree open`)
 
-## Phase 4 — Planning sidecar (`aim-plan` + scrum-planning companion changes)
+## Phase 4 — Planning sidecar (`yb-plan` + scrum-planning companion changes)
 - [ ] Companion #1: scrum-planning `--engine-mode` (intake JSON stdin → graph → `export_plan_json`)
 - [ ] Companion #2: `ChatClaudeCLI` provider (`LLM_PROVIDER=claude-cli`) + structured-output emulation, **verified node-by-node**
 - [ ] Companion #3: `--list-questions` JSON (expose the 30 intake questions)
-- [ ] `aim-plan`: detect `scrum-agent`; spawn `--engine-mode`; JSON IO contract; graceful degrade
+- [ ] `yb-plan`: detect `scrum-agent`; spawn `--engine-mode`; JSON IO contract; graceful degrade
 - [ ] Desktop: intake multi-step form + pipeline-progress view
-- [ ] Loop closure: tasks/stories → `aim-worktree create`; save plan artifact to `.ai-manager/plans/`
+- [ ] Loop closure: tasks/stories → `yb-worktree create`; save plan artifact to `.yeaboi.ai/plans/`
 
-## Phase 5 — Cron + push + mobile remote (`aim-schedule`, `aim-notify`, `aim-remote`)
-- [ ] `aim-schedule`: cron execution (incl. v2 recommendations)
-- [ ] `aim-notify`: Slack + Telegram adapters; chat subscriptions; push for threshold/finish/blocked events
-- [ ] `aim-remote`: local daemon API + tunnel (Tailscale/ngrok); mobile web UI (reuse the React frontend)
+## Phase 5 — Cron + push + mobile remote (`yb-schedule`, `yb-notify`, `yb-remote`)
+- [ ] `yb-schedule`: cron execution (incl. v2 recommendations)
+- [ ] `yb-notify`: Slack + Telegram adapters; chat subscriptions; push for threshold/finish/blocked events
+- [ ] `yb-remote`: local daemon API + tunnel (Tailscale/ngrok); mobile web UI (reuse the React frontend)
 - [ ] Remote permission approve from phone (ties to the v2 inbox + attach)

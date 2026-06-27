@@ -1,9 +1,0 @@
-[package]
-name = "aim-agent"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "ai-manager agent providers + review orchestrator"
-
-[dependencies]
-aim-exec = { workspace = true }

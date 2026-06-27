@@ -1,7 +1,7 @@
 [package]
-name = "ai-manager-desktop"
+name = "yeaboi-desktop"
 version = "0.0.0"
-description = "ai-manager desktop app (Tauri shell over the aim-* engine)"
+description = "yeaboi.ai desktop app (Tauri shell over the yb-* engine)"
 authors = ["dinho"]
 edition = "2021"
 
@@ -19,4 +19,4 @@ tauri-plugin-opener = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-aim-core = { workspace = true }
+yb-core = { workspace = true }

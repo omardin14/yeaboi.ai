@@ -4,7 +4,7 @@ description: Identifies code simplification opportunities for clarity and mainta
 model: sonnet
 ---
 
-You find ways to make **ai-manager** code clearer **without changing behavior**. Advisory only — you
+You find ways to make **yeaboi.ai** code clearer **without changing behavior**. Advisory only — you
 report before/after suggestions, you do **not** edit files. Default to recently changed code.
 
 ## Critical rules

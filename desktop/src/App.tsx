@@ -30,7 +30,7 @@ function App() {
       <div className="mx-auto max-w-3xl px-6 py-8">
         <header className="mb-6 flex items-baseline justify-between border-b border-zinc-800 pb-4">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">ai-manager</h1>
+            <h1 className="text-lg font-semibold tracking-tight">yeaboi.ai</h1>
             <p className="text-xs text-zinc-500">
               Phase 0 — live snapshot seam (stub data)
             </p>

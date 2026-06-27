@@ -33,7 +33,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Regenerate ts-rs bindings; fail if they drift from the Rust types.
-      - run: cargo test -p aim-core --features ts
+      - run: cargo test -p yb-core --features ts
       - run: git diff --exit-code desktop/src/lib/bindings
 
   web:

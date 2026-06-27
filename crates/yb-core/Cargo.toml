@@ -1,9 +1,9 @@
 [package]
-name = "aim-core"
+name = "yb-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ai-manager core domain model and collectors (presentation-agnostic)"
+description = "yeaboi.ai core domain model and collectors (presentation-agnostic)"
 
 [dependencies]
 serde = { workspace = true }

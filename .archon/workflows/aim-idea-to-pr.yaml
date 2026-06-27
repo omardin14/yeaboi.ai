@@ -1,5 +1,5 @@
-# ai-manager idea-to-PR — the full Archon loop adapted from GitHubIssueTriager's
-# triager-idea-to-pr, with the Neon database phases removed (ai-manager has no DB)
+# yeaboi.ai idea-to-PR — the full Archon loop adapted from GitHubIssueTriager's
+# triager-idea-to-pr, with the Neon database phases removed (yeaboi.ai has no DB)
 # and validation swapped to `make verify` (fmt + clippy -D warnings + test + cli).
 #
 # Input: a GitHub issue reference or a free-text feature description.
@@ -8,7 +8,7 @@
 
 name: aim-idea-to-pr
 description: |
-  Use when: shipping a feature in ai-manager via the full Archon loop.
+  Use when: shipping a feature in yeaboi.ai via the full Archon loop.
   Triggers: "aim idea to pr", "idea to pr".
   NOT for: quick fixes or plan-only runs.
 
@@ -33,7 +33,7 @@ nodes:
     context: fresh
     model: claude-opus-4-8[1m]
 
-  # ai-manager validation (replaces archon-validate / Neon-branch testing).
+  # yeaboi.ai validation (replaces archon-validate / Neon-branch testing).
   - id: validate
     bash: |
       set -e

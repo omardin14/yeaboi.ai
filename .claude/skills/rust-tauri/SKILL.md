@@ -1,7 +1,7 @@
 ---
 name: rust-tauri
 description: |
-  Reference for working in ai-manager's Rust + Tauri v2 stack — workspace layout,
+  Reference for working in yeaboi.ai's Rust + Tauri v2 stack — workspace layout,
   the command/event seam, ts-rs bindings, the async model, clippy/conventions, and
   the build gotchas specific to this machine. Use when implementing or debugging
   Rust engine code, the Tauri shell, or the React frontend.
@@ -9,14 +9,14 @@ description: |
 
 # rust-tauri
 
-ai-manager = a Rust (edition 2024) Cargo workspace + a Tauri v2 desktop app
+yeaboi.ai = a Rust (edition 2024) Cargo workspace + a Tauri v2 desktop app
 (React 19 + Vite + Tailwind v4). The engine is presentation-agnostic and also ships the
-headless `aim` CLI. See `CLAUDE.md` for the hard rules.
+headless `yeaboi` CLI. See `CLAUDE.md` for the hard rules.
 
 ## Workspace layout
-- `crates/aim-core` — the `Snapshot` contract + collectors. **No UI/OS deps.**
-- `crates/aim-proc` — OS introspection (sysinfo/lsof/signals). `crates/aim-exec` — process runner.
-- `crates/aim-git` · `crates/aim-worktree` · `crates/aim-agent` · `crates/aim-cli` (bin `aim`).
+- `crates/yb-core` — the `Snapshot` contract + collectors. **No UI/OS deps.**
+- `crates/yb-proc` — OS introspection (sysinfo/lsof/signals). `crates/yb-exec` — process runner.
+- `crates/yb-git` · `crates/yb-worktree` · `crates/yb-agent` · `crates/yb-cli` (bin `yeaboi`).
 - `desktop/src-tauri` — Tauri Rust shell (commands + events; workspace member).
 - `desktop/src` — React frontend; `desktop/src/lib/bindings/` is **generated** (ts-rs).
 
@@ -29,7 +29,7 @@ headless `aim` CLI. See `CLAUDE.md` for the hard rules.
 - **Types**: derive on the model with `#[cfg_attr(feature = "ts", derive(ts_rs::TS))]` +
   `#[ts(export, export_to = "../../../desktop/src/lib/bindings/")]`. Pin wire-number types with
   `#[ts(type = "number")]` (u64 → JSON number, not `bigint`). Regenerate: `make gen-bindings`
-  (= `cargo test -p aim-core --features ts`). **CI fails if bindings are stale.**
+  (= `cargo test -p yb-core --features ts`). **CI fails if bindings are stale.**
 
 ## Async model
 Collectors run in a background task → publish `Arc<Snapshot>` over `tokio::sync::watch`. The Tauri

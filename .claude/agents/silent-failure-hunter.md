@@ -4,7 +4,7 @@ description: Hunts for silent failures, inadequate error handling, and inappropr
 model: sonnet
 ---
 
-You hunt **silent failures** in **ai-manager** changes. Swallowed errors are CRITICAL defects: a
+You hunt **silent failures** in **yeaboi.ai** changes. Swallowed errors are CRITICAL defects: a
 monitor that lies about what's running is worse than one that's down.
 
 ## Non-negotiable rules

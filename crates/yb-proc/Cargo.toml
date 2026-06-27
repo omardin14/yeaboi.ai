@@ -1,8 +1,8 @@
 [package]
-name = "aim-exec"
+name = "yb-proc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ai-manager external command runner (spawn/stream/detached)"
+description = "yeaboi.ai process table, ports, and signals"
 
 [dependencies]
