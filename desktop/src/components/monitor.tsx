@@ -1,23 +1,23 @@
 import type { Snapshot } from "@/lib/bindings/Snapshot";
 import type { Session } from "@/lib/bindings/Session";
 import type { Project } from "@/lib/bindings/Project";
+import type { ActivityStatus } from "@/lib/bindings/ActivityStatus";
 import {
   formatCpu,
   formatMem,
   formatPct,
   heatClass,
   statusBadgeClass,
-  statusLabel,
 } from "@/lib/format";
 
-function StatusBadge({ session }: { session: Session }) {
+function StatusBadge({ status }: { status: ActivityStatus }) {
   return (
     <span
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-wide ring-1 ring-inset ${statusBadgeClass(
-        session.status,
+        status,
       )}`}
     >
-      {statusLabel(session.status)}
+      {status}
     </span>
   );
 }
@@ -28,7 +28,7 @@ function SessionRow({ session }: { session: Session }) {
   return (
     <tr className="border-b border-zinc-900 last:border-0 hover:bg-zinc-900/40">
       <td className="py-1.5 pr-3">
-        <StatusBadge session={session} />
+        <StatusBadge status={session.status} />
       </td>
       <td className="py-1.5 pr-3 font-mono text-xs text-zinc-500">
         {session.pid ?? "—"}
@@ -106,7 +106,17 @@ export function Monitor({ snapshot }: { snapshot: Snapshot | null }) {
     <div>
       {snapshot.projects.map((project) => {
         const sessions = project.session_ids
-          .map((id) => byId.get(id))
+          .map((id) => {
+            const s = byId.get(id);
+            if (s == null) {
+              // A project references a session not in the snapshot — surfaces a
+              // collector/engine inconsistency instead of silently miscounting.
+              console.warn(
+                `monitor: project ${project.id} references unknown session ${id}`,
+              );
+            }
+            return s;
+          })
           .filter((s): s is Session => s != null);
         return (
           <ProjectGroup

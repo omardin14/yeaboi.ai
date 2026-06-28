@@ -8,6 +8,13 @@ import {
   statusBadgeClass,
 } from "@/lib/format";
 
+test("format helpers guard NaN/Infinity rather than rendering garbage", () => {
+  expect(formatPct(NaN)).toBe("—");
+  expect(formatCpu(NaN)).toBe("—");
+  expect(formatPct(Infinity)).toBe("—");
+  expect(heatClass(NaN)).toContain("zinc");
+});
+
 test("formatMem scales bytes to MB/GB", () => {
   expect(formatMem(0)).toBe("—");
   expect(formatMem(524_288_000)).toBe("500 MB");
@@ -32,14 +39,17 @@ test("formatUptime is compact", () => {
   expect(formatUptime(90_000)).toBe("1d 1h");
 });
 
-test("heatClass escalates with intensity", () => {
+test("heatClass escalates across all bands", () => {
   expect(heatClass(null)).toContain("zinc");
   expect(heatClass(0.1)).toContain("emerald");
+  expect(heatClass(0.5)).toContain("yellow");
+  expect(heatClass(0.75)).toContain("amber");
   expect(heatClass(0.95)).toContain("rose");
 });
 
 test("statusBadgeClass differs per status", () => {
   expect(statusBadgeClass("Busy")).toContain("emerald");
+  expect(statusBadgeClass("Idle")).toContain("sky");
   expect(statusBadgeClass("Dead")).toContain("zinc");
   expect(statusBadgeClass("Unknown")).toContain("amber");
 });

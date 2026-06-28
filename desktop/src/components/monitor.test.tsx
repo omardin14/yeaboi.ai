@@ -18,7 +18,7 @@ function session(over: Partial<Session> = {}): Session {
     started_at_ms: 0,
     updated_at_ms: 0,
     context: { used: 180000, window: 200000, pct: 0.9 },
-    last_prompt: "do the thing",
+    last_prompt: "alpha task",
     sub_agent_count: 2,
     proc_stats: { cpu_pct: 12, mem_bytes: 524_288_000, uptime_secs: 3600, ppid: 1 },
     ...over,
@@ -48,37 +48,55 @@ const snapshot: Snapshot = {
     },
   ],
   sessions: [
-    session({ id: "s1", project_id: "/repo-a", status: "Busy" }),
-    session({ id: "s2", project_id: "/repo-a", status: "Idle", model: "claude-sonnet-4-6" }),
-    session({ id: "s3", project_id: "/repo-b", status: "Idle", model: "gpt-5", pid: null }),
+    session({ id: "s1", project_id: "/repo-a", status: "Busy", last_prompt: "alpha task" }),
+    session({
+      id: "s2",
+      project_id: "/repo-a",
+      status: "Idle",
+      model: "claude-sonnet-4-6",
+      last_prompt: "beta task",
+    }),
+    // s3: no process and no usage — pid + cpu + mem + ctx all render "—".
+    session({
+      id: "s3",
+      project_id: "/repo-b",
+      status: "Idle",
+      model: "gpt-5",
+      pid: null,
+      context: null,
+      proc_stats: null,
+      last_prompt: "gamma task",
+    }),
   ],
   totals: { session_count: 3, busy_count: 1, project_count: 2 },
   warnings: [],
 };
 
-test("groups sessions under their project headers", () => {
+/** The `<tr>` that contains the given prompt text. */
+function rowWithPrompt(prompt: string): HTMLElement {
+  return screen.getByText(prompt).closest("tr") as HTMLElement;
+}
+
+test("groups sessions under their project headers with rolled-up counts", () => {
   render(<Monitor snapshot={snapshot} />);
-  const a = screen.getByRole("heading", { name: "repo-a" });
-  const b = screen.getByRole("heading", { name: "repo-b" });
-  expect(a).toBeInTheDocument();
-  expect(b).toBeInTheDocument();
-  // repo-a header reports its rolled-up counts.
+  expect(screen.getByRole("heading", { name: "repo-a" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "repo-b" })).toBeInTheDocument();
   expect(screen.getByText(/1 busy/)).toBeInTheDocument();
 });
 
-test("renders one row per session with model, context and prompt", () => {
+test("renders a row per session with model, context and prompt", () => {
   render(<Monitor snapshot={snapshot} />);
   expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument();
   expect(screen.getByText("gpt-5")).toBeInTheDocument();
-  expect(screen.getAllByText("do the thing").length).toBe(3);
-  // 90% context on the busy session.
-  expect(screen.getAllByText("90%").length).toBeGreaterThan(0);
+  // 90% context is scoped to the busy session's own row.
+  expect(within(rowWithPrompt("alpha task")).getByText("90%")).toBeInTheDocument();
 });
 
-test("a session without a process shows a dash for pid", () => {
+test("a session without process or usage shows dashes in its own row", () => {
   render(<Monitor snapshot={snapshot} />);
-  // s3 has pid null → "—" appears.
-  expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  const row = rowWithPrompt("gamma task");
+  // pid, ctx, cpu, mem all unknown → at least the pid dash is present here.
+  expect(within(row).getAllByText("—").length).toBeGreaterThanOrEqual(1);
 });
 
 test("shows a connecting state for a null snapshot", () => {
@@ -89,7 +107,12 @@ test("shows a connecting state for a null snapshot", () => {
 test("shows an empty state when there are no sessions", () => {
   render(
     <Monitor
-      snapshot={{ ...snapshot, projects: [], sessions: [], totals: { session_count: 0, busy_count: 0, project_count: 0 } }}
+      snapshot={{
+        ...snapshot,
+        projects: [],
+        sessions: [],
+        totals: { session_count: 0, busy_count: 0, project_count: 0 },
+      }}
     />,
   );
   expect(screen.getByText(/no active sessions/i)).toBeInTheDocument();
@@ -97,8 +120,33 @@ test("shows an empty state when there are no sessions", () => {
 
 test("only lists a project's own sessions under it", () => {
   render(<Monitor snapshot={snapshot} />);
-  const repoBHeading = screen.getByRole("heading", { name: "repo-b" });
-  const section = repoBHeading.closest("section") as HTMLElement;
-  // repo-b has exactly one session row.
+  const section = screen
+    .getByRole("heading", { name: "repo-b" })
+    .closest("section") as HTMLElement;
   expect(within(section).getAllByRole("row")).toHaveLength(1);
+});
+
+test("warns and skips a project's dangling session id", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const broken: Snapshot = {
+    ...snapshot,
+    projects: [
+      {
+        id: "/repo-c",
+        name: "repo-c",
+        root: "/repo-c",
+        remote: null,
+        // One real session (so the empty-state guard doesn't short-circuit) plus
+        // a dangling id that must be warned about and skipped.
+        session_ids: ["s1", "nope"],
+        busy_count: 1,
+        session_count: 2,
+      },
+    ],
+    sessions: [session({ id: "s1", project_id: "/repo-c", last_prompt: "real one" })],
+    totals: { session_count: 1, busy_count: 1, project_count: 1 },
+  };
+  render(<Monitor snapshot={broken} />);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("nope"));
+  warn.mockRestore();
 });

@@ -4,11 +4,6 @@
 import type { ActivityStatus } from "@/lib/bindings/ActivityStatus";
 import type { HostApp } from "@/lib/bindings/HostApp";
 
-/** Human label for an activity status. */
-export function statusLabel(status: ActivityStatus): string {
-  return status; // "Busy" | "Idle" | "Dead" | "Unknown"
-}
-
 /** Tailwind ring/badge classes per status. */
 export function statusBadgeClass(status: ActivityStatus): string {
   switch (status) {
@@ -31,15 +26,15 @@ export function formatMem(bytes: number): string {
   return `${Math.round(mb)} MB`;
 }
 
-/** Format a 0–1 fraction as an integer percent, or "—" when undefined. */
+/** Format a 0–1 fraction as an integer percent, or "—" when missing/non-finite. */
 export function formatPct(fraction: number | null | undefined): string {
-  if (fraction == null) return "—";
+  if (fraction == null || !Number.isFinite(fraction)) return "—";
   return `${Math.round(fraction * 100)}%`;
 }
 
 /** Format CPU usage (already a percent that can exceed 100 across cores). */
 export function formatCpu(pct: number | null | undefined): string {
-  if (pct == null) return "—";
+  if (pct == null || !Number.isFinite(pct)) return "—";
   return `${Math.round(pct)}%`;
 }
 
@@ -59,7 +54,7 @@ export function formatUptime(secs: number | null | undefined): string {
  * CPU. `null` intensity renders muted.
  */
 export function heatClass(intensity: number | null | undefined): string {
-  if (intensity == null) return "text-zinc-500";
+  if (intensity == null || !Number.isFinite(intensity)) return "text-zinc-500";
   if (intensity >= 0.9) return "text-rose-400";
   if (intensity >= 0.7) return "text-amber-400";
   if (intensity >= 0.4) return "text-yellow-400";

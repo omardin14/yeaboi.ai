@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Snapshot } from "@/lib/bindings/Snapshot";
-import { getSnapshot, subscribeSnapshot } from "@/lib/api";
+import {
+  getSnapshot,
+  subscribeSnapshot,
+  subscribeSnapshotError,
+} from "@/lib/api";
 import { Monitor } from "@/components/monitor";
+import { WarningsBanner } from "@/components/warnings-banner";
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -20,14 +25,20 @@ function App() {
       .then(setSnapshot)
       .catch((e) => setError(`Failed to load snapshot: ${e}`));
 
-    let unlisten: UnlistenFn | undefined;
-    subscribeSnapshot(setSnapshot)
-      .then((stop) => {
-        unlisten = stop;
-      })
+    const unlisteners: UnlistenFn[] = [];
+    subscribeSnapshot((snap) => {
+      setSnapshot(snap);
+      setError(null); // a fresh frame means the stream recovered
+    })
+      .then((stop) => unlisteners.push(stop))
+      .catch((e) => setError(`Live updates unavailable: ${e}`));
+    subscribeSnapshotError((message) =>
+      setError(`Live updates stopped: ${message}`),
+    )
+      .then((stop) => unlisteners.push(stop))
       .catch((e) => setError(`Live updates unavailable: ${e}`));
 
-    return () => unlisten?.();
+    return () => unlisteners.forEach((stop) => stop());
   }, []);
 
   const totals = snapshot?.totals;
@@ -60,13 +71,7 @@ function App() {
           </div>
         )}
 
-        {snapshot && snapshot.warnings.length > 0 && (
-          <div className="mb-4 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-            {snapshot.warnings.map((w, i) => (
-              <div key={i}>{w}</div>
-            ))}
-          </div>
-        )}
+        <WarningsBanner warnings={snapshot?.warnings ?? []} />
 
         <Monitor snapshot={snapshot} />
       </div>

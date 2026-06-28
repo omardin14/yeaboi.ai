@@ -15,6 +15,10 @@ use yb_core::{CollectOptions, Engine, Snapshot, Totals};
 /// Event name carrying each new snapshot to the frontend.
 const SNAPSHOT_EVENT: &str = "snapshot-update";
 
+/// Event name carrying a fatal collector failure to the frontend, so the UI can
+/// tell the user the live view has stopped rather than silently freezing.
+const SNAPSHOT_ERROR_EVENT: &str = "snapshot-error";
+
 /// How often the collector rebuilds a snapshot. Transcript tailing is
 /// incremental, so each tick after the first is cheap.
 const TICK: Duration = Duration::from_millis(1500);
@@ -33,13 +37,20 @@ fn empty_snapshot() -> Snapshot {
     }
 }
 
-/// Read a `Mutex` guard's value, recovering (rather than panicking) if a prior
-/// holder panicked while holding the lock.
+/// Lock the shared snapshot, recovering (with a logged breadcrumb) if a prior
+/// holder panicked while holding it. Clears the poison so the hot path doesn't
+/// run the recovery arm on every subsequent tick.
+fn lock_recovering(shared: &SharedSnapshot) -> std::sync::MutexGuard<'_, Snapshot> {
+    shared.lock().unwrap_or_else(|poisoned| {
+        eprintln!("snapshot state lock was poisoned (a prior holder panicked); recovering");
+        shared.clear_poison();
+        poisoned.into_inner()
+    })
+}
+
+/// Read the current snapshot from shared state.
 fn snapshot_of(shared: &SharedSnapshot) -> Snapshot {
-    match shared.lock() {
-        Ok(guard) => guard.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    }
+    lock_recovering(shared).clone()
 }
 
 /// Frontend → Rust: fetch the current snapshot on demand.
@@ -86,21 +97,38 @@ fn spawn_collector(handle: tauri::AppHandle, shared: SharedSnapshot) {
         std::thread::sleep(yb_proc::min_sample_interval());
 
         loop {
-            let proc = sampler.sample();
-            let snap = engine.collect(&proc);
+            // Catch a panic in the data path so the monitor reports the failure
+            // instead of silently freezing on its last frame — the one failure
+            // mode a monitor must never have.
+            let collected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let proc = sampler.sample();
+                engine.collect(&proc)
+            }));
+            let snap = match collected {
+                Ok(snap) => snap,
+                Err(_) => {
+                    report_stream_death(&handle, "the session collector panicked");
+                    break;
+                }
+            };
 
-            match shared.lock() {
-                Ok(mut guard) => *guard = snap.clone(),
-                Err(poisoned) => *poisoned.into_inner() = snap.clone(),
-            }
+            *lock_recovering(&shared) = snap.clone();
 
             if let Err(err) = handle.emit(SNAPSHOT_EVENT, &snap) {
-                // The only data pipeline just died — be loud rather than
-                // silently freezing the UI.
-                eprintln!("snapshot emit failed, stopping stream: {err}");
+                report_stream_death(&handle, &format!("snapshot stream failed: {err}"));
                 break;
             }
             std::thread::sleep(TICK);
         }
     });
+}
+
+/// Tell the frontend (and the logs) that live updates have stopped. The error
+/// event is best-effort — if even that fails, the channel is gone and there's
+/// nothing left to do but log.
+fn report_stream_death(handle: &tauri::AppHandle, message: &str) {
+    eprintln!("collector stream stopped: {message}");
+    if let Err(err) = handle.emit(SNAPSHOT_ERROR_EVENT, message) {
+        eprintln!("could not deliver snapshot-error to the UI: {err}");
+    }
 }
