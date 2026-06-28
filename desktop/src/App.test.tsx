@@ -34,7 +34,7 @@ const { SNAP } = vi.hoisted(() => ({
         last_prompt: "hi",
         sub_agent_count: 0,
         proc_stats: { cpu_pct: 1, mem_bytes: 1, uptime_secs: 1, ppid: 1 },
-        ports: [],
+        ports: [{ number: 1420, pid: 4242, state: "LISTEN" }],
       },
     ],
     totals: { session_count: 1, busy_count: 1, project_count: 1 },
@@ -42,9 +42,12 @@ const { SNAP } = vi.hoisted(() => ({
   },
 }));
 
+const freePortMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
 vi.mock("@/lib/api", () => ({
   getSnapshot: () => Promise.resolve(SNAP),
   killSession: () => Promise.reject("backend says no"),
+  freePort: freePortMock,
   subscribeSnapshot: () => Promise.resolve(() => {}),
   subscribeSnapshotError: () => Promise.resolve(() => {}),
 }));
@@ -79,5 +82,14 @@ test("cancelling the stop dialog dismisses it without error", async () => {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Stop session s1" }));
   fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+test("freeing a port confirms and calls the backend", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Free port 1420" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Free (SIGTERM)" }));
+  await waitFor(() => expect(freePortMock).toHaveBeenCalledWith(4242));
+  // Success → dialog dismissed, no error banner.
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

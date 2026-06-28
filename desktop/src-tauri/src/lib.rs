@@ -76,6 +76,22 @@ fn kill_session(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String
     yb_proc::actions::sigterm(pid).map_err(|e| e.to_string())
 }
 
+/// Frontend → Rust: free a listening port by SIGTERM-ing the process holding it.
+///
+/// Guarded like [`kill_session`]: we only signal a pid that currently holds a
+/// port attributed to a tracked session (its subtree) — so a forged pid can't
+/// be laundered through this command — and `yb_proc` refuses pid ≤ 1.
+#[tauri::command]
+fn free_port(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String> {
+    let snapshot = snapshot_of(&state);
+    if !yb_core::pid_owns_tracked_port(&snapshot.sessions, pid) {
+        return Err(format!(
+            "pid {pid} does not hold a port yeaboi is tracking — refusing to signal it"
+        ));
+    }
+    yb_proc::actions::sigterm(pid).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shared: SharedSnapshot = Arc::new(Mutex::new(empty_snapshot()));
@@ -83,7 +99,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_snapshot, kill_session])
+        .invoke_handler(tauri::generate_handler![
+            get_snapshot,
+            kill_session,
+            free_port
+        ])
         .setup(move |app| {
             // Minimal tray with a placeholder tooltip. A later slice renders live
             // status (busy count · $today · blocked) and a click-to-open menu.

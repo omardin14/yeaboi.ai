@@ -32,6 +32,15 @@ pub fn pid_is_live_session(sessions: &[Session], pid: u32) -> bool {
         .any(|s| s.pid == Some(pid) && s.status != ActivityStatus::Dead)
 }
 
+/// Whether `pid` holds a listening port currently attributed to some tracked
+/// session (its subtree). The authorization check for `free_port`: we only
+/// signal a process we've attributed to a session via a port it's listening on.
+pub fn pid_owns_tracked_port(sessions: &[Session], pid: u32) -> bool {
+    sessions
+        .iter()
+        .any(|s| s.ports.iter().any(|p| p.pid == pid))
+}
+
 /// Owns the collectors + resolver and produces snapshots.
 pub struct Engine {
     collectors: Vec<Box<dyn Collector>>,
@@ -411,6 +420,23 @@ mod tests {
         assert!(!pid_is_live_session(&sessions, 200));
         // untracked pid → refused
         assert!(!pid_is_live_session(&sessions, 999));
+    }
+
+    #[test]
+    fn pid_owns_tracked_port_gate() {
+        use crate::model::Port;
+        let mut s = session("a", Some(100), "/tmp/a", ActivityStatus::Busy);
+        // Port held by a child pid (a dev server), not the session pid.
+        s.ports = vec![Port {
+            number: 5173,
+            pid: 555,
+            state: "LISTEN".into(),
+        }];
+        let sessions = vec![s];
+
+        assert!(pid_owns_tracked_port(&sessions, 555)); // the port holder
+        assert!(!pid_owns_tracked_port(&sessions, 100)); // session pid holds no port
+        assert!(!pid_owns_tracked_port(&sessions, 999)); // untracked
     }
 
     #[test]

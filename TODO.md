@@ -62,8 +62,9 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] React: project-grouped grid (status/pid/model/ctx%/cpu/mem/branch/sub-agents/prompt) + heat colors
 - [x] `src-tauri`: `kill_session` command (SIGTERM via `yb-proc::actions`, snapshot-validated guard)
 - [x] Confirm dialog (kill) + per-row stop button
-- [ ] `src-tauri`: `free_port` command; menu-bar/tray live status (busy · $today · blocked) — *1b-3*
-- [ ] React: TanStack Table data grid, detail panel, live filter/sort, keyboard shortcuts — *1b-3*
+- [x] `src-tauri`: `free_port` command (guarded by `pid_owns_tracked_port`) + clickable port chips → confirm
+- [ ] `src-tauri`: menu-bar/tray live status (busy · $today · blocked) — *1b-5*
+- [ ] React: TanStack Table data grid, detail panel, live filter/sort, keyboard shortcuts — *1b-5*
 - [ ] Working-diff viewer + transcript replay (detail panel)
 - [ ] Native notifications + deep links (finish/blocked)
 - [ ] Permission/approval inbox — **detection only (read-only)**

@@ -155,6 +155,34 @@ test("renders a chip per listening port", () => {
   render(<Monitor snapshot={snap} />);
   expect(screen.getByText(":1420")).toBeInTheDocument();
   expect(screen.getByText(":5173")).toBeInTheDocument();
+  // Without onFreePort the chips are static (not buttons).
+  expect(screen.queryByRole("button", { name: /Free port/ })).toBeNull();
+});
+
+test("port chips become buttons that call onFreePort", () => {
+  const onFreePort = vi.fn();
+  const snap: Snapshot = {
+    ...snapshot,
+    projects: [
+      {
+        id: "/repo-a",
+        name: "repo-a",
+        root: "/repo-a",
+        remote: null,
+        session_ids: ["s1"],
+        busy_count: 1,
+        session_count: 1,
+      },
+    ],
+    sessions: [
+      session({ id: "s1", ports: [{ number: 1420, pid: 100, state: "LISTEN" }] }),
+    ],
+    totals: { session_count: 1, busy_count: 1, project_count: 1 },
+  };
+  render(<Monitor snapshot={snap} onFreePort={onFreePort} />);
+  fireEvent.click(screen.getByRole("button", { name: "Free port 1420" }));
+  expect(onFreePort).toHaveBeenCalledTimes(1);
+  expect(onFreePort.mock.calls[0][0]).toMatchObject({ number: 1420, pid: 100 });
 });
 
 test("a stop button appears only for killable sessions and calls onKill", () => {
