@@ -7,10 +7,13 @@ description = "yeaboi.ai core domain model and collectors (presentation-agnostic
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { workspace = true }
 ts-rs = { version = "12.0.1", optional = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 # Enables ts-rs derives so we can generate TypeScript bindings. Off by default
