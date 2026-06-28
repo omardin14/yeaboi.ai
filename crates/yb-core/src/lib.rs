@@ -16,6 +16,7 @@ pub mod adapters;
 pub mod engine;
 pub mod model;
 pub mod project;
+pub(crate) mod util;
 
 pub use engine::{CollectOptions, Engine};
 pub use model::{

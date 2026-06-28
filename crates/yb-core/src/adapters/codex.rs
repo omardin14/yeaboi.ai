@@ -85,7 +85,7 @@ impl CodexCollector {
                 context,
                 last_prompt: first_user_message
                     .filter(|m| !m.is_empty())
-                    .map(|m| truncate(&m, 200)),
+                    .map(|m| crate::util::truncate(&m, 200)),
                 sub_agent_count: 0,
                 proc_stats: None,
             })
@@ -101,25 +101,25 @@ impl Collector for CodexCollector {
     }
 
     fn collect(&mut self, out: &mut Vec<Session>, warnings: &mut Vec<String>) {
-        // No DB at all is the common case on a machine that's never run Codex.
-        if !self.db_path.exists() {
-            return;
+        // Distinguish "never ran Codex" (absent → silent) from a present-but-
+        // unreadable DB (permission/mount issue → surface it), rather than
+        // conflating both via `Path::exists()`.
+        match std::fs::metadata(&self.db_path) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) => {
+                warnings.push(format!(
+                    "codex: cannot access {}: {e}",
+                    self.db_path.display()
+                ));
+                return;
+            }
         }
         match self.query() {
             Ok(mut sessions) => out.append(&mut sessions),
             Err(err) => warnings.push(format!("codex: {}: {err}", self.db_path.display())),
         }
     }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]
@@ -182,6 +182,11 @@ mod tests {
         assert_eq!(out[0].pid, None);
         let ctx = out[0].context.unwrap();
         assert_eq!(ctx.used, 5000);
+        // gpt-5 resolves to the 128k OpenAI window (exercises that branch).
+        assert_eq!(ctx.window, 128_000);
+        assert_eq!(out[0].branch.as_deref(), Some("main"));
+        assert_eq!(out[0].last_prompt.as_deref(), Some("first message"));
+        assert_eq!(out[0].name.as_deref(), Some("a title"));
     }
 
     #[test]

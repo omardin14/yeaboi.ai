@@ -35,12 +35,15 @@ impl ProjectResolver {
         Self::default()
     }
 
-    /// Resolve `cwd`, consulting (and populating) the cache.
-    pub fn resolve(&mut self, cwd: &str) -> ResolvedProject {
+    /// Resolve `cwd`, consulting (and populating) the cache. Filesystem errors
+    /// that degrade grouping (e.g. an unreadable worktree `.git` or repo config)
+    /// are surfaced via `warnings`; because the result is cached, each cwd warns
+    /// at most once.
+    pub fn resolve(&mut self, cwd: &str, warnings: &mut Vec<String>) -> ResolvedProject {
         if let Some(hit) = self.cache.get(cwd) {
             return hit.clone();
         }
-        let resolved = resolve_uncached(Path::new(cwd));
+        let resolved = resolve_uncached(Path::new(cwd), warnings);
         self.cache.insert(cwd.to_string(), resolved.clone());
         resolved
     }
@@ -48,17 +51,17 @@ impl ProjectResolver {
 
 /// Walk up from `start` to the first `.git`, resolving worktrees to the common
 /// dir. Falls back to the cwd as its own project when nothing git-like is found.
-fn resolve_uncached(start: &Path) -> ResolvedProject {
+fn resolve_uncached(start: &Path, warnings: &mut Vec<String>) -> ResolvedProject {
     let mut dir = Some(start);
     while let Some(d) = dir {
         let dot_git = d.join(".git");
         if dot_git.is_dir() {
-            return project_from_root(d, &dot_git);
+            return project_from_root(d, &dot_git, warnings);
         }
         if dot_git.is_file()
-            && let Some((root, common)) = worktree_root(d, &dot_git)
+            && let Some((root, common)) = worktree_root(d, &dot_git, warnings)
         {
-            return project_from_root(&root, &common);
+            return project_from_root(&root, &common, warnings);
         }
         dir = d.parent();
     }
@@ -68,9 +71,23 @@ fn resolve_uncached(start: &Path) -> ResolvedProject {
 /// Resolve a worktree's `.git` file to `(repo_root, common_dir)`.
 ///
 /// The file holds `gitdir: <main>/.git/worktrees/<name>`; the common dir is two
-/// levels up (`<main>/.git`) and the repo root is its parent (`<main>`).
-fn worktree_root(worktree_dir: &Path, dot_git_file: &Path) -> Option<(PathBuf, PathBuf)> {
-    let contents = std::fs::read_to_string(dot_git_file).ok()?;
+/// levels up (`<main>/.git`) and the repo root is its parent (`<main>`). An
+/// unreadable `.git` file degrades the worktree to its own project — surface it.
+fn worktree_root(
+    worktree_dir: &Path,
+    dot_git_file: &Path,
+    warnings: &mut Vec<String>,
+) -> Option<(PathBuf, PathBuf)> {
+    let contents = match std::fs::read_to_string(dot_git_file) {
+        Ok(c) => c,
+        Err(e) => {
+            warnings.push(format!(
+                "project: cannot read {} ({e}); worktree won't roll up under its repo",
+                dot_git_file.display()
+            ));
+            return None;
+        }
+    };
     let gitdir = contents
         .lines()
         .find_map(|l| l.strip_prefix("gitdir:"))?
@@ -92,16 +109,21 @@ fn worktree_root(worktree_dir: &Path, dot_git_file: &Path) -> Option<(PathBuf, P
 }
 
 /// Build a [`ResolvedProject`] from a repo root and its git common dir.
-fn project_from_root(root: &Path, common_dir: &Path) -> ResolvedProject {
-    let remote = read_origin_remote(&common_dir.join("config"));
+fn project_from_root(
+    root: &Path,
+    common_dir: &Path,
+    warnings: &mut Vec<String>,
+) -> ResolvedProject {
+    let remote = read_origin_remote(&common_dir.join("config"), warnings);
     let name = remote
         .as_deref()
         .and_then(remote_slug)
         .unwrap_or_else(|| dir_name(root));
+    let root_str = root.to_string_lossy().into_owned();
     ResolvedProject {
-        id: root.to_string_lossy().into_owned(),
+        id: root_str.clone(),
         name,
-        root: root.to_string_lossy().into_owned(),
+        root: root_str,
         remote,
     }
 }
@@ -116,10 +138,21 @@ fn fallback(cwd: &Path) -> ResolvedProject {
     }
 }
 
-/// Parse the `url` under `[remote "origin"]` from a git config file (best
-/// effort; returns `None` if the file or section is absent).
-fn read_origin_remote(config_path: &Path) -> Option<String> {
-    let contents = std::fs::read_to_string(config_path).ok()?;
+/// Parse the `url` under `[remote "origin"]` from a git config file. A missing
+/// config is normal (silent `None`); an unreadable one is surfaced — the project
+/// just loses its remote-derived name, not correctness.
+fn read_origin_remote(config_path: &Path, warnings: &mut Vec<String>) -> Option<String> {
+    let contents = match std::fs::read_to_string(config_path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            warnings.push(format!(
+                "project: cannot read {} ({e})",
+                config_path.display()
+            ));
+            return None;
+        }
+    };
     let mut in_origin = false;
     for line in contents.lines() {
         let line = line.trim();
@@ -186,7 +219,7 @@ mod tests {
         .unwrap();
 
         let mut r = ProjectResolver::new();
-        let p = r.resolve(&root.to_string_lossy());
+        let p = r.resolve(&root.to_string_lossy(), &mut Vec::new());
         assert_eq!(p.name, "yeaboi.ai");
         assert_eq!(p.root, root.to_string_lossy());
         assert_eq!(
@@ -217,8 +250,8 @@ mod tests {
         .unwrap();
 
         let mut r = ProjectResolver::new();
-        let main = r.resolve(&root.to_string_lossy());
-        let worktree = r.resolve(&wt.to_string_lossy());
+        let main = r.resolve(&root.to_string_lossy(), &mut Vec::new());
+        let worktree = r.resolve(&wt.to_string_lossy(), &mut Vec::new());
         // Both must resolve to the SAME project id (the main repo root).
         assert_eq!(main.id, worktree.id);
         assert_eq!(worktree.name, "yeaboi.ai");
@@ -233,7 +266,7 @@ mod tests {
         fs::create_dir_all(&deep).unwrap();
 
         let mut r = ProjectResolver::new();
-        let p = r.resolve(&deep.to_string_lossy());
+        let p = r.resolve(&deep.to_string_lossy(), &mut Vec::new());
         assert_eq!(p.root, root.to_string_lossy());
         assert_eq!(p.name, "repo");
     }
@@ -245,7 +278,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
 
         let mut r = ProjectResolver::new();
-        let p = r.resolve(&dir.to_string_lossy());
+        let p = r.resolve(&dir.to_string_lossy(), &mut Vec::new());
         assert_eq!(p.id, dir.to_string_lossy());
         assert_eq!(p.name, "scratch");
         assert!(p.remote.is_none());

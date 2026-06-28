@@ -62,22 +62,36 @@ impl ClaudeCollector {
             .unwrap_or_else(|| context_window(model))
     }
 
-    /// Load per-model `contextWindow` from `stats-cache.json` once (best effort).
-    fn ensure_stats_loaded(&mut self) {
+    /// Load per-model `contextWindow` from `stats-cache.json` once. A missing
+    /// file is the normal case (silent); a present-but-unreadable or corrupt
+    /// file degrades to the static window table and is surfaced as a warning.
+    fn ensure_stats_loaded(&mut self, warnings: &mut Vec<String>) {
         if self.stats_loaded {
             return;
         }
         self.stats_loaded = true;
         let path = self.claude_home.join("stats-cache.json");
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return;
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) => {
+                warnings.push(format!("claude: cannot read {}: {e}", path.display()));
+                return;
+            }
         };
-        let Ok(stats) = serde_json::from_str::<StatsCache>(&text) else {
-            return;
-        };
-        for (model, usage) in stats.model_usage {
-            if let Some(w) = usage.context_window {
-                self.window_overrides.insert(model, w);
+        match serde_json::from_str::<StatsCache>(&text) {
+            Ok(stats) => {
+                for (model, usage) in stats.model_usage {
+                    if let Some(w) = usage.context_window {
+                        self.window_overrides.insert(model, w);
+                    }
+                }
+            }
+            Err(e) => {
+                warnings.push(format!(
+                    "claude: ignoring unparseable {} ({e}); using the static window table",
+                    path.display()
+                ));
             }
         }
     }
@@ -89,7 +103,7 @@ impl Collector for ClaudeCollector {
     }
 
     fn collect(&mut self, out: &mut Vec<Session>, warnings: &mut Vec<String>) {
-        self.ensure_stats_loaded();
+        self.ensure_stats_loaded(warnings);
 
         let dir = self.sessions_dir();
         let entries = match std::fs::read_dir(&dir) {
@@ -103,12 +117,24 @@ impl Collector for ClaudeCollector {
             }
         };
 
-        for entry in entries.flatten() {
+        for entry in entries {
+            // Don't silently drop an unreadable directory entry (e.g. EACCES) —
+            // a session would vanish with no trace.
+            let entry = match entry {
+                Ok(e) => e,
+                Err(err) => {
+                    warnings.push(format!(
+                        "claude: cannot read entry in {}: {err}",
+                        dir.display()
+                    ));
+                    continue;
+                }
+            };
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            match self.collect_one(&path) {
+            match self.collect_one(&path, warnings) {
                 Ok(Some(session)) => out.push(session),
                 Ok(None) => {}
                 Err(err) => warnings.push(format!("claude: {}: {err}", path.display())),
@@ -118,16 +144,19 @@ impl Collector for ClaudeCollector {
 }
 
 impl ClaudeCollector {
-    fn collect_one(&mut self, session_path: &Path) -> std::io::Result<Option<Session>> {
+    fn collect_one(
+        &mut self,
+        session_path: &Path,
+        warnings: &mut Vec<String>,
+    ) -> std::io::Result<Option<Session>> {
         let text = std::fs::read_to_string(session_path)?;
-        let raw: RawSessionFile = match serde_json::from_str(&text) {
-            Ok(r) => r,
-            // A half-written or schema-drifted file: skip, let the caller warn.
-            Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-        };
+        // A half-written or schema-drifted file: surface as an InvalidData error
+        // the caller turns into a warning.
+        let raw: RawSessionFile = serde_json::from_str(&text)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Tier B: tail the transcript for model / usage / prompt / branch.
-        let tail = self.tail_transcript(&raw.session_id);
+        let tail = self.tail_transcript(&raw.session_id, warnings);
 
         let model = tail.model.clone();
         let context = tail.used_tokens.map(|used| {
@@ -172,25 +201,45 @@ impl ClaudeCollector {
 
     /// Read newly-appended transcript bytes for `session_id` and fold them into
     /// the persisted cursor, returning the cursor's current derived state.
-    fn tail_transcript(&mut self, session_id: &str) -> TranscriptState {
+    fn tail_transcript(&mut self, session_id: &str, warnings: &mut Vec<String>) -> TranscriptState {
+        use std::collections::hash_map::Entry;
         // Resolve (and cache) the transcript path on first sighting.
         let projects = self.projects_dir();
-        let cursor = self
-            .cursors
-            .entry(session_id.to_string())
-            .or_insert_with(|| TranscriptCursor::new(find_transcript(&projects, session_id)));
+        let cursor = match self.cursors.entry(session_id.to_string()) {
+            Entry::Occupied(e) => e.into_mut(),
+            Entry::Vacant(e) => {
+                let path = find_transcript(&projects, session_id, warnings);
+                e.insert(TranscriptCursor::new(path))
+            }
+        };
 
-        cursor.advance();
+        cursor.advance(warnings);
         cursor.state.clone()
     }
 }
 
 /// Locate `<session_id>.jsonl` under any `projects/*/` subdir. Robust against
-/// the cwd→dirname encoding (which we don't try to reproduce).
-fn find_transcript(projects_dir: &Path, session_id: &str) -> Option<PathBuf> {
+/// the cwd→dirname encoding (which we don't try to reproduce). An absent
+/// `projects/` dir is normal (silent `None`); an *unreadable* one is surfaced.
+fn find_transcript(
+    projects_dir: &Path,
+    session_id: &str,
+    warnings: &mut Vec<String>,
+) -> Option<PathBuf> {
     let file_name = format!("{session_id}.jsonl");
-    let entries = std::fs::read_dir(projects_dir).ok()?;
-    for entry in entries.flatten() {
+    let entries = match std::fs::read_dir(projects_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            warnings.push(format!(
+                "claude: cannot read {}: {e}",
+                projects_dir.display()
+            ));
+            return None;
+        }
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
         if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             let candidate = entry.path().join(&file_name);
             if candidate.is_file() {
@@ -217,6 +266,9 @@ struct TranscriptCursor {
     byte_offset: u64,
     last_len: u64,
     state: TranscriptState,
+    /// True once we've warned about an I/O failure on this path; reset on the
+    /// next success so a permanently-unreadable file warns once, not every tick.
+    warned: bool,
 }
 
 /// Prompts can be long; keep the UI line bounded.
@@ -229,21 +281,25 @@ impl TranscriptCursor {
             byte_offset: 0,
             last_len: 0,
             state: TranscriptState::default(),
+            warned: false,
         }
     }
 
     /// Read complete lines appended since the last call, updating `state`.
-    /// Resets to a full re-read if the file shrank (truncation/rotation).
-    fn advance(&mut self) {
+    /// Resets to a full re-read if the file shrank (truncation/rotation). I/O
+    /// failures on an existing transcript are surfaced once via `warnings`
+    /// rather than silently leaving the session looking blank.
+    fn advance(&mut self, warnings: &mut Vec<String>) {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let Ok(mut file) = File::open(&path) else {
-            return;
+        let mut file = match File::open(&path) {
+            Ok(f) => f,
+            Err(e) => return self.warn_once(warnings, &path, &e),
         };
         let len = match file.metadata() {
             Ok(m) => m.len(),
-            Err(_) => return,
+            Err(e) => return self.warn_once(warnings, &path, &e),
         };
 
         if len < self.last_len {
@@ -253,19 +309,18 @@ impl TranscriptCursor {
         }
         if len == self.byte_offset {
             self.last_len = len;
+            self.warned = false; // healthy read
             return; // nothing new
         }
-        if file.seek(SeekFrom::Start(self.byte_offset)).is_err() {
-            return;
+        if let Err(e) = file.seek(SeekFrom::Start(self.byte_offset)) {
+            return self.warn_once(warnings, &path, &e);
         }
 
         let mut buf = String::new();
-        if file
-            .take(len - self.byte_offset)
-            .read_to_string(&mut buf)
-            .is_err()
-        {
-            return; // non-UTF8 / read error: leave the cursor untouched
+        if let Err(e) = file.take(len - self.byte_offset).read_to_string(&mut buf) {
+            // non-UTF8 mid-write can be transient; a real read failure should not
+            // hide forever. Warn once and leave the cursor untouched to retry.
+            return self.warn_once(warnings, &path, &e);
         }
 
         // Only consume up to the last complete line; a trailing partial line is
@@ -277,6 +332,18 @@ impl TranscriptCursor {
             self.byte_offset += (nl + 1) as u64;
         }
         self.last_len = len;
+        self.warned = false; // healthy read
+    }
+
+    /// Emit a degradation warning at most once per unhealthy streak.
+    fn warn_once(&mut self, warnings: &mut Vec<String>, path: &Path, err: &std::io::Error) {
+        if !self.warned {
+            self.warned = true;
+            warnings.push(format!(
+                "claude: cannot tail transcript {}: {err}",
+                path.display()
+            ));
+        }
     }
 
     fn apply_line(&mut self, line: &str) {
@@ -323,21 +390,11 @@ impl TranscriptCursor {
                 }
             }
             RawLine::LastPrompt { last_prompt } => {
-                self.state.last_prompt = Some(truncate(&last_prompt, MAX_PROMPT_LEN));
+                self.state.last_prompt = Some(crate::util::truncate(&last_prompt, MAX_PROMPT_LEN));
             }
             RawLine::Other => {}
         }
     }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max).collect();
-    out.push('…');
-    out
 }
 
 // ---- raw serde shapes -------------------------------------------------------
@@ -489,13 +546,13 @@ mod tests {
             writeln!(f, "{}", all[1]).unwrap();
         }
         let mut cursor = TranscriptCursor::new(Some(path.clone()));
-        cursor.advance();
+        cursor.advance(&mut Vec::new());
         {
             let mut f = File::options().append(true).open(&path).unwrap();
             writeln!(f, "{}", all[2]).unwrap();
             writeln!(f, "{}", all[3]).unwrap();
         }
-        cursor.advance();
+        cursor.advance(&mut Vec::new());
 
         assert_eq!(cursor.state.model, oracle.model);
         assert_eq!(cursor.state.used_tokens, oracle.used_tokens);
@@ -514,7 +571,7 @@ mod tests {
             write!(f, "{}", ASSISTANT).unwrap(); // no newline
         }
         let mut cursor = TranscriptCursor::new(Some(path.clone()));
-        cursor.advance();
+        cursor.advance(&mut Vec::new());
         assert!(
             cursor.state.model.is_none(),
             "partial line consumed too early"
@@ -525,7 +582,7 @@ mod tests {
             let mut f = File::options().append(true).open(&path).unwrap();
             writeln!(f).unwrap();
         }
-        cursor.advance();
+        cursor.advance(&mut Vec::new());
         assert_eq!(cursor.state.model.as_deref(), Some("claude-opus-4-8"));
     }
 
@@ -538,15 +595,23 @@ mod tests {
             writeln!(f, "{}", ASSISTANT).unwrap();
         }
         let mut cursor = TranscriptCursor::new(Some(path.clone()));
-        cursor.advance();
+        cursor.advance(&mut Vec::new());
         assert!(cursor.state.used_tokens.is_some());
+        let offset_before = cursor.byte_offset;
+        assert!(offset_before > 0);
 
         // Rotate the file to something shorter.
         {
             let mut f = File::create(&path).unwrap();
             writeln!(f, "{}", LAST_PROMPT).unwrap();
         }
-        cursor.advance();
+        cursor.advance(&mut Vec::new());
+        // Test the mechanism, not a byte-length coincidence: the cursor must have
+        // rewound to re-read the rotated file from the start.
+        assert!(
+            cursor.byte_offset <= offset_before,
+            "cursor did not rewind on truncation"
+        );
         assert!(
             cursor.state.used_tokens.is_none(),
             "stale usage survived truncation"
@@ -590,5 +655,102 @@ mod tests {
         c.collect(&mut out, &mut warnings);
         assert!(out.is_empty());
         assert!(warnings.is_empty());
+    }
+
+    const SYNTHETIC: &str =
+        r#"{"type":"assistant","message":{"model":"<synthetic>","content":[]}}"#;
+
+    #[test]
+    fn synthetic_model_does_not_clobber_the_real_one() {
+        // A `<synthetic>` turn (e.g. a slash-command) must not overwrite the
+        // last real model — otherwise every such session would show <synthetic>.
+        let st = parse_whole(&[ASSISTANT, SYNTHETIC]);
+        assert_eq!(st.model.as_deref(), Some("claude-opus-4-8"));
+    }
+
+    /// Build a minimal `~/.claude` with one session + its transcript.
+    fn write_session(home: &Path, session_id: &str, session_json: &str, transcript: &[&str]) {
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        let proj = home.join("projects").join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(home.join("sessions").join("1.json"), session_json).unwrap();
+        // Each JSONL line ends in a newline — a trailing partial line is, by
+        // design, not consumed until completed.
+        let body = format!("{}\n", transcript.join("\n"));
+        std::fs::write(proj.join(format!("{session_id}.jsonl")), body).unwrap();
+    }
+
+    #[test]
+    fn stats_cache_context_window_overrides_the_static_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let assistant = r#"{"type":"assistant","message":{"model":"test-model-x","usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"content":[]}}"#;
+        write_session(
+            home,
+            "sess-x",
+            r#"{"pid":1,"sessionId":"sess-x","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
+            &[assistant],
+        );
+        // Unknown model → static table would say 200k; the override must win.
+        std::fs::write(
+            home.join("stats-cache.json"),
+            r#"{"modelUsage":{"test-model-x":{"contextWindow":50000}}}"#,
+        )
+        .unwrap();
+
+        let mut c = ClaudeCollector::new(home.to_path_buf());
+        let mut out = Vec::new();
+        let mut warnings = Vec::new();
+        c.collect(&mut out, &mut warnings);
+
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+        let ctx = out[0].context.expect("usage present");
+        assert_eq!(out[0].model.as_deref(), Some("test-model-x"));
+        assert_eq!(ctx.window, 50_000, "stats-cache override was not applied");
+        assert_eq!(ctx.used, 10);
+    }
+
+    #[test]
+    fn collector_parses_explicit_busy_and_idle_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        std::fs::write(
+            home.join("sessions").join("1.json"),
+            r#"{"pid":1,"sessionId":"a","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli","status":"busy"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("sessions").join("2.json"),
+            r#"{"pid":2,"sessionId":"b","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli","status":"idle"}"#,
+        )
+        .unwrap();
+
+        let mut c = ClaudeCollector::new(home.to_path_buf());
+        let mut out = Vec::new();
+        let mut warnings = Vec::new();
+        c.collect(&mut out, &mut warnings);
+
+        let busy = out.iter().find(|s| s.id == "a").unwrap();
+        let idle = out.iter().find(|s| s.id == "b").unwrap();
+        assert_eq!(busy.status, ActivityStatus::Busy);
+        assert_eq!(idle.status, ActivityStatus::Idle);
+    }
+
+    #[test]
+    fn unparseable_stats_cache_warns_and_falls_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        std::fs::write(home.join("stats-cache.json"), "{ not valid json").unwrap();
+
+        let mut c = ClaudeCollector::new(home.to_path_buf());
+        let mut out = Vec::new();
+        let mut warnings = Vec::new();
+        c.collect(&mut out, &mut warnings);
+        assert_eq!(warnings.len(), 1, "expected one degradation warning");
+        assert!(warnings[0].contains("stats-cache.json"));
     }
 }

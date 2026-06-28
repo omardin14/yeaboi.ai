@@ -74,7 +74,7 @@ impl Engine {
         let mut projects: BTreeMap<String, Project> = BTreeMap::new();
 
         for session in &mut sessions {
-            let resolved = self.resolver.resolve(&session.cwd);
+            let resolved = self.resolver.resolve(&session.cwd, &mut warnings);
             session.project_id = resolved.id.clone();
             enrich_with_proc(session, proc);
 
@@ -302,6 +302,22 @@ mod tests {
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.sessions[0].pid, Some(200));
         assert_eq!(snap.projects[0].session_ids, vec!["dup".to_string()]);
+    }
+
+    #[test]
+    fn duplicate_session_id_equal_timestamp_breaks_tie_on_pid() {
+        // Identical updated_at_ms → the larger pid (more recent process) wins.
+        let mut a = session("dup", Some(100), "/tmp/x", ActivityStatus::Idle);
+        a.updated_at_ms = 50;
+        let mut b = session("dup", Some(300), "/tmp/x", ActivityStatus::Idle);
+        b.updated_at_ms = 50;
+        let mut engine = Engine::new(
+            vec![Box::new(FakeCollector(vec![a, b]))],
+            CollectOptions::default(),
+        );
+        let snap = engine.collect(&proc_table_with(300));
+        assert_eq!(snap.sessions.len(), 1);
+        assert_eq!(snap.sessions[0].pid, Some(300));
     }
 
     #[test]
