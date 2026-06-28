@@ -191,8 +191,11 @@ fn attach_ports(session: &mut Session, proc: &ProcTable, ports: &[Port]) {
     if ports.is_empty() {
         return;
     }
-    let mut owned: std::collections::HashSet<u32> = proc.subtree(pid).into_iter().collect();
-    owned.insert(pid);
+    let owned: std::collections::HashSet<u32> = proc
+        .subtree(pid)
+        .into_iter()
+        .chain(std::iter::once(pid))
+        .collect();
 
     let mut matched: Vec<Port> = ports
         .iter()
@@ -341,12 +344,12 @@ mod tests {
     }
 
     #[test]
-    fn attaches_ports_owned_by_the_session_subtree() {
+    fn attaches_subtree_ports_sorted_excluding_unrelated() {
         use crate::model::Port;
-        // Session pid 42 has child 100 (a dev server). Port 5173 is held by the
-        // child, 9999 by an unrelated pid.
+        // pid 42 → child 100 → grandchild 150. Attach the session's own port and
+        // a grandchild dev-server port; exclude an unrelated pid's port.
         let mut by_pid = HashMap::new();
-        for p in [42u32, 100] {
+        for p in [42u32, 100, 150] {
             by_pid.insert(
                 p,
                 ProcStats {
@@ -359,19 +362,26 @@ mod tests {
         }
         let mut children = HashMap::new();
         children.insert(42u32, vec![100u32]);
+        children.insert(100u32, vec![150u32]);
         let proc = ProcTable { by_pid, children };
 
+        // Deliberately out of order to prove the output is sorted by number.
         let ports = vec![
             Port {
-                number: 5173,
-                pid: 100,
+                number: 3000,
+                pid: 150,
                 state: "LISTEN".into(),
-            },
+            }, // grandchild dev server
+            Port {
+                number: 1420,
+                pid: 42,
+                state: "LISTEN".into(),
+            }, // the session itself
             Port {
                 number: 9999,
                 pid: 777,
                 state: "LISTEN".into(),
-            },
+            }, // unrelated process
         ];
 
         let s = session("a", Some(42), "/tmp/x", ActivityStatus::Busy);
@@ -381,10 +391,12 @@ mod tests {
         );
         let snap = engine.collect(&proc, &ports);
 
-        let ports = &snap.sessions[0].ports;
-        assert_eq!(ports.len(), 1, "only the subtree-owned port attaches");
-        assert_eq!(ports[0].number, 5173);
-        assert_eq!(ports[0].pid, 100);
+        let attached: Vec<u16> = snap.sessions[0].ports.iter().map(|p| p.number).collect();
+        assert_eq!(
+            attached,
+            vec![1420, 3000],
+            "subtree ports only, sorted, unrelated excluded"
+        );
     }
 
     #[test]

@@ -2,7 +2,8 @@
 //!
 //! `lsof` can block on a stuck mount, so the call is run with a hard timeout and
 //! degrades to a typed error rather than hanging a collect tick. The output is
-//! parsed from the stable `-F` field format. Non-unix platforms return empty.
+//! parsed from the stable `-F` field format. Non-unix platforms return
+//! [`PortError::Unsupported`].
 
 use std::time::Duration;
 
@@ -31,14 +32,26 @@ pub fn list() -> Result<Vec<Port>, PortError> {
 
 #[cfg(unix)]
 pub fn list_with_timeout(timeout: Duration) -> Result<Vec<Port>, PortError> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-    use std::sync::mpsc;
-
     // -n/-P: skip DNS/port-name lookups (faster, no hangs). -iTCP -sTCP:LISTEN:
     // only listening TCP sockets. -Fpn: machine-readable pid + name fields.
-    let mut child = Command::new("lsof")
-        .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"])
+    list_from_command("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"], timeout)
+}
+
+/// Run `program args`, reading its stdout on a worker thread so the read can be
+/// abandoned on timeout. Factored out so tests can drive the timeout/spawn arms
+/// with a fake subprocess.
+#[cfg(unix)]
+fn list_from_command(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Vec<Port>, PortError> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc::{self, RecvTimeoutError};
+
+    let mut child = Command::new(program)
+        .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -48,9 +61,12 @@ pub fn list_with_timeout(timeout: Duration) -> Result<Vec<Port>, PortError> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut buf = String::new();
-        let read = stdout.read_to_string(&mut buf);
-        // If the receiver timed out and went away, this send just fails — fine.
-        let _ = tx.send(read.map(|_| buf));
+        let read_result = stdout.read_to_string(&mut buf);
+        // The receiver may have timed out and gone away; a failed send just
+        // means nobody's listening, which is the expected race, not an error.
+        if tx.send(read_result.map(|_| buf)).is_err() {
+            // nothing to do — the timeout arm already handled the child
+        }
     });
 
     match rx.recv_timeout(timeout) {
@@ -58,16 +74,26 @@ pub fn list_with_timeout(timeout: Duration) -> Result<Vec<Port>, PortError> {
             reap(&mut child);
             Ok(parse_lsof(&output))
         }
-        // Read error on the pipe: reap and report nothing rather than hang.
+        // The pipe read failed: reap and surface it (don't hang).
         Ok(Err(err)) => {
             reap(&mut child);
             Err(PortError::Spawn(err))
         }
-        Err(_) => {
-            // Timed out — kill the stuck lsof so it doesn't linger.
-            let _ = child.kill();
+        Err(RecvTimeoutError::Timeout) => {
+            // Stuck child — kill it so it doesn't linger, then surface the timeout.
+            if let Err(e) = child.kill() {
+                eprintln!("lsof kill failed: {e}");
+            }
             reap(&mut child);
             Err(PortError::Timeout(timeout))
+        }
+        // The reader thread dropped its sender without sending (e.g. it
+        // panicked). Report a read failure, not a misleading "timed out".
+        Err(RecvTimeoutError::Disconnected) => {
+            reap(&mut child);
+            Err(PortError::Spawn(std::io::Error::other(
+                "lsof reader thread ended unexpectedly",
+            )))
         }
     }
 }
@@ -97,6 +123,9 @@ fn parse_lsof(output: &str) -> Vec<Port> {
             continue;
         };
         match tag {
+            // A malformed pid is an intentional best-effort skip: the rest of
+            // this process block gets dropped. lsof is stable under our flags,
+            // so this shouldn't happen in practice.
             "p" => current_pid = rest.trim().parse().ok(),
             "n" => {
                 if let (Some(pid), Some(number)) = (current_pid, port_from_name(rest)) {
@@ -161,5 +190,21 @@ n*:5173
     fn ignores_lines_without_a_current_pid() {
         // An `n` line before any `p` line is dropped, not attributed to pid 0.
         assert!(parse_lsof("n*:1420\n").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn times_out_on_a_slow_command() {
+        // A fake "lsof" that never finishes must hit the timeout arm (and the
+        // child-kill path), not hang.
+        let r = list_from_command("sleep", &["5"], Duration::from_millis(80));
+        assert!(matches!(r, Err(PortError::Timeout(_))), "got {r:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_failure_is_surfaced() {
+        let r = list_from_command("yb-no-such-binary-xyz", &[], Duration::from_millis(500));
+        assert!(matches!(r, Err(PortError::Spawn(_))), "got {r:?}");
     }
 }
