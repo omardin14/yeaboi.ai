@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Finding } from "@/lib/bindings/Finding";
 import type { Severity } from "@/lib/bindings/Severity";
@@ -16,10 +16,11 @@ const SEVERITY_STYLE: Record<Severity, string> = {
 };
 
 function progressLine(p: AgentProgress): string {
+  const prefix = `${p.provider} · ${p.category}`;
   if ("Done" in p.status) {
-    return `${p.provider} · ${p.category} — ${p.status.Done} finding(s)`;
+    return `${prefix} — ${p.status.Done} finding(s)`;
   }
-  return `${p.provider} · ${p.category} — failed: ${p.status.Failed}`;
+  return `${prefix} — failed: ${p.status.Failed}`;
 }
 
 /** Runs a multi-agent review for one PR and shows progress + findings. */
@@ -29,21 +30,40 @@ export function ReviewPanel({ cwd, number }: { cwd: string; number: number }) {
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The active progress subscription + whether a review is in flight, held in
+  // refs so the unmount cleanup can tear both down regardless of render timing.
+  const unlistenRef = useRef<UnlistenFn | undefined>(undefined);
+  const runningRef = useRef(false);
+
+  // On unmount (e.g. selecting another PR mid-review), unsubscribe and cancel
+  // the in-flight review so the backend isn't left running with no listener.
+  useEffect(() => {
+    return () => {
+      unlistenRef.current?.();
+      unlistenRef.current = undefined;
+      if (runningRef.current) {
+        void cancelReview().catch(console.error);
+      }
+    };
+  }, []);
+
   async function start() {
     setRunning(true);
+    runningRef.current = true;
     setProgress([]);
     setFindings(null);
     setError(null);
-    let unlisten: UnlistenFn | undefined;
     try {
-      unlisten = await subscribeReviewProgress((p) =>
+      unlistenRef.current = await subscribeReviewProgress((p) =>
         setProgress((cur) => [...cur, p]),
       );
       setFindings(await reviewPr(cwd, number));
     } catch (e) {
       setError(`Review failed: ${e}`);
     } finally {
-      unlisten?.();
+      unlistenRef.current?.();
+      unlistenRef.current = undefined;
+      runningRef.current = false;
       setRunning(false);
     }
   }
@@ -62,7 +82,7 @@ export function ReviewPanel({ cwd, number }: { cwd: string; number: number }) {
         {running && (
           <button
             type="button"
-            onClick={() => void cancelReview()}
+            onClick={() => void cancelReview().catch(console.error)}
             className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
           >
             Cancel

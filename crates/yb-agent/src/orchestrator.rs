@@ -113,8 +113,13 @@ fn lock(m: &Mutex<Vec<Finding>>) -> std::sync::MutexGuard<'_, Vec<Finding>> {
 }
 
 /// Collapse findings that are the same issue (file + line + category + title),
-/// regardless of which provider reported them.
+/// regardless of which provider reported them, keeping the **highest-severity**
+/// instance — so a Critical from one provider isn't dropped for an earlier
+/// Suggestion of the same issue from another.
 fn dedupe(findings: &mut Vec<Finding>) {
+    // Sort by severity first (lowest rank = most severe) so the retained
+    // first-seen entry of each issue is the most severe one.
+    findings.sort_by_key(|f| f.severity.rank());
     let mut seen = HashSet::new();
     findings.retain(|f| {
         seen.insert((
@@ -131,10 +136,21 @@ mod tests {
     use super::*;
     use crate::model::{Finding, Severity, default_specs};
 
-    /// A provider that returns a canned finding per spec (or fails).
+    /// A provider that returns a canned finding per spec (or fails). `severity`
+    /// lets a test exercise cross-provider severity merging.
     struct Fake {
         name: &'static str,
         fail: bool,
+        severity: Severity,
+    }
+    impl Fake {
+        fn ok(name: &'static str) -> Self {
+            Fake {
+                name,
+                fail: false,
+                severity: Severity::Important,
+            }
+        }
     }
     impl AgentProvider for Fake {
         fn name(&self) -> &str {
@@ -153,7 +169,7 @@ mod tests {
                 return Err(crate::provider::AgentError::Msg("boom".into()));
             }
             Ok(vec![Finding {
-                severity: Severity::Important,
+                severity: self.severity,
                 category: spec.category.clone(),
                 file: Some("a.rs".into()),
                 line: Some(1),
@@ -166,13 +182,7 @@ mod tests {
 
     #[test]
     fn fans_out_and_reports_progress() {
-        let orch = ReviewOrchestrator::new(
-            vec![Box::new(Fake {
-                name: "claude",
-                fail: false,
-            })],
-            default_specs(),
-        );
+        let orch = ReviewOrchestrator::new(vec![Box::new(Fake::ok("claude"))], default_specs());
         let progress = Mutex::new(Vec::new());
         let findings = orch.run("diff", &AtomicBool::new(false), |p| {
             progress.lock().unwrap().push(p);
@@ -187,16 +197,7 @@ mod tests {
         // Two providers, same finding (file+line+category+title) → deduped to one
         // per category.
         let orch = ReviewOrchestrator::new(
-            vec![
-                Box::new(Fake {
-                    name: "claude",
-                    fail: false,
-                }),
-                Box::new(Fake {
-                    name: "codex",
-                    fail: false,
-                }),
-            ],
+            vec![Box::new(Fake::ok("claude")), Box::new(Fake::ok("codex"))],
             default_specs(),
         );
         let findings = orch.run("diff", &AtomicBool::new(false), |_| {});
@@ -204,16 +205,39 @@ mod tests {
     }
 
     #[test]
-    fn a_failing_agent_reports_but_doesnt_abort() {
+    fn dedupe_keeps_the_highest_severity_instance() {
+        // Same issue reported as Suggestion by one provider and Critical by
+        // another → the merged finding must keep Critical, not first-seen.
         let orch = ReviewOrchestrator::new(
             vec![
                 Box::new(Fake {
-                    name: "ok",
+                    name: "low",
                     fail: false,
+                    severity: Severity::Suggestion,
                 }),
+                Box::new(Fake {
+                    name: "high",
+                    fail: false,
+                    severity: Severity::Critical,
+                }),
+            ],
+            // One spec keeps the assertion focused on the merge, not the fan-out.
+            vec![default_specs().swap_remove(0)],
+        );
+        let findings = orch.run("diff", &AtomicBool::new(false), |_| {});
+        assert_eq!(findings.len(), 1, "the duplicate is merged");
+        assert_eq!(findings[0].severity, Severity::Critical);
+    }
+
+    #[test]
+    fn a_failing_agent_reports_but_doesnt_abort() {
+        let orch = ReviewOrchestrator::new(
+            vec![
+                Box::new(Fake::ok("ok")),
                 Box::new(Fake {
                     name: "bad",
                     fail: true,
+                    severity: Severity::Important,
                 }),
             ],
             default_specs(),
@@ -233,13 +257,7 @@ mod tests {
 
     #[test]
     fn cancellation_before_start_yields_nothing() {
-        let orch = ReviewOrchestrator::new(
-            vec![Box::new(Fake {
-                name: "claude",
-                fail: false,
-            })],
-            default_specs(),
-        );
+        let orch = ReviewOrchestrator::new(vec![Box::new(Fake::ok("claude"))], default_specs());
         let cancel = AtomicBool::new(true);
         assert!(orch.run("diff", &cancel, |_| {}).is_empty());
     }

@@ -12,17 +12,23 @@ use crate::model::{Finding, Severity};
 /// Parse `raw` into findings, tagging each with `provider` and defaulting a
 /// missing category to `category`.
 pub fn extract_findings(raw: &str, provider: &str, category: &str) -> Vec<Finding> {
-    if let Some(blob) = find_json(raw)
-        && let Ok(value) = serde_json::from_str::<Value>(blob)
+    // Prefer a ```json fenced block.
+    if let Some(blob) = fenced_block(raw)
+        && let Some(findings) = parse_blob(blob, provider, category)
     {
-        if let Some(items) = value.get("findings").and_then(Value::as_array) {
-            return map_findings(items, provider, category);
-        }
-        if let Some(items) = value.as_array() {
-            return map_findings(items, provider, category);
+        return findings;
+    }
+    // Otherwise try each balanced {…}/[…] candidate until one parses as findings —
+    // so a stray `{...}` in prose before the real block doesn't defeat us.
+    for (start, c) in raw.char_indices() {
+        if (c == '{' || c == '[')
+            && let Some(blob) = balanced_from(raw, start)
+            && let Some(findings) = parse_blob(blob, provider, category)
+        {
+            return findings;
         }
     }
-    // Couldn't find/parse structured findings → keep the raw text as one note.
+    // Nothing structured → keep the raw text as one note (never silently lost).
     vec![Finding {
         severity: Severity::Info,
         category: category.to_string(),
@@ -32,6 +38,19 @@ pub fn extract_findings(raw: &str, provider: &str, category: &str) -> Vec<Findin
         body: truncate(raw, 4000),
         provider: provider.to_string(),
     }]
+}
+
+/// `Some(findings)` if `blob` is findings-shaped JSON (object with `findings`, or
+/// a bare array) — even if empty; `None` if it's not that shape.
+fn parse_blob(blob: &str, provider: &str, category: &str) -> Option<Vec<Finding>> {
+    let value: Value = serde_json::from_str(blob).ok()?;
+    if let Some(items) = value.get("findings").and_then(Value::as_array) {
+        return Some(map_findings(items, provider, category));
+    }
+    if let Some(items) = value.as_array() {
+        return Some(map_findings(items, provider, category));
+    }
+    None
 }
 
 fn map_findings(items: &[Value], provider: &str, category: &str) -> Vec<Finding> {
@@ -53,10 +72,17 @@ fn to_finding(v: &Value, provider: &str, default_category: &str) -> Option<Findi
         category: obj
             .get("category")
             .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| default_category.to_string()),
+            .unwrap_or(default_category)
+            .to_string(),
         file: obj.get("file").and_then(Value::as_str).map(str::to_string),
-        line: obj.get("line").and_then(Value::as_u64).map(|n| n as u32),
+        // Accept a numeric or string line ("42").
+        line: obj
+            .get("line")
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
+            .map(|n| n as u32),
         title,
         body: first_str(obj, &["body", "description", "detail"]).unwrap_or_default(),
         provider: provider.to_string(),
@@ -69,30 +95,49 @@ fn first_str(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<Stri
         .map(str::to_string)
 }
 
-/// Find the JSON payload in agent output: a ```json fence, else a balanced
-/// object/array starting at the first opener.
-fn find_json(raw: &str) -> Option<&str> {
-    if let Some(fence) = raw.find("```") {
-        let after = &raw[fence + 3..];
-        if let Some(nl) = after.find('\n') {
-            let body_start = fence + 3 + nl + 1;
-            if let Some(end) = raw[body_start..].find("```") {
-                return Some(raw[body_start..body_start + end].trim());
-            }
-        }
-    }
+/// The contents of the first ```…``` fence, if any.
+fn fenced_block(raw: &str) -> Option<&str> {
+    let fence = raw.find("```")?;
+    let after = &raw[fence + 3..];
+    let nl = after.find('\n')?;
+    let body_start = fence + 3 + nl + 1;
+    let end = raw[body_start..].find("```")?;
+    Some(raw[body_start..body_start + end].trim())
+}
 
-    let (start, open) = raw.char_indices().find(|(_, c)| *c == '{' || *c == '[')?;
-    let close = if open == '{' { '}' } else { ']' };
+/// The balanced `{…}`/`[…]` group beginning at byte `start` (string-aware, so a
+/// bracket inside a JSON string doesn't throw off the depth count).
+fn balanced_from(raw: &str, start: usize) -> Option<&str> {
+    let open = raw[start..].chars().next()?;
+    let close = match open {
+        '{' => '}',
+        '[' => ']',
+        _ => return None,
+    };
     let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
     for (i, c) in raw[start..].char_indices() {
-        if c == open {
-            depth += 1;
-        } else if c == close {
-            depth -= 1;
-            if depth == 0 {
-                return Some(&raw[start..start + i + c.len_utf8()]);
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
             }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            d if d == open => depth += 1,
+            d if d == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&raw[start..start + i + c.len_utf8()]);
+                }
+            }
+            _ => {}
         }
     }
     None
@@ -156,5 +201,33 @@ mod tests {
     fn ignores_a_finding_without_a_title() {
         let f = extract_findings(r#"{"findings":[{"severity":"high"}]}"#, "c", "code");
         assert!(f.is_empty(), "a finding with no title is dropped");
+    }
+
+    #[test]
+    fn braces_inside_strings_dont_corrupt_the_scan() {
+        // A `}` inside a title would mis-balance a naive scanner.
+        let raw = r#"{"findings":[{"title":"Remove extra }","severity":"important"}]}"#;
+        let f = extract_findings(raw, "claude", "code");
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].title, "Remove extra }");
+        assert_eq!(f[0].severity, Severity::Important);
+    }
+
+    #[test]
+    fn skips_a_balanced_brace_group_in_prose() {
+        // A non-JSON `{...}` before the real findings block must be skipped.
+        let raw = r#"I considered {some idea} but here it is:
+        {"findings":[{"title":"real","severity":"critical"}]}"#;
+        let f = extract_findings(raw, "claude", "code");
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].title, "real");
+        assert_eq!(f[0].severity, Severity::Critical);
+    }
+
+    #[test]
+    fn line_as_string_is_parsed() {
+        let raw = r#"{"findings":[{"title":"x","line":"42"}]}"#;
+        let f = extract_findings(raw, "c", "code");
+        assert_eq!(f[0].line, Some(42));
     }
 }
