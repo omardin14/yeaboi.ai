@@ -19,6 +19,14 @@ export function killSession(pid: number): Promise<void> {
   return invoke<void>("kill_session", { pid });
 }
 
+/**
+ * Frontend → Rust: free a listening port by SIGTERM-ing the process holding it.
+ * Rejects if the pid doesn't hold a tracked port or the signal fails.
+ */
+export function freePort(pid: number): Promise<void> {
+  return invoke<void>("free_port", { pid });
+}
+
 /** Subscribe to the Rust-emitted snapshot stream (~every 1.5s). */
 export function subscribeSnapshot(
   onSnapshot: (snapshot: Snapshot) => void,

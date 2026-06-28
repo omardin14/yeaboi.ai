@@ -18,7 +18,7 @@ pub mod model;
 pub mod project;
 pub(crate) mod util;
 
-pub use engine::{CollectOptions, Engine, pid_is_live_session};
+pub use engine::{CollectOptions, Engine, pid_is_live_session, pid_owns_tracked_port};
 pub use model::{
     ActivityStatus, ContextUsage, HostApp, Port, ProcStats, ProcTable, Project, Provider, Session,
     Snapshot, Totals,

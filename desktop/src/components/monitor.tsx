@@ -1,6 +1,7 @@
 import type { Snapshot } from "@/lib/bindings/Snapshot";
 import type { Session } from "@/lib/bindings/Session";
 import type { Project } from "@/lib/bindings/Project";
+import type { Port } from "@/lib/bindings/Port";
 import type { ActivityStatus } from "@/lib/bindings/ActivityStatus";
 import {
   formatCpu,
@@ -27,12 +28,61 @@ function isKillable(session: Session): boolean {
   return session.pid != null && session.status !== "Dead";
 }
 
+const CHIP_CLS = "rounded bg-zinc-800 px-1 font-mono text-xs text-sky-300";
+
+function PortChip({
+  port,
+  onFreePort,
+}: {
+  port: Port;
+  onFreePort?: (port: Port) => void;
+}) {
+  const label = `:${port.number}`;
+  const title = `pid ${port.pid} · ${port.state}`;
+  if (!onFreePort) {
+    return (
+      <span title={title} className={CHIP_CLS}>
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      aria-label={`Free port ${port.number}`}
+      title={`Free ${label} (${title})`}
+      onClick={() => onFreePort(port)}
+      className={`${CHIP_CLS} hover:bg-rose-500/15 hover:text-rose-300`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function PortChips({
+  ports,
+  onFreePort,
+}: {
+  ports: Port[];
+  onFreePort?: (port: Port) => void;
+}) {
+  return (
+    <span className="flex flex-wrap gap-1">
+      {ports.map((p) => (
+        <PortChip key={`${p.pid}:${p.number}`} port={p} onFreePort={onFreePort} />
+      ))}
+    </span>
+  );
+}
+
 function SessionRow({
   session,
   onKill,
+  onFreePort,
 }: {
   session: Session;
   onKill?: (session: Session) => void;
+  onFreePort?: (port: Port) => void;
 }) {
   const ctx = session.context?.pct ?? null;
   const cpu = session.proc_stats?.cpu_pct ?? null;
@@ -63,17 +113,7 @@ function SessionRow({
         {session.sub_agent_count > 0 ? `⌥${session.sub_agent_count}` : ""}
       </td>
       <td className="py-1.5 pr-3">
-        <span className="flex flex-wrap gap-1">
-          {session.ports.map((p) => (
-            <span
-              key={`${p.pid}:${p.number}`}
-              title={`pid ${p.pid} · ${p.state}`}
-              className="rounded bg-zinc-800 px-1 font-mono text-xs text-sky-300"
-            >
-              :{p.number}
-            </span>
-          ))}
-        </span>
+        <PortChips ports={session.ports} onFreePort={onFreePort} />
       </td>
       <td className="max-w-md truncate py-1.5 pr-3 text-zinc-500" title={session.last_prompt ?? ""}>
         {session.last_prompt ?? ""}
@@ -99,10 +139,12 @@ function ProjectGroup({
   project,
   sessions,
   onKill,
+  onFreePort,
 }: {
   project: Project;
   sessions: Session[];
   onKill?: (session: Session) => void;
+  onFreePort?: (port: Port) => void;
 }) {
   return (
     <section className="mb-5">
@@ -119,7 +161,12 @@ function ProjectGroup({
       <table className="w-full border-collapse text-sm">
         <tbody>
           {sessions.map((s) => (
-            <SessionRow key={s.id} session={s} onKill={onKill} />
+            <SessionRow
+              key={s.id}
+              session={s}
+              onKill={onKill}
+              onFreePort={onFreePort}
+            />
           ))}
         </tbody>
       </table>
@@ -135,9 +182,11 @@ function ProjectGroup({
 export function Monitor({
   snapshot,
   onKill,
+  onFreePort,
 }: {
   snapshot: Snapshot | null;
   onKill?: (session: Session) => void;
+  onFreePort?: (port: Port) => void;
 }) {
   if (!snapshot) {
     return <p className="text-sm text-zinc-500">Connecting…</p>;
@@ -170,6 +219,7 @@ export function Monitor({
             project={project}
             sessions={sessions}
             onKill={onKill}
+            onFreePort={onFreePort}
           />
         );
       })}
