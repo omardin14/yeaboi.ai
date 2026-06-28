@@ -55,7 +55,16 @@ impl ProjectConfig {
         let path = repo_root.join(".yeaboi").join("project.toml");
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
-            Err(_) => return ProjectConfig::default(),
+            // Absent is the normal case; an unreadable file shouldn't make the
+            // repo's ports/branch-rules vanish without a trace.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ProjectConfig::default(),
+            Err(e) => {
+                eprintln!(
+                    "worktree: cannot read {} ({e}); using defaults",
+                    path.display()
+                );
+                return ProjectConfig::default();
+            }
         };
         match toml::from_str(&text) {
             Ok(cfg) => cfg,

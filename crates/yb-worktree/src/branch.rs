@@ -11,7 +11,7 @@ pub fn derive_branch(name: &str, rules: &[BranchRule]) -> String {
     for rule in rules {
         match Regex::new(&rule.pattern) {
             Ok(re) if re.is_match(name) => {
-                return re.replace(name, rule.template.as_str()).into_owned();
+                return re.replace(name, &rule.template).into_owned();
             }
             Ok(_) => {}
             Err(e) => eprintln!("worktree: bad branch_rule /{}/: {e}", rule.pattern),

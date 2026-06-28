@@ -215,64 +215,50 @@ async fn session_transcript(session_id: String) -> Result<Vec<TranscriptEvent>, 
 
 // ---- worktrees (yb-worktree) ------------------------------------------------
 
-#[tauri::command]
-async fn list_worktrees(cwd: String) -> Result<Vec<yb_worktree::Worktree>, String> {
+/// Run `f` against the worktree engine for the repo at `cwd`, on the blocking
+/// pool, mapping every error to a string for the IPC boundary.
+async fn with_worktrees<T, F>(cwd: String, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&yb_worktree::WorktreeEngine) -> Result<T, yb_worktree::WorktreeError>
+        + Send
+        + 'static,
+{
     blocking(move || {
-        yb_worktree::WorktreeEngine::discover(&cwd)
-            .and_then(|e| e.list())
-            .map_err(|e| e.to_string())
+        let engine = yb_worktree::WorktreeEngine::discover(&cwd).map_err(|e| e.to_string())?;
+        f(&engine).map_err(|e| e.to_string())
     })
     .await
+}
+
+#[tauri::command]
+async fn list_worktrees(cwd: String) -> Result<Vec<yb_worktree::Worktree>, String> {
+    with_worktrees(cwd, |e| e.list()).await
 }
 
 #[tauri::command]
 async fn create_worktree(cwd: String, name: String) -> Result<yb_worktree::Worktree, String> {
-    blocking(move || {
-        yb_worktree::WorktreeEngine::discover(&cwd)
-            .and_then(|e| e.create(&name))
-            .map_err(|e| e.to_string())
-    })
-    .await
+    with_worktrees(cwd, move |e| e.create(&name)).await
 }
 
 #[tauri::command]
 async fn remove_worktree(cwd: String, name: String) -> Result<(), String> {
-    blocking(move || {
-        yb_worktree::WorktreeEngine::discover(&cwd)
-            .and_then(|e| e.remove(&name))
-            .map_err(|e| e.to_string())
-    })
-    .await
+    with_worktrees(cwd, move |e| e.remove(&name)).await
 }
 
 #[tauri::command]
 async fn prune_worktrees(cwd: String) -> Result<Vec<String>, String> {
-    blocking(move || {
-        yb_worktree::WorktreeEngine::discover(&cwd)
-            .and_then(|e| e.prune_merged())
-            .map_err(|e| e.to_string())
-    })
-    .await
+    with_worktrees(cwd, |e| e.prune_merged()).await
 }
 
 #[tauri::command]
 async fn start_worktree_services(cwd: String, name: String) -> Result<(), String> {
-    blocking(move || {
-        yb_worktree::WorktreeEngine::discover(&cwd)
-            .and_then(|e| e.start_services(&name))
-            .map_err(|e| e.to_string())
-    })
-    .await
+    with_worktrees(cwd, move |e| e.start_services(&name)).await
 }
 
 #[tauri::command]
 async fn stop_worktree_services(cwd: String, name: String) -> Result<(), String> {
-    blocking(move || {
-        yb_worktree::WorktreeEngine::discover(&cwd)
-            .and_then(|e| e.stop_services(&name))
-            .map_err(|e| e.to_string())
-    })
-    .await
+    with_worktrees(cwd, move |e| e.stop_services(&name)).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

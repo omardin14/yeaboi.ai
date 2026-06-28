@@ -6,14 +6,17 @@ import type { Worktree } from "@/lib/bindings/Worktree";
 const listMock = vi.hoisted(() => vi.fn());
 const createMock = vi.hoisted(() => vi.fn());
 const removeMock = vi.hoisted(() => vi.fn());
+const pruneMock = vi.hoisted(() => vi.fn());
+const startMock = vi.hoisted(() => vi.fn());
+const stopMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", () => ({
   listWorktrees: listMock,
   createWorktree: createMock,
   removeWorktree: removeMock,
-  pruneWorktrees: vi.fn(() => Promise.resolve([])),
-  startWorktreeServices: vi.fn(),
-  stopWorktreeServices: vi.fn(),
+  pruneWorktrees: pruneMock,
+  startWorktreeServices: startMock,
+  stopWorktreeServices: stopMock,
 }));
 
 const project: Project = {
@@ -44,6 +47,9 @@ beforeEach(() => {
   ]);
   createMock.mockReset().mockResolvedValue(wt());
   removeMock.mockReset().mockResolvedValue(undefined);
+  pruneMock.mockReset().mockResolvedValue(["old"]);
+  startMock.mockReset().mockResolvedValue(undefined);
+  stopMock.mockReset().mockResolvedValue(undefined);
 });
 
 test("lists worktrees with branch and port", async () => {
@@ -83,8 +89,33 @@ test("removing confirms then calls the backend", async () => {
   await waitFor(() => expect(removeMock).toHaveBeenCalledWith("/repo", "feat-x"));
 });
 
+test("start/stop/prune buttons call their backends", async () => {
+  render(<WorktreeBoard projects={[project]} />);
+  await screen.findByText("feat-x");
+
+  fireEvent.click(screen.getByRole("button", { name: "start" }));
+  await waitFor(() => expect(startMock).toHaveBeenCalledWith("/repo", "feat-x"));
+
+  fireEvent.click(screen.getByRole("button", { name: "stop" }));
+  await waitFor(() => expect(stopMock).toHaveBeenCalledWith("/repo", "feat-x"));
+
+  fireEvent.click(screen.getByRole("button", { name: "Prune merged" }));
+  await waitFor(() => expect(pruneMock).toHaveBeenCalledWith("/repo"));
+});
+
 test("a list failure surfaces an error", async () => {
   listMock.mockRejectedValueOnce("not a git repo");
   render(<WorktreeBoard projects={[project]} />);
   expect(await screen.findByText(/could not list worktrees/i)).toBeInTheDocument();
+});
+
+test("a create failure surfaces an error banner", async () => {
+  createMock.mockRejectedValueOnce("name already exists");
+  render(<WorktreeBoard projects={[project]} />);
+  await screen.findByText("feat-x");
+  fireEvent.change(screen.getByLabelText("New worktree name"), {
+    target: { value: "dup" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  expect(await screen.findByText(/already exists/)).toBeInTheDocument();
 });

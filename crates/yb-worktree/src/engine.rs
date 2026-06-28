@@ -81,6 +81,22 @@ impl WorktreeEngine {
         self.parent.join(format!("{}-{}", self.repo_name, name))
     }
 
+    /// Reject names that could escape the worktrees parent dir (a stray `/` or
+    /// `..` would otherwise let `git worktree add` / `remove_dir_all` touch the
+    /// wrong directory).
+    fn validate_name(name: &str) -> Result<(), WorktreeError> {
+        let n = name.trim();
+        if n.is_empty() {
+            return Err(WorktreeError::Msg("worktree name is empty".into()));
+        }
+        if n.contains('/') || n.contains('\\') || n.contains("..") {
+            return Err(WorktreeError::Msg(format!(
+                "invalid worktree name `{name}` (no `/`, `\\`, or `..`)"
+            )));
+        }
+        Ok(())
+    }
+
     fn run_git(&self, args: &[&str]) -> Result<yb_exec::Output, WorktreeError> {
         Ok(Cmd::new("git")
             .arg("-C")
@@ -92,12 +108,11 @@ impl WorktreeEngine {
     /// Run a git subcommand best-effort, logging (not failing) on error — for the
     /// idempotent cleanup steps (`prune`, `branch -D`).
     fn git_quiet(&self, args: &[&str]) {
+        let label = args.join(" ");
         match self.run_git(args) {
-            Ok(o) if !o.success => {
-                eprintln!("worktree: git {} — {}", args.join(" "), o.stderr_tail())
-            }
+            Ok(o) if !o.success => eprintln!("worktree: git {label} — {}", o.stderr_tail()),
             Ok(_) => {}
-            Err(e) => eprintln!("worktree: git {} — {e}", args.join(" ")),
+            Err(e) => eprintln!("worktree: git {label} — {e}"),
         }
     }
 
@@ -167,9 +182,7 @@ impl WorktreeEngine {
     /// Create a worktree: derive the branch, `git worktree add -b`, render `.env`,
     /// then run the configured setup commands.
     pub fn create(&self, name: &str) -> Result<Worktree, WorktreeError> {
-        if name.trim().is_empty() {
-            return Err(WorktreeError::Msg("worktree name is empty".into()));
-        }
+        Self::validate_name(name)?;
         let branch = derive_branch(name, &self.config.branch_rules);
         let target = self.target_path(name);
         if target.exists() {
@@ -214,13 +227,19 @@ impl WorktreeEngine {
             .collect();
 
         let mut lines = Vec::new();
-        if let Ok(text) = std::fs::read_to_string(self.repo_root.join(".env")) {
-            for line in text.lines() {
-                let key = line.split('=').next().unwrap_or("").trim();
-                if !overridden.contains(key) {
-                    lines.push(line.to_string());
+        let parent_env = self.repo_root.join(".env");
+        match std::fs::read_to_string(&parent_env) {
+            Ok(text) => {
+                for line in text.lines() {
+                    let key = line.split('=').next().unwrap_or("").trim();
+                    if !overridden.contains(key) {
+                        lines.push(line.to_string());
+                    }
                 }
             }
+            // No parent .env is normal; an unreadable one shouldn't drop secrets silently.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!("worktree: cannot read {}: {e}", parent_env.display()),
         }
         lines.push(format!("PORT={port}"));
         for (k, v) in &self.config.env {
@@ -245,10 +264,19 @@ impl WorktreeEngine {
     }
 
     /// Remove a worktree: teardown (best-effort) → forced removal → prune →
-    /// delete the branch. Idempotent, like the reference `w.sh rm`.
+    /// delete the branch. The forced-removal step surfaces a real failure (so the
+    /// UI can't show success); the cleanup steps are idempotent best-effort.
     pub fn remove(&self, name: &str) -> Result<(), WorktreeError> {
+        Self::validate_name(name)?;
         let target = self.target_path(name);
-        let branch = derive_branch(name, &self.config.branch_rules);
+        // Delete the worktree's *actual* branch (config rules may have changed
+        // since create), falling back to the derived name if we can't read it.
+        let branch = self
+            .list()
+            .ok()
+            .and_then(|wts| wts.into_iter().find(|w| w.name == name))
+            .map(|w| w.branch)
+            .unwrap_or_else(|| derive_branch(name, &self.config.branch_rules));
 
         if let Err(e) = self.run_commands(&target, &self.config.lifecycle.teardown) {
             eprintln!("worktree: teardown for {name} failed (continuing): {e}");
@@ -260,11 +288,14 @@ impl WorktreeEngine {
             .args(["worktree", "remove", "--force"])
             .arg(&target)
             .output()?;
-        if !removed.success {
-            eprintln!("worktree: git worktree remove — {}", removed.stderr_tail());
-        }
-        if target.exists() {
-            std::fs::remove_dir_all(&target)?;
+        // `git worktree remove --force` deletes the directory on success. A
+        // failure while the directory still exists is a genuine error to surface;
+        // a failure with the directory already gone is just idempotent.
+        if !removed.success && target.exists() {
+            return Err(WorktreeError::Msg(format!(
+                "git worktree remove failed: {}",
+                removed.stderr_tail()
+            )));
         }
         self.git_quiet(&["worktree", "prune"]);
         self.git_quiet(&["branch", "-D", &branch]);
@@ -293,6 +324,7 @@ impl WorktreeEngine {
     /// Start the repo's configured services in a worktree (detached, pid-filed).
     #[cfg(unix)]
     pub fn start_services(&self, name: &str) -> Result<(), WorktreeError> {
+        Self::validate_name(name)?;
         let dir = self.target_path(name);
         let svc_dir = dir.join(".yeaboi");
         std::fs::create_dir_all(&svc_dir)?;
@@ -318,15 +350,28 @@ impl WorktreeEngine {
     /// Stop a worktree's services by SIGTERM-ing their pids and clearing the
     /// pid files.
     pub fn stop_services(&self, name: &str) -> Result<(), WorktreeError> {
+        Self::validate_name(name)?;
         let svc_dir = self.target_path(name).join(".yeaboi");
         for svc in &self.config.services {
             let pid_file = svc_dir.join(format!("{}.pid", svc.name));
-            let Ok(text) = std::fs::read_to_string(&pid_file) else {
+            let text = match std::fs::read_to_string(&pid_file) {
+                Ok(t) => t,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    eprintln!("worktree: cannot read {}: {e}", pid_file.display());
+                    continue;
+                }
+            };
+            // A corrupt pid: don't SIGTERM a random pid and don't delete the file
+            // — leave it for inspection rather than orphaning the process silently.
+            let Ok(pid) = text.trim().parse::<u32>() else {
+                eprintln!(
+                    "worktree: unparseable pid in {} — leaving it",
+                    pid_file.display()
+                );
                 continue;
             };
-            if let Ok(pid) = text.trim().parse::<u32>()
-                && let Err(e) = yb_proc::actions::sigterm(pid)
-            {
+            if let Err(e) = yb_proc::actions::sigterm(pid) {
                 eprintln!("worktree: stop {} (pid {pid}): {e}", svc.name);
             }
             if let Err(e) = std::fs::remove_file(&pid_file) {
@@ -414,5 +459,115 @@ mod tests {
         let wt = eng.create("issue-42").unwrap();
         assert_eq!(wt.branch, "feature/issue-42");
         eng.remove("issue-42").unwrap();
+    }
+
+    #[test]
+    fn rejects_unsafe_and_empty_names() {
+        let (_tmp, root) = repo();
+        let eng = WorktreeEngine::discover(&root).unwrap();
+        for bad in ["", "  ", "a/b", "..", "x/../../y", "a\\b"] {
+            assert!(
+                eng.create(bad).is_err(),
+                "create({bad:?}) should be refused"
+            );
+            assert!(
+                eng.remove(bad).is_err(),
+                "remove({bad:?}) should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn create_refuses_an_existing_target() {
+        let (_tmp, root) = repo();
+        let eng = WorktreeEngine::discover(&root).unwrap();
+        eng.create("dup").unwrap();
+        assert!(eng.create("dup").is_err(), "second create should fail");
+        eng.remove("dup").unwrap();
+    }
+
+    #[test]
+    fn config_env_value_wins_over_parent_env() {
+        let (_tmp, root) = repo(); // parent .env has API_KEY=keep, PORT=9999
+        std::fs::write(root.join(".env"), "API_KEY=keep\nDATABASE_URL=parent\n").unwrap();
+        std::fs::create_dir_all(root.join(".yeaboi")).unwrap();
+        std::fs::write(
+            root.join(".yeaboi").join("project.toml"),
+            "[env]\nDATABASE_URL = \"child\"\n",
+        )
+        .unwrap();
+
+        let eng = WorktreeEngine::discover(&root).unwrap();
+        let wt = eng.create("w").unwrap();
+        let env = std::fs::read_to_string(Path::new(&wt.path).join(".env")).unwrap();
+        assert!(env.contains("DATABASE_URL=child"));
+        assert!(!env.contains("DATABASE_URL=parent"));
+        assert_eq!(env.matches("DATABASE_URL=").count(), 1, "no duplicate key");
+        assert!(env.contains("API_KEY=keep"));
+        eng.remove("w").unwrap();
+    }
+
+    #[test]
+    fn prune_merged_removes_only_merged_worktrees() {
+        let (_tmp, root) = repo();
+        let eng = WorktreeEngine::discover(&root).unwrap();
+
+        // `merged` sits at main's tip → merged. `wip` gets an extra commit.
+        eng.create("merged").unwrap();
+        let wip = eng.create("wip").unwrap();
+        std::fs::write(Path::new(&wip.path).join("x.txt"), "x").unwrap();
+        git(&["add", "."], Path::new(&wip.path));
+        git(&["commit", "-q", "-m", "wip"], Path::new(&wip.path));
+
+        let removed = eng.prune_merged().unwrap();
+        assert_eq!(removed, vec!["merged".to_string()]);
+
+        let names: Vec<String> = eng.list().unwrap().into_iter().map(|w| w.name).collect();
+        assert!(names.iter().any(|n| n == "(main)"), "main never pruned");
+        assert!(names.contains(&"wip".to_string()), "unmerged kept");
+        assert!(!names.contains(&"merged".to_string()));
+    }
+
+    #[test]
+    fn stop_services_without_a_pidfile_is_ok() {
+        let (_tmp, root) = repo();
+        let eng = WorktreeEngine::discover(&root).unwrap();
+        eng.create("svc").unwrap();
+        // No services configured / no pid files → a clean no-op.
+        eng.stop_services("svc").unwrap();
+        eng.remove("svc").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_then_stop_services_manages_the_pid_file() {
+        let (_tmp, root) = repo();
+        std::fs::create_dir_all(root.join(".yeaboi")).unwrap();
+        std::fs::write(
+            root.join(".yeaboi").join("project.toml"),
+            "[[services]]\nname = \"dev\"\ncmd = \"sleep 30\"\n",
+        )
+        .unwrap();
+        let eng = WorktreeEngine::discover(&root).unwrap();
+        let wt = eng.create("s").unwrap();
+
+        eng.start_services("s").unwrap();
+        let pid_file = Path::new(&wt.path).join(".yeaboi").join("dev.pid");
+        assert!(pid_file.exists(), "start should write a pid file");
+
+        eng.stop_services("s").unwrap();
+        assert!(!pid_file.exists(), "stop should clear the pid file");
+        eng.remove("s").unwrap();
+    }
+
+    #[test]
+    fn parse_porcelain_handles_a_detached_head() {
+        let (_tmp, root) = repo();
+        let eng = WorktreeEngine::discover(&root).unwrap();
+        // A worktree block with no `branch` line → "(detached)".
+        let porcelain = format!("worktree {}\nHEAD abc123\ndetached\n", root.display());
+        let wts = eng.parse_porcelain(&porcelain);
+        assert_eq!(wts.len(), 1);
+        assert_eq!(wts[0].branch, "(detached)");
     }
 }
