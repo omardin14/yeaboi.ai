@@ -5128,6 +5128,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "yb-core",
+ "yb-proc",
 ]
 
 [[package]]

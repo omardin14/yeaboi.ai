@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Snapshot } from "@/lib/bindings/Snapshot";
-import { getSnapshot, subscribeSnapshot } from "@/lib/api";
-import { SessionsTable } from "@/components/sessions-table";
+import {
+  getSnapshot,
+  subscribeSnapshot,
+  subscribeSnapshotError,
+} from "@/lib/api";
+import { Monitor } from "@/components/monitor";
+import { WarningsBanner } from "@/components/warnings-banner";
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -20,16 +25,23 @@ function App() {
       .then(setSnapshot)
       .catch((e) => setError(`Failed to load snapshot: ${e}`));
 
-    let unlisten: UnlistenFn | undefined;
-    subscribeSnapshot(setSnapshot)
-      .then((stop) => {
-        unlisten = stop;
-      })
+    const unlisteners: UnlistenFn[] = [];
+    subscribeSnapshot((snap) => {
+      setSnapshot(snap);
+      setError(null); // a fresh frame means the stream recovered
+    })
+      .then((stop) => unlisteners.push(stop))
+      .catch((e) => setError(`Live updates unavailable: ${e}`));
+    subscribeSnapshotError((message) =>
+      setError(`Live updates stopped: ${message}`),
+    )
+      .then((stop) => unlisteners.push(stop))
       .catch((e) => setError(`Live updates unavailable: ${e}`));
 
-    return () => unlisten?.();
+    return () => unlisteners.forEach((stop) => stop());
   }, []);
 
+  const totals = snapshot?.totals;
   const updatedAt =
     snapshot && snapshot.generated_at_ms > 0
       ? new Date(snapshot.generated_at_ms).toLocaleTimeString()
@@ -37,17 +49,17 @@ function App() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="mx-auto max-w-3xl px-6 py-8">
+      <div className="mx-auto max-w-4xl px-6 py-8">
         <header className="mb-6 flex items-baseline justify-between border-b border-zinc-800 pb-4">
           <div>
             <h1 className="text-lg font-semibold tracking-tight">yeaboi.ai</h1>
-            <p className="text-xs text-zinc-500">
-              Phase 0 — live snapshot seam (stub data)
-            </p>
+            <p className="text-xs text-zinc-500">live monitor</p>
           </div>
           <div className="text-right text-xs text-zinc-500">
             <div>
-              {snapshot ? `${snapshot.sessions.length} session(s)` : "connecting…"}
+              {totals
+                ? `${totals.session_count} session(s) · ${totals.busy_count} busy · ${totals.project_count} project(s)`
+                : "connecting…"}
             </div>
             <div>updated {updatedAt}</div>
           </div>
@@ -59,7 +71,9 @@ function App() {
           </div>
         )}
 
-        <SessionsTable snapshot={snapshot} />
+        <WarningsBanner warnings={snapshot?.warnings ?? []} />
+
+        <Monitor snapshot={snapshot} />
       </div>
     </main>
   );

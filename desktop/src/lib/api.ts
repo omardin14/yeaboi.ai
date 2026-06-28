@@ -11,9 +11,19 @@ export function getSnapshot(): Promise<Snapshot> {
   return invoke<Snapshot>("get_snapshot");
 }
 
-/** Subscribe to the Rust-emitted snapshot stream (~1/s in Phase 0). */
+/** Subscribe to the Rust-emitted snapshot stream (~every 1.5s). */
 export function subscribeSnapshot(
   onSnapshot: (snapshot: Snapshot) => void,
 ): Promise<UnlistenFn> {
   return listen<Snapshot>("snapshot-update", (event) => onSnapshot(event.payload));
+}
+
+/**
+ * Subscribe to fatal collector failures. When the collector thread dies the
+ * stream stops, so the UI must say so rather than freeze on the last frame.
+ */
+export function subscribeSnapshotError(
+  onError: (message: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("snapshot-error", (event) => onError(event.payload));
 }
