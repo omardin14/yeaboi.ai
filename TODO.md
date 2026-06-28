@@ -27,12 +27,20 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - Run the app: `make web-install && make dev`. Headless: `make cli`.
 - _Note: shadcn deferred — Tailwind v4 + `@` alias are in place, add components later with `pnpm dlx shadcn@latest add …`._
 
-## Phase 1 — Monitor + worktrees + full PR/git loop (v1)
+## Phase 1 — Monitor + worktrees + full PR/git loop (v1) — ✅ COMPLETE
 
-> **Phase 1a (data path, headless) — DONE.** `make cli --json/--once/--interval`
-> shows real live sessions grouped by project with context %, model, CPU/MEM.
-> Deferred from 1a: `notify` fs-watch, `watch<Arc<Snapshot>>` stream, lsof ports,
-> sigterm/free-port (these land with the desktop monitor in 1b).
+> **v1 is done.** Single pane of glass with three tabs over one Rust engine
+> (also the headless `yeaboi` CLI):
+> - **Monitor** — live sessions/sub-agents/ports grouped by repo; kill a session,
+>   free a port (incl. orphans); detail panel with working-diff + transcript
+>   replay; native notifications; permission "needs you" inbox; filter/sort.
+> - **PRs** — list · diff · merge/comment/open/sync-rebase (continue/abort) ·
+>   **multi-agent review** (claude + codex, cross-provider).
+> - **Worktrees** — create/list/remove/prune + per-worktree services; MD5 ports.
+>
+> Shipped across PRs #2 (1a) · #3–#6 (1b) · #8 (cleanup) · #7 (1c) · #9 (1d) ·
+> #10 (1e). Only open item: the manual `make dev` end-to-end pass (yours).
+> Per-checkbox detail below.
 
 ### yb-core (data + collectors)
 - [x] `model`: `Snapshot{projects,sessions,totals,warnings}`, `Project`, `Session`, `ProcStats`, `ContextUsage`, enums (`SubAgent`→`sub_agent_count`; `Port` deferred to 1b)
@@ -42,13 +50,13 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] `ClaudeCollector` Tier B — `TranscriptCursor` incremental tail; `RawLine` type-tagged enum; `last-prompt`; truncation reset; sub-agent count via tool_use
 - [x] `ProjectResolver` — pure-filesystem `.git`/worktree common-dir grouping; roll worktrees under repo
 - [x] `CodexCollector` — `rusqlite` read-only; recency-bounded `threads` query
-- [x] `notify` fs-watch wrapper (`DirtyWatcher`) — wakes the collector early on a change
-- [x] `engine` tick loop + `watch<Snapshot>` channel (desktop) + idle-skip via fs-watch
+- [x] `engine` tick loop + `watch<Snapshot>` channel (desktop) + idle-skip; fs-watch lives in `yb-proc` (OS boundary)
 
 ### yb-proc
 - [x] `sysinfo` `ProcTable` (cpu+mem+parent) + ppid subtree BFS
-- [x] `lsof -Fpn` parser + 750ms timeout/degrade; ports attached by subtree (orphan heuristic deferred)
-- [ ] `actions::sigterm(pid)` (nix, guards) + `free_port` — *1b*
+- [x] `lsof -Fpn` parser + 750ms timeout/degrade; ports attached by subtree + orphan detection
+- [x] `actions::sigterm(pid)` (nix, guards: pid≤1 / out-of-i32) — backs kill_session/free_port
+- [x] `fswatch::DirtyWatcher` (notify) — wakes the collector early on a `~/.claude` change
 
 ### yb-cli (headless — build & validate the data path first)
 - [x] clap args: `--once`, `--json`, `--interval`, `--no-ports` (+ `--hide-dead`)
@@ -80,7 +88,8 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] PR ops: `find_existing/create/merge/comment`; types `MergeMethod`/`RebaseOutcome` (ts-exported)
 - [x] Git ops: `push_current/rebase_onto/rebase_continue/abort/merged_branches/list_conflicts`
 - [x] Desktop PR view: project picker + list + diff viewer + merge/comment/open/sync (Monitor|PRs tabs)
-- [ ] `review` (agent-driven) — *lands with yb-agent (1e)*
+- [x] `review` (agent-driven) — Review panel wired to `yb-agent` (1e)
+- [x] `GitRepo::working_diff` (for the session detail panel)
 
 ### yb-worktree (decentralized, GitHubIssueTriager model) — DONE (1d)
 - [x] `project.toml` schema (`[ports]`/`branch_rules`/`[lifecycle]`/`[[services]]`/`[env]`) with defaults
@@ -100,7 +109,10 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] Desktop `review_pr`/`cancel_review` commands + `review-progress` events; PrView Review panel (progress rows + findings by severity)
 
 ### desktop — PR/worktree views
-- [ ] PR list · review-run progress (per-agent rows via events, cancelable) · findings (post to PR) · worktree board · diff/conflict viewers · merge/rebase dialogs
+- [x] PR list · diff viewer · merge/comment/open/sync + continue/abort dialogs (PRs tab)
+- [x] Review-run progress (per-agent rows via `review-progress` events, cancelable) + findings by severity
+- [x] Worktree board (create/list/remove/prune + services) (Worktrees tab)
+- [ ] Post findings back to the PR as a comment — *deferred to Phase 2 (uses `gh pr comment`, already wired)*
 
 ### v1 testing
 - [x] Unit (context math, transcript incremental==oracle, port attribution, rebase outcomes, JSON extraction)
