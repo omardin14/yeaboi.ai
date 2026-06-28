@@ -3,6 +3,7 @@ import type { Project } from "@/lib/bindings/Project";
 import type { PullRequest } from "@/lib/bindings/PullRequest";
 import type { MergeMethod } from "@/lib/bindings/MergeMethod";
 import {
+  abortRebase,
   commentPr,
   listPrs,
   mergePr,
@@ -11,6 +12,7 @@ import {
   syncBranch,
 } from "@/lib/api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Banner } from "@/components/banner";
 
 const STATE_STYLES: Record<string, string> = {
   OPEN: "bg-emerald-500/15 text-emerald-400 ring-emerald-500/30",
@@ -45,6 +47,8 @@ export function PrView({ projects }: { projects: Project[] }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Files left conflicted by a paused rebase; drives the "Abort rebase" affordance.
+  const [conflicts, setConflicts] = useState<string[] | null>(null);
 
   // Adopt the first project once the snapshot arrives, if none chosen yet.
   useEffect(() => {
@@ -87,8 +91,8 @@ export function PrView({ projects }: { projects: Project[] }) {
     setError(null);
     try {
       await mergePr(repo, selected.number, method);
+      await refresh(repo); // refresh clears banners, so set the notice after
       setNotice(`Merged #${selected.number}.`);
-      await refresh(repo);
     } catch (e) {
       setError(`Failed to merge #${selected.number}: ${e}`);
     } finally {
@@ -116,9 +120,9 @@ export function PrView({ projects }: { projects: Project[] }) {
     setBusy(true);
     setError(null);
     try {
-      const url = await openPr(repo, "main");
+      const url = await openPr(repo);
+      await refresh(repo); // refresh clears banners, so set the notice after
       setNotice(`Opened PR: ${url}`);
-      await refresh(repo);
     } catch (e) {
       setError(`Failed to open a PR: ${e}`);
     } finally {
@@ -130,17 +134,33 @@ export function PrView({ projects }: { projects: Project[] }) {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setConflicts(null);
     try {
-      const outcome = await syncBranch(repo, "main");
+      const outcome = await syncBranch(repo);
       if (outcome === "Clean") {
-        setNotice("Rebased onto origin/main cleanly.");
+        setNotice("Rebased onto the default branch cleanly.");
       } else {
+        setConflicts(outcome.Conflicts);
         setError(
-          `Rebase paused on conflicts: ${outcome.Conflicts.join(", ")}. Resolve in your editor, then continue.`,
+          `Rebase paused on conflicts: ${outcome.Conflicts.join(", ")}. Resolve in your editor and continue, or abort.`,
         );
       }
     } catch (e) {
       setError(`Sync failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doAbort() {
+    setBusy(true);
+    try {
+      await abortRebase(repo);
+      setConflicts(null);
+      setError(null);
+      setNotice("Rebase aborted.");
+    } catch (e) {
+      setError(`Failed to abort the rebase: ${e}`);
     } finally {
       setBusy(false);
     }
@@ -178,8 +198,18 @@ export function PrView({ projects }: { projects: Project[] }) {
           onClick={() => void doSync()}
           className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
         >
-          Sync with main
+          Sync (rebase)
         </button>
+        {conflicts && conflicts.length > 0 && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void doAbort()}
+            className="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+          >
+            Abort rebase
+          </button>
+        )}
         <button
           type="button"
           disabled={busy}
@@ -190,16 +220,8 @@ export function PrView({ projects }: { projects: Project[] }) {
         </button>
       </div>
 
-      {error && (
-        <div className="mb-4 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-400">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="mb-4 rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
-          {notice}
-        </div>
-      )}
+      {error && <Banner kind="error">{error}</Banner>}
+      {notice && <Banner kind="notice">{notice}</Banner>}
 
       {prs == null ? (
         <p className="text-sm text-zinc-500">Loading PRs…</p>
@@ -292,7 +314,7 @@ export function PrView({ projects }: { projects: Project[] }) {
       <ConfirmDialog
         open={confirmMerge}
         title={`Merge #${selected?.number}?`}
-        confirmLabel={`${method} & merge`}
+        confirmLabel={method === "Merge" ? "Merge" : `${method} & merge`}
         danger
         onConfirm={() => void doMerge()}
         onCancel={() => setConfirmMerge(false)}

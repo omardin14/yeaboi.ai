@@ -135,8 +135,10 @@ struct RawPr {
     head: String,
     #[serde(rename = "baseRefName")]
     base: String,
+    // GitHub returns `"author": null` for deleted/bot accounts (not just an
+    // absent key), so accept null too — `#[serde(default)]` alone wouldn't.
     #[serde(default)]
-    author: RawAuthor,
+    author: Option<RawAuthor>,
     url: String,
     #[serde(rename = "isDraft")]
     is_draft: bool,
@@ -158,7 +160,7 @@ impl From<RawPr> for PullRequest {
             state: r.state,
             head: r.head,
             base: r.base,
-            author: r.author.login,
+            author: r.author.unwrap_or_default().login,
             url: r.url,
             is_draft: r.is_draft,
             updated_at: r.updated_at,
@@ -200,6 +202,15 @@ mod tests {
     fn missing_author_defaults_to_empty() {
         let json = r#"[{"number":1,"title":"t","state":"OPEN","headRefName":"h",
             "baseRefName":"main","url":"u","isDraft":false,"updatedAt":"now"}]"#;
+        let prs = parse_pr_list(json).expect("parse");
+        assert_eq!(prs[0].author, "");
+    }
+
+    #[test]
+    fn null_author_is_accepted() {
+        // gh returns `"author": null` for deleted/bot accounts.
+        let json = r#"[{"number":1,"title":"t","state":"OPEN","headRefName":"h",
+            "baseRefName":"main","author":null,"url":"u","isDraft":false,"updatedAt":"now"}]"#;
         let prs = parse_pr_list(json).expect("parse");
         assert_eq!(prs[0].author, "");
     }

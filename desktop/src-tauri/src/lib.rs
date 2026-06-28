@@ -146,13 +146,14 @@ async fn comment_pr(cwd: String, number: u64, body: String) -> Result<(), String
     .await
 }
 
-/// Push the current branch and open a PR against `base`; returns the PR URL.
+/// Push the current branch and open a PR against the repo's default branch;
+/// returns the PR URL.
 #[tauri::command]
-async fn open_pr(cwd: String, base: String) -> Result<String, String> {
+async fn open_pr(cwd: String) -> Result<String, String> {
     blocking(move || {
-        yb_git::GitRepo::new(&cwd)
-            .push_current()
-            .map_err(|e| e.to_string())?;
+        let repo = yb_git::GitRepo::new(&cwd);
+        let base = repo.default_base().map_err(|e| e.to_string())?;
+        repo.push_current().map_err(|e| e.to_string())?;
         yb_git::Gh::new(&cwd)
             .pr_create(&base)
             .map_err(|e| e.to_string())
@@ -160,12 +161,23 @@ async fn open_pr(cwd: String, base: String) -> Result<String, String> {
     .await
 }
 
-/// Rebase the repo's current branch onto `origin/<base>`.
+/// Rebase the repo's current branch onto its default branch.
 #[tauri::command]
-async fn sync_branch(cwd: String, base: String) -> Result<yb_git::RebaseOutcome, String> {
+async fn sync_branch(cwd: String) -> Result<yb_git::RebaseOutcome, String> {
+    blocking(move || {
+        let repo = yb_git::GitRepo::new(cwd);
+        let base = repo.default_base().map_err(|e| e.to_string())?;
+        repo.rebase_onto(&base).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Abort an in-progress rebase (e.g. after [`sync_branch`] hit conflicts).
+#[tauri::command]
+async fn abort_rebase(cwd: String) -> Result<(), String> {
     blocking(move || {
         yb_git::GitRepo::new(cwd)
-            .rebase_onto(&base)
+            .rebase_abort()
             .map_err(|e| e.to_string())
     })
     .await
@@ -187,7 +199,8 @@ pub fn run() {
             merge_pr,
             comment_pr,
             open_pr,
-            sync_branch
+            sync_branch,
+            abort_rebase
         ])
         .setup(move |app| {
             // Minimal tray with a placeholder tooltip. A later slice renders live

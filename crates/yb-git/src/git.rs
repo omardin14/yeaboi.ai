@@ -55,10 +55,55 @@ impl GitRepo {
         Ok(())
     }
 
+    /// The repo's default branch (what `origin/HEAD` points at), e.g. `main` or
+    /// `master`. Falls back to `main` when `origin/HEAD` isn't set locally — a
+    /// documented best-effort default, not a swallowed failure.
+    pub fn default_base(&self) -> Result<String, GitError> {
+        match self.run(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+            Ok(reference) => Ok(reference
+                .strip_prefix("origin/")
+                .unwrap_or(&reference)
+                .to_string()),
+            Err(GitError::Command { .. }) => Ok("main".to_string()),
+            Err(other) => Err(other),
+        }
+    }
+
     /// Files with unresolved merge conflicts (empty when none).
     pub fn list_conflicts(&self) -> Result<Vec<String>, GitError> {
         let out = self.run(&["diff", "--name-only", "--diff-filter=U"])?;
         Ok(out.lines().map(str::to_string).collect())
+    }
+
+    /// A `git -C <root> …` command builder.
+    fn cmd(&self, args: &[&str]) -> Cmd {
+        Cmd::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(args.iter().copied())
+    }
+
+    /// Interpret a finished (non-`run`) git output as a rebase outcome: success
+    /// → Clean; failure with conflicts → Conflicts; failure with none → surface
+    /// the *rebase's* code/stderr (captured before the secondary `list_conflicts`
+    /// call, so a failure there can't mask the real error).
+    fn rebase_outcome(
+        &self,
+        out: yb_exec::Output,
+        args: String,
+    ) -> Result<RebaseOutcome, GitError> {
+        if out.success {
+            return Ok(RebaseOutcome::Clean);
+        }
+        let code = out.status;
+        let stderr = out.stderr_tail().to_string();
+        // If listing conflicts itself fails, fall back to reporting the rebase
+        // error we captured above rather than the secondary failure.
+        let conflicts = self.list_conflicts().unwrap_or_default();
+        if conflicts.is_empty() {
+            return Err(GitError::Command { args, code, stderr });
+        }
+        Ok(RebaseOutcome::Conflicts(conflicts))
     }
 
     /// Fetch `origin/<base>` and rebase the current branch onto it. On conflict
@@ -67,47 +112,17 @@ impl GitRepo {
     pub fn rebase_onto(&self, base: &str) -> Result<RebaseOutcome, GitError> {
         self.run(&["fetch", "origin", base])?;
         let target = format!("origin/{base}");
-        let out = Cmd::new("git")
-            .arg("-C")
-            .arg(&self.root)
-            .args(["rebase", &target])
-            .output()?;
-        if out.success {
-            return Ok(RebaseOutcome::Clean);
-        }
-        // Non-zero may mean conflicts (rebase paused) — report them. If there are
-        // none, it's a genuine failure to surface.
-        let conflicts = self.list_conflicts()?;
-        if conflicts.is_empty() {
-            return Err(GitError::Command {
-                args: format!("rebase {target}"),
-                code: out.status,
-                stderr: out.stderr_tail().to_string(),
-            });
-        }
-        Ok(RebaseOutcome::Conflicts(conflicts))
+        let out = self.cmd(&["rebase", &target]).output()?;
+        self.rebase_outcome(out, format!("rebase {target}"))
     }
 
     /// Continue an in-progress rebase after conflicts are resolved.
     pub fn rebase_continue(&self) -> Result<RebaseOutcome, GitError> {
-        // `git rebase --continue` needs the editor disabled in non-interactive use.
-        let out = Cmd::new("git")
-            .arg("-C")
-            .arg(&self.root)
-            .args(["-c", "core.editor=true", "rebase", "--continue"])
+        // `core.editor=true` disables the editor for non-interactive continue.
+        let out = self
+            .cmd(&["-c", "core.editor=true", "rebase", "--continue"])
             .output()?;
-        if out.success {
-            return Ok(RebaseOutcome::Clean);
-        }
-        let conflicts = self.list_conflicts()?;
-        if conflicts.is_empty() {
-            return Err(GitError::Command {
-                args: "rebase --continue".to_string(),
-                code: out.status,
-                stderr: out.stderr_tail().to_string(),
-            });
-        }
-        Ok(RebaseOutcome::Conflicts(conflicts))
+        self.rebase_outcome(out, "rebase --continue".to_string())
     }
 
     /// Abort an in-progress rebase, restoring the pre-rebase state.
@@ -141,19 +156,11 @@ mod tests {
         assert!(out.success, "git {args:?} failed: {}", out.stderr_tail());
     }
 
-    fn git_available() -> bool {
-        Cmd::new("git")
-            .arg("--version")
-            .output()
-            .map(|o| o.success)
-            .unwrap_or(false)
-    }
+    // git is a hard dependency of this project (and present in CI), so these
+    // integration tests run unconditionally rather than silently skipping.
 
     #[test]
     fn current_branch_of_a_real_repo() {
-        if !git_available() {
-            return;
-        }
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         git(&["init", "-q"], dir);
@@ -172,9 +179,6 @@ mod tests {
 
     #[test]
     fn non_zero_exit_becomes_structured_error() {
-        if !git_available() {
-            return;
-        }
         // A directory that isn't a git repo → `rev-parse` exits non-zero.
         let tmp = tempfile::tempdir().unwrap();
         let err = GitRepo::new(tmp.path()).current_branch().unwrap_err();
@@ -215,9 +219,6 @@ mod tests {
 
     #[test]
     fn rebase_onto_is_clean_without_conflicts() {
-        if !git_available() {
-            return;
-        }
         let (_o, _w, w) = repo_with_origin();
         // feat adds a non-conflicting file.
         git(&["checkout", "-q", "-b", "feat"], &w);
@@ -236,9 +237,6 @@ mod tests {
 
     #[test]
     fn rebase_onto_reports_then_aborts_conflicts() {
-        if !git_available() {
-            return;
-        }
         let (_o, _w, w) = repo_with_origin();
         // feat and main both change file.txt differently → conflict on rebase.
         git(&["checkout", "-q", "-b", "feat"], &w);
@@ -260,10 +258,51 @@ mod tests {
     }
 
     #[test]
+    fn rebase_continue_after_resolving_reaches_clean() {
+        let (_o, _w, w) = repo_with_origin();
+        git(&["checkout", "-q", "-b", "feat"], &w);
+        write_commit(&w, "file.txt", "feat-change\n", "feat edit");
+        git(&["checkout", "-q", "main"], &w);
+        write_commit(&w, "file.txt", "main-change\n", "main edit");
+        git(&["push", "-q", "origin", "main"], &w);
+
+        git(&["checkout", "-q", "feat"], &w);
+        let repo = GitRepo::new(&w);
+        assert!(matches!(
+            repo.rebase_onto("main").unwrap(),
+            RebaseOutcome::Conflicts(_)
+        ));
+        // Resolve the conflict (take a concrete version) and stage it.
+        std::fs::write(w.join("file.txt"), "resolved\n").unwrap();
+        git(&["add", "file.txt"], &w);
+        assert_eq!(repo.rebase_continue().unwrap(), RebaseOutcome::Clean);
+        assert!(repo.list_conflicts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn default_base_reads_origin_head_and_falls_back() {
+        // No origin/HEAD set → documented fallback to "main".
+        let tmp = tempfile::tempdir().unwrap();
+        git(&["init", "-q", "-b", "trunk"], tmp.path());
+        git(&["config", "user.email", "t@t"], tmp.path());
+        git(&["config", "user.name", "t"], tmp.path());
+        write_commit(tmp.path(), "a.txt", "a\n", "init");
+        assert_eq!(GitRepo::new(tmp.path()).default_base().unwrap(), "main");
+
+        // With origin/HEAD pointed at a branch, it's read back.
+        git(
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/trunk",
+            ],
+            tmp.path(),
+        );
+        assert_eq!(GitRepo::new(tmp.path()).default_base().unwrap(), "trunk");
+    }
+
+    #[test]
     fn merged_branches_lists_ancestors_excluding_base() {
-        if !git_available() {
-            return;
-        }
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         git(&["init", "-q", "-b", "main"], dir);

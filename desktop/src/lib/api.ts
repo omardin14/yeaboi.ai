@@ -60,14 +60,19 @@ export function commentPr(
   return invoke<void>("comment_pr", { cwd, number, body });
 }
 
-/** Push the current branch and open a PR against `base`; resolves to its URL. */
-export function openPr(cwd: string, base: string): Promise<string> {
-  return invoke<string>("open_pr", { cwd, base });
+/** Push the current branch and open a PR against the default branch; → its URL. */
+export function openPr(cwd: string): Promise<string> {
+  return invoke<string>("open_pr", { cwd });
 }
 
-/** Rebase the repo's current branch onto `origin/<base>`. */
-export function syncBranch(cwd: string, base: string): Promise<RebaseOutcome> {
-  return invoke<RebaseOutcome>("sync_branch", { cwd, base });
+/** Rebase the repo's current branch onto its default branch. */
+export function syncBranch(cwd: string): Promise<RebaseOutcome> {
+  return invoke<RebaseOutcome>("sync_branch", { cwd });
+}
+
+/** Abort an in-progress rebase (after a conflicted sync). */
+export function abortRebase(cwd: string): Promise<void> {
+  return invoke<void>("abort_rebase", { cwd });
 }
 
 /** Subscribe to the Rust-emitted snapshot stream (~every 1.5s). */
