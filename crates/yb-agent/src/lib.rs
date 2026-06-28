@@ -1,19 +1,33 @@
-//! Agent providers (`claude`/`codex`) + parallel review orchestrator.
-//! Phase 0 stub — depends on [`yb_exec`] for spawning the agent CLIs.
+//! Agent providers (`claude`/`codex`) + the multi-agent review orchestrator.
+//!
+//! [`AgentProvider`]s spawn a local CLI to review a diff against a category
+//! [`ReviewSpec`]; [`ReviewOrchestrator`] fans the specs out across providers,
+//! reports per-agent progress, and dedupes the merged [`Finding`]s. Running more
+//! than one provider is the cross-provider review.
 
-// Keep the dependency edge declared until the providers consume it.
-use yb_exec as _;
+pub mod extract;
+pub mod model;
+pub mod orchestrator;
+pub mod provider;
 
-/// Crate marker used by Phase 0 to verify linkage; replaced by `AgentProvider`
-/// and `ReviewOrchestrator` in Phase 1.
-pub fn placeholder() -> String {
-    "yb-agent (spawns via yb-exec)".to_string()
-}
+pub use extract::extract_findings;
+pub use model::{Finding, ReviewSpec, Severity, default_specs};
+pub use orchestrator::{AgentProgress, ProgressStatus, ReviewOrchestrator};
+pub use provider::{AgentError, AgentProvider, ClaudeProvider, CodexProvider, binary_on_path};
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn placeholder_links_exec() {
-        assert!(super::placeholder().contains("yb-exec"));
+/// Build the orchestrator from whichever agent CLIs are reachable on `PATH`
+/// (`claude` always preferred; `codex` added for a cross-provider review).
+/// Returns `None` if neither is available.
+pub fn default_orchestrator() -> Option<ReviewOrchestrator> {
+    let mut providers: Vec<Box<dyn AgentProvider>> = Vec::new();
+    if ClaudeProvider.is_available() {
+        providers.push(Box::new(ClaudeProvider));
     }
+    if CodexProvider.is_available() {
+        providers.push(Box::new(CodexProvider));
+    }
+    if providers.is_empty() {
+        return None;
+    }
+    Some(ReviewOrchestrator::new(providers, default_specs()))
 }

@@ -7,3 +7,11 @@ description = "yeaboi.ai agent providers + review orchestrator"
 
 [dependencies]
 yb-exec = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { version = "12.0.1", optional = true }
+
+[features]
+# ts-rs derives for TypeScript bindings (binding generation only).
+ts = ["dep:ts-rs"]

@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Banner } from "@/components/banner";
+import { ReviewPanel } from "@/components/review-panel";
 
 const STATE_STYLES: Record<string, string> = {
   OPEN: "bg-emerald-500/15 text-emerald-400 ring-emerald-500/30",
@@ -338,6 +339,8 @@ export function PrView({ projects }: { projects: Project[] }) {
           <pre className="max-h-96 overflow-auto rounded bg-zinc-900 p-3 text-xs leading-relaxed text-zinc-300">
             {diff || "Loading diff…"}
           </pre>
+
+          <ReviewPanel cwd={repo} number={selected.number} />
         </div>
       )}
 

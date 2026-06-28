@@ -5304,6 +5304,10 @@ dependencies = [
 name = "yb-agent"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "ts-rs",
  "yb-exec",
 ]
 
@@ -5389,6 +5393,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tokio",
+ "yb-agent",
  "yb-core",
  "yb-git",
  "yb-proc",

@@ -38,6 +38,8 @@ pub struct StreamResult {
     pub success: bool,
     /// Whether we cancelled it.
     pub canceled: bool,
+    /// Captured stderr (so a non-zero exit's reason isn't lost).
+    pub stderr: String,
 }
 
 /// The captured result of a finished command. `stdout`/`stderr` are decoded
@@ -145,7 +147,7 @@ impl Cmd {
         let mut child = self
             .std_command()
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|source| ExecError::Spawn {
                 program: self.program_name(),
@@ -153,7 +155,20 @@ impl Cmd {
             })?;
 
         let stdout = child.stdout.take().expect("stdout was piped above");
+        let stderr = child.stderr.take().expect("stderr was piped above");
         let program = self.program_name();
+
+        // Drain stderr on its own thread so it can't deadlock the stdout reader.
+        let stderr_program = program.clone();
+        let stderr_reader = std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = String::new();
+            if let Err(e) = BufReader::new(stderr).read_to_string(&mut buf) {
+                eprintln!("stream: stderr read error on `{stderr_program}`: {e}");
+            }
+            buf
+        });
+
         let (tx, rx) = mpsc::channel();
         let reader = std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
@@ -197,11 +212,13 @@ impl Cmd {
         if let Err(e) = reader.join() {
             eprintln!("stream: reader thread panicked: {e:?}");
         }
+        let stderr = stderr_reader.join().unwrap_or_default();
 
         Ok(StreamResult {
             status: status.code(),
             success: status.success(),
             canceled,
+            stderr,
         })
     }
 
@@ -292,6 +309,18 @@ mod tests {
         assert_eq!(lines, ["a", "b", "c"]);
         assert!(res.success);
         assert!(!res.canceled);
+    }
+
+    #[test]
+    fn stream_captures_stderr_separately_from_stdout() {
+        let cancel = AtomicBool::new(false);
+        let mut lines = Vec::new();
+        let res = Cmd::new("sh")
+            .args(["-c", "echo out; echo boom >&2"])
+            .stream(&cancel, |l| lines.push(l.to_string()))
+            .expect("stream");
+        assert_eq!(lines, ["out"]);
+        assert_eq!(res.stderr.trim(), "boom");
     }
 
     #[test]
