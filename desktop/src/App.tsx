@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { Monitor } from "@/components/monitor";
 import { PrView } from "@/components/pr-view";
+import { WorktreeBoard } from "@/components/worktree-board";
 import { SessionDetail } from "@/components/session-detail";
 import { WarningsBanner } from "@/components/warnings-banner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -21,7 +22,13 @@ type Pending =
   | { kind: "kill"; session: Session }
   | { kind: "free"; port: Port };
 
-type Tab = "monitor" | "prs";
+type Tab = "monitor" | "prs" | "worktrees";
+
+const TAB_LABELS: Record<Tab, string> = {
+  monitor: "Monitor",
+  prs: "PRs",
+  worktrees: "Worktrees",
+};
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -102,7 +109,7 @@ function App() {
           <div className="flex items-center gap-4">
             <h1 className="text-lg font-semibold tracking-tight">yeaboi.ai</h1>
             <nav className="flex gap-1 text-xs">
-              {(["monitor", "prs"] as const).map((t) => (
+              {(["monitor", "prs", "worktrees"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -113,7 +120,7 @@ function App() {
                       : "text-zinc-500 hover:text-zinc-300"
                   }`}
                 >
-                  {t === "monitor" ? "Monitor" : "PRs"}
+                  {TAB_LABELS[t]}
                 </button>
               ))}
             </nav>
@@ -150,8 +157,10 @@ function App() {
               />
             )}
           </>
-        ) : (
+        ) : tab === "prs" ? (
           <PrView projects={snapshot?.projects ?? []} />
+        ) : (
+          <WorktreeBoard projects={snapshot?.projects ?? []} />
         )}
       </div>
 

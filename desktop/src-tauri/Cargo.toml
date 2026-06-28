@@ -23,3 +23,4 @@ tokio = { workspace = true }
 yb-core = { workspace = true }
 yb-proc = { workspace = true }
 yb-git = { workspace = true }
+yb-worktree = { workspace = true }

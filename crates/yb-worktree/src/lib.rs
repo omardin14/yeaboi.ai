@@ -1,26 +1,16 @@
-//! Worktree engine — modeled on GitHubIssueTriager's decentralized multi-workspace
-//! setup (discover-on-read, MD5 ports byte-compatible with `assign-port.ts`).
-//! Phase 0 stub — composes [`yb_exec`], [`yb_git`], and [`yb_proc`].
+//! Worktree engine — modeled on GitHubIssueTriager's decentralized setup
+//! (discover-on-read, no central registry; MD5 ports byte-compatible with
+//! `assign-port.ts`).
+//!
+//! Create/list/remove/prune worktrees, render each one's `.env`, run the repo's
+//! configured lifecycle commands (where DB isolation lives), and manage detached
+//! per-worktree services. Config is `<repo>/.yeaboi/project.toml` (all optional).
 
-// These became real crates ahead of the worktree engine; keep the architectural
-// dependency edges declared until the engine consumes them.
-use yb_exec as _;
-use yb_git as _;
-use yb_proc as _;
+pub mod branch;
+pub mod config;
+pub mod engine;
+pub mod ports;
 
-/// Crate marker used by Phase 0 to verify the dependency edges; replaced by the
-/// `WorktreeEngine` (create/open/list/remove/prune) + `PortAllocator` in Phase 1.
-pub fn placeholder() -> String {
-    "yb-worktree (yb-exec + yb-git + yb-proc)".to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn placeholder_links_all_edges() {
-        let s = super::placeholder();
-        assert!(s.contains("yb-exec"));
-        assert!(s.contains("yb-git"));
-        assert!(s.contains("yb-proc"));
-    }
-}
+pub use config::ProjectConfig;
+pub use engine::{Worktree, WorktreeEngine, WorktreeError};
+pub use ports::PortConfig;

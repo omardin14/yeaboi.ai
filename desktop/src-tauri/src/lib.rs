@@ -213,6 +213,68 @@ async fn session_transcript(session_id: String) -> Result<Vec<TranscriptEvent>, 
     blocking(move || yb_core::transcript_events(&session_id, 500).map_err(|e| e.to_string())).await
 }
 
+// ---- worktrees (yb-worktree) ------------------------------------------------
+
+#[tauri::command]
+async fn list_worktrees(cwd: String) -> Result<Vec<yb_worktree::Worktree>, String> {
+    blocking(move || {
+        yb_worktree::WorktreeEngine::discover(&cwd)
+            .and_then(|e| e.list())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn create_worktree(cwd: String, name: String) -> Result<yb_worktree::Worktree, String> {
+    blocking(move || {
+        yb_worktree::WorktreeEngine::discover(&cwd)
+            .and_then(|e| e.create(&name))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn remove_worktree(cwd: String, name: String) -> Result<(), String> {
+    blocking(move || {
+        yb_worktree::WorktreeEngine::discover(&cwd)
+            .and_then(|e| e.remove(&name))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn prune_worktrees(cwd: String) -> Result<Vec<String>, String> {
+    blocking(move || {
+        yb_worktree::WorktreeEngine::discover(&cwd)
+            .and_then(|e| e.prune_merged())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn start_worktree_services(cwd: String, name: String) -> Result<(), String> {
+    blocking(move || {
+        yb_worktree::WorktreeEngine::discover(&cwd)
+            .and_then(|e| e.start_services(&name))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn stop_worktree_services(cwd: String, name: String) -> Result<(), String> {
+    blocking(move || {
+        yb_worktree::WorktreeEngine::discover(&cwd)
+            .and_then(|e| e.stop_services(&name))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (tx, rx) = watch::channel(empty_snapshot());
@@ -234,7 +296,13 @@ pub fn run() {
             abort_rebase,
             continue_rebase,
             working_diff,
-            session_transcript
+            session_transcript,
+            list_worktrees,
+            create_worktree,
+            remove_worktree,
+            prune_worktrees,
+            start_worktree_services,
+            stop_worktree_services
         ])
         .setup(move |app| {
             let icon = app
