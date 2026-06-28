@@ -34,7 +34,9 @@ const { SNAP } = vi.hoisted(() => ({
         last_prompt: "hi",
         sub_agent_count: 0,
         proc_stats: { cpu_pct: 1, mem_bytes: 1, uptime_secs: 1, ppid: 1 },
-        ports: [{ number: 1420, pid: 4242, state: "LISTEN" }],
+        // Distinct from the session pid (4242) so a test can prove the port's
+        // pid — not the session's — is what reaches free_port.
+        ports: [{ number: 1420, pid: 9999, state: "LISTEN" }],
       },
     ],
     totals: { session_count: 1, busy_count: 1, project_count: 1 },
@@ -55,6 +57,8 @@ vi.mock("@/lib/api", () => ({
 beforeEach(() => {
   // App only talks to the backend when the Tauri bridge is present.
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  freePortMock.mockClear();
+  freePortMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -85,11 +89,29 @@ test("cancelling the stop dialog dismisses it without error", async () => {
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-test("freeing a port confirms and calls the backend", async () => {
+test("freeing a port confirms and calls the backend with the port's pid", async () => {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Free port 1420" }));
   fireEvent.click(await screen.findByRole("button", { name: "Free (SIGTERM)" }));
-  await waitFor(() => expect(freePortMock).toHaveBeenCalledWith(4242));
-  // Success → dialog dismissed, no error banner.
+  // The port's pid (9999), not the session's (4242), must reach free_port.
+  await waitFor(() => expect(freePortMock).toHaveBeenCalledWith(9999));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+test("a failed free surfaces an error banner", async () => {
+  freePortMock.mockRejectedValueOnce("backend says no");
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Free port 1420" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Free (SIGTERM)" }));
+  await waitFor(() =>
+    expect(screen.getByText(/Failed to free port :1420/)).toBeInTheDocument(),
+  );
+});
+
+test("cancelling the free dialog dismisses it without a backend call", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Free port 1420" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(freePortMock).not.toHaveBeenCalled();
 });

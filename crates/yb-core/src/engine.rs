@@ -36,9 +36,7 @@ pub fn pid_is_live_session(sessions: &[Session], pid: u32) -> bool {
 /// session (its subtree). The authorization check for `free_port`: we only
 /// signal a process we've attributed to a session via a port it's listening on.
 pub fn pid_owns_tracked_port(sessions: &[Session], pid: u32) -> bool {
-    sessions
-        .iter()
-        .any(|s| s.ports.iter().any(|p| p.pid == pid))
+    sessions.iter().flat_map(|s| &s.ports).any(|p| p.pid == pid)
 }
 
 /// Owns the collectors + resolver and produces snapshots.
@@ -437,6 +435,23 @@ mod tests {
         assert!(pid_owns_tracked_port(&sessions, 555)); // the port holder
         assert!(!pid_owns_tracked_port(&sessions, 100)); // session pid holds no port
         assert!(!pid_owns_tracked_port(&sessions, 999)); // untracked
+
+        // Startup-race: no sessions yet → nothing is freeable.
+        assert!(!pid_owns_tracked_port(&[], 555));
+    }
+
+    #[test]
+    fn pid_owns_tracked_port_has_no_liveness_filter() {
+        use crate::model::Port;
+        // A Dead session can still own a port via an orphaned child dev server —
+        // freeing it is intentional, so there's deliberately no liveness gate.
+        let mut s = session("a", Some(100), "/tmp/a", ActivityStatus::Dead);
+        s.ports = vec![Port {
+            number: 5173,
+            pid: 555,
+            state: "LISTEN".into(),
+        }];
+        assert!(pid_owns_tracked_port(&[s], 555));
     }
 
     #[test]

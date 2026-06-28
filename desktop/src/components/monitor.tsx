@@ -28,6 +28,37 @@ function isKillable(session: Session): boolean {
   return session.pid != null && session.status !== "Dead";
 }
 
+const CHIP_CLS = "rounded bg-zinc-800 px-1 font-mono text-xs text-sky-300";
+
+function PortChip({
+  port,
+  onFreePort,
+}: {
+  port: Port;
+  onFreePort?: (port: Port) => void;
+}) {
+  const label = `:${port.number}`;
+  const title = `pid ${port.pid} · ${port.state}`;
+  if (!onFreePort) {
+    return (
+      <span title={title} className={CHIP_CLS}>
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      aria-label={`Free port ${port.number}`}
+      title={`Free ${label} (${title})`}
+      onClick={() => onFreePort(port)}
+      className={`${CHIP_CLS} hover:bg-rose-500/15 hover:text-rose-300`}
+    >
+      {label}
+    </button>
+  );
+}
+
 function PortChips({
   ports,
   onFreePort,
@@ -37,28 +68,9 @@ function PortChips({
 }) {
   return (
     <span className="flex flex-wrap gap-1">
-      {ports.map((p) => {
-        const label = `:${p.number}`;
-        const title = `pid ${p.pid} · ${p.state}`;
-        const cls =
-          "rounded bg-zinc-800 px-1 font-mono text-xs text-sky-300";
-        return onFreePort ? (
-          <button
-            key={`${p.pid}:${p.number}`}
-            type="button"
-            aria-label={`Free port ${p.number}`}
-            title={`Free ${label} (${title})`}
-            onClick={() => onFreePort(p)}
-            className={`${cls} hover:bg-rose-500/15 hover:text-rose-300`}
-          >
-            {label}
-          </button>
-        ) : (
-          <span key={`${p.pid}:${p.number}`} title={title} className={cls}>
-            {label}
-          </span>
-        );
-      })}
+      {ports.map((p) => (
+        <PortChip key={`${p.pid}:${p.number}`} port={p} onFreePort={onFreePort} />
+      ))}
     </span>
   );
 }

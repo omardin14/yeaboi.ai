@@ -28,24 +28,26 @@ function App() {
     const action = pending;
     setPending(null);
     if (action == null) return; // nothing selected — benign
-    try {
-      if (action.kind === "kill") {
-        if (action.session.pid == null) {
-          // The stop button shouldn't appear for a pid-less session, so reaching
-          // here is a bug — surface it, never silently no-op.
-          setError("Cannot stop a session with no PID — please report this.");
-          return;
-        }
-        await killSession(action.session.pid);
-      } else {
-        await freePort(action.port.pid);
+
+    if (action.kind === "kill") {
+      const pid = action.session.pid;
+      if (pid == null) {
+        // The stop button shouldn't appear for a pid-less session, so reaching
+        // here is a bug — surface it, never silently no-op.
+        setError("Cannot stop a session with no PID — please report this.");
+        return;
       }
-    } catch (e) {
-      const what =
-        action.kind === "kill"
-          ? `stop session ${action.session.pid}`
-          : `free port :${action.port.number}`;
-      setError(`Failed to ${what}: ${e}`);
+      try {
+        await killSession(pid);
+      } catch (e) {
+        setError(`Failed to stop session ${pid}: ${e}`);
+      }
+    } else {
+      try {
+        await freePort(action.port.pid);
+      } catch (e) {
+        setError(`Failed to free port :${action.port.number}: ${e}`);
+      }
     }
   }
 
@@ -128,7 +130,9 @@ function App() {
             pending.kind === "kill" ? "Stop (SIGTERM)" : "Free (SIGTERM)"
           }
           danger
-          onConfirm={confirmPending}
+          onConfirm={() => {
+            void confirmPending();
+          }}
           onCancel={() => setPending(null)}
         >
           {pending.kind === "kill" ? (
