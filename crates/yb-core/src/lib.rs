@@ -20,7 +20,7 @@ pub(crate) mod util;
 
 pub use engine::{CollectOptions, Engine, pid_is_live_session};
 pub use model::{
-    ActivityStatus, ContextUsage, HostApp, ProcStats, ProcTable, Project, Provider, Session,
+    ActivityStatus, ContextUsage, HostApp, Port, ProcStats, ProcTable, Project, Provider, Session,
     Snapshot, Totals,
 };
 
@@ -75,6 +75,7 @@ impl Snapshot {
             last_prompt: Some("stub prompt".to_string()),
             sub_agent_count: 0,
             proc_stats: None,
+            ports: Vec::new(),
         };
         let project = Project {
             id: "yeaboi.ai".to_string(),

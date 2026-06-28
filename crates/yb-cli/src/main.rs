@@ -7,7 +7,7 @@
 use std::io::Write;
 
 use clap::Parser;
-use yb_core::{ActivityStatus, CollectOptions, Engine, Session, Snapshot};
+use yb_core::{ActivityStatus, CollectOptions, Engine, Port, Session, Snapshot};
 
 #[derive(Parser, Debug)]
 #[command(name = "yeaboi", version, about = "yeaboi.ai headless CLI")]
@@ -28,14 +28,13 @@ struct Args {
     #[arg(long)]
     hide_dead: bool,
 
-    /// Accepted for forward-compatibility; port collection lands in a later slice.
+    /// Skip listening-port collection (`lsof`).
     #[arg(long)]
     no_ports: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let _ = args.no_ports; // reserved until lsof port collection lands
 
     let options = CollectOptions {
         drop_dead: args.hide_dead,
@@ -52,7 +51,9 @@ fn main() -> anyhow::Result<()> {
             std::thread::sleep(yb_proc::min_sample_interval());
             loop {
                 let proc = sampler.sample();
-                let snap = engine.collect(&proc);
+                let (ports, warn) = sample_ports(args.no_ports);
+                let mut snap = engine.collect(&proc, &ports);
+                snap.warnings.extend(warn);
                 render(&snap, args.json)?;
                 std::thread::sleep(std::time::Duration::from_secs(secs));
             }
@@ -60,10 +61,24 @@ fn main() -> anyhow::Result<()> {
         // One-shot.
         _ => {
             let proc = yb_proc::sample_once();
-            let snap = engine.collect(&proc);
+            let (ports, warn) = sample_ports(args.no_ports);
+            let mut snap = engine.collect(&proc, &ports);
+            snap.warnings.extend(warn);
             render(&snap, args.json)?;
             Ok(())
         }
+    }
+}
+
+/// Enumerate listening ports unless `--no-ports`, degrading a failure to a
+/// snapshot warning instead of aborting the frame.
+fn sample_ports(no_ports: bool) -> (Vec<Port>, Option<String>) {
+    if no_ports {
+        return (Vec::new(), None);
+    }
+    match yb_proc::ports::list() {
+        Ok(ports) => (ports, None),
+        Err(err) => (Vec::new(), Some(format!("ports: {err}"))),
     }
 }
 
@@ -123,10 +138,21 @@ fn write_session_row(out: &mut impl Write, s: &Session) -> std::io::Result<()> {
     let model = s.model.as_deref().unwrap_or("—");
     let branch = s.branch.as_deref().unwrap_or("—");
     let prompt = s.last_prompt.as_deref().unwrap_or("");
+    let ports = if s.ports.is_empty() {
+        String::new()
+    } else {
+        let list = s
+            .ports
+            .iter()
+            .map(|p| format!(":{}", p.number))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("  [{list}]")
+    };
 
     writeln!(
         out,
-        "  {:>7}  {:<7}  ctx {}  cpu {}  {}  {:<22}  {:<18}  {}",
+        "  {:>7}  {:<7}  ctx {}  cpu {}  {}  {:<22}  {:<18}  {}{}",
         pid,
         status_label(s.status),
         ctx,
@@ -135,6 +161,7 @@ fn write_session_row(out: &mut impl Write, s: &Session) -> std::io::Result<()> {
         truncate(model, 22),
         truncate(branch, 18),
         truncate(prompt, 60),
+        ports,
     )
 }
 

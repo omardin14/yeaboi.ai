@@ -34,6 +34,7 @@ const { SNAP } = vi.hoisted(() => ({
         last_prompt: "hi",
         sub_agent_count: 0,
         proc_stats: { cpu_pct: 1, mem_bytes: 1, uptime_secs: 1, ppid: 1 },
+        ports: [],
       },
     ],
     totals: { session_count: 1, busy_count: 1, project_count: 1 },

@@ -2,6 +2,7 @@
 import type { ActivityStatus } from "./ActivityStatus";
 import type { ContextUsage } from "./ContextUsage";
 import type { HostApp } from "./HostApp";
+import type { Port } from "./Port";
 import type { ProcStats } from "./ProcStats";
 import type { Provider } from "./Provider";
 
@@ -60,4 +61,8 @@ sub_agent_count: number,
 /**
  * Process metrics joined in by pid, when the process is live.
  */
-proc_stats: ProcStats | null, };
+proc_stats: ProcStats | null, 
+/**
+ * Listening ports held by this session's process subtree.
+ */
+ports: Array<Port>, };

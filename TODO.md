@@ -47,7 +47,7 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 
 ### yb-proc
 - [x] `sysinfo` `ProcTable` (cpu+mem+parent) + ppid subtree BFS
-- [ ] `lsof -Fpn` parser + 750ms timeout/degrade + orphan-port heuristic — *1b*
+- [x] `lsof -Fpn` parser + 750ms timeout/degrade; ports attached by subtree (orphan heuristic deferred)
 - [ ] `actions::sigterm(pid)` (nix, guards) + `free_port` — *1b*
 
 ### yb-cli (headless — build & validate the data path first)

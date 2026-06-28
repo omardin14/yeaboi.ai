@@ -62,6 +62,19 @@ function SessionRow({
       <td className="py-1.5 pr-3 text-zinc-500">
         {session.sub_agent_count > 0 ? `⌥${session.sub_agent_count}` : ""}
       </td>
+      <td className="py-1.5 pr-3">
+        <span className="flex flex-wrap gap-1">
+          {session.ports.map((p) => (
+            <span
+              key={`${p.pid}:${p.number}`}
+              title={`pid ${p.pid} · ${p.state}`}
+              className="rounded bg-zinc-800 px-1 font-mono text-xs text-sky-300"
+            >
+              :{p.number}
+            </span>
+          ))}
+        </span>
+      </td>
       <td className="max-w-md truncate py-1.5 pr-3 text-zinc-500" title={session.last_prompt ?? ""}>
         {session.last_prompt ?? ""}
       </td>

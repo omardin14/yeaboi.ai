@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use crate::adapters::{ClaudeCollector, CodexCollector, Collector};
-use crate::model::{ActivityStatus, ProcTable, Project, Session, Snapshot, Totals};
+use crate::model::{ActivityStatus, Port, ProcTable, Project, Session, Snapshot, Totals};
 use crate::now_ms;
 use crate::project::ProjectResolver;
 
@@ -61,8 +61,9 @@ impl Engine {
         Engine::new(collectors, options)
     }
 
-    /// Run one collect pass against the supplied process table.
-    pub fn collect(&mut self, proc: &ProcTable) -> Snapshot {
+    /// Run one collect pass against the supplied process table and listening
+    /// ports. Pass an empty `ports` slice to skip port attribution (`--no-ports`).
+    pub fn collect(&mut self, proc: &ProcTable, ports: &[Port]) -> Snapshot {
         let mut sessions: Vec<Session> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
 
@@ -88,6 +89,7 @@ impl Engine {
             let resolved = self.resolver.resolve(&session.cwd, &mut warnings);
             session.project_id = resolved.id.clone();
             enrich_with_proc(session, proc);
+            attach_ports(session, proc, ports);
 
             let project = projects
                 .entry(resolved.id.clone())
@@ -179,6 +181,31 @@ fn newer(a: &Session, b: &Session) -> bool {
         == std::cmp::Ordering::Greater
 }
 
+/// Attach the listening ports owned by this session's process subtree (its own
+/// pid plus descendants — so a dev server spawned by the session counts). Ports
+/// are sorted by number for deterministic output.
+fn attach_ports(session: &mut Session, proc: &ProcTable, ports: &[Port]) {
+    let Some(pid) = session.pid else {
+        return;
+    };
+    if ports.is_empty() {
+        return;
+    }
+    let owned: std::collections::HashSet<u32> = proc
+        .subtree(pid)
+        .into_iter()
+        .chain(std::iter::once(pid))
+        .collect();
+
+    let mut matched: Vec<Port> = ports
+        .iter()
+        .filter(|p| owned.contains(&p.pid))
+        .cloned()
+        .collect();
+    matched.sort_by_key(|p| p.number);
+    session.ports = matched;
+}
+
 /// Attach process metrics and refine liveness for a session that has a pid.
 /// A live process whose status was `Unknown` becomes `Idle`; a pid with no live
 /// process is `Dead` regardless of the (stale) file status. Sessions without a
@@ -236,6 +263,7 @@ mod tests {
             last_prompt: None,
             sub_agent_count: 0,
             proc_stats: None,
+            ports: Vec::new(),
         }
     }
 
@@ -263,7 +291,7 @@ mod tests {
             vec![Box::new(FakeCollector(vec![s]))],
             CollectOptions::default(),
         );
-        let snap = engine.collect(&proc_table_with(42));
+        let snap = engine.collect(&proc_table_with(42), &[]);
 
         assert_eq!(snap.sessions.len(), 1);
         let s = &snap.sessions[0];
@@ -279,7 +307,7 @@ mod tests {
             vec![Box::new(FakeCollector(vec![s]))],
             CollectOptions::default(),
         );
-        let snap = engine.collect(&ProcTable::default());
+        let snap = engine.collect(&ProcTable::default(), &[]);
         assert_eq!(snap.sessions[0].status, ActivityStatus::Dead);
     }
 
@@ -289,7 +317,7 @@ mod tests {
         let dead = session("dead", Some(999), "/tmp/b", ActivityStatus::Idle);
         let opts = CollectOptions { drop_dead: true };
         let mut engine = Engine::new(vec![Box::new(FakeCollector(vec![live, dead]))], opts);
-        let snap = engine.collect(&proc_table_with(42));
+        let snap = engine.collect(&proc_table_with(42), &[]);
 
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.sessions[0].id, "live");
@@ -309,10 +337,66 @@ mod tests {
             vec![Box::new(FakeCollector(vec![old, new]))],
             CollectOptions::default(),
         );
-        let snap = engine.collect(&proc_table_with(200));
+        let snap = engine.collect(&proc_table_with(200), &[]);
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.sessions[0].pid, Some(200));
         assert_eq!(snap.projects[0].session_ids, vec!["dup".to_string()]);
+    }
+
+    #[test]
+    fn attaches_subtree_ports_sorted_excluding_unrelated() {
+        use crate::model::Port;
+        // pid 42 → child 100 → grandchild 150. Attach the session's own port and
+        // a grandchild dev-server port; exclude an unrelated pid's port.
+        let mut by_pid = HashMap::new();
+        for p in [42u32, 100, 150] {
+            by_pid.insert(
+                p,
+                ProcStats {
+                    cpu_pct: 0.0,
+                    mem_bytes: 1,
+                    uptime_secs: 1,
+                    ppid: None,
+                },
+            );
+        }
+        let mut children = HashMap::new();
+        children.insert(42u32, vec![100u32]);
+        children.insert(100u32, vec![150u32]);
+        let proc = ProcTable { by_pid, children };
+
+        // Deliberately out of order to prove the output is sorted by number.
+        let ports = vec![
+            Port {
+                number: 3000,
+                pid: 150,
+                state: "LISTEN".into(),
+            }, // grandchild dev server
+            Port {
+                number: 1420,
+                pid: 42,
+                state: "LISTEN".into(),
+            }, // the session itself
+            Port {
+                number: 9999,
+                pid: 777,
+                state: "LISTEN".into(),
+            }, // unrelated process
+        ];
+
+        let s = session("a", Some(42), "/tmp/x", ActivityStatus::Busy);
+        let mut engine = Engine::new(
+            vec![Box::new(FakeCollector(vec![s]))],
+            CollectOptions::default(),
+        );
+        let snap = engine.collect(&proc, &ports);
+
+        let attached: Vec<u16> = snap.sessions[0].ports.iter().map(|p| p.number).collect();
+        assert_eq!(
+            attached,
+            vec![1420, 3000],
+            "subtree ports only, sorted, unrelated excluded"
+        );
     }
 
     #[test]
@@ -340,7 +424,7 @@ mod tests {
             vec![Box::new(FakeCollector(vec![a, b]))],
             CollectOptions::default(),
         );
-        let snap = engine.collect(&proc_table_with(300));
+        let snap = engine.collect(&proc_table_with(300), &[]);
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.sessions[0].pid, Some(300));
     }
@@ -354,7 +438,7 @@ mod tests {
             vec![Box::new(FakeCollector(vec![a, b]))],
             CollectOptions::default(),
         );
-        let snap = engine.collect(&proc_table_with(42));
+        let snap = engine.collect(&proc_table_with(42), &[]);
 
         assert_eq!(snap.totals.session_count, 2);
         assert_eq!(snap.totals.busy_count, 1);

@@ -196,6 +196,7 @@ impl ClaudeCollector {
             last_prompt: tail.last_prompt,
             sub_agent_count: tail.sub_agent_count,
             proc_stats: None,
+            ports: Vec::new(),
         }))
     }
 

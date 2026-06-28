@@ -88,6 +88,7 @@ impl CodexCollector {
                     .map(|m| crate::util::truncate(&m, 200)),
                 sub_agent_count: 0,
                 proc_stats: None,
+                ports: Vec::new(),
             })
         })?;
 
