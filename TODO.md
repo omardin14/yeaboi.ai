@@ -55,9 +55,14 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] wire collectors → engine → JSON/once output
 
 ### desktop — monitor
-- [ ] `src-tauri`: stream `Snapshot` as events; commands `kill_session`/`free_port`; menu-bar/tray (busy · $today · blocked)
-- [ ] React: project-tree data grid (TanStack Table), detail panel, heat colors, live filter/sort, keyboard shortcuts
-- [ ] Confirm dialogs (kill / free-port)
+> **Phase 1b-1 (live read-only monitor) — DONE.** The app streams the *real*
+> `Snapshot` (background collector thread → `snapshot-update` event + shared
+> state for `get_snapshot`) and renders a project-grouped grid with heat colors.
+- [x] `src-tauri`: stream the real `Snapshot` as events + `get_snapshot` from shared state
+- [x] React: project-grouped grid (status/pid/model/ctx%/cpu/mem/branch/sub-agents/prompt) + heat colors
+- [ ] `src-tauri`: commands `kill_session`/`free_port`; menu-bar/tray live status (busy · $today · blocked) — *1b-2*
+- [ ] React: TanStack Table data grid, detail panel, live filter/sort, keyboard shortcuts — *1b-2*
+- [ ] Confirm dialogs (kill / free-port) — *1b-2*
 - [ ] Working-diff viewer + transcript replay (detail panel)
 - [ ] Native notifications + deep links (finish/blocked)
 - [ ] Permission/approval inbox — **detection only (read-only)**
