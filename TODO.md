@@ -82,13 +82,15 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] Desktop PR view: project picker + list + diff viewer + merge/comment/open/sync (Monitor|PRs tabs)
 - [ ] `review` (agent-driven) — *lands with yb-agent (1e)*
 
-### yb-worktree (decentralized, GitHubIssueTriager model)
-- [ ] `project.toml` schema (`branch_rules`/`[ports]`/`[lifecycle]`/`[[services]]`/`[env]`) + global repo registry
-- [ ] `PortAllocator` — **MD5, byte-compatible with `assign-port.ts`** (+ determinism/range tests)
-- [ ] Branch derivation (regex→template) + tests
-- [ ] Engine: `create`/`open`/`list`/`start`/`stop`/`remove`/`prune` (discover-on-read from `git worktree list`)
-- [ ] `.env` render (parent minus overrides); lifecycle setup/teardown (Neon branch / pg clone); honor Claude Code `WorktreeCreate/Remove` hooks
-- [ ] Detached service lifecycle + pid files
+### yb-worktree (decentralized, GitHubIssueTriager model) — DONE (1d)
+- [x] `project.toml` schema (`[ports]`/`branch_rules`/`[lifecycle]`/`[[services]]`/`[env]`) with defaults
+- [x] `PortConfig::port_for` — **MD5, byte-parity with `assign-port.ts`** (+ determinism/range/parity tests)
+- [x] Branch derivation (regex→template, first-match) + tests
+- [x] Engine: `create`/`list`/`remove`/`prune_merged`/`start_services`/`stop_services` (discover-on-read)
+- [x] `.env` render (parent minus overrides + PORT + `[env]`); lifecycle setup/teardown commands
+- [x] Detached service lifecycle + pid files (`Cmd::spawn_detached` → SIGTERM)
+- [x] Desktop worktree board (project picker · list · create · remove · start/stop · prune)
+- _open = reveal in Finder (desktop opener); Neon/pg DB isolation is just configured lifecycle commands_
 
 ### yb-agent
 - [ ] `AgentProvider` trait; `ClaudeProvider` (`claude -p --output-format json`); `CodexProvider`; tolerant JSON extraction

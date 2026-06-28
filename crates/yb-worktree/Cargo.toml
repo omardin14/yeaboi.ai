@@ -9,3 +9,16 @@ description = "yeaboi.ai worktree engine (decentralized, MD5 ports)"
 yb-exec = { workspace = true }
 yb-git = { workspace = true }
 yb-proc = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+regex = { workspace = true }
+md-5 = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { version = "12.0.1", optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+# ts-rs derives for TypeScript bindings (binding generation only).
+ts = ["dep:ts-rs"]

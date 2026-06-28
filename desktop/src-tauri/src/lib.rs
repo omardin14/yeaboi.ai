@@ -213,6 +213,54 @@ async fn session_transcript(session_id: String) -> Result<Vec<TranscriptEvent>, 
     blocking(move || yb_core::transcript_events(&session_id, 500).map_err(|e| e.to_string())).await
 }
 
+// ---- worktrees (yb-worktree) ------------------------------------------------
+
+/// Run `f` against the worktree engine for the repo at `cwd`, on the blocking
+/// pool, mapping every error to a string for the IPC boundary.
+async fn with_worktrees<T, F>(cwd: String, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&yb_worktree::WorktreeEngine) -> Result<T, yb_worktree::WorktreeError>
+        + Send
+        + 'static,
+{
+    blocking(move || {
+        let engine = yb_worktree::WorktreeEngine::discover(&cwd).map_err(|e| e.to_string())?;
+        f(&engine).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_worktrees(cwd: String) -> Result<Vec<yb_worktree::Worktree>, String> {
+    with_worktrees(cwd, |e| e.list()).await
+}
+
+#[tauri::command]
+async fn create_worktree(cwd: String, name: String) -> Result<yb_worktree::Worktree, String> {
+    with_worktrees(cwd, move |e| e.create(&name)).await
+}
+
+#[tauri::command]
+async fn remove_worktree(cwd: String, name: String) -> Result<(), String> {
+    with_worktrees(cwd, move |e| e.remove(&name)).await
+}
+
+#[tauri::command]
+async fn prune_worktrees(cwd: String) -> Result<Vec<String>, String> {
+    with_worktrees(cwd, |e| e.prune_merged()).await
+}
+
+#[tauri::command]
+async fn start_worktree_services(cwd: String, name: String) -> Result<(), String> {
+    with_worktrees(cwd, move |e| e.start_services(&name)).await
+}
+
+#[tauri::command]
+async fn stop_worktree_services(cwd: String, name: String) -> Result<(), String> {
+    with_worktrees(cwd, move |e| e.stop_services(&name)).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (tx, rx) = watch::channel(empty_snapshot());
@@ -234,7 +282,13 @@ pub fn run() {
             abort_rebase,
             continue_rebase,
             working_diff,
-            session_transcript
+            session_transcript,
+            list_worktrees,
+            create_worktree,
+            remove_worktree,
+            prune_worktrees,
+            start_worktree_services,
+            stop_worktree_services
         ])
         .setup(move |app| {
             let icon = app

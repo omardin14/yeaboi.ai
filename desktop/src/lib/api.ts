@@ -9,6 +9,7 @@ import type { PullRequest } from "@/lib/bindings/PullRequest";
 import type { MergeMethod } from "@/lib/bindings/MergeMethod";
 import type { RebaseOutcome } from "@/lib/bindings/RebaseOutcome";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
+import type { Worktree } from "@/lib/bindings/Worktree";
 
 /** Frontend → Rust: fetch the current snapshot on demand. */
 export function getSnapshot(): Promise<Snapshot> {
@@ -89,6 +90,38 @@ export function workingDiff(cwd: string): Promise<string> {
 /** A session's transcript timeline for replay. */
 export function sessionTranscript(sessionId: string): Promise<TranscriptEvent[]> {
   return invoke<TranscriptEvent[]>("session_transcript", { sessionId });
+}
+
+// ---- worktrees ----
+
+/** List the worktrees of the repo at `cwd`. */
+export function listWorktrees(cwd: string): Promise<Worktree[]> {
+  return invoke<Worktree[]>("list_worktrees", { cwd });
+}
+
+/** Create a worktree named `name` (derives branch, renders .env, runs setup). */
+export function createWorktree(cwd: string, name: string): Promise<Worktree> {
+  return invoke<Worktree>("create_worktree", { cwd, name });
+}
+
+/** Remove a worktree (teardown → forced removal → prune → delete branch). */
+export function removeWorktree(cwd: string, name: string): Promise<void> {
+  return invoke<void>("remove_worktree", { cwd, name });
+}
+
+/** Remove every worktree whose branch is already merged; → the names removed. */
+export function pruneWorktrees(cwd: string): Promise<string[]> {
+  return invoke<string[]>("prune_worktrees", { cwd });
+}
+
+/** Start a worktree's configured services (detached). */
+export function startWorktreeServices(cwd: string, name: string): Promise<void> {
+  return invoke<void>("start_worktree_services", { cwd, name });
+}
+
+/** Stop a worktree's services. */
+export function stopWorktreeServices(cwd: string, name: string): Promise<void> {
+  return invoke<void>("stop_worktree_services", { cwd, name });
 }
 
 /** Subscribe to the Rust-emitted snapshot stream (~every 1.5s). */
