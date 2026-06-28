@@ -256,6 +256,36 @@ test("an orphan port renders with a free button", () => {
   expect(onFreePort).toHaveBeenCalledTimes(1);
 });
 
+test("sorting by context orders rows high-to-low", () => {
+  // Input order is low-then-high; sorting by context must flip them.
+  const snap: Snapshot = {
+    ...snapshot,
+    projects: [
+      {
+        id: "/repo-a",
+        name: "repo-a",
+        root: "/repo-a",
+        remote: null,
+        session_ids: ["lo", "hi"],
+        busy_count: 0,
+        session_count: 2,
+      },
+    ],
+    sessions: [
+      session({ id: "lo", last_prompt: "low one", context: { used: 1, window: 10, pct: 0.1 } }),
+      session({ id: "hi", last_prompt: "high one", context: { used: 9, window: 10, pct: 0.9 } }),
+    ],
+    totals: { session_count: 2, busy_count: 0, project_count: 1 },
+  };
+  render(<Monitor snapshot={snap} />);
+  fireEvent.change(screen.getByLabelText("Sort by"), {
+    target: { value: "context" },
+  });
+  const rows = screen.getAllByRole("row");
+  expect(rows[0].textContent).toContain("high one");
+  expect(rows[1].textContent).toContain("low one");
+});
+
 test("selecting a row fires onSelect", () => {
   const onSelect = vi.fn();
   render(<Monitor snapshot={snapshot} onSelect={onSelect} />);

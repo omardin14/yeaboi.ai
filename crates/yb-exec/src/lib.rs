@@ -1,8 +1,8 @@
 //! Typed external-command runner — the foundation under `yb-git`/`yb-agent`.
 //!
-//! Phase 1c ships the blocking [`Cmd::output`] form (run, wait, capture). The
-//! streaming (`stream(tx, cancel)`) and detached (`spawn_detached`) forms land
-//! when the review orchestrator and per-worktree services need them.
+//! Three forms: blocking [`Cmd::output`] (run, wait, capture), [`Cmd::stream`]
+//! (cancelable line-by-line) for agent output, and [`Cmd::spawn_detached`]
+//! (new process group + pid file) for long-lived per-worktree services.
 
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader};
@@ -100,16 +100,13 @@ impl Cmd {
     /// can't be launched; a non-zero exit is a successful call with
     /// `Output::success == false`.
     pub fn output(&self) -> Result<Output, ExecError> {
-        let mut command = std::process::Command::new(&self.program);
-        command.args(&self.args);
-        if let Some(dir) = &self.cwd {
-            command.current_dir(dir);
-        }
-
-        let out = command.output().map_err(|source| ExecError::Spawn {
-            program: self.program.to_string_lossy().into_owned(),
-            source,
-        })?;
+        let out = self
+            .std_command()
+            .output()
+            .map_err(|source| ExecError::Spawn {
+                program: self.program_name(),
+                source,
+            })?;
 
         Ok(Output {
             status: out.status.code(),
@@ -156,6 +153,7 @@ impl Cmd {
             })?;
 
         let stdout = child.stdout.take().expect("stdout was piped above");
+        let program = self.program_name();
         let (tx, rx) = mpsc::channel();
         let reader = std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
@@ -166,7 +164,11 @@ impl Cmd {
                             break;
                         }
                     }
-                    Err(_) => break,
+                    // A real read error (not clean EOF) shouldn't vanish silently.
+                    Err(e) => {
+                        eprintln!("stream: read error on `{program}`: {e}");
+                        break;
+                    }
                 }
             }
         });
@@ -192,7 +194,9 @@ impl Cmd {
             program: self.program_name(),
             source,
         })?;
-        let _ = reader.join();
+        if let Err(e) = reader.join() {
+            eprintln!("stream: reader thread panicked: {e:?}");
+        }
 
         Ok(StreamResult {
             status: status.code(),
@@ -216,7 +220,7 @@ impl Cmd {
         let log_file = std::fs::File::create(log).map_err(io_err)?;
         let log_err = log_file.try_clone().map_err(io_err)?;
 
-        let child = self
+        let mut child = self
             .std_command()
             .stdout(log_file)
             .stderr(log_err)
@@ -228,7 +232,14 @@ impl Cmd {
             })?;
 
         let pid = child.id();
-        std::fs::write(pid_file, pid.to_string()).map_err(io_err)?;
+        // If we can't record the pid we'd leak an untracked process — kill it
+        // (best-effort) before surfacing the error.
+        if let Err(source) = std::fs::write(pid_file, pid.to_string()) {
+            if let Err(e) = child.kill() {
+                eprintln!("spawn_detached: failed to kill orphaned child {pid}: {e}");
+            }
+            return Err(io_err(source));
+        }
         Ok(pid)
     }
 }
@@ -311,9 +322,19 @@ mod tests {
         assert!(pid > 1);
         assert_eq!(std::fs::read_to_string(&pid_file).unwrap(), pid.to_string());
 
-        // Give the short child a moment to flush, then confirm the log captured it.
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        assert!(std::fs::read_to_string(&log).unwrap().contains("hi"));
+        // Poll the log (rather than a fixed sleep) until the child flushes "hi".
+        let mut logged = false;
+        for _ in 0..50 {
+            if std::fs::read_to_string(&log)
+                .unwrap_or_default()
+                .contains("hi")
+            {
+                logged = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(logged, "detached child's output never reached the log");
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

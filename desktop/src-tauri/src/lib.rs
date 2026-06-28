@@ -210,7 +210,7 @@ async fn working_diff(cwd: String) -> Result<String, String> {
 /// A session's transcript timeline for replay (most recent entries).
 #[tauri::command]
 async fn session_transcript(session_id: String) -> Result<Vec<TranscriptEvent>, String> {
-    blocking(move || Ok(yb_core::transcript_events(&session_id, 500))).await
+    blocking(move || yb_core::transcript_events(&session_id, 500).map_err(|e| e.to_string())).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -300,11 +300,10 @@ fn spawn_collector(handle: tauri::AppHandle, tx: watch::Sender<Snapshot>) {
             prev = Some(snap);
 
             // Sleep up to a tick, but wake early when ~/.claude changes.
-            match &watcher {
-                Some(w) => {
-                    w.wait(TICK);
-                }
-                None => std::thread::sleep(TICK),
+            if let Some(w) = &watcher {
+                w.wait(TICK);
+            } else {
+                std::thread::sleep(TICK);
             }
         }
     });
@@ -330,10 +329,10 @@ fn report_stream_death(handle: &tauri::AppHandle, message: &str) {
 }
 
 /// Watch `~/.claude` + `~/.codex` so the collector wakes promptly on a change.
-fn claude_codex_watcher() -> Option<yb_core::DirtyWatcher> {
+fn claude_codex_watcher() -> Option<yb_proc::DirtyWatcher> {
     let home = std::env::var_os("HOME")?;
     let home = std::path::Path::new(&home);
-    yb_core::DirtyWatcher::new([home.join(".claude"), home.join(".codex")])
+    yb_proc::DirtyWatcher::new([home.join(".claude"), home.join(".codex")])
 }
 
 /// Reflect the live counts in the tray tooltip.

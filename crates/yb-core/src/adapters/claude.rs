@@ -257,26 +257,26 @@ fn find_transcript(
 }
 
 /// Read a session's transcript into a replay timeline (most recent `limit`
-/// entries). Best-effort: a missing/unreadable transcript yields an empty list.
+/// entries). A *missing* transcript is normal → empty list; a genuine read
+/// failure on a transcript that exists is surfaced as an error.
 pub fn transcript_events(
     claude_home: &Path,
     session_id: &str,
     limit: usize,
-) -> Vec<crate::model::TranscriptEvent> {
+) -> std::io::Result<Vec<crate::model::TranscriptEvent>> {
     let projects = claude_home.join("projects");
     let Some(path) = find_transcript(&projects, session_id, &mut Vec::new()) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
-    };
+    let text = std::fs::read_to_string(&path)?;
 
     let mut events: Vec<crate::model::TranscriptEvent> =
         text.lines().filter_map(event_from_line).collect();
-    if events.len() > limit {
-        events.drain(0..events.len() - limit);
-    }
-    events
+    // Keep the most recent `limit`; drain the older prefix (saturating, so a
+    // short transcript never underflows).
+    let drop = events.len().saturating_sub(limit);
+    events.drain(0..drop);
+    Ok(events)
 }
 
 fn event_from_line(line: &str) -> Option<crate::model::TranscriptEvent> {
@@ -883,6 +883,23 @@ mod tests {
     }
 
     #[test]
+    fn awaiting_permission_is_suppressed_while_busy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // Same pending tool-use, but the session reports "busy" → not awaiting.
+        write_session(
+            home,
+            "sess-b",
+            r#"{"pid":1,"sessionId":"sess-b","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli","status":"busy"}"#,
+            &[ASSISTANT, TOOL_USE],
+        );
+        let mut c = ClaudeCollector::new(home.to_path_buf());
+        let mut out = Vec::new();
+        c.collect(&mut out, &mut Vec::new());
+        assert!(!out[0].awaiting_permission, "busy sessions aren't awaiting");
+    }
+
+    #[test]
     fn transcript_events_summarizes_the_timeline() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
@@ -892,12 +909,71 @@ mod tests {
             r#"{"pid":1,"sessionId":"sess-t","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
             &[USER, ASSISTANT, TOOL_USE],
         );
-        let events = transcript_events(home, "sess-t", 100);
+        let events = transcript_events(home, "sess-t", 100).unwrap();
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].kind, "user");
         assert!(events[0].summary.contains("go ahead"));
         assert_eq!(events[2].kind, "assistant");
         assert!(events[2].summary.contains("tool_use: Bash"));
+    }
+
+    #[test]
+    fn transcript_events_keeps_only_the_most_recent_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        write_session(
+            home,
+            "sess-l",
+            r#"{"pid":1,"sessionId":"sess-l","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
+            &[USER, ASSISTANT, TOOL_USE],
+        );
+        // limit 2 over 3 entries → drop the oldest (the user line).
+        let events = transcript_events(home, "sess-l", 2).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "assistant");
+        assert_eq!(events[1].kind, "assistant"); // the tool-use line
+    }
+
+    #[test]
+    fn missing_transcript_is_empty_not_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("projects")).unwrap();
+        let events = transcript_events(tmp.path(), "nope", 10).unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn event_from_line_covers_each_arm() {
+        // assistant with thinking + tool_use blocks
+        let a = event_from_line(
+            r#"{"type":"assistant","message":{"content":[{"type":"thinking"},{"type":"tool_use","name":"Read"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(a.kind, "assistant");
+        assert!(a.summary.contains("thinking"));
+        assert!(a.summary.contains("tool_use: Read"));
+
+        // user as a tool_result block
+        let tr =
+            event_from_line(r#"{"type":"user","message":{"content":[{"type":"tool_result"}]}}"#)
+                .unwrap();
+        assert_eq!(tr.summary, "(tool result)");
+
+        // user with no recognizable content → fallback
+        let uf = event_from_line(r#"{"type":"user","message":{"content":[]}}"#).unwrap();
+        assert_eq!(uf.summary, "(user message)");
+
+        // last-prompt + unknown type
+        let lp = event_from_line(r#"{"type":"last-prompt","lastPrompt":"hi"}"#).unwrap();
+        assert_eq!(
+            (lp.kind.as_str(), lp.summary.as_str()),
+            ("last-prompt", "hi")
+        );
+        let other = event_from_line(r#"{"type":"mode","mode":"normal"}"#).unwrap();
+        assert_eq!(other.kind, "mode");
+
+        // not JSON → skipped
+        assert!(event_from_line("not json").is_none());
     }
 
     #[test]

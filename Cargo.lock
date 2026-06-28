@@ -5313,7 +5313,6 @@ dependencies = [
 name = "yb-core"
 version = "0.0.0"
 dependencies = [
- "notify",
  "rusqlite",
  "serde",
  "serde_json",
@@ -5346,7 +5345,9 @@ name = "yb-proc"
 version = "0.0.0"
 dependencies = [
  "nix",
+ "notify",
  "sysinfo",
+ "tempfile",
  "thiserror 2.0.18",
  "yb-core",
 ]

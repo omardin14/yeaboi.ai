@@ -14,12 +14,9 @@
 
 pub mod adapters;
 pub mod engine;
-pub mod fswatch;
 pub mod model;
 pub mod project;
 pub(crate) mod util;
-
-pub use fswatch::DirtyWatcher;
 
 pub use engine::{
     CollectOptions, Engine, SessionEvent, SessionEventKind, detect_events, pid_is_live_session,
@@ -27,15 +24,16 @@ pub use engine::{
 };
 
 /// Read a session's transcript timeline from `$HOME/.claude` for replay
-/// (most recent `limit` entries). Empty if `$HOME` is unset.
-pub fn transcript_events(session_id: &str, limit: usize) -> Vec<TranscriptEvent> {
+/// (most recent `limit` entries). Empty if `$HOME` is unset or no transcript
+/// exists; a genuine read failure on an existing transcript propagates.
+pub fn transcript_events(session_id: &str, limit: usize) -> std::io::Result<Vec<TranscriptEvent>> {
     match std::env::var_os("HOME") {
         Some(home) => adapters::claude::transcript_events(
             &std::path::Path::new(&home).join(".claude"),
             session_id,
             limit,
         ),
-        None => Vec::new(),
+        None => Ok(Vec::new()),
     }
 }
 pub use model::{

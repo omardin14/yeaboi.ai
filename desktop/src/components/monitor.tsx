@@ -168,20 +168,18 @@ function ProjectGroup({
   onFreePort?: (port: Port) => void;
   onSelect?: (session: Session) => void;
 }) {
+  const busy = sessions.filter((s) => s.status === "Busy").length;
   return (
     <section className="mb-5">
       <header className="mb-1 flex items-baseline gap-2">
         <h2 className="text-sm font-semibold text-zinc-200">{project.name}</h2>
         <span className="text-xs text-zinc-500">
-          {(() => {
-            const busy = sessions.filter((s) => s.status === "Busy").length;
-            return busy > 0 ? (
-              <>
-                <span className="text-emerald-400">{busy} busy</span>
-                {" · "}
-              </>
-            ) : null;
-          })()}
+          {busy > 0 && (
+            <>
+              <span className="text-emerald-400">{busy} busy</span>
+              {" · "}
+            </>
+          )}
           {sessions.length} shown
         </span>
       </header>

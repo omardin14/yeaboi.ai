@@ -1,6 +1,9 @@
 //! Filesystem-change watcher used to wake the collector early instead of
-//! always sleeping a full tick. Purely an optimization: if watching fails, the
-//! caller just falls back to its timeout.
+//! always sleeping a full tick. OS introspection (per-platform fsevents /
+//! inotify / kqueue via `notify`), so it lives in `yb-proc`, not `yb-core`.
+//!
+//! Purely an optimization: if watching fails, the caller falls back to its
+//! timeout and keeps polling.
 
 use std::path::Path;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
@@ -25,9 +28,15 @@ impl DirtyWatcher {
     {
         let (tx, rx) = channel();
         let mut watcher = match notify::recommended_watcher(move |res: notify::Result<_>| {
-            // Coalesce every successful event into a single "dirty" ping; a send
-            // failure just means the watcher was dropped — nothing to do.
-            if res.is_ok() && tx.send(()).is_err() {}
+            // Coalesce every successful event into a single "dirty" ping. A send
+            // failure just means the watcher was dropped — nothing to do. A
+            // runtime watch error is surfaced rather than silently swallowed.
+            match res {
+                Ok(_) => {
+                    let _ = tx.send(());
+                }
+                Err(err) => eprintln!("fswatch: watch error: {err}"),
+            }
         }) {
             Ok(w) => w,
             Err(err) => {

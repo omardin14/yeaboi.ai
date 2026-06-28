@@ -66,3 +66,15 @@ test("close fires the callback", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Close detail" }));
   expect(onClose).toHaveBeenCalledTimes(1);
 });
+
+test("an empty diff shows the no-changes state", async () => {
+  workingDiffMock.mockResolvedValueOnce("");
+  render(<SessionDetail session={session} onClose={() => {}} />);
+  expect(await screen.findByText(/no uncommitted changes/i)).toBeInTheDocument();
+});
+
+test("a diff load failure surfaces an error", async () => {
+  workingDiffMock.mockRejectedValueOnce("not a git repo");
+  render(<SessionDetail session={session} onClose={() => {}} />);
+  expect(await screen.findByText(/could not load diff/i)).toBeInTheDocument();
+});

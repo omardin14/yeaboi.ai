@@ -65,7 +65,11 @@ pub fn detect_events(prev: &Snapshot, next: &Snapshot) -> Vec<SessionEvent> {
             continue; // brand-new session: nothing to compare against
         };
         let label = s.name.clone().unwrap_or_else(|| s.project_id.clone());
-        if p.status == ActivityStatus::Busy && s.status == ActivityStatus::Idle {
+        // "Finished" covers both a clean stop (Busy→Idle) and a crash (Busy→Dead)
+        // — the latter is exactly when a heads-up matters most.
+        if p.status == ActivityStatus::Busy
+            && matches!(s.status, ActivityStatus::Idle | ActivityStatus::Dead)
+        {
             out.push(SessionEvent {
                 session_id: s.id.clone(),
                 label: label.clone(),
@@ -511,6 +515,39 @@ mod tests {
         let snap2 = engine.collect(&ProcTable::default(), &[port]);
         assert_eq!(snap2.orphan_ports.len(), 1);
         assert_eq!(snap2.orphan_ports[0].number, 5173);
+    }
+
+    #[test]
+    fn a_dead_pid_clears_awaiting_permission() {
+        let mut s = session("a", Some(999), "/tmp/x", ActivityStatus::Idle);
+        s.awaiting_permission = true;
+        let mut engine = Engine::new(
+            vec![Box::new(FakeCollector(vec![s]))],
+            CollectOptions::default(),
+        );
+        // pid 999 not in the (empty) proc table → Dead → awaiting cleared.
+        let snap = engine.collect(&ProcTable::default(), &[]);
+        assert_eq!(snap.sessions[0].status, ActivityStatus::Dead);
+        assert!(!snap.sessions[0].awaiting_permission);
+    }
+
+    #[test]
+    fn detect_events_reports_a_crash_as_finished() {
+        let busy = session("a", Some(1), "/tmp/x", ActivityStatus::Busy);
+        let prev = snap_of(vec![busy.clone()]);
+        let mut dead = busy.clone();
+        dead.status = ActivityStatus::Dead;
+        let events = detect_events(&prev, &snap_of(vec![dead]));
+        assert!(events.iter().any(|e| e.kind == SessionEventKind::Finished));
+    }
+
+    #[test]
+    fn detect_events_ignores_brand_new_sessions() {
+        let prev = snap_of(vec![]);
+        let mut fresh = session("new", Some(1), "/tmp/x", ActivityStatus::Idle);
+        fresh.awaiting_permission = true;
+        // A session absent from `prev` has no transition → no spurious event.
+        assert!(detect_events(&prev, &snap_of(vec![fresh])).is_empty());
     }
 
     #[test]
