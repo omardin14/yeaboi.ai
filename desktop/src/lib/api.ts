@@ -10,6 +10,8 @@ import type { MergeMethod } from "@/lib/bindings/MergeMethod";
 import type { RebaseOutcome } from "@/lib/bindings/RebaseOutcome";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 import type { Worktree } from "@/lib/bindings/Worktree";
+import type { Finding } from "@/lib/bindings/Finding";
+import type { AgentProgress } from "@/lib/bindings/AgentProgress";
 
 /** Frontend → Rust: fetch the current snapshot on demand. */
 export function getSnapshot(): Promise<Snapshot> {
@@ -122,6 +124,25 @@ export function startWorktreeServices(cwd: string, name: string): Promise<void> 
 /** Stop a worktree's services. */
 export function stopWorktreeServices(cwd: string, name: string): Promise<void> {
   return invoke<void>("stop_worktree_services", { cwd, name });
+}
+
+// ---- multi-agent review ----
+
+/** Run a multi-agent review of a PR; resolves to the merged findings. */
+export function reviewPr(cwd: string, number: number): Promise<Finding[]> {
+  return invoke<Finding[]>("review_pr", { cwd, number });
+}
+
+/** Cancel an in-flight review. */
+export function cancelReview(): Promise<void> {
+  return invoke<void>("cancel_review");
+}
+
+/** Subscribe to per-agent review progress. */
+export function subscribeReviewProgress(
+  onProgress: (p: AgentProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentProgress>("review-progress", (e) => onProgress(e.payload));
 }
 
 /** Subscribe to the Rust-emitted snapshot stream (~every 1.5s). */

@@ -92,11 +92,12 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] Desktop worktree board (project picker · list · create · remove · start/stop · prune)
 - _open = reveal in Finder (desktop opener); Neon/pg DB isolation is just configured lifecycle commands_
 
-### yb-agent
-- [ ] `AgentProvider` trait; `ClaudeProvider` (`claude -p --output-format json`); `CodexProvider`; tolerant JSON extraction
-- [ ] `ReviewOrchestrator` — 5-way fan-out (`Semaphore`), dedupe, synthesis (local default / opt-in 6th LLM)
-- [ ] Cross-PR + **cross-provider** (claude vs codex) variants
-- [ ] Per-agent timeout + shared `CancellationToken`
+### yb-agent — DONE (1e)
+- [x] `AgentProvider` trait; `ClaudeProvider` (`claude -p --output-format json`); `CodexProvider` (`codex exec`); tolerant JSON extraction (fenced/balanced/fallback)
+- [x] `ReviewOrchestrator` — 5-way fan-out (bounded concurrency), per-agent progress, dedupe (file+line+category+title), local synthesis
+- [x] **Cross-provider** (claude + codex) — same diff through both, dups merged
+- [x] Shared cancel flag (`AtomicBool`) threaded into providers via `Cmd::stream` (kills the agent)
+- [x] Desktop `review_pr`/`cancel_review` commands + `review-progress` events; PrView Review panel (progress rows + findings by severity)
 
 ### desktop — PR/worktree views
 - [ ] PR list · review-run progress (per-agent rows via events, cancelable) · findings (post to PR) · worktree board · diff/conflict viewers · merge/rebase dialogs

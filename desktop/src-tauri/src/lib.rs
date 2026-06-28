@@ -7,6 +7,8 @@
 //! ([`kill_session`], [`free_port`]) and the PR loop ([`list_prs`]/[`pr_diff`]/
 //! [`merge_pr`]/[`comment_pr`]/[`open_pr`]/[`sync_branch`]).
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tauri::{Emitter, State};
@@ -261,6 +263,42 @@ async fn stop_worktree_services(cwd: String, name: String) -> Result<(), String>
     with_worktrees(cwd, move |e| e.stop_services(&name)).await
 }
 
+// ---- multi-agent review (yb-agent) ------------------------------------------
+
+/// Run a multi-agent review of PR `number`: fetch its diff, fan it out across the
+/// reachable agent CLIs, and emit `review-progress` per agent. Returns the merged
+/// findings. Cancelable via [`cancel_review`].
+#[tauri::command]
+async fn review_pr(
+    cwd: String,
+    number: u64,
+    app: tauri::AppHandle,
+    cancel: State<'_, Arc<AtomicBool>>,
+) -> Result<Vec<yb_agent::Finding>, String> {
+    let flag = cancel.inner().clone();
+    flag.store(false, Ordering::Relaxed); // fresh run
+    blocking(move || {
+        let diff = yb_git::Gh::new(&cwd)
+            .pr_diff(number)
+            .map_err(|e| e.to_string())?;
+        let orchestrator = yb_agent::default_orchestrator()
+            .ok_or("no agent CLI found on PATH (need `claude` or `codex`)")?;
+        let findings = orchestrator.run(&diff, &flag, |progress| {
+            if let Err(e) = app.emit("review-progress", &progress) {
+                eprintln!("review-progress emit failed: {e}");
+            }
+        });
+        Ok(findings)
+    })
+    .await
+}
+
+/// Signal an in-flight [`review_pr`] to stop.
+#[tauri::command]
+fn cancel_review(cancel: State<'_, Arc<AtomicBool>>) {
+    cancel.store(true, Ordering::Relaxed);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (tx, rx) = watch::channel(empty_snapshot());
@@ -269,6 +307,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(rx)
+        .manage(Arc::new(AtomicBool::new(false))) // review cancel flag
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             kill_session,
@@ -288,7 +327,9 @@ pub fn run() {
             remove_worktree,
             prune_worktrees,
             start_worktree_services,
-            stop_worktree_services
+            stop_worktree_services,
+            review_pr,
+            cancel_review
         ])
         .setup(move |app| {
             let icon = app
