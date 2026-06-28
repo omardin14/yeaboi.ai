@@ -9,6 +9,10 @@ description = "yeaboi.ai process table, ports, and signals"
 yb-core = { workspace = true }
 sysinfo = { workspace = true }
 thiserror = { workspace = true }
+notify = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

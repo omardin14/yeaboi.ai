@@ -39,11 +39,62 @@ pub fn pid_owns_tracked_port(sessions: &[Session], pid: u32) -> bool {
     sessions.iter().flat_map(|s| &s.ports).any(|p| p.pid == pid)
 }
 
+/// A notable change between two snapshots, for native notifications.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionEvent {
+    pub session_id: String,
+    pub label: String,
+    pub kind: SessionEventKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionEventKind {
+    /// Transitioned Busy → Idle (a turn finished).
+    Finished,
+    /// Newly paused on a permission request.
+    AwaitingPermission,
+}
+
+/// Diff two snapshots for notify-worthy transitions (finished / newly blocked).
+pub fn detect_events(prev: &Snapshot, next: &Snapshot) -> Vec<SessionEvent> {
+    let prev_by: std::collections::HashMap<&str, &Session> =
+        prev.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
+    let mut out = Vec::new();
+    for s in &next.sessions {
+        let Some(p) = prev_by.get(s.id.as_str()) else {
+            continue; // brand-new session: nothing to compare against
+        };
+        let label = s.name.clone().unwrap_or_else(|| s.project_id.clone());
+        // "Finished" covers both a clean stop (Busy→Idle) and a crash (Busy→Dead)
+        // — the latter is exactly when a heads-up matters most.
+        if p.status == ActivityStatus::Busy
+            && matches!(s.status, ActivityStatus::Idle | ActivityStatus::Dead)
+        {
+            out.push(SessionEvent {
+                session_id: s.id.clone(),
+                label: label.clone(),
+                kind: SessionEventKind::Finished,
+            });
+        }
+        if !p.awaiting_permission && s.awaiting_permission {
+            out.push(SessionEvent {
+                session_id: s.id.clone(),
+                label,
+                kind: SessionEventKind::AwaitingPermission,
+            });
+        }
+    }
+    out
+}
+
 /// Owns the collectors + resolver and produces snapshots.
 pub struct Engine {
     collectors: Vec<Box<dyn Collector>>,
     resolver: ProjectResolver,
     options: CollectOptions,
+    /// Pids ever attributed to a session's port subtree — lets us flag a port
+    /// whose owner outlived its session (an orphan) on a later tick.
+    seen_owned_pids: std::collections::HashSet<u32>,
 }
 
 impl Engine {
@@ -53,6 +104,7 @@ impl Engine {
             collectors,
             resolver: ProjectResolver::new(),
             options,
+            seen_owned_pids: std::collections::HashSet::new(),
         }
     }
 
@@ -130,6 +182,21 @@ impl Engine {
             projects.retain(|_, p| p.session_count > 0);
         }
 
+        // Orphan ports: a listener whose pid we've attributed to a session
+        // before but isn't attributed to any live session now (its owner
+        // outlived the session). First seen → can't know yet → none.
+        let attributed_now: std::collections::HashSet<u32> = sessions
+            .iter()
+            .flat_map(|s| &s.ports)
+            .map(|p| p.pid)
+            .collect();
+        let orphan_ports: Vec<Port> = ports
+            .iter()
+            .filter(|p| !attributed_now.contains(&p.pid) && self.seen_owned_pids.contains(&p.pid))
+            .cloned()
+            .collect();
+        self.seen_owned_pids.extend(attributed_now);
+
         let projects: Vec<Project> = projects.into_values().collect();
         let busy_count = sessions
             .iter()
@@ -145,6 +212,7 @@ impl Engine {
             generated_at_ms: now_ms(),
             projects,
             sessions,
+            orphan_ports,
             totals,
             warnings,
         }
@@ -231,6 +299,7 @@ fn enrich_with_proc(session: &mut Session, proc: &ProcTable) {
         None => {
             session.status = ActivityStatus::Dead;
             session.proc_stats = None;
+            session.awaiting_permission = false; // a dead session isn't waiting on us
         }
     }
 }
@@ -269,6 +338,7 @@ mod tests {
             context: None,
             last_prompt: None,
             sub_agent_count: 0,
+            awaiting_permission: false,
             proc_stats: None,
             ports: Vec::new(),
         }
@@ -404,6 +474,118 @@ mod tests {
             vec![1420, 3000],
             "subtree ports only, sorted, unrelated excluded"
         );
+    }
+
+    #[test]
+    fn orphan_ports_flagged_once_owner_outlives_session() {
+        use crate::model::Port;
+        let port = Port {
+            number: 5173,
+            pid: 100,
+            state: "LISTEN".into(),
+        };
+
+        // Tick 1: session 42 owns pid 100 (its child) → attributed, not orphan,
+        // but remembered.
+        let s = session("a", Some(42), "/tmp/x", ActivityStatus::Busy);
+        let mut engine = Engine::new(
+            vec![Box::new(FakeCollector(vec![s]))],
+            CollectOptions::default(),
+        );
+        let mut by_pid = HashMap::new();
+        by_pid.insert(
+            42u32,
+            ProcStats {
+                cpu_pct: 0.0,
+                mem_bytes: 1,
+                uptime_secs: 1,
+                ppid: None,
+            },
+        );
+        let mut children = HashMap::new();
+        children.insert(42u32, vec![100u32]);
+        let proc = ProcTable { by_pid, children };
+        let snap = engine.collect(&proc, std::slice::from_ref(&port));
+        assert!(snap.orphan_ports.is_empty());
+        assert_eq!(snap.sessions[0].ports.len(), 1);
+
+        // Tick 2: the session is gone; the port (pid 100) is still listening but
+        // unattributed → orphan.
+        engine.collectors.clear();
+        let snap2 = engine.collect(&ProcTable::default(), &[port]);
+        assert_eq!(snap2.orphan_ports.len(), 1);
+        assert_eq!(snap2.orphan_ports[0].number, 5173);
+    }
+
+    #[test]
+    fn a_dead_pid_clears_awaiting_permission() {
+        let mut s = session("a", Some(999), "/tmp/x", ActivityStatus::Idle);
+        s.awaiting_permission = true;
+        let mut engine = Engine::new(
+            vec![Box::new(FakeCollector(vec![s]))],
+            CollectOptions::default(),
+        );
+        // pid 999 not in the (empty) proc table → Dead → awaiting cleared.
+        let snap = engine.collect(&ProcTable::default(), &[]);
+        assert_eq!(snap.sessions[0].status, ActivityStatus::Dead);
+        assert!(!snap.sessions[0].awaiting_permission);
+    }
+
+    #[test]
+    fn detect_events_reports_a_crash_as_finished() {
+        let busy = session("a", Some(1), "/tmp/x", ActivityStatus::Busy);
+        let prev = snap_of(vec![busy.clone()]);
+        let mut dead = busy.clone();
+        dead.status = ActivityStatus::Dead;
+        let events = detect_events(&prev, &snap_of(vec![dead]));
+        assert!(events.iter().any(|e| e.kind == SessionEventKind::Finished));
+    }
+
+    #[test]
+    fn detect_events_ignores_brand_new_sessions() {
+        let prev = snap_of(vec![]);
+        let mut fresh = session("new", Some(1), "/tmp/x", ActivityStatus::Idle);
+        fresh.awaiting_permission = true;
+        // A session absent from `prev` has no transition → no spurious event.
+        assert!(detect_events(&prev, &snap_of(vec![fresh])).is_empty());
+    }
+
+    #[test]
+    fn detect_events_finds_finished_and_blocked() {
+        let mut busy = session("a", Some(1), "/tmp/x", ActivityStatus::Busy);
+        busy.name = Some("alpha".into());
+        let calm = session("b", Some(2), "/tmp/y", ActivityStatus::Idle);
+        let prev = snap_of(vec![busy.clone(), calm.clone()]);
+
+        // `a` finishes (busy→idle); `b` newly awaiting permission.
+        let mut idle = busy.clone();
+        idle.status = ActivityStatus::Idle;
+        let mut blocked = calm.clone();
+        blocked.awaiting_permission = true;
+        let next = snap_of(vec![idle, blocked]);
+
+        let events = detect_events(&prev, &next);
+        assert!(
+            events
+                .iter()
+                .any(|e| e.session_id == "a" && e.kind == SessionEventKind::Finished)
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| e.session_id == "b" && e.kind == SessionEventKind::AwaitingPermission)
+        );
+    }
+
+    fn snap_of(sessions: Vec<Session>) -> Snapshot {
+        Snapshot {
+            generated_at_ms: 0,
+            projects: vec![],
+            sessions,
+            orphan_ports: vec![],
+            totals: Totals::default(),
+            warnings: vec![],
+        }
     }
 
     #[test]

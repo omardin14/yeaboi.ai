@@ -44,5 +44,7 @@ export default defineConfig(async () => ({
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
     css: true,
+    // Component tests live under src/; the e2e/ Playwright specs run separately.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
 }));

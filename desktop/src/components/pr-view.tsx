@@ -5,6 +5,7 @@ import type { MergeMethod } from "@/lib/bindings/MergeMethod";
 import {
   abortRebase,
   commentPr,
+  continueRebase,
   listPrs,
   mergePr,
   openPr,
@@ -166,6 +167,25 @@ export function PrView({ projects }: { projects: Project[] }) {
     }
   }
 
+  async function doContinue() {
+    setBusy(true);
+    try {
+      const outcome = await continueRebase(repo);
+      if (outcome === "Clean") {
+        setConflicts(null);
+        setError(null);
+        setNotice("Rebase completed.");
+      } else {
+        setConflicts(outcome.Conflicts);
+        setError(`Still conflicted: ${outcome.Conflicts.join(", ")}. Resolve and continue.`);
+      }
+    } catch (e) {
+      setError(`Failed to continue the rebase: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (projects.length === 0) {
     return <p className="text-sm text-zinc-500">No projects to show PRs for yet.</p>;
   }
@@ -201,14 +221,24 @@ export function PrView({ projects }: { projects: Project[] }) {
           Sync (rebase)
         </button>
         {conflicts && conflicts.length > 0 && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void doAbort()}
-            className="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
-          >
-            Abort rebase
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void doContinue()}
+              className="rounded border border-emerald-500/40 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50"
+            >
+              Continue rebase
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void doAbort()}
+              className="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+            >
+              Abort rebase
+            </button>
+          </>
         )}
         <button
           type="button"

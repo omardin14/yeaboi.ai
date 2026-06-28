@@ -18,10 +18,27 @@ pub mod model;
 pub mod project;
 pub(crate) mod util;
 
-pub use engine::{CollectOptions, Engine, pid_is_live_session, pid_owns_tracked_port};
+pub use engine::{
+    CollectOptions, Engine, SessionEvent, SessionEventKind, detect_events, pid_is_live_session,
+    pid_owns_tracked_port,
+};
+
+/// Read a session's transcript timeline from `$HOME/.claude` for replay
+/// (most recent `limit` entries). Empty if `$HOME` is unset or no transcript
+/// exists; a genuine read failure on an existing transcript propagates.
+pub fn transcript_events(session_id: &str, limit: usize) -> std::io::Result<Vec<TranscriptEvent>> {
+    match std::env::var_os("HOME") {
+        Some(home) => adapters::claude::transcript_events(
+            &std::path::Path::new(&home).join(".claude"),
+            session_id,
+            limit,
+        ),
+        None => Ok(Vec::new()),
+    }
+}
 pub use model::{
     ActivityStatus, ContextUsage, HostApp, Port, ProcStats, ProcTable, Project, Provider, Session,
-    Snapshot, Totals,
+    Snapshot, Totals, TranscriptEvent,
 };
 
 /// Errors surfaced by the collector path. Most failures are *per-source* and
@@ -74,6 +91,7 @@ impl Snapshot {
             context: Some(ContextUsage::new(144_593, 200_000)),
             last_prompt: Some("stub prompt".to_string()),
             sub_agent_count: 0,
+            awaiting_permission: false,
             proc_stats: None,
             ports: Vec::new(),
         };
@@ -95,6 +113,7 @@ impl Snapshot {
             },
             projects: vec![project],
             sessions: vec![session],
+            orphan_ports: Vec::new(),
             warnings: Vec::new(),
         }
     }

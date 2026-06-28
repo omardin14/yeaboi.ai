@@ -179,6 +179,10 @@ impl ClaudeCollector {
             .or(raw.status_updated_at)
             .unwrap_or(raw.started_at);
 
+        // Paused on a tool-use (a permission prompt is the common cause) while
+        // not actively working. The engine clears this if the pid is dead.
+        let awaiting_permission = tail.pending_tool_use && status != ActivityStatus::Busy;
+
         Ok(Some(Session {
             id: raw.session_id,
             pid: Some(raw.pid),
@@ -195,6 +199,7 @@ impl ClaudeCollector {
             context,
             last_prompt: tail.last_prompt,
             sub_agent_count: tail.sub_agent_count,
+            awaiting_permission,
             proc_stats: None,
             ports: Vec::new(),
         }))
@@ -251,6 +256,99 @@ fn find_transcript(
     None
 }
 
+/// Read a session's transcript into a replay timeline (most recent `limit`
+/// entries). A *missing* transcript is normal → empty list; a genuine read
+/// failure on a transcript that exists is surfaced as an error.
+pub fn transcript_events(
+    claude_home: &Path,
+    session_id: &str,
+    limit: usize,
+) -> std::io::Result<Vec<crate::model::TranscriptEvent>> {
+    let projects = claude_home.join("projects");
+    let Some(path) = find_transcript(&projects, session_id, &mut Vec::new()) else {
+        return Ok(Vec::new());
+    };
+    let text = std::fs::read_to_string(&path)?;
+
+    let mut events: Vec<crate::model::TranscriptEvent> =
+        text.lines().filter_map(event_from_line).collect();
+    // Keep the most recent `limit`; drain the older prefix (saturating, so a
+    // short transcript never underflows).
+    let drop = events.len().saturating_sub(limit);
+    events.drain(0..drop);
+    Ok(events)
+}
+
+fn event_from_line(line: &str) -> Option<crate::model::TranscriptEvent> {
+    use serde_json::Value;
+    let v: Value = serde_json::from_str(line.trim()).ok()?;
+    let kind = v.get("type")?.as_str()?.to_string();
+    let summary = match kind.as_str() {
+        "user" => user_text(&v).unwrap_or_else(|| "(user message)".to_string()),
+        "assistant" => assistant_summary(&v),
+        "last-prompt" => v
+            .get("lastPrompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        other => other.to_string(),
+    };
+    Some(crate::model::TranscriptEvent {
+        kind,
+        summary: crate::util::truncate(&summary, 160),
+    })
+}
+
+fn assistant_summary(v: &serde_json::Value) -> String {
+    let Some(blocks) = v
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return "(assistant)".to_string();
+    };
+    let mut parts = Vec::new();
+    for b in blocks {
+        match b.get("type").and_then(|t| t.as_str()) {
+            Some("text") => {
+                if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                    parts.push(format!("“{}”", t));
+                }
+            }
+            Some("thinking") => parts.push("thinking".to_string()),
+            Some("tool_use") => parts.push(format!(
+                "tool_use: {}",
+                b.get("name").and_then(|n| n.as_str()).unwrap_or("?")
+            )),
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        "(assistant)".to_string()
+    } else {
+        parts.join(" · ")
+    }
+}
+
+fn user_text(v: &serde_json::Value) -> Option<String> {
+    let content = v.get("message")?.get("content")?;
+    if let Some(s) = content.as_str() {
+        return Some(s.to_string());
+    }
+    for b in content.as_array()? {
+        match b.get("type").and_then(|t| t.as_str()) {
+            Some("text") => {
+                if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                    return Some(t.to_string());
+                }
+            }
+            Some("tool_result") => return Some("(tool result)".to_string()),
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Derived state accumulated from a transcript tail.
 #[derive(Debug, Clone, Default)]
 struct TranscriptState {
@@ -259,6 +357,9 @@ struct TranscriptState {
     last_prompt: Option<String>,
     branch: Option<String>,
     sub_agent_count: u32,
+    /// The last assistant turn issued a tool-use with no `user`/tool-result line
+    /// after it — a proxy for "waiting" (incl. a permission prompt).
+    pending_tool_use: bool,
 }
 
 /// Incremental byte cursor over one transcript file.
@@ -374,18 +475,26 @@ impl TranscriptCursor {
                         u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens,
                     );
                 }
+                let mut saw_tool_use = false;
                 for block in message.content {
-                    if let ContentBlock::ToolUse { name } = block
-                        && (name == "Task" || name == "Agent")
-                    {
-                        self.state.sub_agent_count += 1;
+                    if let ContentBlock::ToolUse { name } = block {
+                        saw_tool_use = true;
+                        if name == "Task" || name == "Agent" {
+                            self.state.sub_agent_count += 1;
+                        }
                     }
+                }
+                // A turn that ends in a tool-use is "pending" until a user line
+                // (the tool result / next prompt) lands.
+                if saw_tool_use {
+                    self.state.pending_tool_use = true;
                 }
                 if let Some(b) = git_branch.filter(|b| !b.is_empty()) {
                     self.state.branch = Some(b);
                 }
             }
             RawLine::User { git_branch } => {
+                self.state.pending_tool_use = false;
                 if let Some(b) = git_branch.filter(|b| !b.is_empty()) {
                     self.state.branch = Some(b);
                 }
@@ -737,6 +846,134 @@ mod tests {
         let idle = out.iter().find(|s| s.id == "b").unwrap();
         assert_eq!(busy.status, ActivityStatus::Busy);
         assert_eq!(idle.status, ActivityStatus::Idle);
+    }
+
+    const TOOL_USE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"tool_use","name":"Bash"}]}}"#;
+    const USER: &str =
+        r#"{"type":"user","message":{"content":[{"type":"text","text":"go ahead"}]}}"#;
+
+    #[test]
+    fn pending_tool_use_sets_awaiting_permission() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // Transcript ends on an unanswered tool-use; session has no "busy" status.
+        write_session(
+            home,
+            "sess-p",
+            r#"{"pid":1,"sessionId":"sess-p","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
+            &[ASSISTANT, TOOL_USE],
+        );
+        let mut c = ClaudeCollector::new(home.to_path_buf());
+        let mut out = Vec::new();
+        let mut warnings = Vec::new();
+        c.collect(&mut out, &mut warnings);
+        assert!(
+            out[0].awaiting_permission,
+            "should be awaiting after a pending tool-use"
+        );
+    }
+
+    #[test]
+    fn a_following_user_line_clears_awaiting() {
+        let st = parse_whole(&[TOOL_USE, USER]);
+        assert!(
+            !st.pending_tool_use,
+            "user line (tool result) clears pending"
+        );
+    }
+
+    #[test]
+    fn awaiting_permission_is_suppressed_while_busy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // Same pending tool-use, but the session reports "busy" → not awaiting.
+        write_session(
+            home,
+            "sess-b",
+            r#"{"pid":1,"sessionId":"sess-b","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli","status":"busy"}"#,
+            &[ASSISTANT, TOOL_USE],
+        );
+        let mut c = ClaudeCollector::new(home.to_path_buf());
+        let mut out = Vec::new();
+        c.collect(&mut out, &mut Vec::new());
+        assert!(!out[0].awaiting_permission, "busy sessions aren't awaiting");
+    }
+
+    #[test]
+    fn transcript_events_summarizes_the_timeline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        write_session(
+            home,
+            "sess-t",
+            r#"{"pid":1,"sessionId":"sess-t","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
+            &[USER, ASSISTANT, TOOL_USE],
+        );
+        let events = transcript_events(home, "sess-t", 100).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].kind, "user");
+        assert!(events[0].summary.contains("go ahead"));
+        assert_eq!(events[2].kind, "assistant");
+        assert!(events[2].summary.contains("tool_use: Bash"));
+    }
+
+    #[test]
+    fn transcript_events_keeps_only_the_most_recent_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        write_session(
+            home,
+            "sess-l",
+            r#"{"pid":1,"sessionId":"sess-l","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
+            &[USER, ASSISTANT, TOOL_USE],
+        );
+        // limit 2 over 3 entries → drop the oldest (the user line).
+        let events = transcript_events(home, "sess-l", 2).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "assistant");
+        assert_eq!(events[1].kind, "assistant"); // the tool-use line
+    }
+
+    #[test]
+    fn missing_transcript_is_empty_not_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("projects")).unwrap();
+        let events = transcript_events(tmp.path(), "nope", 10).unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn event_from_line_covers_each_arm() {
+        // assistant with thinking + tool_use blocks
+        let a = event_from_line(
+            r#"{"type":"assistant","message":{"content":[{"type":"thinking"},{"type":"tool_use","name":"Read"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(a.kind, "assistant");
+        assert!(a.summary.contains("thinking"));
+        assert!(a.summary.contains("tool_use: Read"));
+
+        // user as a tool_result block
+        let tr =
+            event_from_line(r#"{"type":"user","message":{"content":[{"type":"tool_result"}]}}"#)
+                .unwrap();
+        assert_eq!(tr.summary, "(tool result)");
+
+        // user with no recognizable content → fallback
+        let uf = event_from_line(r#"{"type":"user","message":{"content":[]}}"#).unwrap();
+        assert_eq!(uf.summary, "(user message)");
+
+        // last-prompt + unknown type
+        let lp = event_from_line(r#"{"type":"last-prompt","lastPrompt":"hi"}"#).unwrap();
+        assert_eq!(
+            (lp.kind.as_str(), lp.summary.as_str()),
+            ("last-prompt", "hi")
+        );
+        let other = event_from_line(r#"{"type":"mode","mode":"normal"}"#).unwrap();
+        assert_eq!(other.kind, "mode");
+
+        // not JSON → skipped
+        assert!(event_from_line("not json").is_none());
     }
 
     #[test]

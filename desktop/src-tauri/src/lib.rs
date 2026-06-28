@@ -7,11 +7,14 @@
 //! ([`kill_session`], [`free_port`]) and the PR loop ([`list_prs`]/[`pr_diff`]/
 //! [`merge_pr`]/[`comment_pr`]/[`open_pr`]/[`sync_branch`]).
 
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::{Emitter, State};
-use yb_core::{CollectOptions, Engine, Snapshot, Totals};
+use tauri_plugin_notification::NotificationExt;
+use tokio::sync::watch;
+use yb_core::{
+    CollectOptions, Engine, SessionEventKind, Snapshot, Totals, TranscriptEvent, detect_events,
+};
 
 /// Event name carrying each new snapshot to the frontend.
 const SNAPSHOT_EVENT: &str = "snapshot-update";
@@ -20,43 +23,36 @@ const SNAPSHOT_EVENT: &str = "snapshot-update";
 /// tell the user the live view has stopped rather than silently freezing.
 const SNAPSHOT_ERROR_EVENT: &str = "snapshot-error";
 
-/// How often the collector rebuilds a snapshot. Transcript tailing is
-/// incremental, so each tick after the first is cheap.
+/// Tray icon id.
+const TRAY_ID: &str = "yeaboi-tray";
+
+/// Upper bound on a collect tick; the fs-watch wakes it earlier on a change.
 const TICK: Duration = Duration::from_millis(1500);
 
-/// Latest snapshot, shared between the collector thread and the command handler.
-type SharedSnapshot = Arc<Mutex<Snapshot>>;
+/// The latest snapshot, published over a `watch` channel: the collector thread
+/// holds the sender, the command handlers read the receiver from Tauri state.
+type SnapshotRx = watch::Receiver<Snapshot>;
 
-/// An empty snapshot to seed shared state before the first collect completes.
+/// An empty snapshot to seed the channel before the first collect completes.
 fn empty_snapshot() -> Snapshot {
     Snapshot {
         generated_at_ms: 0,
         projects: Vec::new(),
         sessions: Vec::new(),
+        orphan_ports: Vec::new(),
         totals: Totals::default(),
         warnings: Vec::new(),
     }
 }
 
-/// Lock the shared snapshot, recovering (with a logged breadcrumb) if a prior
-/// holder panicked while holding it. Clears the poison so the hot path doesn't
-/// run the recovery arm on every subsequent tick.
-fn lock_recovering(shared: &SharedSnapshot) -> std::sync::MutexGuard<'_, Snapshot> {
-    shared.lock().unwrap_or_else(|poisoned| {
-        eprintln!("snapshot state lock was poisoned (a prior holder panicked); recovering");
-        shared.clear_poison();
-        poisoned.into_inner()
-    })
-}
-
-/// Read the current snapshot from shared state.
-fn snapshot_of(shared: &SharedSnapshot) -> Snapshot {
-    lock_recovering(shared).clone()
+/// Read the current snapshot from the watch channel.
+fn snapshot_of(state: &SnapshotRx) -> Snapshot {
+    state.borrow().clone()
 }
 
 /// Frontend → Rust: fetch the current snapshot on demand.
 #[tauri::command]
-fn get_snapshot(state: State<'_, SharedSnapshot>) -> Snapshot {
+fn get_snapshot(state: State<'_, SnapshotRx>) -> Snapshot {
     snapshot_of(&state)
 }
 
@@ -67,7 +63,7 @@ fn get_snapshot(state: State<'_, SharedSnapshot>) -> Snapshot {
 /// kill an arbitrary process — and `yb_proc` itself refuses pid ≤ 1. Returns
 /// `Err(String)` (a rejected JS promise) the frontend surfaces as an error.
 #[tauri::command]
-fn kill_session(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String> {
+fn kill_session(pid: u32, state: State<'_, SnapshotRx>) -> Result<(), String> {
     let snapshot = snapshot_of(&state);
     if !yb_core::pid_is_live_session(&snapshot.sessions, pid) {
         return Err(format!(
@@ -83,9 +79,11 @@ fn kill_session(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String
 /// port attributed to a tracked session (its subtree) — so a forged pid can't
 /// be laundered through this command — and `yb_proc` refuses pid ≤ 1.
 #[tauri::command]
-fn free_port(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String> {
+fn free_port(pid: u32, state: State<'_, SnapshotRx>) -> Result<(), String> {
     let snapshot = snapshot_of(&state);
-    if !yb_core::pid_owns_tracked_port(&snapshot.sessions, pid) {
+    // A tracked-session port, or an orphan port we surfaced — both are ours to free.
+    let is_orphan = snapshot.orphan_ports.iter().any(|p| p.pid == pid);
+    if !yb_core::pid_owns_tracked_port(&snapshot.sessions, pid) && !is_orphan {
         return Err(format!(
             "pid {pid} does not hold a port yeaboi is tracking — refusing to signal it"
         ));
@@ -152,11 +150,15 @@ async fn comment_pr(cwd: String, number: u64, body: String) -> Result<(), String
 async fn open_pr(cwd: String) -> Result<String, String> {
     blocking(move || {
         let repo = yb_git::GitRepo::new(&cwd);
+        let gh = yb_git::Gh::new(&cwd);
+        let branch = repo.current_branch().map_err(|e| e.to_string())?;
+        // Don't create a duplicate — return the existing PR's URL if there is one.
+        if let Some(existing) = gh.find_existing(&branch).map_err(|e| e.to_string())? {
+            return Ok(existing.url);
+        }
         let base = repo.default_base().map_err(|e| e.to_string())?;
         repo.push_current().map_err(|e| e.to_string())?;
-        yb_git::Gh::new(&cwd)
-            .pr_create(&base)
-            .map_err(|e| e.to_string())
+        gh.pr_create(&base).map_err(|e| e.to_string())
     })
     .await
 }
@@ -183,13 +185,42 @@ async fn abort_rebase(cwd: String) -> Result<(), String> {
     .await
 }
 
+/// Continue an in-progress rebase after the user resolved conflicts in-editor.
+#[tauri::command]
+async fn continue_rebase(cwd: String) -> Result<yb_git::RebaseOutcome, String> {
+    blocking(move || {
+        yb_git::GitRepo::new(cwd)
+            .rebase_continue()
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// The working diff (`git diff HEAD`) for a session's directory.
+#[tauri::command]
+async fn working_diff(cwd: String) -> Result<String, String> {
+    blocking(move || {
+        yb_git::GitRepo::new(cwd)
+            .working_diff()
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// A session's transcript timeline for replay (most recent entries).
+#[tauri::command]
+async fn session_transcript(session_id: String) -> Result<Vec<TranscriptEvent>, String> {
+    blocking(move || yb_core::transcript_events(&session_id, 500).map_err(|e| e.to_string())).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared: SharedSnapshot = Arc::new(Mutex::new(empty_snapshot()));
+    let (tx, rx) = watch::channel(empty_snapshot());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(shared.clone())
+        .plugin(tauri_plugin_notification::init())
+        .manage(rx)
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             kill_session,
@@ -200,21 +231,22 @@ pub fn run() {
             comment_pr,
             open_pr,
             sync_branch,
-            abort_rebase
+            abort_rebase,
+            continue_rebase,
+            working_diff,
+            session_transcript
         ])
         .setup(move |app| {
-            // Minimal tray with a placeholder tooltip. A later slice renders live
-            // status (busy count · $today · blocked) and a click-to-open menu.
             let icon = app
                 .default_window_icon()
                 .cloned()
                 .ok_or("bundled default window icon missing")?;
-            tauri::tray::TrayIconBuilder::with_id("yeaboi-tray")
+            tauri::tray::TrayIconBuilder::with_id(TRAY_ID)
                 .tooltip("yeaboi.ai")
                 .icon(icon)
                 .build(app)?;
 
-            spawn_collector(app.handle().clone(), shared.clone());
+            spawn_collector(app.handle().clone(), tx);
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -224,10 +256,12 @@ pub fn run() {
 
 /// Spawn the collector loop on a dedicated OS thread. Building the engine and
 /// sampler *inside* the thread keeps the (non-`Send`) collectors thread-local.
-fn spawn_collector(handle: tauri::AppHandle, shared: SharedSnapshot) {
+fn spawn_collector(handle: tauri::AppHandle, tx: watch::Sender<Snapshot>) {
     std::thread::spawn(move || {
         let mut engine = Engine::with_default_sources(CollectOptions::default());
         let mut sampler = yb_proc::Sampler::new();
+        let watcher = claude_codex_watcher();
+        let mut prev: Option<Snapshot> = None;
         // Prime CPU so the first frame carries real percentages.
         std::thread::sleep(yb_proc::min_sample_interval());
 
@@ -250,13 +284,27 @@ fn spawn_collector(handle: tauri::AppHandle, shared: SharedSnapshot) {
                 }
             };
 
-            *lock_recovering(&shared) = snap.clone();
+            // Fire notifications for finish/blocked transitions vs the prior frame.
+            if let Some(prev) = &prev {
+                notify_transitions(&handle, prev, &snap);
+            }
+            update_tray(&handle, &snap);
 
+            if tx.send(snap.clone()).is_err() {
+                break; // all receivers dropped — the app is shutting down
+            }
             if let Err(err) = handle.emit(SNAPSHOT_EVENT, &snap) {
                 report_stream_death(&handle, &format!("snapshot stream failed: {err}"));
                 break;
             }
-            std::thread::sleep(TICK);
+            prev = Some(snap);
+
+            // Sleep up to a tick, but wake early when ~/.claude changes.
+            if let Some(w) = &watcher {
+                w.wait(TICK);
+            } else {
+                std::thread::sleep(TICK);
+            }
         }
     });
 }
@@ -277,5 +325,49 @@ fn report_stream_death(handle: &tauri::AppHandle, message: &str) {
     eprintln!("collector stream stopped: {message}");
     if let Err(err) = handle.emit(SNAPSHOT_ERROR_EVENT, message) {
         eprintln!("could not deliver snapshot-error to the UI: {err}");
+    }
+}
+
+/// Watch `~/.claude` + `~/.codex` so the collector wakes promptly on a change.
+fn claude_codex_watcher() -> Option<yb_proc::DirtyWatcher> {
+    let home = std::env::var_os("HOME")?;
+    let home = std::path::Path::new(&home);
+    yb_proc::DirtyWatcher::new([home.join(".claude"), home.join(".codex")])
+}
+
+/// Reflect the live counts in the tray tooltip.
+fn update_tray(handle: &tauri::AppHandle, snap: &Snapshot) {
+    let Some(tray) = handle.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    let t = &snap.totals;
+    let tooltip = format!(
+        "yeaboi.ai — {} busy · {} session(s) · {} project(s)",
+        t.busy_count, t.session_count, t.project_count
+    );
+    if let Err(err) = tray.set_tooltip(Some(tooltip)) {
+        eprintln!("tray: could not update tooltip: {err}");
+    }
+}
+
+/// Fire an OS notification for each finish/blocked transition since the last frame.
+fn notify_transitions(handle: &tauri::AppHandle, prev: &Snapshot, next: &Snapshot) {
+    for event in detect_events(prev, next) {
+        let (title, body) = match event.kind {
+            SessionEventKind::Finished => ("Session finished", format!("{} is idle", event.label)),
+            SessionEventKind::AwaitingPermission => (
+                "Permission needed",
+                format!("{} is waiting on you", event.label),
+            ),
+        };
+        if let Err(err) = handle
+            .notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .show()
+        {
+            eprintln!("notification failed: {err}");
+        }
     }
 }

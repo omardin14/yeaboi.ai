@@ -16,7 +16,10 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 use yb_core::{ProcStats, ProcTable};
 
 pub mod actions;
+pub mod fswatch;
 pub mod ports;
+
+pub use fswatch::DirtyWatcher;
 
 /// Reusable process sampler. Holds a `System` so CPU deltas accumulate across
 /// `sample` calls without an artificial sleep on the hot path.

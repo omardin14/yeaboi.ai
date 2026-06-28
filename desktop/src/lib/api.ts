@@ -8,6 +8,7 @@ import type { Snapshot } from "@/lib/bindings/Snapshot";
 import type { PullRequest } from "@/lib/bindings/PullRequest";
 import type { MergeMethod } from "@/lib/bindings/MergeMethod";
 import type { RebaseOutcome } from "@/lib/bindings/RebaseOutcome";
+import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 
 /** Frontend → Rust: fetch the current snapshot on demand. */
 export function getSnapshot(): Promise<Snapshot> {
@@ -73,6 +74,21 @@ export function syncBranch(cwd: string): Promise<RebaseOutcome> {
 /** Abort an in-progress rebase (after a conflicted sync). */
 export function abortRebase(cwd: string): Promise<void> {
   return invoke<void>("abort_rebase", { cwd });
+}
+
+/** Continue an in-progress rebase after resolving conflicts in your editor. */
+export function continueRebase(cwd: string): Promise<RebaseOutcome> {
+  return invoke<RebaseOutcome>("continue_rebase", { cwd });
+}
+
+/** The working diff (`git diff HEAD`) for a directory. */
+export function workingDiff(cwd: string): Promise<string> {
+  return invoke<string>("working_diff", { cwd });
+}
+
+/** A session's transcript timeline for replay. */
+export function sessionTranscript(sessionId: string): Promise<TranscriptEvent[]> {
+  return invoke<TranscriptEvent[]>("session_transcript", { sessionId });
 }
 
 /** Subscribe to the Rust-emitted snapshot stream (~every 1.5s). */

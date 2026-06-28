@@ -42,8 +42,8 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] `ClaudeCollector` Tier B — `TranscriptCursor` incremental tail; `RawLine` type-tagged enum; `last-prompt`; truncation reset; sub-agent count via tool_use
 - [x] `ProjectResolver` — pure-filesystem `.git`/worktree common-dir grouping; roll worktrees under repo
 - [x] `CodexCollector` — `rusqlite` read-only; recency-bounded `threads` query
-- [ ] `notify` fs-watch wrapper (dirty-path set) — *1b*
-- [ ] `engine` — 1s tick loop + `watch<Arc<Snapshot>>`; idle skip — *1b (CLI uses a sync loop)*
+- [x] `notify` fs-watch wrapper (`DirtyWatcher`) — wakes the collector early on a change
+- [x] `engine` tick loop + `watch<Snapshot>` channel (desktop) + idle-skip via fs-watch
 
 ### yb-proc
 - [x] `sysinfo` `ProcTable` (cpu+mem+parent) + ppid subtree BFS
@@ -63,15 +63,16 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [x] `src-tauri`: `kill_session` command (SIGTERM via `yb-proc::actions`, snapshot-validated guard)
 - [x] Confirm dialog (kill) + per-row stop button
 - [x] `src-tauri`: `free_port` command (guarded by `pid_owns_tracked_port`) + clickable port chips → confirm
-- [ ] `src-tauri`: menu-bar/tray live status (busy · $today · blocked) — *1b-5*
-- [ ] React: TanStack Table data grid, detail panel, live filter/sort, keyboard shortcuts — *1b-5*
-- [ ] Working-diff viewer + transcript replay (detail panel)
-- [ ] Native notifications + deep links (finish/blocked)
-- [ ] Permission/approval inbox — **detection only (read-only)**
+- [x] `src-tauri`: tray live status (busy · sessions · projects), updated each tick
+- [x] React: filter box + sort control + keyboard shortcut + detail panel (hand-rolled grid; TanStack deferred as an impl detail)
+- [x] Working-diff viewer + transcript replay (detail panel)
+- [x] Native notifications (finish / awaiting-permission transitions)
+- [x] Permission/approval inbox — **detection only** (`awaiting_permission` + "needs you" filter)
+- [x] Orphan-port detection + free
 
 ### yb-exec
 - [x] `Cmd::output` (run/wait/capture) + typed `ExecError`
-- [ ] `Cmd::stream(tx,cancel)` / `spawn_detached(log,pid)` + pid files — *when review/services need them*
+- [x] `Cmd::stream(cancel, on_line)` (cooperative cancel) + `spawn_detached(log, pid_file)` (new process group)
 
 ### yb-git
 - [x] `GitRepo` (current_branch/toplevel) + `Gh` (pr_list/view/diff); `PullRequest` type
@@ -99,11 +100,11 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [ ] PR list · review-run progress (per-agent rows via events, cancelable) · findings (post to PR) · worktree board · diff/conflict viewers · merge/rebase dialogs
 
 ### v1 testing
-- [ ] Unit (context math, transcript incremental==oracle, sub-agent matching, branch derivation, port determinism, JSON extraction)
-- [ ] Collector fixtures (`tempfile`; trimmed `<pid>.json`, all-line-type `.jsonl`, in-test codex sqlite)
-- [ ] `yb-proc` parse tests + subtree + feature-gated sigterm
-- [ ] Frontend component tests (Vitest/RTL) + Playwright smoke; Tauri command tests
-- [ ] End-to-end manual against the live machine
+- [x] Unit (context math, transcript incremental==oracle, port attribution, rebase outcomes, JSON extraction)
+- [x] Collector fixtures (`tempfile`; `<pid>.json`, all-line-type `.jsonl`, in-test codex sqlite)
+- [x] `yb-proc` parse tests + subtree + sigterm; `yb-git` against tempfile repos + bare origin
+- [x] Frontend component tests (Vitest/RTL) + Playwright smoke (`make e2e`)
+- [ ] End-to-end manual against the live machine — **owner: you** (`make dev`; CI can't render the GUI)
 
 ## Phase 2 — Insights & Suggestions + manager + search + PR/CI dashboard (`yb-insights`, `yb-config`)
 - [ ] `model→pricing` table; cost tracking ($/session/project/day/model) + leaderboards

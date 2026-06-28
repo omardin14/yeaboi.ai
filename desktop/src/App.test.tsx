@@ -33,6 +33,7 @@ const { SNAP } = vi.hoisted(() => ({
         context: { used: 1, window: 2, pct: 0.5 },
         last_prompt: "hi",
         sub_agent_count: 0,
+        awaiting_permission: false,
         proc_stats: { cpu_pct: 1, mem_bytes: 1, uptime_secs: 1, ppid: 1 },
         // Distinct from the session pid (4242) so a test can prove the port's
         // pid — not the session's — is what reaches free_port.
@@ -40,6 +41,7 @@ const { SNAP } = vi.hoisted(() => ({
       },
     ],
     totals: { session_count: 1, busy_count: 1, project_count: 1 },
+    orphan_ports: [],
     warnings: [],
   },
 }));

@@ -87,6 +87,7 @@ impl CodexCollector {
                     .filter(|m| !m.is_empty())
                     .map(|m| crate::util::truncate(&m, 200)),
                 sub_agent_count: 0,
+                awaiting_permission: false,
                 proc_stats: None,
                 ports: Vec::new(),
             })

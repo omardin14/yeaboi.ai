@@ -59,6 +59,10 @@ gen-bindings: ## Regenerate Rust->TS bindings (desktop/src/lib/bindings)
 	$(CARGO) test -p yb-core --features ts
 	$(CARGO) test -p yb-git --features ts
 
+.PHONY: e2e
+e2e: desktop/node_modules ## Playwright smoke of the built frontend (needs `pnpm exec playwright install chromium`)
+	cd desktop && $(PNPM) build && $(PNPM) e2e
+
 .PHONY: verify
 verify: lint test cli ## Run everything CI runs
 
