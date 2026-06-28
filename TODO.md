@@ -70,13 +70,15 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [ ] Permission/approval inbox — **detection only (read-only)**
 
 ### yb-exec
-- [ ] `Cmd::output` / `Cmd::stream(tx,cancel)` / `spawn_detached(log,pid)` + pid files
+- [x] `Cmd::output` (run/wait/capture) + typed `ExecError`
+- [ ] `Cmd::stream(tx,cancel)` / `spawn_detached(log,pid)` + pid files — *when review/services need them*
 
 ### yb-git
-- [ ] `GitRepo` + `Gh` wrappers; types `PullRequest`/`MergeMethod`/`ReviewFinding`/`Conflict`/`RebaseOutcome`
-- [ ] PR ops: `pr_list/view/diff/find_existing/create/merge/comment/review`
-- [ ] Git ops: `push/current_branch/pull_rebase/rebase_continue/abort/merged_branches/list_conflicts`
-- [ ] Structured `GhError`/`GitError` → UI toasts
+- [x] `GitRepo` (current_branch/toplevel) + `Gh` (pr_list/view/diff); `PullRequest` type
+- [x] Structured `GitError`/`GhError` (command/exit/stderr); `yeaboi prs` validates the path live
+- [ ] PR ops: `find_existing/create/merge/comment/review`; types `MergeMethod`/`ReviewFinding`/`Conflict`/`RebaseOutcome`
+- [ ] Git ops: `push/pull_rebase/rebase_continue/abort/merged_branches/list_conflicts`
+- [ ] Desktop PR list/diff view (consume from the Tauri shell)
 
 ### yb-worktree (decentralized, GitHubIssueTriager model)
 - [ ] `project.toml` schema (`branch_rules`/`[ports]`/`[lifecycle]`/`[[services]]`/`[env]`) + global repo registry

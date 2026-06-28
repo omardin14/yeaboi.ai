@@ -5092,6 +5092,7 @@ dependencies = [
  "clap",
  "serde_json",
  "yb-core",
+ "yb-git",
  "yb-proc",
 ]
 
@@ -5110,11 +5111,18 @@ dependencies = [
 [[package]]
 name = "yb-exec"
 version = "0.0.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "yb-git"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
  "yb-exec",
 ]
 

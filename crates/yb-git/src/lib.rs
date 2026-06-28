@@ -1,16 +1,43 @@
-//! Typed wrappers over `git` + `gh` (PR list/diff/create/merge/review,
-//! rebase/conflicts). Phase 0 stub — depends on [`yb_exec`] for spawning.
+//! Typed wrappers over `git` and `gh` (via [`yb_exec`]).
+//!
+//! Phase 1c ships the read side of the PR loop: [`GitRepo`] (branch/toplevel)
+//! and [`Gh`] (PR list / view / diff). Create/merge/rebase/review land in the
+//! following slices on the same error-handling spine.
 
-/// Crate marker used by Phase 0 to verify linkage; replaced by `GitRepo`/`Gh`
-/// in Phase 1.
-pub fn placeholder() -> String {
-    format!("yb-git (runs via {})", yb_exec::placeholder())
+mod gh;
+mod git;
+
+pub use gh::{Gh, PullRequest, parse_pr_list};
+pub use git::GitRepo;
+
+use thiserror::Error;
+
+/// A `git` invocation that ran but exited non-zero. Spawn failures come through
+/// [`yb_exec::ExecError`] (the `Exec` variant).
+#[derive(Debug, Error)]
+pub enum GitError {
+    #[error("git {args} failed (exit {code:?}): {stderr}")]
+    Command {
+        args: String,
+        code: Option<i32>,
+        stderr: String,
+    },
+    #[error(transparent)]
+    Exec(#[from] yb_exec::ExecError),
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn placeholder_links_exec() {
-        assert!(super::placeholder().contains("yb-exec"));
-    }
+/// A `gh` invocation that failed to run, exited non-zero, or returned
+/// unparseable JSON.
+#[derive(Debug, Error)]
+pub enum GhError {
+    #[error("gh {args} failed (exit {code:?}): {stderr}")]
+    Command {
+        args: String,
+        code: Option<i32>,
+        stderr: String,
+    },
+    #[error(transparent)]
+    Exec(#[from] yb_exec::ExecError),
+    #[error("could not parse gh JSON: {0}")]
+    Json(#[from] serde_json::Error),
 }
