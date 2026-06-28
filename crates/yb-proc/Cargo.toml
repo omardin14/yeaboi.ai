@@ -6,3 +6,5 @@ license.workspace = true
 description = "yeaboi.ai process table, ports, and signals"
 
 [dependencies]
+yb-core = { workspace = true }
+sysinfo = { workspace = true }

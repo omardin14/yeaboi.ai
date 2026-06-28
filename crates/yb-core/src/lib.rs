@@ -1,68 +1,99 @@
-//! Core domain model for yeaboi.ai.
+//! Core domain model + read-only collectors for yeaboi.ai.
 //!
-//! Presentation-agnostic: no UI, no OS-specific code. Both the Tauri desktop
-//! app and the headless CLI consume the same [`Snapshot`].
+//! Presentation-agnostic: no UI, no `tauri`, no `sysinfo`, no subprocess
+//! spawning. Both the Tauri desktop app and the headless CLI consume the same
+//! [`Snapshot`], built by [`Engine::collect`] from the local data Claude/Codex
+//! already write to disk.
 //!
-//! Phase 0 ships a stub `Snapshot` that proves the data contract end-to-end
-//! (CLI JSON + Tauri command/event). Phase 1 replaces the stub with real
-//! collectors over `~/.claude` and `~/.codex`.
+//! The OS process table is supplied from the outside as a [`ProcTable`] (filled
+//! by `yb-proc`) so this crate never depends upward on an OS-specific crate.
 //!
-//! TypeScript types are generated from these structs via `ts-rs` under the
-//! `ts` feature (enabled only when regenerating bindings, e.g.
+//! TypeScript types are generated from the model via `ts-rs` under the `ts`
+//! feature (enabled only when regenerating bindings, e.g.
 //! `cargo test -p yb-core --features ts`). The headless CLI never enables it.
 
-use serde::{Deserialize, Serialize};
+pub mod adapters;
+pub mod engine;
+pub mod model;
+pub mod project;
+pub(crate) mod util;
 
-/// Immutable snapshot of everything the monitor knows at a point in time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[cfg_attr(
-    feature = "ts",
-    ts(export, export_to = "../../../desktop/src/lib/bindings/")
-)]
-pub struct Snapshot {
-    /// Unix epoch milliseconds when this snapshot was built.
-    // u64 over the wire is a JSON number; pin the TS type so it doesn't become `bigint`.
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub generated_at_ms: u64,
-    /// Sessions known at this tick (stub shape in Phase 0).
-    pub sessions: Vec<SessionStub>,
-    /// Non-fatal collector degradations to surface in the UI.
-    pub warnings: Vec<String>,
+pub use engine::{CollectOptions, Engine};
+pub use model::{
+    ActivityStatus, ContextUsage, HostApp, ProcStats, ProcTable, Project, Provider, Session,
+    Snapshot, Totals,
+};
+
+/// Errors surfaced by the collector path. Most failures are *per-source* and
+/// degrade to a `Snapshot.warnings` entry rather than failing the whole tick;
+/// this type is for the few hard failures (e.g. a malformed home directory).
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("io error reading {path}: {source}")]
+    Io {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
 }
 
-/// Minimal session shape for Phase 0. Phase 1 expands this into the full
-/// `Session` (pid, cwd, model, context, sub-agents, ports, …).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[cfg_attr(
-    feature = "ts",
-    ts(export, export_to = "../../../desktop/src/lib/bindings/")
-)]
-pub struct SessionStub {
-    pub id: String,
-    pub project: String,
-    pub status: String,
+/// Convenience result alias for the crate.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Current Unix time in milliseconds (`0` if the clock predates the epoch — a
+/// documented, harmless fallback; the UI shows "—" when `generated_at_ms == 0`).
+pub fn now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl Snapshot {
-    /// Deterministic sample snapshot used by the CLI/desktop until real
-    /// collectors land. `generated_at_ms` is fixed (0) for stable tests.
+    /// Deterministic sample snapshot (fixed time 0) used by the desktop shell
+    /// until it renders live data. Kept tiny — it only has to type-check the
+    /// Rust↔TS seam.
     pub fn stub() -> Self {
+        let session = Session {
+            id: "stub-1".to_string(),
+            pid: Some(1234),
+            project_id: "yeaboi.ai".to_string(),
+            provider: Provider::Claude,
+            host_app: HostApp::Cli,
+            cwd: "/Users/dinho/Documents/ai-manager".to_string(),
+            name: Some("ai-manager".to_string()),
+            model: Some("claude-opus-4-8".to_string()),
+            status: ActivityStatus::Busy,
+            branch: Some("main".to_string()),
+            started_at_ms: 0,
+            updated_at_ms: 0,
+            context: Some(ContextUsage::new(144_593, 200_000)),
+            last_prompt: Some("stub prompt".to_string()),
+            sub_agent_count: 0,
+            proc_stats: None,
+        };
+        let project = Project {
+            id: "yeaboi.ai".to_string(),
+            name: "yeaboi.ai".to_string(),
+            root: "/Users/dinho/Documents/ai-manager".to_string(),
+            remote: None,
+            session_ids: vec![session.id.clone()],
+            busy_count: 1,
+            session_count: 1,
+        };
         Snapshot {
             generated_at_ms: 0,
-            sessions: vec![
-                SessionStub {
-                    id: "stub-1".to_string(),
-                    project: "yeaboi.ai".to_string(),
-                    status: "busy".to_string(),
-                },
-                SessionStub {
-                    id: "stub-2".to_string(),
-                    project: "planning-platform".to_string(),
-                    status: "idle".to_string(),
-                },
-            ],
+            totals: Totals {
+                session_count: 1,
+                busy_count: 1,
+                project_count: 1,
+            },
+            projects: vec![project],
+            sessions: vec![session],
             warnings: Vec::new(),
         }
     }
@@ -77,26 +108,16 @@ impl Snapshot {
     }
 }
 
-fn now_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        // `now()` is always ≥ UNIX_EPOCH on supported platforms; 0 is a harmless
-        // documented fallback (the UI shows "—" when generated_at_ms == 0).
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn stub_has_sessions_and_fixed_time() {
+    fn stub_has_one_session_and_project() {
         let s = Snapshot::stub();
-        assert_eq!(s.sessions.len(), 2);
+        assert_eq!(s.sessions.len(), 1);
+        assert_eq!(s.projects.len(), 1);
         assert_eq!(s.generated_at_ms, 0);
-        assert!(s.warnings.is_empty());
     }
 
     #[test]

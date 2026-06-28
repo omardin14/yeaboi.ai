@@ -36,3 +36,8 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# OS introspection + read-only sqlite (Phase 1a data path)
+sysinfo = "0.33"
+rusqlite = { version = "0.32", features = ["bundled"] }
+# test helpers
+tempfile = "3"

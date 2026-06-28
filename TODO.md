@@ -29,25 +29,30 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 
 ## Phase 1 — Monitor + worktrees + full PR/git loop (v1)
 
+> **Phase 1a (data path, headless) — DONE.** `make cli --json/--once/--interval`
+> shows real live sessions grouped by project with context %, model, CPU/MEM.
+> Deferred from 1a: `notify` fs-watch, `watch<Arc<Snapshot>>` stream, lsof ports,
+> sigterm/free-port (these land with the desktop monitor in 1b).
+
 ### yb-core (data + collectors)
-- [ ] `model`: `Snapshot{projects,sessions,totals,warnings}`, `Project`, `Session`, `SubAgent`, `Port`, `ProcStats`, `ContextUsage`, enums
-- [ ] `model::windows` model→context-window table; `ContextUsage` token math (+ unit tests)
-- [ ] `Collector` trait + `Registry` (concurrent collect) + enrichment join (proc subtree + ports by pid)
-- [ ] `ClaudeCollector` Tier A — `sessions/*.json` mtime dirty-check → pid/cwd/status
-- [ ] `ClaudeCollector` Tier B — `TranscriptCursor` incremental tail; `RawLine` type-tagged enum; sub-agent open/close by tool_use id; `last-prompt`; truncation reset
-- [ ] `ProjectResolver` — `git --git-common-dir`/`--show-toplevel` grouping; roll worktrees under repo
-- [ ] `CodexCollector` — `rusqlite` read-only; recency-bounded `agent_jobs`/`threads` queries
-- [ ] `notify` fs-watch wrapper (dirty-path set)
-- [ ] `engine` — 1s tick loop + `watch<Arc<Snapshot>>`; idle skip
+- [x] `model`: `Snapshot{projects,sessions,totals,warnings}`, `Project`, `Session`, `ProcStats`, `ContextUsage`, enums (`SubAgent`→`sub_agent_count`; `Port` deferred to 1b)
+- [x] `model::windows` model→context-window table; `ContextUsage` token math (+ unit tests)
+- [x] `Collector` trait + `Registry` + enrichment join (proc by pid); dedup-by-id, project rollup
+- [x] `ClaudeCollector` Tier A — `sessions/*.json` → pid/cwd/status (status optional)
+- [x] `ClaudeCollector` Tier B — `TranscriptCursor` incremental tail; `RawLine` type-tagged enum; `last-prompt`; truncation reset; sub-agent count via tool_use
+- [x] `ProjectResolver` — pure-filesystem `.git`/worktree common-dir grouping; roll worktrees under repo
+- [x] `CodexCollector` — `rusqlite` read-only; recency-bounded `threads` query
+- [ ] `notify` fs-watch wrapper (dirty-path set) — *1b*
+- [ ] `engine` — 1s tick loop + `watch<Arc<Snapshot>>`; idle skip — *1b (CLI uses a sync loop)*
 
 ### yb-proc
-- [ ] `sysinfo` `ProcTable` (cpu+mem+parent) + ppid subtree BFS
-- [ ] `lsof -Fpn` parser + 750ms timeout/degrade + orphan-port heuristic
-- [ ] `actions::sigterm(pid)` (nix, guards) + `free_port`
+- [x] `sysinfo` `ProcTable` (cpu+mem+parent) + ppid subtree BFS
+- [ ] `lsof -Fpn` parser + 750ms timeout/degrade + orphan-port heuristic — *1b*
+- [ ] `actions::sigterm(pid)` (nix, guards) + `free_port` — *1b*
 
 ### yb-cli (headless — build & validate the data path first)
-- [ ] clap args: `--once`, `--json`, `--interval`, `--no-ports`
-- [ ] wire collectors → engine → JSON/once output
+- [x] clap args: `--once`, `--json`, `--interval`, `--no-ports` (+ `--hide-dead`)
+- [x] wire collectors → engine → JSON/once output
 
 ### desktop — monitor
 - [ ] `src-tauri`: stream `Snapshot` as events; commands `kill_session`/`free_port`; menu-bar/tray (busy · $today · blocked)

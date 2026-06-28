@@ -2,14 +2,17 @@
 //! setup (discover-on-read, MD5 ports byte-compatible with `assign-port.ts`).
 //! Phase 0 stub — composes [`yb_exec`], [`yb_git`], and [`yb_proc`].
 
+// `yb-proc` became a real crate (process sampler) ahead of the worktree engine;
+// keep the architectural dependency edge declared until the engine uses it.
+use yb_proc as _;
+
 /// Crate marker used by Phase 0 to verify the dependency edges; replaced by the
 /// `WorktreeEngine` (create/open/list/remove/prune) + `PortAllocator` in Phase 1.
 pub fn placeholder() -> String {
     format!(
-        "yb-worktree ({} + {} + {})",
+        "yb-worktree ({} + {} + yb-proc)",
         yb_exec::placeholder(),
         yb_git::placeholder(),
-        yb_proc::placeholder(),
     )
 }
 
