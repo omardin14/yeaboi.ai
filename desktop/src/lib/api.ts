@@ -11,6 +11,14 @@ export function getSnapshot(): Promise<Snapshot> {
   return invoke<Snapshot>("get_snapshot");
 }
 
+/**
+ * Frontend → Rust: SIGTERM a session by pid. Rejects (with the backend's
+ * message) if the pid isn't a tracked live session or the signal fails.
+ */
+export function killSession(pid: number): Promise<void> {
+  return invoke<void>("kill_session", { pid });
+}
+
 /** Subscribe to the Rust-emitted snapshot stream (~every 1.5s). */
 export function subscribeSnapshot(
   onSnapshot: (snapshot: Snapshot) => void,

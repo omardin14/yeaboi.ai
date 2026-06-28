@@ -21,6 +21,17 @@ pub struct CollectOptions {
     pub drop_dead: bool,
 }
 
+/// Whether `pid` belongs to a session currently tracked as live (not `Dead`).
+///
+/// This is the authorization check the desktop `kill_session` command runs
+/// before signalling — extracted here so it's unit-testable without a running
+/// Tauri app, and so the rule lives next to the model it guards.
+pub fn pid_is_live_session(sessions: &[Session], pid: u32) -> bool {
+    sessions
+        .iter()
+        .any(|s| s.pid == Some(pid) && s.status != ActivityStatus::Dead)
+}
+
 /// Owns the collectors + resolver and produces snapshots.
 pub struct Engine {
     collectors: Vec<Box<dyn Collector>>,
@@ -302,6 +313,20 @@ mod tests {
         assert_eq!(snap.sessions.len(), 1);
         assert_eq!(snap.sessions[0].pid, Some(200));
         assert_eq!(snap.projects[0].session_ids, vec!["dup".to_string()]);
+    }
+
+    #[test]
+    fn pid_is_live_session_gate() {
+        let sessions = vec![
+            session("live", Some(100), "/tmp/a", ActivityStatus::Idle),
+            session("dead", Some(200), "/tmp/b", ActivityStatus::Dead),
+        ];
+        // tracked + live → allowed
+        assert!(pid_is_live_session(&sessions, 100));
+        // tracked but Dead → refused
+        assert!(!pid_is_live_session(&sessions, 200));
+        // untracked pid → refused
+        assert!(!pid_is_live_session(&sessions, 999));
     }
 
     #[test]
