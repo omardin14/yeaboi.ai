@@ -21,6 +21,7 @@ function session(over: Partial<Session> = {}): Session {
     last_prompt: "alpha task",
     sub_agent_count: 2,
     proc_stats: { cpu_pct: 12, mem_bytes: 524_288_000, uptime_secs: 3600, ppid: 1 },
+    ports: [],
     ...over,
   };
 }
@@ -124,6 +125,36 @@ test("only lists a project's own sessions under it", () => {
     .getByRole("heading", { name: "repo-b" })
     .closest("section") as HTMLElement;
   expect(within(section).getAllByRole("row")).toHaveLength(1);
+});
+
+test("renders a chip per listening port", () => {
+  const snap: Snapshot = {
+    ...snapshot,
+    projects: [
+      {
+        id: "/repo-a",
+        name: "repo-a",
+        root: "/repo-a",
+        remote: null,
+        session_ids: ["s1"],
+        busy_count: 1,
+        session_count: 1,
+      },
+    ],
+    sessions: [
+      session({
+        id: "s1",
+        ports: [
+          { number: 1420, pid: 100, state: "LISTEN" },
+          { number: 5173, pid: 200, state: "LISTEN" },
+        ],
+      }),
+    ],
+    totals: { session_count: 1, busy_count: 1, project_count: 1 },
+  };
+  render(<Monitor snapshot={snap} />);
+  expect(screen.getByText(":1420")).toBeInTheDocument();
+  expect(screen.getByText(":5173")).toBeInTheDocument();
 });
 
 test("a stop button appears only for killable sessions and calls onKill", () => {

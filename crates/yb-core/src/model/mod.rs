@@ -115,6 +115,24 @@ pub struct ProcStats {
     pub ppid: Option<u32>,
 }
 
+/// A listening TCP port held by a session's process (or one of its children,
+/// e.g. a dev server). Joined in from `lsof`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../desktop/src/lib/bindings/")
+)]
+pub struct Port {
+    /// The listening port number.
+    pub number: u16,
+    /// The pid holding the socket (may be a child of the session pid).
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub pid: u32,
+    /// Socket state as reported by lsof (e.g. `LISTEN`).
+    pub state: String,
+}
+
 /// One AI coding session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -155,6 +173,8 @@ pub struct Session {
     pub sub_agent_count: u32,
     /// Process metrics joined in by pid, when the process is live.
     pub proc_stats: Option<ProcStats>,
+    /// Listening ports held by this session's process subtree.
+    pub ports: Vec<Port>,
 }
 
 /// A repository the sessions roll up under. Worktrees of one repo collapse here.

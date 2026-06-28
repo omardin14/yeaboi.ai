@@ -119,7 +119,10 @@ fn spawn_collector(handle: tauri::AppHandle, shared: SharedSnapshot) {
             // mode a monitor must never have.
             let collected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let proc = sampler.sample();
-                engine.collect(&proc)
+                let (ports, warn) = sample_ports();
+                let mut snap = engine.collect(&proc, &ports);
+                snap.warnings.extend(warn);
+                snap
             }));
             let snap = match collected {
                 Ok(snap) => snap,
@@ -138,6 +141,15 @@ fn spawn_collector(handle: tauri::AppHandle, shared: SharedSnapshot) {
             std::thread::sleep(TICK);
         }
     });
+}
+
+/// Enumerate listening ports, degrading a failure to a snapshot warning so a
+/// stuck `lsof` never blocks the live view.
+fn sample_ports() -> (Vec<yb_core::Port>, Option<String>) {
+    match yb_proc::ports::list() {
+        Ok(ports) => (ports, None),
+        Err(err) => (Vec::new(), Some(format!("ports: {err}"))),
+    }
 }
 
 /// Tell the frontend (and the logs) that live updates have stopped. The error
