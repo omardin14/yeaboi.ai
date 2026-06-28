@@ -1,17 +1,32 @@
 //! yeaboi.ai headless CLI — the same engine the desktop app uses, scriptable.
 //!
-//! Reads `~/.claude` + `~/.codex` read-only and prints a live [`Snapshot`]:
-//! `--json` for machine consumption, the default/`--once` for a top-style
-//! human frame, `--interval <secs>` to refresh in place.
+//! Default (no subcommand): a live monitor [`Snapshot`] (`--json` /`--once` /
+//! `--interval`). `yeaboi prs` lists the current repo's pull requests via `gh`.
 
 use std::io::Write;
 
-use clap::Parser;
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use yb_core::{ActivityStatus, CollectOptions, Engine, Port, Session, Snapshot};
 
 #[derive(Parser, Debug)]
 #[command(name = "yeaboi", version, about = "yeaboi.ai headless CLI")]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    #[command(flatten)]
+    monitor: MonitorArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// List pull requests for the current repo (via `gh`).
+    Prs(PrsArgs),
+}
+
+/// Flags for the default monitor view.
+#[derive(ClapArgs, Debug)]
+struct MonitorArgs {
     /// Emit the snapshot as JSON (one document per tick) instead of a table.
     #[arg(long)]
     json: bool,
@@ -33,9 +48,26 @@ struct Args {
     no_ports: bool,
 }
 
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+#[derive(ClapArgs, Debug)]
+struct PrsArgs {
+    /// Emit the PR list as JSON instead of a table.
+    #[arg(long)]
+    json: bool,
 
+    /// Maximum number of PRs to list.
+    #[arg(long, default_value_t = 30)]
+    limit: u32,
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Some(Command::Prs(args)) => run_prs(args),
+        None => run_monitor(cli.monitor),
+    }
+}
+
+fn run_monitor(args: MonitorArgs) -> anyhow::Result<()> {
     let options = CollectOptions {
         drop_dead: args.hide_dead,
     };
@@ -68,6 +100,35 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// `yeaboi prs`: list the current repo's pull requests via `gh`.
+fn run_prs(args: PrsArgs) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let prs = yb_git::Gh::new(cwd).pr_list(args.limit)?;
+
+    let mut out = std::io::stdout().lock();
+    if args.json {
+        serde_json::to_writer_pretty(&mut out, &prs)?;
+        writeln!(out)?;
+    } else if prs.is_empty() {
+        writeln!(out, "no pull requests")?;
+    } else {
+        for pr in &prs {
+            let draft = if pr.is_draft { " (draft)" } else { "" };
+            writeln!(
+                out,
+                "#{:<4} {:<7} {:<26} {}{}",
+                pr.number,
+                pr.state,
+                truncate(&pr.head, 26),
+                truncate(&pr.title, 56),
+                draft,
+            )?;
+        }
+    }
+    out.flush()?;
+    Ok(())
 }
 
 /// Enumerate listening ports unless `--no-ports`, degrading a failure to a

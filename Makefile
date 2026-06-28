@@ -57,6 +57,7 @@ build: ## Build the Rust workspace
 .PHONY: gen-bindings
 gen-bindings: ## Regenerate Rust->TS bindings (desktop/src/lib/bindings)
 	$(CARGO) test -p yb-core --features ts
+	$(CARGO) test -p yb-git --features ts
 
 .PHONY: verify
 verify: lint test cli ## Run everything CI runs

@@ -70,13 +70,16 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 - [ ] Permission/approval inbox — **detection only (read-only)**
 
 ### yb-exec
-- [ ] `Cmd::output` / `Cmd::stream(tx,cancel)` / `spawn_detached(log,pid)` + pid files
+- [x] `Cmd::output` (run/wait/capture) + typed `ExecError`
+- [ ] `Cmd::stream(tx,cancel)` / `spawn_detached(log,pid)` + pid files — *when review/services need them*
 
 ### yb-git
-- [ ] `GitRepo` + `Gh` wrappers; types `PullRequest`/`MergeMethod`/`ReviewFinding`/`Conflict`/`RebaseOutcome`
-- [ ] PR ops: `pr_list/view/diff/find_existing/create/merge/comment/review`
-- [ ] Git ops: `push/current_branch/pull_rebase/rebase_continue/abort/merged_branches/list_conflicts`
-- [ ] Structured `GhError`/`GitError` → UI toasts
+- [x] `GitRepo` (current_branch/toplevel) + `Gh` (pr_list/view/diff); `PullRequest` type
+- [x] Structured `GitError`/`GhError` (command/exit/stderr); `yeaboi prs` validates the path live
+- [x] PR ops: `find_existing/create/merge/comment`; types `MergeMethod`/`RebaseOutcome` (ts-exported)
+- [x] Git ops: `push_current/rebase_onto/rebase_continue/abort/merged_branches/list_conflicts`
+- [x] Desktop PR view: project picker + list + diff viewer + merge/comment/open/sync (Monitor|PRs tabs)
+- [ ] `review` (agent-driven) — *lands with yb-agent (1e)*
 
 ### yb-worktree (decentralized, GitHubIssueTriager model)
 - [ ] `project.toml` schema (`branch_rules`/`[ports]`/`[lifecycle]`/`[[services]]`/`[env]`) + global repo registry
