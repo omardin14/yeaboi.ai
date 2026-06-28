@@ -1,17 +1,32 @@
 import { useEffect, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Snapshot } from "@/lib/bindings/Snapshot";
+import type { Session } from "@/lib/bindings/Session";
 import {
   getSnapshot,
+  killSession,
   subscribeSnapshot,
   subscribeSnapshotError,
 } from "@/lib/api";
 import { Monitor } from "@/components/monitor";
 import { WarningsBanner } from "@/components/warnings-banner";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [killTarget, setKillTarget] = useState<Session | null>(null);
+
+  async function confirmKill() {
+    const target = killTarget;
+    setKillTarget(null);
+    if (target?.pid == null) return;
+    try {
+      await killSession(target.pid);
+    } catch (e) {
+      setError(`Failed to stop session ${target.pid}: ${e}`);
+    }
+  }
 
   useEffect(() => {
     // Outside Tauri (e.g. plain `vite` in a browser) the IPC bridge is absent —
@@ -73,8 +88,29 @@ function App() {
 
         <WarningsBanner warnings={snapshot?.warnings ?? []} />
 
-        <Monitor snapshot={snapshot} />
+        <Monitor snapshot={snapshot} onKill={setKillTarget} />
       </div>
+
+      <ConfirmDialog
+        open={killTarget != null}
+        title="Stop this session?"
+        confirmLabel="Stop (SIGTERM)"
+        danger
+        onConfirm={confirmKill}
+        onCancel={() => setKillTarget(null)}
+      >
+        {killTarget && (
+          <div className="space-y-1">
+            <p>
+              Sends <span className="font-mono">SIGTERM</span> to pid{" "}
+              <span className="font-mono text-zinc-200">{killTarget.pid}</span>.
+            </p>
+            <p className="font-mono text-zinc-400">
+              {killTarget.model ?? "—"} · {killTarget.cwd}
+            </p>
+          </div>
+        )}
+      </ConfirmDialog>
     </main>
   );
 }

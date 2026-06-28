@@ -22,11 +22,22 @@ function StatusBadge({ status }: { status: ActivityStatus }) {
   );
 }
 
-function SessionRow({ session }: { session: Session }) {
+/** A session can be stopped only if it has a live process. */
+function isKillable(session: Session): boolean {
+  return session.pid != null && session.status !== "Dead";
+}
+
+function SessionRow({
+  session,
+  onKill,
+}: {
+  session: Session;
+  onKill?: (session: Session) => void;
+}) {
   const ctx = session.context?.pct ?? null;
   const cpu = session.proc_stats?.cpu_pct ?? null;
   return (
-    <tr className="border-b border-zinc-900 last:border-0 hover:bg-zinc-900/40">
+    <tr className="group border-b border-zinc-900 last:border-0 hover:bg-zinc-900/40">
       <td className="py-1.5 pr-3">
         <StatusBadge status={session.status} />
       </td>
@@ -51,8 +62,21 @@ function SessionRow({ session }: { session: Session }) {
       <td className="py-1.5 pr-3 text-zinc-500">
         {session.sub_agent_count > 0 ? `⌥${session.sub_agent_count}` : ""}
       </td>
-      <td className="max-w-md truncate py-1.5 text-zinc-500" title={session.last_prompt ?? ""}>
+      <td className="max-w-md truncate py-1.5 pr-3 text-zinc-500" title={session.last_prompt ?? ""}>
         {session.last_prompt ?? ""}
+      </td>
+      <td className="py-1.5 text-right">
+        {onKill && isKillable(session) && (
+          <button
+            type="button"
+            aria-label={`Stop session ${session.id}`}
+            title="Stop session (SIGTERM)"
+            onClick={() => onKill(session)}
+            className="rounded px-1.5 py-0.5 text-xs text-zinc-600 opacity-0 transition hover:bg-rose-500/10 hover:text-rose-400 group-hover:opacity-100"
+          >
+            stop
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -61,9 +85,11 @@ function SessionRow({ session }: { session: Session }) {
 function ProjectGroup({
   project,
   sessions,
+  onKill,
 }: {
   project: Project;
   sessions: Session[];
+  onKill?: (session: Session) => void;
 }) {
   return (
     <section className="mb-5">
@@ -80,7 +106,7 @@ function ProjectGroup({
       <table className="w-full border-collapse text-sm">
         <tbody>
           {sessions.map((s) => (
-            <SessionRow key={s.id} session={s} />
+            <SessionRow key={s.id} session={s} onKill={onKill} />
           ))}
         </tbody>
       </table>
@@ -90,9 +116,16 @@ function ProjectGroup({
 
 /**
  * The monitor view: sessions grouped under their project, rendered purely from
- * the streamed snapshot. Phase 1b-next adds sort/filter, ports, and actions.
+ * the streamed snapshot. `onKill` (when provided) enables a per-row stop button.
+ * Phase 1b-next adds sort/filter and ports.
  */
-export function Monitor({ snapshot }: { snapshot: Snapshot | null }) {
+export function Monitor({
+  snapshot,
+  onKill,
+}: {
+  snapshot: Snapshot | null;
+  onKill?: (session: Session) => void;
+}) {
   if (!snapshot) {
     return <p className="text-sm text-zinc-500">Connecting…</p>;
   }
@@ -123,6 +156,7 @@ export function Monitor({ snapshot }: { snapshot: Snapshot | null }) {
             key={project.id}
             project={project}
             sessions={sessions}
+            onKill={onKill}
           />
         );
       })}

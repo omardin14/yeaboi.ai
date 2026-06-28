@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 use yb_core::{ProcStats, ProcTable};
 
+pub mod actions;
+
 /// Reusable process sampler. Holds a `System` so CPU deltas accumulate across
 /// `sample` calls without an artificial sleep on the hot path.
 pub struct Sampler {

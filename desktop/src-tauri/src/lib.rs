@@ -3,8 +3,8 @@
 //! A background collector thread owns the [`Engine`] + a `yb-proc` [`Sampler`],
 //! builds a real [`Snapshot`] every tick, stores the latest in shared state
 //! (so [`get_snapshot`] answers on demand) and streams each one to the frontend
-//! as a `snapshot-update` event. Read-only — mutations (kill / free-port) and
-//! port collection land in the next slice.
+//! as a `snapshot-update` event. The one write path so far is [`kill_session`]
+//! (SIGTERM, guarded); port collection + free-port land in a later slice.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -59,6 +59,26 @@ fn get_snapshot(state: State<'_, SharedSnapshot>) -> Snapshot {
     snapshot_of(&state)
 }
 
+/// Frontend → Rust: SIGTERM a session by pid.
+///
+/// Guarded twice over: we only signal a pid we currently track as a live
+/// (non-`Dead`) session — so a stale/forged pid from the UI can't be used to
+/// kill an arbitrary process — and `yb_proc` itself refuses pid ≤ 1. Returns
+/// `Err(String)` (a rejected JS promise) the frontend surfaces as an error.
+#[tauri::command]
+fn kill_session(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String> {
+    let tracked = snapshot_of(&state)
+        .sessions
+        .iter()
+        .any(|s| s.pid == Some(pid) && s.status != yb_core::ActivityStatus::Dead);
+    if !tracked {
+        return Err(format!(
+            "pid {pid} is not a live session yeaboi is tracking — refusing to signal it"
+        ));
+    }
+    yb_proc::actions::sigterm(pid).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shared: SharedSnapshot = Arc::new(Mutex::new(empty_snapshot()));
@@ -66,7 +86,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_snapshot])
+        .invoke_handler(tauri::generate_handler![get_snapshot, kill_session])
         .setup(move |app| {
             // Minimal tray with a placeholder tooltip. A later slice renders live
             // status (busy count · $today · blocked) and a click-to-open menu.

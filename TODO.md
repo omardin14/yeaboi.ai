@@ -60,9 +60,10 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 > state for `get_snapshot`) and renders a project-grouped grid with heat colors.
 - [x] `src-tauri`: stream the real `Snapshot` as events + `get_snapshot` from shared state
 - [x] React: project-grouped grid (status/pid/model/ctx%/cpu/mem/branch/sub-agents/prompt) + heat colors
-- [ ] `src-tauri`: commands `kill_session`/`free_port`; menu-bar/tray live status (busy · $today · blocked) — *1b-2*
-- [ ] React: TanStack Table data grid, detail panel, live filter/sort, keyboard shortcuts — *1b-2*
-- [ ] Confirm dialogs (kill / free-port) — *1b-2*
+- [x] `src-tauri`: `kill_session` command (SIGTERM via `yb-proc::actions`, snapshot-validated guard)
+- [x] Confirm dialog (kill) + per-row stop button
+- [ ] `src-tauri`: `free_port` command; menu-bar/tray live status (busy · $today · blocked) — *1b-3*
+- [ ] React: TanStack Table data grid, detail panel, live filter/sort, keyboard shortcuts — *1b-3*
 - [ ] Working-diff viewer + transcript replay (detail panel)
 - [ ] Native notifications + deep links (finish/blocked)
 - [ ] Permission/approval inbox — **detection only (read-only)**

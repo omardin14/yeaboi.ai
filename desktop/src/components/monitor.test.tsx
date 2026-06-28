@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import { Monitor } from "@/components/monitor";
 import type { Snapshot } from "@/lib/bindings/Snapshot";
 import type { Session } from "@/lib/bindings/Session";
@@ -124,6 +124,27 @@ test("only lists a project's own sessions under it", () => {
     .getByRole("heading", { name: "repo-b" })
     .closest("section") as HTMLElement;
   expect(within(section).getAllByRole("row")).toHaveLength(1);
+});
+
+test("a stop button appears only for killable sessions and calls onKill", () => {
+  const onKill = vi.fn();
+  render(<Monitor snapshot={snapshot} onKill={onKill} />);
+  // s1 has a live pid → killable; s3 has pid null → not killable.
+  expect(
+    screen.getByRole("button", { name: "Stop session s1" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Stop session s3" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Stop session s1" }));
+  expect(onKill).toHaveBeenCalledTimes(1);
+  expect(onKill.mock.calls[0][0].id).toBe("s1");
+});
+
+test("no stop buttons render without an onKill handler", () => {
+  render(<Monitor snapshot={snapshot} />);
+  expect(screen.queryByRole("button", { name: /Stop session/ })).toBeNull();
 });
 
 test("warns and skips a project's dangling session id", () => {
