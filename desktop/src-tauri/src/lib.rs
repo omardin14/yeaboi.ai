@@ -67,11 +67,8 @@ fn get_snapshot(state: State<'_, SharedSnapshot>) -> Snapshot {
 /// `Err(String)` (a rejected JS promise) the frontend surfaces as an error.
 #[tauri::command]
 fn kill_session(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String> {
-    let tracked = snapshot_of(&state)
-        .sessions
-        .iter()
-        .any(|s| s.pid == Some(pid) && s.status != yb_core::ActivityStatus::Dead);
-    if !tracked {
+    let snapshot = snapshot_of(&state);
+    if !yb_core::pid_is_live_session(&snapshot.sessions, pid) {
         return Err(format!(
             "pid {pid} is not a live session yeaboi is tracking — refusing to signal it"
         ));

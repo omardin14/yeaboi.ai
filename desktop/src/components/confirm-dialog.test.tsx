@@ -30,3 +30,14 @@ test("confirm and cancel fire their callbacks", () => {
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(onCancel).toHaveBeenCalledTimes(1);
 });
+
+test("Escape cancels the dialog", () => {
+  const onCancel = vi.fn();
+  render(
+    <ConfirmDialog open title="Stop?" onConfirm={() => {}} onCancel={onCancel}>
+      <p>body</p>
+    </ConfirmDialog>,
+  );
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onCancel).toHaveBeenCalledTimes(1);
+});

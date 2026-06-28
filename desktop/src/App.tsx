@@ -20,7 +20,13 @@ function App() {
   async function confirmKill() {
     const target = killTarget;
     setKillTarget(null);
-    if (target?.pid == null) return;
+    if (target == null) return; // nothing selected — benign
+    if (target.pid == null) {
+      // Last line of defense: the stop button shouldn't appear for a pid-less
+      // session, so reaching here is a bug — surface it, never silently no-op.
+      setError("Cannot stop a session with no PID — please report this.");
+      return;
+    }
     try {
       await killSession(target.pid);
     } catch (e) {
@@ -91,15 +97,15 @@ function App() {
         <Monitor snapshot={snapshot} onKill={setKillTarget} />
       </div>
 
-      <ConfirmDialog
-        open={killTarget != null}
-        title="Stop this session?"
-        confirmLabel="Stop (SIGTERM)"
-        danger
-        onConfirm={confirmKill}
-        onCancel={() => setKillTarget(null)}
-      >
-        {killTarget && (
+      {killTarget && (
+        <ConfirmDialog
+          open
+          title="Stop this session?"
+          confirmLabel="Stop (SIGTERM)"
+          danger
+          onConfirm={confirmKill}
+          onCancel={() => setKillTarget(null)}
+        >
           <div className="space-y-1">
             <p>
               Sends <span className="font-mono">SIGTERM</span> to pid{" "}
@@ -109,8 +115,8 @@ function App() {
               {killTarget.model ?? "—"} · {killTarget.cwd}
             </p>
           </div>
-        )}
-      </ConfirmDialog>
+        </ConfirmDialog>
+      )}
     </main>
   );
 }

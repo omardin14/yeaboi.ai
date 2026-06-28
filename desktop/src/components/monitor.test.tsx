@@ -147,6 +147,32 @@ test("no stop buttons render without an onKill handler", () => {
   expect(screen.queryByRole("button", { name: /Stop session/ })).toBeNull();
 });
 
+test("a Dead session with a (recycled) pid still shows no stop button", () => {
+  // drop_dead defaults to false, so a Dead row with a non-null pid is a real
+  // shape — signalling it would target a process that's already gone/recycled.
+  const dead = session({ id: "s4", pid: 12345, status: "Dead", last_prompt: "dead one" });
+  const snap: Snapshot = {
+    ...snapshot,
+    projects: [
+      {
+        id: "/repo-d",
+        name: "repo-d",
+        root: "/repo-d",
+        remote: null,
+        session_ids: ["s4"],
+        busy_count: 0,
+        session_count: 1,
+      },
+    ],
+    sessions: [dead],
+    totals: { session_count: 1, busy_count: 0, project_count: 1 },
+  };
+  render(<Monitor snapshot={snap} onKill={vi.fn()} />);
+  expect(
+    screen.queryByRole("button", { name: "Stop session s4" }),
+  ).not.toBeInTheDocument();
+});
+
 test("warns and skips a project's dangling session id", () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const broken: Snapshot = {

@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 /**
  * A small modal confirmation. Deliberately a React component (not the native
  * `window.confirm`, which would block the webview). Renders nothing when closed.
+ * Escape cancels.
  */
 export function ConfirmDialog({
   open,
@@ -21,6 +22,15 @@ export function ConfirmDialog({
   onCancel: () => void;
   children?: ReactNode;
 }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
   if (!open) return null;
   return (
     <div
