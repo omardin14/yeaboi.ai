@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { Monitor } from "@/components/monitor";
 import { PrView } from "@/components/pr-view";
+import { SessionDetail } from "@/components/session-detail";
 import { WarningsBanner } from "@/components/warnings-banner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -27,6 +28,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [tab, setTab] = useState<Tab>("monitor");
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   async function confirmPending() {
     const action = pending;
@@ -84,6 +86,10 @@ function App() {
   }, []);
 
   const totals = snapshot?.totals;
+  // Re-resolved each render so the panel tracks live data and closes itself if
+  // the session disappears from the snapshot.
+  const detailSession =
+    snapshot?.sessions.find((s) => s.id === detailId) ?? null;
   const updatedAt =
     snapshot && snapshot.generated_at_ms > 0
       ? new Date(snapshot.generated_at_ms).toLocaleTimeString()
@@ -135,7 +141,14 @@ function App() {
               snapshot={snapshot}
               onKill={(session) => setPending({ kind: "kill", session })}
               onFreePort={(port) => setPending({ kind: "free", port })}
+              onSelect={(session) => setDetailId(session.id)}
             />
+            {detailSession && (
+              <SessionDetail
+                session={detailSession}
+                onClose={() => setDetailId(null)}
+              />
+            )}
           </>
         ) : (
           <PrView projects={snapshot?.projects ?? []} />

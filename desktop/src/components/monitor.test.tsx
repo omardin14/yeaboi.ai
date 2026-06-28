@@ -20,6 +20,7 @@ function session(over: Partial<Session> = {}): Session {
     context: { used: 180000, window: 200000, pct: 0.9 },
     last_prompt: "alpha task",
     sub_agent_count: 2,
+    awaiting_permission: false,
     proc_stats: { cpu_pct: 12, mem_bytes: 524_288_000, uptime_secs: 3600, ppid: 1 },
     ports: [],
     ...over,
@@ -70,6 +71,7 @@ const snapshot: Snapshot = {
     }),
   ],
   totals: { session_count: 3, busy_count: 1, project_count: 2 },
+  orphan_ports: [],
   warnings: [],
 };
 
@@ -230,6 +232,55 @@ test("a Dead session with a (recycled) pid still shows no stop button", () => {
   expect(
     screen.queryByRole("button", { name: "Stop session s4" }),
   ).not.toBeInTheDocument();
+});
+
+test("the filter box narrows to matching sessions", () => {
+  render(<Monitor snapshot={snapshot} />);
+  fireEvent.change(screen.getByLabelText("Filter sessions"), {
+    target: { value: "sonnet" },
+  });
+  // Only the sonnet session (beta task) survives.
+  expect(screen.getByText("beta task")).toBeInTheDocument();
+  expect(screen.queryByText("alpha task")).not.toBeInTheDocument();
+});
+
+test("an orphan port renders with a free button", () => {
+  const onFreePort = vi.fn();
+  const snap: Snapshot = {
+    ...snapshot,
+    orphan_ports: [{ number: 4321, pid: 777, state: "LISTEN" }],
+  };
+  render(<Monitor snapshot={snap} onFreePort={onFreePort} />);
+  expect(screen.getByText("Orphan ports")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Free port 4321" }));
+  expect(onFreePort).toHaveBeenCalledTimes(1);
+});
+
+test("selecting a row fires onSelect", () => {
+  const onSelect = vi.fn();
+  render(<Monitor snapshot={snapshot} onSelect={onSelect} />);
+  fireEvent.click(screen.getByText("alpha task"));
+  expect(onSelect).toHaveBeenCalledTimes(1);
+  expect(onSelect.mock.calls[0][0].id).toBe("s1");
+});
+
+test("the needs-you filter shows only awaiting sessions", () => {
+  const snap: Snapshot = {
+    ...snapshot,
+    sessions: [
+      session({ id: "s1", project_id: "/repo-a", last_prompt: "alpha task" }),
+      session({
+        id: "s2",
+        project_id: "/repo-a",
+        last_prompt: "beta task",
+        awaiting_permission: true,
+      }),
+    ],
+  };
+  render(<Monitor snapshot={snap} />);
+  fireEvent.click(screen.getByRole("button", { name: /need you/ }));
+  expect(screen.getByText("beta task")).toBeInTheDocument();
+  expect(screen.queryByText("alpha task")).not.toBeInTheDocument();
 });
 
 test("warns and skips a project's dangling session id", () => {

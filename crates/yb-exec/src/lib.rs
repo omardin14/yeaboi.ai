@@ -5,7 +5,9 @@
 //! when the review orchestrator and per-worktree services need them.
 
 use std::ffi::{OsStr, OsString};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use thiserror::Error;
 
@@ -19,6 +21,23 @@ pub enum ExecError {
         #[source]
         source: std::io::Error,
     },
+    #[error("io error running `{program}`: {source}")]
+    Io {
+        program: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// The result of a [`Cmd::stream`] run.
+#[derive(Debug, Clone)]
+pub struct StreamResult {
+    /// Exit code, or `None` if signalled (incl. our own cancel-kill).
+    pub status: Option<i32>,
+    /// Whether the process exited 0.
+    pub success: bool,
+    /// Whether we cancelled it.
+    pub canceled: bool,
 }
 
 /// The captured result of a finished command. `stdout`/`stderr` are decoded
@@ -99,6 +118,119 @@ impl Cmd {
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         })
     }
+
+    fn std_command(&self) -> std::process::Command {
+        let mut command = std::process::Command::new(&self.program);
+        command.args(&self.args);
+        if let Some(dir) = &self.cwd {
+            command.current_dir(dir);
+        }
+        command
+    }
+
+    fn program_name(&self) -> String {
+        self.program.to_string_lossy().into_owned()
+    }
+
+    /// Run, invoking `on_line` for each stdout line as it arrives. `cancel` is
+    /// checked continuously on a background reader, so setting it kills the child
+    /// promptly even mid-silence (cooperative cancellation). stderr is discarded;
+    /// use [`Cmd::output`] when you need it.
+    pub fn stream(
+        &self,
+        cancel: &AtomicBool,
+        mut on_line: impl FnMut(&str),
+    ) -> Result<StreamResult, ExecError> {
+        use std::process::Stdio;
+        use std::sync::mpsc::{self, RecvTimeoutError};
+        use std::time::Duration;
+
+        let mut child = self
+            .std_command()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|source| ExecError::Spawn {
+                program: self.program_name(),
+                source,
+            })?;
+
+        let stdout = child.stdout.take().expect("stdout was piped above");
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                match line {
+                    // Receiver gone (we cancelled) → stop reading.
+                    Ok(l) => {
+                        if tx.send(l).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let mut canceled = false;
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                canceled = true;
+                if let Err(e) = child.kill() {
+                    eprintln!("stream: failed to kill `{}`: {e}", self.program_name());
+                }
+                break;
+            }
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(line) => on_line(&line),
+                Err(RecvTimeoutError::Timeout) => continue,
+                // Reader finished — the process closed stdout (it's exiting).
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        let status = child.wait().map_err(|source| ExecError::Io {
+            program: self.program_name(),
+            source,
+        })?;
+        let _ = reader.join();
+
+        Ok(StreamResult {
+            status: status.code(),
+            success: status.success(),
+            canceled,
+        })
+    }
+
+    /// Spawn a long-lived process detached from us: a new process group (so it
+    /// outlives the app and isn't killed by our signals), stdout+stderr to
+    /// `log`, and its pid written to `pid_file`. Returns the child pid.
+    #[cfg(unix)]
+    pub fn spawn_detached(&self, log: &Path, pid_file: &Path) -> Result<u32, ExecError> {
+        use std::os::unix::process::CommandExt;
+
+        let io_err = |source| ExecError::Io {
+            program: self.program_name(),
+            source,
+        };
+
+        let log_file = std::fs::File::create(log).map_err(io_err)?;
+        let log_err = log_file.try_clone().map_err(io_err)?;
+
+        let child = self
+            .std_command()
+            .stdout(log_file)
+            .stderr(log_err)
+            .process_group(0) // detach into a new group
+            .spawn()
+            .map_err(|source| ExecError::Spawn {
+                program: self.program_name(),
+                source,
+            })?;
+
+        let pid = child.id();
+        std::fs::write(pid_file, pid.to_string()).map_err(io_err)?;
+        Ok(pid)
+    }
 }
 
 #[cfg(test)]
@@ -136,5 +268,52 @@ mod tests {
         // `/` is a stable, symlink-free directory on every unix.
         let out = Cmd::new("pwd").cwd("/").output().expect("run pwd");
         assert_eq!(out.stdout.trim(), "/");
+    }
+
+    #[test]
+    fn stream_delivers_lines_in_order() {
+        let cancel = AtomicBool::new(false);
+        let mut lines = Vec::new();
+        let res = Cmd::new("sh")
+            .args(["-c", "echo a; echo b; echo c"])
+            .stream(&cancel, |l| lines.push(l.to_string()))
+            .expect("stream");
+        assert_eq!(lines, ["a", "b", "c"]);
+        assert!(res.success);
+        assert!(!res.canceled);
+    }
+
+    #[test]
+    fn stream_cancel_interrupts_a_hanging_child() {
+        // Emits one line, then sleeps far longer than the test should take.
+        let cancel = AtomicBool::new(false);
+        let res = Cmd::new("sh")
+            .args(["-c", "echo go; sleep 30"])
+            .stream(&cancel, |_| cancel.store(true, Ordering::Relaxed))
+            .expect("stream");
+        // The cancel (set on the first line) must kill the child promptly.
+        assert!(res.canceled);
+        assert!(!res.success);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_detached_writes_pid_and_log() {
+        let tmp = std::env::temp_dir().join(format!("yb-detach-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let log = tmp.join("out.log");
+        let pid_file = tmp.join("pid");
+
+        let pid = Cmd::new("sh")
+            .args(["-c", "echo hi"])
+            .spawn_detached(&log, &pid_file)
+            .expect("spawn_detached");
+        assert!(pid > 1);
+        assert_eq!(std::fs::read_to_string(&pid_file).unwrap(), pid.to_string());
+
+        // Give the short child a moment to flush, then confirm the log captured it.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(std::fs::read_to_string(&log).unwrap().contains("hi"));
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

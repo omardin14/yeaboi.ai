@@ -19,3 +19,7 @@ desktop/src-tauri/target/
 # OS / editor
 .DS_Store
 *.log
+
+# Playwright
+desktop/test-results/
+desktop/playwright-report/

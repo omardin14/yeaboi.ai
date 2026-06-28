@@ -171,6 +171,9 @@ pub struct Session {
     pub last_prompt: Option<String>,
     /// Best-effort count of sub-agent (sidechain) activity in the transcript.
     pub sub_agent_count: u32,
+    /// Best-effort: the session appears paused on a permission request (a
+    /// pending tool-use with no result while not actively working).
+    pub awaiting_permission: bool,
     /// Process metrics joined in by pid, when the process is live.
     pub proc_stats: Option<ProcStats>,
     /// Listening ports held by this session's process subtree.
@@ -225,9 +228,26 @@ pub struct Snapshot {
     pub generated_at_ms: u64,
     pub projects: Vec<Project>,
     pub sessions: Vec<Session>,
+    /// Listening ports once owned by a session's subtree whose process is now
+    /// unattributed (e.g. a dev server outliving the session that spawned it).
+    pub orphan_ports: Vec<Port>,
     pub totals: Totals,
     /// Non-fatal collector degradations to surface in the UI.
     pub warnings: Vec<String>,
+}
+
+/// One entry in a session's transcript timeline (for replay).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../desktop/src/lib/bindings/")
+)]
+pub struct TranscriptEvent {
+    /// `user` | `assistant` | `tool_use` | `tool_result` | `thinking` | …
+    pub kind: String,
+    /// A short human summary of the entry.
+    pub summary: String,
 }
 
 /// Process metrics keyed by pid, plus parent→children adjacency. Produced by

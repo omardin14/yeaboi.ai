@@ -10,6 +10,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rusqlite = { workspace = true }
+notify = { workspace = true }
 ts-rs = { version = "12.0.1", optional = true }
 
 [dev-dependencies]

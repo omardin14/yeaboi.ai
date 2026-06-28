@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "preview": "vite preview",
+    "e2e": "playwright test",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "@tailwindcss/vite": "^4.3.1",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",

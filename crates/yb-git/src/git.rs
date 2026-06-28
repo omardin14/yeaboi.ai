@@ -49,6 +49,11 @@ impl GitRepo {
         self.run(&["rev-parse", "--show-toplevel"])
     }
 
+    /// All uncommitted changes (`git diff HEAD`) — the session's working diff.
+    pub fn working_diff(&self) -> Result<String, GitError> {
+        self.run(&["diff", "HEAD"])
+    }
+
     /// Push the current branch to `origin`, setting upstream.
     pub fn push_current(&self) -> Result<(), GitError> {
         self.run(&["push", "-u", "origin", "HEAD"])?;

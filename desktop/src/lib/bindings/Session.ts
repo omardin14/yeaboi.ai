@@ -59,6 +59,11 @@ last_prompt: string | null,
  */
 sub_agent_count: number, 
 /**
+ * Best-effort: the session appears paused on a permission request (a
+ * pending tool-use with no result while not actively working).
+ */
+awaiting_permission: boolean, 
+/**
  * Process metrics joined in by pid, when the process is live.
  */
 proc_stats: ProcStats | null, 
