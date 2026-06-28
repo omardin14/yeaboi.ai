@@ -6,9 +6,11 @@
 
 mod gh;
 mod git;
+mod types;
 
 pub use gh::{Gh, PullRequest, parse_pr_list};
 pub use git::GitRepo;
+pub use types::{MergeMethod, RebaseOutcome};
 
 use thiserror::Error;
 

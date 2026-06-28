@@ -3,8 +3,9 @@
 //! A background collector thread owns the [`Engine`] + a `yb-proc` [`Sampler`],
 //! builds a real [`Snapshot`] every tick, stores the latest in shared state
 //! (so [`get_snapshot`] answers on demand) and streams each one to the frontend
-//! as a `snapshot-update` event. The one write path so far is [`kill_session`]
-//! (SIGTERM, guarded); port collection + free-port land in a later slice.
+//! as a `snapshot-update` event. Commands cover the monitor write paths
+//! ([`kill_session`], [`free_port`]) and the PR loop ([`list_prs`]/[`pr_diff`]/
+//! [`merge_pr`]/[`comment_pr`]/[`open_pr`]/[`sync_branch`]).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -92,6 +93,84 @@ fn free_port(pid: u32, state: State<'_, SharedSnapshot>) -> Result<(), String> {
     yb_proc::actions::sigterm(pid).map_err(|e| e.to_string())
 }
 
+// ---- PR loop (yb-git over gh/git) -------------------------------------------
+//
+// These shell out to `gh`/`git` (network, seconds), so each runs on the blocking
+// pool via `spawn_blocking` to keep the snapshot stream + UI responsive. They
+// target a repo by `cwd` (the selected project's root).
+
+/// Flatten a `spawn_blocking` join + the inner result into one `Result<_, String>`.
+async fn blocking<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(f).await {
+        Ok(inner) => inner,
+        Err(join) => Err(format!("background task failed: {join}")),
+    }
+}
+
+#[tauri::command]
+async fn list_prs(cwd: String) -> Result<Vec<yb_git::PullRequest>, String> {
+    blocking(move || yb_git::Gh::new(cwd).pr_list(50).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
+async fn pr_diff(cwd: String, number: u64) -> Result<String, String> {
+    blocking(move || {
+        yb_git::Gh::new(cwd)
+            .pr_diff(number)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn merge_pr(cwd: String, number: u64, method: yb_git::MergeMethod) -> Result<(), String> {
+    blocking(move || {
+        yb_git::Gh::new(cwd)
+            .pr_merge(number, method)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn comment_pr(cwd: String, number: u64, body: String) -> Result<(), String> {
+    blocking(move || {
+        yb_git::Gh::new(cwd)
+            .pr_comment(number, &body)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Push the current branch and open a PR against `base`; returns the PR URL.
+#[tauri::command]
+async fn open_pr(cwd: String, base: String) -> Result<String, String> {
+    blocking(move || {
+        yb_git::GitRepo::new(&cwd)
+            .push_current()
+            .map_err(|e| e.to_string())?;
+        yb_git::Gh::new(&cwd)
+            .pr_create(&base)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Rebase the repo's current branch onto `origin/<base>`.
+#[tauri::command]
+async fn sync_branch(cwd: String, base: String) -> Result<yb_git::RebaseOutcome, String> {
+    blocking(move || {
+        yb_git::GitRepo::new(cwd)
+            .rebase_onto(&base)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shared: SharedSnapshot = Arc::new(Mutex::new(empty_snapshot()));
@@ -102,7 +181,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             kill_session,
-            free_port
+            free_port,
+            list_prs,
+            pr_diff,
+            merge_pr,
+            comment_pr,
+            open_pr,
+            sync_branch
         ])
         .setup(move |app| {
             // Minimal tray with a placeholder tooltip. A later slice renders live

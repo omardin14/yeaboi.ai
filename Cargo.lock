@@ -5123,6 +5123,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "ts-rs",
  "yb-exec",
 ]
 
@@ -5156,6 +5157,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "yb-core",
+ "yb-git",
  "yb-proc",
 ]
 

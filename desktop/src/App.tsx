@@ -11,6 +11,7 @@ import {
   subscribeSnapshotError,
 } from "@/lib/api";
 import { Monitor } from "@/components/monitor";
+import { PrView } from "@/components/pr-view";
 import { WarningsBanner } from "@/components/warnings-banner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -19,10 +20,13 @@ type Pending =
   | { kind: "kill"; session: Session }
   | { kind: "free"; port: Port };
 
+type Tab = "monitor" | "prs";
+
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
+  const [tab, setTab] = useState<Tab>("monitor");
 
   async function confirmPending() {
     const action = pending;
@@ -89,9 +93,24 @@ function App() {
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="mx-auto max-w-4xl px-6 py-8">
         <header className="mb-6 flex items-baseline justify-between border-b border-zinc-800 pb-4">
-          <div>
+          <div className="flex items-center gap-4">
             <h1 className="text-lg font-semibold tracking-tight">yeaboi.ai</h1>
-            <p className="text-xs text-zinc-500">live monitor</p>
+            <nav className="flex gap-1 text-xs">
+              {(["monitor", "prs"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTab(t)}
+                  className={`rounded px-2 py-1 ${
+                    tab === t
+                      ? "bg-zinc-800 text-zinc-100"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  {t === "monitor" ? "Monitor" : "PRs"}
+                </button>
+              ))}
+            </nav>
           </div>
           <div className="text-right text-xs text-zinc-500">
             <div>
@@ -109,13 +128,18 @@ function App() {
           </div>
         )}
 
-        <WarningsBanner warnings={snapshot?.warnings ?? []} />
-
-        <Monitor
-          snapshot={snapshot}
-          onKill={(session) => setPending({ kind: "kill", session })}
-          onFreePort={(port) => setPending({ kind: "free", port })}
-        />
+        {tab === "monitor" ? (
+          <>
+            <WarningsBanner warnings={snapshot?.warnings ?? []} />
+            <Monitor
+              snapshot={snapshot}
+              onKill={(session) => setPending({ kind: "kill", session })}
+              onFreePort={(port) => setPending({ kind: "free", port })}
+            />
+          </>
+        ) : (
+          <PrView projects={snapshot?.projects ?? []} />
+        )}
       </div>
 
       {pending && (

@@ -6,14 +6,20 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use yb_exec::Cmd;
 
-use crate::GhError;
+use crate::{GhError, MergeMethod};
 
 /// The `--json` fields we request for a PR. Kept in one place so list/view agree.
 const PR_FIELDS: &str = "number,title,state,headRefName,baseRefName,author,url,isDraft,updatedAt";
 
 /// A pull request, flattened from `gh`'s JSON into the shape the app renders.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../desktop/src/lib/bindings/")
+)]
 pub struct PullRequest {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub number: u64,
     pub title: String,
     /// `OPEN` | `CLOSED` | `MERGED`.
@@ -77,6 +83,37 @@ impl Gh {
     pub fn pr_diff(&self, number: u64) -> Result<String, GhError> {
         let number = number.to_string();
         self.run(&["pr", "diff", &number])
+    }
+
+    /// The open PR whose head is `branch`, if one exists.
+    pub fn find_existing(&self, branch: &str) -> Result<Option<PullRequest>, GhError> {
+        let json = self.run(&[
+            "pr", "list", "--head", branch, "--state", "open", "--json", PR_FIELDS,
+        ])?;
+        Ok(parse_pr_list(&json)?.into_iter().next())
+    }
+
+    /// Open a PR for the current branch against `base`, filling title/body from
+    /// commits (`--fill`). Returns the new PR's URL.
+    pub fn pr_create(&self, base: &str) -> Result<String, GhError> {
+        Ok(self
+            .run(&["pr", "create", "--fill", "--base", base])?
+            .trim()
+            .to_string())
+    }
+
+    /// Merge a PR with the given method.
+    pub fn pr_merge(&self, number: u64, method: MergeMethod) -> Result<(), GhError> {
+        let number = number.to_string();
+        self.run(&["pr", "merge", &number, method.flag()])?;
+        Ok(())
+    }
+
+    /// Post a comment on a PR.
+    pub fn pr_comment(&self, number: u64, body: &str) -> Result<(), GhError> {
+        let number = number.to_string();
+        self.run(&["pr", "comment", &number, "--body", body])?;
+        Ok(())
     }
 }
 

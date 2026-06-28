@@ -76,9 +76,10 @@ worktree variant · scrum-planning-ai-agent = v4 planning sidecar.
 ### yb-git
 - [x] `GitRepo` (current_branch/toplevel) + `Gh` (pr_list/view/diff); `PullRequest` type
 - [x] Structured `GitError`/`GhError` (command/exit/stderr); `yeaboi prs` validates the path live
-- [ ] PR ops: `find_existing/create/merge/comment/review`; types `MergeMethod`/`ReviewFinding`/`Conflict`/`RebaseOutcome`
-- [ ] Git ops: `push/pull_rebase/rebase_continue/abort/merged_branches/list_conflicts`
-- [ ] Desktop PR list/diff view (consume from the Tauri shell)
+- [x] PR ops: `find_existing/create/merge/comment`; types `MergeMethod`/`RebaseOutcome` (ts-exported)
+- [x] Git ops: `push_current/rebase_onto/rebase_continue/abort/merged_branches/list_conflicts`
+- [x] Desktop PR view: project picker + list + diff viewer + merge/comment/open/sync (Monitor|PRs tabs)
+- [ ] `review` (agent-driven) — *lands with yb-agent (1e)*
 
 ### yb-worktree (decentralized, GitHubIssueTriager model)
 - [ ] `project.toml` schema (`branch_rules`/`[ports]`/`[lifecycle]`/`[[services]]`/`[env]`) + global repo registry

@@ -21,3 +21,4 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 yb-core = { workspace = true }
 yb-proc = { workspace = true }
+yb-git = { workspace = true }
