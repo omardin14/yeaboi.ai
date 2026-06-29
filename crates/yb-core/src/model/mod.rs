@@ -244,13 +244,15 @@ pub struct Snapshot {
     ts(export, export_to = "../../../desktop/src/lib/bindings/")
 )]
 pub struct TranscriptEvent {
-    /// `user` | `assistant` | `tool_use` | `tool_result` | `thinking` | …
+    /// One atomic entry: `user` | `assistant` | `thinking` | `tool_use` |
+    /// `tool_result` | `system` | … — the speaker/label is derived from this.
     pub kind: String,
     /// A short human summary of the entry (≤160 chars) — for compact lists.
     pub summary: String,
-    /// The full entry text (generously bounded) — for the readable reader and
-    /// for recovering the untruncated current prompt.
+    /// The full entry text (generously bounded) — the readable reader content.
     pub text: String,
+    /// ISO8601 timestamp of the source line, or `""` if absent.
+    pub at: String,
 }
 
 /// Process metrics keyed by pid, plus parent→children adjacency. Produced by

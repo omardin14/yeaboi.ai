@@ -34,8 +34,14 @@ const session: Session = {
 beforeEach(() => {
   workingDiffMock.mockReset().mockResolvedValue("diff --git a b\n+added line");
   transcriptMock.mockReset().mockResolvedValue([
-    { kind: "user", summary: "do the thing", text: "do the thing" },
-    { kind: "assistant", summary: "tool_use: Bash", text: "tool_use: Bash" },
+    { kind: "user", summary: "do the thing", text: "do the thing", at: "2026-06-27T21:42:32.000Z" },
+    { kind: "assistant", summary: "on it", text: "on it", at: "2026-06-27T21:42:35.000Z" },
+    {
+      kind: "tool_result",
+      summary: "exit 0",
+      text: "3 tests passed",
+      at: "2026-06-27T21:43:01.000Z",
+    },
   ]);
 });
 
@@ -45,15 +51,22 @@ test("loads and shows the working diff", async () => {
   expect(workingDiffMock).toHaveBeenCalledWith("/repo");
 });
 
-test("switches to the transcript and shows the full conversation", async () => {
+test("switches to the transcript and shows speakers, times, and turns", async () => {
   render(<SessionDetail session={session} onClose={() => {}} />);
   // Wait for the transcript to load, then open its tab.
   await waitFor(() => expect(transcriptMock).toHaveBeenCalledWith("s1"));
   fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
 
-  // The reader shows every turn's full text at once (no scrubbing).
-  expect(await screen.findByText("do the thing")).toBeInTheDocument();
-  expect(screen.getByText("tool_use: Bash")).toBeInTheDocument();
+  // Speaker attribution + the conversation text render (no scrubbing slider).
+  expect(await screen.findByText("You")).toBeInTheDocument();
+  expect(screen.getByText("Assistant")).toBeInTheDocument();
+  expect(screen.getByText("do the thing")).toBeInTheDocument();
+  expect(screen.getByText("on it")).toBeInTheDocument();
+  // A clock (HH:MM:SS) appears on entries.
+  expect(screen.getAllByText(/^\d{2}:\d{2}:\d{2}$/).length).toBeGreaterThan(0);
+  // The tool result is a collapsible heavy entry (its summary shows as a label).
+  expect(screen.getByText("exit 0")).toBeInTheDocument();
+  expect(screen.getByText(/Tool result/)).toBeInTheDocument();
   expect(
     screen.queryByRole("slider", { name: "Transcript position" }),
   ).not.toBeInTheDocument();

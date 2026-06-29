@@ -2,22 +2,78 @@ import { useEffect, useRef, useState } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 import { sessionTranscript, workingDiff } from "@/lib/api";
+import { formatAgo, formatClock, isoMs } from "@/lib/format";
 import { Drawer } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { cx } from "@/components/ui/cx";
 
-/** Left-rule color per transcript turn kind, so the reader scans at a glance. */
-function kindRail(kind: string): string {
+type Meta = { label: string; icon: string; heavy: boolean; rail: string; tone: string };
+
+/** Speaker label, icon, rail color, and whether the entry is collapsed-by-default. */
+function kindMeta(kind: string): Meta {
   switch (kind) {
     case "user":
-      return "border-l-idle";
+      return { label: "You", icon: "", heavy: false, rail: "border-l-idle", tone: "text-idle" };
     case "assistant":
-      return "border-l-busy";
+      return { label: "Assistant", icon: "", heavy: false, rail: "border-l-busy", tone: "text-busy" };
     case "thinking":
-      return "border-l-merge";
+      return { label: "Thinking", icon: "💭", heavy: true, rail: "border-l-merge", tone: "text-merge" };
+    case "tool_use":
+      return { label: "Tool call", icon: "⚙", heavy: true, rail: "border-l-line-strong", tone: "text-ink-muted" };
+    case "tool_result":
+      return { label: "Tool result", icon: "↩", heavy: true, rail: "border-l-line-strong", tone: "text-ink-muted" };
     default:
-      return "border-l-line-strong";
+      return { label: "System", icon: "·", heavy: true, rail: "border-l-line-strong", tone: "text-ink-faint" };
   }
+}
+
+/** One transcript entry: time + speaker, text inline, heavy entries collapsed. */
+function TranscriptTurn({ ev }: { ev: TranscriptEvent }) {
+  const meta = kindMeta(ev.kind);
+  const clock = formatClock(ev.at);
+  const ago = formatAgo(isoMs(ev.at));
+
+  const header = (
+    <div className="flex items-center gap-2 text-[10px]">
+      {clock && (
+        <span className="font-mono text-ink-faint" title={ago}>
+          {clock}
+        </span>
+      )}
+      <span className={cx("font-semibold uppercase tracking-wide", meta.tone)}>
+        {meta.icon && `${meta.icon} `}
+        {meta.label}
+      </span>
+    </div>
+  );
+
+  return (
+    <div className={cx("border-l-2 pl-2.5", meta.rail)}>
+      {meta.heavy ? (
+        <details className="group/d">
+          <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+            <span className="shrink-0 text-[9px] text-ink-faint transition-transform group-open/d:rotate-90">
+              ▶
+            </span>
+            <div className="min-w-0 flex-1">
+              {header}
+              <span className="block truncate text-xs text-ink-muted">{ev.summary}</span>
+            </div>
+          </summary>
+          <p className="mt-1 whitespace-pre-wrap break-words pl-4 text-xs leading-relaxed text-ink-soft">
+            {ev.text}
+          </p>
+        </details>
+      ) : (
+        <>
+          {header}
+          <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-soft">
+            {ev.text || ev.summary}
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
 /** Detail panel for one session: metadata + working diff + transcript reader. */
@@ -122,14 +178,7 @@ export function SessionDetail({
         ) : (
           <Card tone="sunken" pad="sm" className="max-h-[70vh] space-y-3 overflow-auto">
             {events.map((ev, i) => (
-              <div key={i} className={cx("border-l-2 pl-2.5", kindRail(ev.kind))}>
-                <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-faint">
-                  {ev.kind}
-                </div>
-                <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-soft">
-                  {ev.text || ev.summary}
-                </p>
-              </div>
+              <TranscriptTurn key={i} ev={ev} />
             ))}
             <div ref={readerEndRef} />
           </Card>

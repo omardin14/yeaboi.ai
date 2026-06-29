@@ -271,7 +271,7 @@ pub fn transcript_events(
     let text = std::fs::read_to_string(&path)?;
 
     let mut events: Vec<crate::model::TranscriptEvent> =
-        text.lines().filter_map(event_from_line).collect();
+        text.lines().flat_map(events_from_line).collect();
     // Keep the most recent `limit`; drain the older prefix (saturating, so a
     // short transcript never underflows).
     let drop = events.len().saturating_sub(limit);
@@ -279,77 +279,161 @@ pub fn transcript_events(
     Ok(events)
 }
 
-fn event_from_line(line: &str) -> Option<crate::model::TranscriptEvent> {
-    use serde_json::Value;
-    let v: Value = serde_json::from_str(line.trim()).ok()?;
-    let kind = v.get("type")?.as_str()?.to_string();
-    let summary = match kind.as_str() {
-        "user" => user_text(&v).unwrap_or_else(|| "(user message)".to_string()),
-        "assistant" => assistant_summary(&v),
-        "last-prompt" => v
-            .get("lastPrompt")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        other => other.to_string(),
-    };
-    Some(crate::model::TranscriptEvent {
-        kind,
-        summary: crate::util::truncate(&summary, 160),
-        // Generously bounded so a single huge tool-result can't bloat the wire,
-        // while still showing whole prompts/turns in the reader.
-        text: crate::util::truncate(&summary, 4000),
-    })
+/// Build a single transcript event (`summary` compact, `text` full).
+fn event(kind: &str, full: &str, at: &str) -> crate::model::TranscriptEvent {
+    crate::model::TranscriptEvent {
+        kind: kind.to_string(),
+        summary: crate::util::truncate(full, 160),
+        // Generously bounded so one huge tool result can't bloat the wire.
+        text: crate::util::truncate(full, 4000),
+        at: at.to_string(),
+    }
 }
 
-fn assistant_summary(v: &serde_json::Value) -> String {
+/// Segment one transcript line into atomic, speaker-attributed events: an
+/// assistant line fans out into its text / thinking / tool-call blocks, and a
+/// user line into the real prompt and/or any tool-result outputs. Redundant or
+/// structural lines (`last-prompt`, summaries) are dropped from the reader.
+fn events_from_line(line: &str) -> Vec<crate::model::TranscriptEvent> {
+    use serde_json::Value;
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return Vec::new();
+    };
+    let Some(kind) = v.get("type").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let at = v.get("timestamp").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "assistant" => assistant_events(&v, at),
+        "user" => user_events(&v, at),
+        // Redundant with the user line / purely structural — not shown.
+        "last-prompt" | "summary" | "file-history-snapshot" => Vec::new(),
+        "system" => vec![event("system", &system_text(&v), at)],
+        other => vec![event(other, other, at)],
+    }
+}
+
+fn assistant_events(v: &serde_json::Value, at: &str) -> Vec<crate::model::TranscriptEvent> {
+    use serde_json::Value;
     let Some(blocks) = v
         .get("message")
         .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_array())
+        .and_then(Value::as_array)
     else {
-        return "(assistant)".to_string();
+        return vec![event("assistant", "(assistant)", at)];
     };
-    let mut parts = Vec::new();
+    let mut out = Vec::new();
     for b in blocks {
-        match b.get("type").and_then(|t| t.as_str()) {
+        match b.get("type").and_then(Value::as_str) {
             Some("text") => {
-                if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
-                    parts.push(format!("“{}”", t));
+                let t = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
+                if !t.is_empty() {
+                    out.push(event("assistant", t, at));
                 }
             }
-            Some("thinking") => parts.push("thinking".to_string()),
-            Some("tool_use") => parts.push(format!(
-                "tool_use: {}",
-                b.get("name").and_then(|n| n.as_str()).unwrap_or("?")
-            )),
+            Some("thinking") => {
+                let t = b.get("thinking").and_then(Value::as_str).unwrap_or("");
+                out.push(event("thinking", t, at));
+            }
+            Some("tool_use") => {
+                let name = b.get("name").and_then(Value::as_str).unwrap_or("?");
+                out.push(event("tool_use", &tool_use_text(name, b.get("input")), at));
+            }
             _ => {}
         }
     }
-    if parts.is_empty() {
-        "(assistant)".to_string()
-    } else {
-        parts.join(" · ")
+    if out.is_empty() {
+        out.push(event("assistant", "(assistant)", at));
+    }
+    out
+}
+
+fn user_events(v: &serde_json::Value, at: &str) -> Vec<crate::model::TranscriptEvent> {
+    use serde_json::Value;
+    let Some(content) = v.get("message").and_then(|m| m.get("content")) else {
+        return Vec::new();
+    };
+    if let Some(s) = content.as_str() {
+        let s = s.trim();
+        return if s.is_empty() {
+            Vec::new()
+        } else {
+            vec![event("user", s, at)]
+        };
+    }
+    let Some(blocks) = content.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for b in blocks {
+        match b.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                let t = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
+                if !t.is_empty() {
+                    out.push(event("user", t, at));
+                }
+            }
+            // A tool result is the *tool* speaking, not you — its own kind, and
+            // we surface the actual output instead of a "(tool result)" stub.
+            Some("tool_result") => out.push(event("tool_result", &tool_result_text(b), at)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `Bash: cargo test` style label for a tool call, falling back to pretty JSON.
+fn tool_use_text(name: &str, input: Option<&serde_json::Value>) -> String {
+    use serde_json::Value;
+    let Some(input) = input else {
+        return name.to_string();
+    };
+    let snippet = [
+        "command",
+        "description",
+        "file_path",
+        "path",
+        "pattern",
+        "url",
+    ]
+    .iter()
+    .find_map(|k| input.get(*k).and_then(Value::as_str));
+    if let Some(s) = snippet {
+        return format!("{name}: {}", s.trim());
+    }
+    match serde_json::to_string_pretty(input) {
+        Ok(p) if !p.is_empty() && p != "null" && p != "{}" => format!("{name}\n{p}"),
+        _ => name.to_string(),
     }
 }
 
-fn user_text(v: &serde_json::Value) -> Option<String> {
-    let content = v.get("message")?.get("content")?;
-    if let Some(s) = content.as_str() {
-        return Some(s.to_string());
+/// The text a tool returned (string content, or joined text blocks).
+fn tool_result_text(block: &serde_json::Value) -> String {
+    use serde_json::Value;
+    let joined = match block.get("content") {
+        Some(Value::String(s)) => s.trim().to_string(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|c| c.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    };
+    if joined.trim().is_empty() {
+        "(tool result)".to_string()
+    } else {
+        joined.trim().to_string()
     }
-    for b in content.as_array()? {
-        match b.get("type").and_then(|t| t.as_str()) {
-            Some("text") => {
-                if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
-                    return Some(t.to_string());
-                }
-            }
-            Some("tool_result") => return Some("(tool result)".to_string()),
-            _ => {}
-        }
-    }
-    None
+}
+
+fn system_text(v: &serde_json::Value) -> String {
+    use serde_json::Value;
+    v.get("content")
+        .and_then(Value::as_str)
+        .or_else(|| v.get("text").and_then(Value::as_str))
+        .unwrap_or("(system)")
+        .trim()
+        .to_string()
 }
 
 /// Derived state accumulated from a transcript tail.
@@ -913,11 +997,14 @@ mod tests {
             &[USER, ASSISTANT, TOOL_USE],
         );
         let events = transcript_events(home, "sess-t", 100).unwrap();
+        // USER → user, ASSISTANT(text) → assistant, TOOL_USE → tool_use.
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].kind, "user");
-        assert!(events[0].summary.contains("go ahead"));
-        assert_eq!(events[2].kind, "assistant");
-        assert!(events[2].summary.contains("tool_use: Bash"));
+        assert!(events[0].text.contains("go ahead"));
+        assert_eq!(events[1].kind, "assistant");
+        assert!(events[1].text.contains("hi"));
+        assert_eq!(events[2].kind, "tool_use");
+        assert!(events[2].summary.contains("Bash"));
     }
 
     #[test]
@@ -930,11 +1017,11 @@ mod tests {
             r#"{"pid":1,"sessionId":"sess-l","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
             &[USER, ASSISTANT, TOOL_USE],
         );
-        // limit 2 over 3 entries → drop the oldest (the user line).
+        // 3 segmented events; limit 2 → drop the oldest (the user line).
         let events = transcript_events(home, "sess-l", 2).unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, "assistant");
-        assert_eq!(events[1].kind, "assistant"); // the tool-use line
+        assert_eq!(events[1].kind, "tool_use");
     }
 
     #[test]
@@ -946,37 +1033,44 @@ mod tests {
     }
 
     #[test]
-    fn event_from_line_covers_each_arm() {
-        // assistant with thinking + tool_use blocks
-        let a = event_from_line(
-            r#"{"type":"assistant","message":{"content":[{"type":"thinking"},{"type":"tool_use","name":"Read"}]}}"#,
-        )
-        .unwrap();
-        assert_eq!(a.kind, "assistant");
-        assert!(a.summary.contains("thinking"));
-        assert!(a.summary.contains("tool_use: Read"));
-
-        // user as a tool_result block
-        let tr =
-            event_from_line(r#"{"type":"user","message":{"content":[{"type":"tool_result"}]}}"#)
-                .unwrap();
-        assert_eq!(tr.summary, "(tool result)");
-
-        // user with no recognizable content → fallback
-        let uf = event_from_line(r#"{"type":"user","message":{"content":[]}}"#).unwrap();
-        assert_eq!(uf.summary, "(user message)");
-
-        // last-prompt + unknown type
-        let lp = event_from_line(r#"{"type":"last-prompt","lastPrompt":"hi"}"#).unwrap();
-        assert_eq!(
-            (lp.kind.as_str(), lp.summary.as_str()),
-            ("last-prompt", "hi")
+    fn events_from_line_segments_each_arm() {
+        // An assistant line fans out into one event per content block.
+        let a = events_from_line(
+            r#"{"type":"assistant","timestamp":"2026-06-27T21:42:35.935Z","message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"tool_use","name":"Bash","input":{"command":"cargo test"}}]}}"#,
         );
-        let other = event_from_line(r#"{"type":"mode","mode":"normal"}"#).unwrap();
-        assert_eq!(other.kind, "mode");
+        assert_eq!(a.len(), 2);
+        assert_eq!(a[0].kind, "thinking");
+        assert_eq!(a[0].text, "hmm");
+        assert_eq!(a[1].kind, "tool_use");
+        assert!(a[1].summary.contains("Bash: cargo test"));
+        // The ISO timestamp is carried through.
+        assert_eq!(a[0].at, "2026-06-27T21:42:35.935Z");
 
-        // not JSON → skipped
-        assert!(event_from_line("not json").is_none());
+        // A tool result is its own kind and surfaces the actual output.
+        let tr = events_from_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"build OK\n3 passed"}]}}"#,
+        );
+        assert_eq!(tr.len(), 1);
+        assert_eq!(tr[0].kind, "tool_result");
+        assert!(tr[0].text.contains("3 passed"));
+
+        // A real prompt → a single `user` event.
+        let u = events_from_line(
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"go ahead"}]}}"#,
+        );
+        assert_eq!(u.len(), 1);
+        assert_eq!(u[0].kind, "user");
+        assert!(u[0].text.contains("go ahead"));
+
+        // Empty content and structural lines emit nothing.
+        assert!(events_from_line(r#"{"type":"user","message":{"content":[]}}"#).is_empty());
+        assert!(events_from_line(r#"{"type":"last-prompt","lastPrompt":"hi"}"#).is_empty());
+
+        // Unknown type passes through as a single event; non-JSON is skipped.
+        let other = events_from_line(r#"{"type":"mode","mode":"normal"}"#);
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].kind, "mode");
+        assert!(events_from_line("not json").is_empty());
     }
 
     #[test]

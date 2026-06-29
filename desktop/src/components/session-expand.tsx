@@ -107,10 +107,10 @@ export function SessionExpand({
   const prefs = useMonitorPrefs();
   const [fullPrompt, setFullPrompt] = useState<string | null>(null);
 
-  // Lazily fetch the untruncated current prompt. Use the `last-prompt` event —
-  // NOT `user`, since tool results are also recorded as `user` lines and would
-  // surface a tool result instead of what the human actually typed. Falls back
-  // to the (truncated) row prompt while loading or if none is found.
+  // Lazily fetch the untruncated current prompt: the latest `user` event. Tool
+  // results are now their own `tool_result` kind, so the most recent `user`
+  // entry is genuinely what the human typed. Falls back to the (truncated) row
+  // prompt while loading or if none is found.
   useEffect(() => {
     let active = true;
     setFullPrompt(null);
@@ -119,7 +119,7 @@ export function SessionExpand({
         if (!active) return;
         const latest = [...events]
           .reverse()
-          .find((e) => e.kind === "last-prompt" && e.text.trim() !== "");
+          .find((e) => e.kind === "user" && e.text.trim() !== "");
         if (latest) setFullPrompt(latest.text);
       })
       .catch(() => {

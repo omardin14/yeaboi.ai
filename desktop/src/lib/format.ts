@@ -157,6 +157,25 @@ export function formatAgo(ms: number | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Epoch-ms for an ISO8601 timestamp string, or null if empty/unparseable. */
+export function isoMs(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** Local `HH:MM:SS` clock for an ISO8601 timestamp, or "" if absent/invalid. */
+export function formatClock(iso: string | null | undefined): string {
+  const ms = isoMs(iso);
+  if (ms == null) return "";
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
 /** Short host-app label. */
 export function hostAppLabel(host: HostApp): string {
   if (host === "Cli") return "cli";
