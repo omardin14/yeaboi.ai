@@ -15,22 +15,16 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Banner } from "@/components/banner";
 import { ReviewPanel } from "@/components/review-panel";
-
-const STATE_STYLES: Record<string, string> = {
-  OPEN: "bg-emerald-500/15 text-emerald-400 ring-emerald-500/30",
-  MERGED: "bg-violet-500/15 text-violet-400 ring-violet-500/30",
-  CLOSED: "bg-rose-500/15 text-rose-400 ring-rose-500/30",
-};
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { cx } from "@/components/ui/cx";
+import { prStateBadgeClass } from "@/lib/format";
 
 function StateBadge({ state }: { state: string }) {
-  const cls = STATE_STYLES[state] ?? "bg-zinc-500/15 text-zinc-400 ring-zinc-500/30";
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${cls}`}
-    >
-      {state}
-    </span>
-  );
+  return <Badge tone={prStateBadgeClass(state)}>{state}</Badge>;
 }
 
 /**
@@ -188,157 +182,125 @@ export function PrView({ projects }: { projects: Project[] }) {
   }
 
   if (projects.length === 0) {
-    return <p className="text-sm text-zinc-500">No projects to show PRs for yet.</p>;
+    return <EmptyState title="No projects yet" hint="Projects show up here once a session is running." />;
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <select
+        <Select
           aria-label="Project"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
-          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
         >
           {projects.map((p) => (
             <option key={p.id} value={p.root}>
               {p.name}
             </option>
           ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => void refresh(repo)}
-          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-        >
-          Refresh
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void doSync()}
-          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
+        </Select>
+        <Button onClick={() => void refresh(repo)}>Refresh</Button>
+        <Button disabled={busy} onClick={() => void doSync()}>
           Sync (rebase)
-        </button>
+        </Button>
         {conflicts && conflicts.length > 0 && (
           <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void doContinue()}
-              className="rounded border border-emerald-500/40 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50"
-            >
+            <Button variant="outline" disabled={busy} onClick={() => void doContinue()}>
               Continue rebase
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
               disabled={busy}
               onClick={() => void doAbort()}
-              className="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+              className="text-danger hover:bg-danger-fill"
             >
               Abort rebase
-            </button>
+            </Button>
           </>
         )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => setConfirmOpen(true)}
-          className="rounded bg-sky-600 px-2 py-1 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-        >
+        <Button variant="primary" disabled={busy} onClick={() => setConfirmOpen(true)}>
           Open PR
-        </button>
+        </Button>
       </div>
 
       {error && <Banner kind="error">{error}</Banner>}
       {notice && <Banner kind="notice">{notice}</Banner>}
 
       {prs == null ? (
-        <p className="text-sm text-zinc-500">Loading PRs…</p>
+        <p className="text-sm text-ink-muted">Loading PRs…</p>
       ) : prs.length === 0 ? (
-        <p className="text-sm text-zinc-500">No pull requests.</p>
+        <EmptyState glyph="⌥" title="No pull requests" hint="Open one with the Open PR button above." />
       ) : (
-        <table className="w-full border-collapse text-sm">
-          <tbody>
-            {prs.map((pr) => (
-              <tr
-                key={pr.number}
-                onClick={() => void selectPr(pr)}
-                className={`cursor-pointer border-b border-zinc-900 hover:bg-zinc-900/50 ${
-                  selected?.number === pr.number ? "bg-zinc-900/60" : ""
-                }`}
-              >
-                <td className="py-1.5 pr-3 font-mono text-xs text-zinc-500">#{pr.number}</td>
-                <td className="py-1.5 pr-3">
-                  <StateBadge state={pr.state} />
-                </td>
-                <td className="py-1.5 pr-3 text-zinc-200">
-                  {pr.title}
-                  {pr.is_draft && <span className="ml-1 text-xs text-zinc-500">(draft)</span>}
-                </td>
-                <td className="py-1.5 pr-3 font-mono text-xs text-zinc-500">
-                  {pr.head} → {pr.base}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <Card pad="none" className="overflow-hidden">
+          {prs.map((pr, i) => (
+            <button
+              key={pr.number}
+              type="button"
+              onClick={() => void selectPr(pr)}
+              className={cx(
+                "flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:bg-surface-raised",
+                i > 0 && "border-t border-line",
+                selected?.number === pr.number && "bg-surface-raised",
+              )}
+            >
+              <span className="font-mono text-xs text-ink-faint">#{pr.number}</span>
+              <StateBadge state={pr.state} />
+              <span className="min-w-0 flex-1 truncate text-ink">
+                {pr.title}
+                {pr.is_draft && <span className="ml-1 text-xs text-ink-faint">(draft)</span>}
+              </span>
+              <span className="shrink-0 font-mono text-xs text-ink-faint">
+                {pr.head} → {pr.base}
+              </span>
+            </button>
+          ))}
+        </Card>
       )}
 
       {selected && (
-        <div className="mt-5 border-t border-zinc-800 pt-4">
+        <div className="mt-5 border-t border-line pt-4">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-zinc-200">
+            <h3 className="text-sm font-semibold text-ink">
               #{selected.number} {selected.title}
             </h3>
             {selected.state === "OPEN" && (
               <>
-                <select
+                <Select
                   aria-label="Merge method"
                   value={method}
                   onChange={(e) => setMethod(e.target.value as MergeMethod)}
-                  className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200"
                 >
                   <option value="Squash">Squash</option>
                   <option value="Merge">Merge</option>
                   <option value="Rebase">Rebase</option>
-                </select>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setConfirmMerge(true)}
-                  className="rounded bg-violet-600 px-2 py-1 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-                >
+                </Select>
+                <Button variant="primary" disabled={busy} onClick={() => setConfirmMerge(true)}>
                   Merge
-                </button>
+                </Button>
               </>
             )}
           </div>
 
           {selected.state === "OPEN" && (
             <div className="mb-3 flex gap-2">
-              <input
+              <Input
                 aria-label="Comment"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="Comment on this PR…"
-                className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
+                className="flex-1"
               />
-              <button
-                type="button"
-                disabled={busy || !comment.trim()}
-                onClick={() => void doComment()}
-                className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-              >
+              <Button disabled={busy || !comment.trim()} onClick={() => void doComment()}>
                 Comment
-              </button>
+              </Button>
             </div>
           )}
 
-          <pre className="max-h-96 overflow-auto rounded bg-zinc-900 p-3 text-xs leading-relaxed text-zinc-300">
-            {diff || "Loading diff…"}
-          </pre>
+          <Card tone="sunken" pad="sm" className="max-h-96 overflow-auto">
+            <pre className="text-xs leading-relaxed text-ink-soft">
+              {diff || "Loading diff…"}
+            </pre>
+          </Card>
 
           <ReviewPanel cwd={repo} number={selected.number} />
         </div>

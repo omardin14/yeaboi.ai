@@ -75,9 +75,9 @@ const snapshot: Snapshot = {
   warnings: [],
 };
 
-/** The `<tr>` that contains the given prompt text. */
+/** The row element that contains the given prompt text. */
 function rowWithPrompt(prompt: string): HTMLElement {
-  return screen.getByText(prompt).closest("tr") as HTMLElement;
+  return screen.getByText(prompt).closest('[role="row"]') as HTMLElement;
 }
 
 test("groups sessions under their project headers with rolled-up counts", () => {

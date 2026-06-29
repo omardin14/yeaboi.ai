@@ -10,6 +10,7 @@ import {
   subscribeSnapshot,
   subscribeSnapshotError,
 } from "@/lib/api";
+import { AppShell, type Tab } from "@/components/app-shell";
 import { Monitor } from "@/components/monitor";
 import { PrView } from "@/components/pr-view";
 import { WorktreeBoard } from "@/components/worktree-board";
@@ -21,14 +22,6 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 type Pending =
   | { kind: "kill"; session: Session }
   | { kind: "free"; port: Port };
-
-type Tab = "monitor" | "prs" | "worktrees";
-
-const TAB_LABELS: Record<Tab, string> = {
-  monitor: "Monitor",
-  prs: "PRs",
-  worktrees: "Worktrees",
-};
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -92,7 +85,6 @@ function App() {
     return () => unlisteners.forEach((stop) => stop());
   }, []);
 
-  const totals = snapshot?.totals;
   // Re-resolved each render so the panel tracks live data and closes itself if
   // the session disappears from the snapshot.
   const detailSession =
@@ -103,66 +95,43 @@ function App() {
       : "—";
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        <header className="mb-6 flex items-baseline justify-between border-b border-zinc-800 pb-4">
-          <div className="flex items-center gap-4">
-            <h1 className="text-lg font-semibold tracking-tight">yeaboi.ai</h1>
-            <nav className="flex gap-1 text-xs">
-              {(["monitor", "prs", "worktrees"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTab(t)}
-                  className={`rounded px-2 py-1 ${
-                    tab === t
-                      ? "bg-zinc-800 text-zinc-100"
-                      : "text-zinc-500 hover:text-zinc-300"
-                  }`}
-                >
-                  {TAB_LABELS[t]}
-                </button>
-              ))}
-            </nav>
-          </div>
-          <div className="text-right text-xs text-zinc-500">
-            <div>
-              {totals
-                ? `${totals.session_count} session(s) · ${totals.busy_count} busy · ${totals.project_count} project(s)`
-                : "connecting…"}
-            </div>
-            <div>updated {updatedAt}</div>
-          </div>
-        </header>
+    <AppShell
+      tab={tab}
+      onTab={setTab}
+      totals={snapshot?.totals}
+      updatedAt={updatedAt}
+    >
+      {error && (
+        <div className="mb-4 rounded-lg border border-danger-ring bg-danger-fill px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
 
-        {error && (
-          <div className="mb-4 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-400">
-            {error}
-          </div>
-        )}
-
-        {tab === "monitor" ? (
-          <>
-            <WarningsBanner warnings={snapshot?.warnings ?? []} />
-            <Monitor
-              snapshot={snapshot}
-              onKill={(session) => setPending({ kind: "kill", session })}
-              onFreePort={(port) => setPending({ kind: "free", port })}
-              onSelect={(session) => setDetailId(session.id)}
+      {tab === "monitor" ? (
+        <div className="mx-auto max-w-6xl">
+          <WarningsBanner warnings={snapshot?.warnings ?? []} />
+          <Monitor
+            snapshot={snapshot}
+            onKill={(session) => setPending({ kind: "kill", session })}
+            onFreePort={(port) => setPending({ kind: "free", port })}
+            onSelect={(session) => setDetailId(session.id)}
+          />
+          {detailSession && (
+            <SessionDetail
+              session={detailSession}
+              onClose={() => setDetailId(null)}
             />
-            {detailSession && (
-              <SessionDetail
-                session={detailSession}
-                onClose={() => setDetailId(null)}
-              />
-            )}
-          </>
-        ) : tab === "prs" ? (
+          )}
+        </div>
+      ) : tab === "prs" ? (
+        <div className="mx-auto max-w-5xl">
           <PrView projects={snapshot?.projects ?? []} />
-        ) : (
+        </div>
+      ) : (
+        <div className="mx-auto max-w-5xl">
           <WorktreeBoard projects={snapshot?.projects ?? []} />
-        )}
-      </div>
+        </div>
+      )}
 
       {pending && (
         <ConfirmDialog
@@ -185,27 +154,25 @@ function App() {
             <div className="space-y-1">
               <p>
                 Sends <span className="font-mono">SIGTERM</span> to pid{" "}
-                <span className="font-mono text-zinc-200">
+                <span className="font-mono text-ink">
                   {pending.session.pid}
                 </span>
                 .
               </p>
-              <p className="font-mono text-zinc-400">
+              <p className="font-mono text-ink-muted">
                 {pending.session.model ?? "—"} · {pending.session.cwd}
               </p>
             </div>
           ) : (
             <p>
               Sends <span className="font-mono">SIGTERM</span> to pid{" "}
-              <span className="font-mono text-zinc-200">
-                {pending.port.pid}
-              </span>{" "}
+              <span className="font-mono text-ink">{pending.port.pid}</span>{" "}
               holding <span className="font-mono">:{pending.port.number}</span>.
             </p>
           )}
         </ConfirmDialog>
       )}
-    </main>
+    </AppShell>
   );
 }
 
