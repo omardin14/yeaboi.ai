@@ -36,9 +36,20 @@ pub fn transcript_events(session_id: &str, limit: usize) -> std::io::Result<Vec<
         None => Ok(Vec::new()),
     }
 }
+
+/// The sub-agents (`Task`/`Agent` calls) launched in a session's transcript.
+pub fn transcript_sub_agents(session_id: &str) -> std::io::Result<Vec<SubAgent>> {
+    match std::env::var_os("HOME") {
+        Some(home) => adapters::claude::transcript_sub_agents(
+            &std::path::Path::new(&home).join(".claude"),
+            session_id,
+        ),
+        None => Ok(Vec::new()),
+    }
+}
 pub use model::{
     ActivityStatus, ContextUsage, HostApp, Port, ProcStats, ProcTable, Project, Provider, Session,
-    Snapshot, Totals, TranscriptEvent,
+    Snapshot, SubAgent, Totals, TranscriptEvent,
 };
 
 /// Errors surfaced by the collector path. Most failures are *per-source* and

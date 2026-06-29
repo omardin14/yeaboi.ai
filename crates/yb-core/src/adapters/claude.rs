@@ -164,6 +164,11 @@ impl ClaudeCollector {
                 .as_deref()
                 .map(|m| self.window_for(m))
                 .unwrap_or(200_000);
+            // A turn can't occupy more than its window; if `used` exceeds it our
+            // model→window table under-detected (e.g. a 1M-context Opus session
+            // reporting a bare `claude-opus-4-8` id) — widen to the smallest
+            // tier that actually holds `used` so the % isn't pinned at 100.
+            let window = if used > window { 1_000_000 } else { window };
             ContextUsage::new(used, window)
         });
 
@@ -277,6 +282,62 @@ pub fn transcript_events(
     let drop = events.len().saturating_sub(limit);
     events.drain(0..drop);
     Ok(events)
+}
+
+/// Scan a session's transcript for the sub-agents (`Task`/`Agent` tool calls)
+/// it launched, with their type + description. A missing transcript → empty.
+pub fn transcript_sub_agents(
+    claude_home: &Path,
+    session_id: &str,
+) -> std::io::Result<Vec<crate::model::SubAgent>> {
+    let projects = claude_home.join("projects");
+    let Some(path) = find_transcript(&projects, session_id, &mut Vec::new()) else {
+        return Ok(Vec::new());
+    };
+    let text = std::fs::read_to_string(&path)?;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        sub_agents_from_line(line, &mut out);
+    }
+    Ok(out)
+}
+
+fn sub_agents_from_line(line: &str, out: &mut Vec<crate::model::SubAgent>) {
+    use serde_json::Value;
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return;
+    };
+    if v.get("type").and_then(Value::as_str) != Some("assistant") {
+        return;
+    }
+    let Some(blocks) = v
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for b in blocks {
+        if b.get("type").and_then(Value::as_str) != Some("tool_use") {
+            continue;
+        }
+        let name = b.get("name").and_then(Value::as_str).unwrap_or("");
+        if name != "Task" && name != "Agent" {
+            continue;
+        }
+        let input = b.get("input");
+        let field = |k: &str| {
+            input
+                .and_then(|i| i.get(k))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        out.push(crate::model::SubAgent {
+            kind: field("subagent_type"),
+            description: crate::util::truncate(&field("description"), 200),
+        });
+    }
 }
 
 /// Build a single transcript event (`summary` compact, `text` full).
@@ -1054,6 +1115,25 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("projects")).unwrap();
         let events = transcript_events(tmp.path(), "nope", 10).unwrap();
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn transcript_sub_agents_lists_task_calls_with_type_and_description() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let task = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"subagent_type":"Explore","description":"map the code"}}]}}"#;
+        let bash = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}"#;
+        write_session(
+            home,
+            "sess-sa",
+            r#"{"pid":1,"sessionId":"sess-sa","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
+            &[task, bash],
+        );
+        let agents = transcript_sub_agents(home, "sess-sa").unwrap();
+        // Only the Task call is a sub-agent; Bash is ignored.
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].kind, "Explore");
+        assert!(agents[0].description.contains("map the code"));
     }
 
     #[test]

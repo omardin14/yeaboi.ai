@@ -261,6 +261,20 @@ pub struct TranscriptEvent {
     pub out_tokens: u32,
 }
 
+/// One sub-agent (a `Task`/`Agent` tool call) launched during a session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../desktop/src/lib/bindings/")
+)]
+pub struct SubAgent {
+    /// The sub-agent type (e.g. `Explore`, `general-purpose`), or `""`.
+    pub kind: String,
+    /// The task description it was given, or `""`.
+    pub description: String,
+}
+
 /// Process metrics keyed by pid, plus parent→children adjacency. Produced by
 /// `yb-proc` and consumed by the enrichment pass; not part of the wire contract.
 #[derive(Debug, Clone, Default)]

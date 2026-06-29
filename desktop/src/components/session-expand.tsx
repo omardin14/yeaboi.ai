@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { Port } from "@/lib/bindings/Port";
-import { sessionTranscript } from "@/lib/api";
+import type { SubAgent } from "@/lib/bindings/SubAgent";
+import { sessionSubAgents, sessionTranscript } from "@/lib/api";
 import {
   formatAgo,
   formatCpu,
@@ -106,6 +107,22 @@ export function SessionExpand({
 }) {
   const prefs = useMonitorPrefs();
   const [fullPrompt, setFullPrompt] = useState<string | null>(null);
+  const [subAgents, setSubAgents] = useState<SubAgent[] | null>(null);
+
+  // Lazily fetch the session's sub-agents (Task/Agent calls) for the Agents
+  // section — their type + task, scanned from the whole transcript.
+  useEffect(() => {
+    let active = true;
+    setSubAgents(null);
+    sessionSubAgents(session.id)
+      .then((a) => active && setSubAgents(a))
+      .catch(() => {
+        /* best-effort; the count badge still shows */
+      });
+    return () => {
+      active = false;
+    };
+  }, [session.id]);
 
   // Lazily fetch the untruncated current prompt: the latest `user` event. Tool
   // results are now their own `tool_result` kind, so the most recent `user`
@@ -232,12 +249,33 @@ export function SessionExpand({
 
       {/* Agents */}
       <Section label="Agents" {...sec("agents")}>
-        <div className="flex items-center gap-1 font-mono text-xs text-ink-soft">
-          {session.sub_agent_count > 0
-            ? `${session.sub_agent_count} sub-agent${session.sub_agent_count === 1 ? "" : "s"}`
-            : "none"}
-          <InfoDot label="Sidechain / sub-agent activity seen in this session's transcript." />
-        </div>
+        {session.sub_agent_count === 0 ? (
+          <p className="text-[11px] text-ink-faint">No sub-agents launched.</p>
+        ) : subAgents == null ? (
+          <p className="text-[11px] text-ink-faint">Loading…</p>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1 text-xs text-ink-muted">
+              {subAgents.length || session.sub_agent_count} sub-agent
+              {(subAgents.length || session.sub_agent_count) === 1 ? "" : "s"} launched
+              <InfoDot label="Each Task/Agent sub-agent spawned in this session, with its type and task." />
+            </div>
+            {subAgents.length === 0 ? (
+              <p className="text-[11px] text-ink-faint">Per-agent details unavailable.</p>
+            ) : (
+              <ul className="space-y-1">
+                {subAgents.map((a, i) => (
+                  <li key={i} className="flex items-baseline gap-2 text-xs">
+                    <span className="shrink-0 rounded bg-surface-sunken px-1.5 font-mono text-[11px] text-merge">
+                      {a.kind || "agent"}
+                    </span>
+                    <span className="min-w-0 break-words text-ink-soft">{a.description || "—"}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </Section>
 
       <div className="flex justify-end border-t border-line pt-2">

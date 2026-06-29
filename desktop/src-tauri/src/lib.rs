@@ -15,7 +15,8 @@ use tauri::{Emitter, State};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::watch;
 use yb_core::{
-    CollectOptions, Engine, SessionEventKind, Snapshot, Totals, TranscriptEvent, detect_events,
+    CollectOptions, Engine, SessionEventKind, Snapshot, SubAgent, Totals, TranscriptEvent,
+    detect_events,
 };
 
 /// Event name carrying each new snapshot to the frontend.
@@ -220,6 +221,12 @@ async fn session_transcript(
         .await
 }
 
+/// The sub-agents (`Task`/`Agent` calls) a session launched, with type + task.
+#[tauri::command]
+async fn session_sub_agents(session_id: String) -> Result<Vec<SubAgent>, String> {
+    blocking(move || yb_core::transcript_sub_agents(&session_id).map_err(|e| e.to_string())).await
+}
+
 // ---- worktrees (yb-worktree) ------------------------------------------------
 
 /// Run `f` against the worktree engine for the repo at `cwd`, on the blocking
@@ -327,6 +334,7 @@ pub fn run() {
             continue_rebase,
             working_diff,
             session_transcript,
+            session_sub_agents,
             list_worktrees,
             create_worktree,
             remove_worktree,

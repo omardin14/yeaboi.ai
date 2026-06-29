@@ -9,6 +9,7 @@ import type { PullRequest } from "@/lib/bindings/PullRequest";
 import type { MergeMethod } from "@/lib/bindings/MergeMethod";
 import type { RebaseOutcome } from "@/lib/bindings/RebaseOutcome";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
+import type { SubAgent } from "@/lib/bindings/SubAgent";
 import type { Worktree } from "@/lib/bindings/Worktree";
 import type { Finding } from "@/lib/bindings/Finding";
 import type { AgentProgress } from "@/lib/bindings/AgentProgress";
@@ -95,6 +96,11 @@ export function sessionTranscript(
   limit: number,
 ): Promise<TranscriptEvent[]> {
   return invoke<TranscriptEvent[]>("session_transcript", { sessionId, limit });
+}
+
+/** The sub-agents (Task/Agent calls) a session launched. */
+export function sessionSubAgents(sessionId: string): Promise<SubAgent[]> {
+  return invoke<SubAgent[]>("session_sub_agents", { sessionId });
 }
 
 // ---- worktrees ----

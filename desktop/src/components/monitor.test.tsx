@@ -3,9 +3,10 @@ import { Monitor } from "@/components/monitor";
 import type { Snapshot } from "@/lib/bindings/Snapshot";
 import type { Session } from "@/lib/bindings/Session";
 
-// The inline detail panel lazily fetches the transcript for the full prompt.
+// The inline detail panel lazily fetches the transcript + sub-agents.
 vi.mock("@/lib/api", () => ({
   sessionTranscript: vi.fn().mockResolvedValue([]),
+  sessionSubAgents: vi.fn().mockResolvedValue([]),
 }));
 
 function session(over: Partial<Session> = {}): Session {
