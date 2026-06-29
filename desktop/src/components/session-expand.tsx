@@ -24,6 +24,16 @@ import { PortChips } from "@/components/port-chips";
 
 type Prefs = ReturnType<typeof useMonitorPrefs>;
 
+/** Count sub-agents by type, most frequent first. */
+function agentCounts(agents: SubAgent[]): [string, number][] {
+  const m = new Map<string, number>();
+  for (const a of agents) {
+    const k = a.kind || "agent";
+    m.set(k, (m.get(k) ?? 0) + 1);
+  }
+  return [...m.entries()].sort((a, b) => b[1] - a[1]);
+}
+
 const METRIC_INFO: Record<MetricId, string> = {
   cpu: "CPU use of this process, averaged over recent samples so it doesn't flicker.",
   mem: "Resident memory this process is currently holding.",
@@ -254,19 +264,36 @@ export function SessionExpand({
         ) : subAgents == null ? (
           <p className="text-[11px] text-ink-faint">Loading…</p>
         ) : (
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1 text-xs text-ink-muted">
-              {subAgents.length || session.sub_agent_count} sub-agent
-              {(subAgents.length || session.sub_agent_count) === 1 ? "" : "s"} launched
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5 text-xs text-ink-muted">
+              <span className="font-mono tabular-nums text-ink">
+                {subAgents.length || session.sub_agent_count}
+              </span>
+              sub-agents launched
               <InfoDot label="Each Task/Agent sub-agent spawned in this session, with its type and task." />
             </div>
+            {/* Breakdown by type. */}
+            <div className="flex flex-wrap gap-1">
+              {agentCounts(subAgents).map(([kind, n]) => (
+                <span
+                  key={kind}
+                  className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-merge"
+                >
+                  {kind} ×{n}
+                </span>
+              ))}
+            </div>
+            {/* Aligned, scrollable list. */}
             {subAgents.length === 0 ? (
               <p className="text-[11px] text-ink-faint">Per-agent details unavailable.</p>
             ) : (
-              <ul className="space-y-1">
+              <ul className="max-h-56 space-y-0.5 overflow-auto pr-1">
                 {subAgents.map((a, i) => (
                   <li key={i} className="flex items-baseline gap-2 text-xs">
-                    <span className="shrink-0 rounded bg-surface-sunken px-1.5 font-mono text-[11px] text-merge">
+                    <span className="w-5 shrink-0 text-right font-mono text-[10px] text-ink-faint">
+                      {i + 1}
+                    </span>
+                    <span className="w-24 shrink-0 truncate font-mono text-[11px] text-merge">
                       {a.kind || "agent"}
                     </span>
                     <span className="min-w-0 break-words text-ink-soft">{a.description || "—"}</span>

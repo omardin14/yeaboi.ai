@@ -28,17 +28,20 @@ export function Tooltip({
   );
 }
 
-/** A small ⓘ affordance that reveals `label` on hover/focus. */
+/**
+ * A small ⓘ affordance that reveals `label` on hover. Uses a native `title`
+ * tooltip — the CSS popover above gets clipped inside the collapsible panels'
+ * `overflow-hidden`, whereas `title` always renders.
+ */
 export function InfoDot({ label }: { label: string }) {
   return (
-    <Tooltip content={label}>
-      <button
-        type="button"
-        aria-label={label}
-        className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-ink-faint transition-colors hover:border-burgundy hover:text-burgundy"
-      >
-        i
-      </button>
-    </Tooltip>
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      className="inline-flex h-3.5 w-3.5 shrink-0 cursor-help items-center justify-center rounded-full border border-line-strong text-[9px] leading-none text-ink-faint transition-colors hover:border-burgundy hover:text-burgundy"
+    >
+      i
+    </button>
   );
 }
