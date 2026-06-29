@@ -34,8 +34,8 @@ const session: Session = {
 beforeEach(() => {
   workingDiffMock.mockReset().mockResolvedValue("diff --git a b\n+added line");
   transcriptMock.mockReset().mockResolvedValue([
-    { kind: "user", summary: "do the thing" },
-    { kind: "assistant", summary: "tool_use: Bash" },
+    { kind: "user", summary: "do the thing", text: "do the thing" },
+    { kind: "assistant", summary: "tool_use: Bash", text: "tool_use: Bash" },
   ]);
 });
 
@@ -45,19 +45,18 @@ test("loads and shows the working diff", async () => {
   expect(workingDiffMock).toHaveBeenCalledWith("/repo");
 });
 
-test("switches to the transcript and scrubs", async () => {
+test("switches to the transcript and shows the full conversation", async () => {
   render(<SessionDetail session={session} onClose={() => {}} />);
   // Wait for the transcript to load, then open its tab.
   await waitFor(() => expect(transcriptMock).toHaveBeenCalledWith("s1"));
   fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
 
-  // Starts at the last entry.
-  expect(await screen.findByText("tool_use: Bash")).toBeInTheDocument();
-  // Scrub back to the first entry.
-  fireEvent.change(screen.getByRole("slider", { name: "Transcript position" }), {
-    target: { value: "0" },
-  });
-  expect(screen.getByText("do the thing")).toBeInTheDocument();
+  // The reader shows every turn's full text at once (no scrubbing).
+  expect(await screen.findByText("do the thing")).toBeInTheDocument();
+  expect(screen.getByText("tool_use: Bash")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("slider", { name: "Transcript position" }),
+  ).not.toBeInTheDocument();
 });
 
 test("close fires the callback", async () => {

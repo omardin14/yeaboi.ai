@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { cx } from "@/components/ui/cx";
 
 type Tone = "surface" | "sunken" | "outline";
@@ -11,19 +11,21 @@ const TONE: Record<Tone, string> = {
 
 /**
  * A rounded panel — the literal "pane" of the single pane of glass. `tone`
- * picks the surface; `pad` the inner padding. Anything else passes through.
+ * picks the surface; `pad` the inner padding. Extra div props (role, onClick,
+ * aria-*) pass straight through.
  */
 export function Card({
   tone = "surface",
   pad = "md",
   className,
   children,
+  ...rest
 }: {
   tone?: Tone;
   pad?: "none" | "sm" | "md" | "lg";
   className?: string;
   children: ReactNode;
-}) {
+} & Omit<HTMLAttributes<HTMLDivElement>, "className" | "children">) {
   const padding =
     pad === "none"
       ? ""
@@ -33,7 +35,10 @@ export function Card({
           ? "p-6"
           : "p-4";
   return (
-    <div className={cx("rounded-2xl border", TONE[tone], padding, className)}>
+    <div
+      className={cx("rounded-2xl border", TONE[tone], padding, className)}
+      {...rest}
+    >
       {children}
     </div>
   );

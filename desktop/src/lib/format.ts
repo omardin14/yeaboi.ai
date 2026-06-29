@@ -143,6 +143,20 @@ export function heatVar(intensity: number | null | undefined): string {
   }
 }
 
+/** Relative time like `3m ago` / `2h ago` / `1d ago` from an epoch-ms stamp. */
+export function formatAgo(ms: number | null | undefined): string {
+  if (ms == null || ms <= 0) return "—";
+  const diff = Date.now() - ms;
+  if (diff < 0) return "just now";
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 /** Short host-app label. */
 export function hostAppLabel(host: HostApp): string {
   if (host === "Cli") return "cli";

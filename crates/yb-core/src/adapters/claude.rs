@@ -296,6 +296,9 @@ fn event_from_line(line: &str) -> Option<crate::model::TranscriptEvent> {
     Some(crate::model::TranscriptEvent {
         kind,
         summary: crate::util::truncate(&summary, 160),
+        // Generously bounded so a single huge tool-result can't bloat the wire,
+        // while still showing whole prompts/turns in the reader.
+        text: crate::util::truncate(&summary, 4000),
     })
 }
 

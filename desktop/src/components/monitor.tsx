@@ -4,169 +4,142 @@ import type { Session } from "@/lib/bindings/Session";
 import type { Project } from "@/lib/bindings/Project";
 import type { Port } from "@/lib/bindings/Port";
 import {
-  formatCpu,
-  formatMem,
   formatPct,
-  formatUptime,
   heatClass,
-  hostAppLabel,
   providerAccent,
   statusRailVar,
 } from "@/lib/format";
+import { useSessionMetrics, type SessionMetric } from "@/lib/session-metrics";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Gauge } from "@/components/ui/gauge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PortChips } from "@/components/port-chips";
+import { SessionExpand } from "@/components/session-expand";
 
 /** A session can be stopped only if it has a live process. */
 function isKillable(session: Session): boolean {
   return session.pid != null && session.status !== "Dead";
 }
 
-const CHIP_CLS =
-  "rounded-md bg-surface-sunken px-1.5 font-mono text-xs text-idle";
-
-function PortChip({
-  port,
-  onFreePort,
-}: {
-  port: Port;
-  onFreePort?: (port: Port) => void;
-}) {
-  const label = `:${port.number}`;
-  const title = `pid ${port.pid} · ${port.state}`;
-  if (!onFreePort) {
-    return (
-      <span title={title} className={CHIP_CLS}>
-        {label}
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      aria-label={`Free port ${port.number}`}
-      title={`Free ${label} (${title})`}
-      onClick={(e) => {
-        e.stopPropagation();
-        onFreePort(port);
-      }}
-      className={`${CHIP_CLS} transition-colors hover:bg-danger-fill hover:text-danger`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function PortChips({
-  ports,
-  onFreePort,
-}: {
-  ports: Port[];
-  onFreePort?: (port: Port) => void;
-}) {
-  return (
-    <span className="flex flex-wrap gap-1">
-      {ports.map((p) => (
-        <PortChip key={`${p.pid}:${p.number}`} port={p} onFreePort={onFreePort} />
-      ))}
-    </span>
-  );
-}
-
 function SessionRow({
   session,
+  expanded,
+  onToggleExpand,
+  metric,
   onKill,
   onFreePort,
   onSelect,
 }: {
   session: Session;
+  expanded: boolean;
+  onToggleExpand: (session: Session) => void;
+  metric: SessionMetric | undefined;
   onKill?: (session: Session) => void;
   onFreePort?: (port: Port) => void;
   onSelect?: (session: Session) => void;
 }) {
   const ctx = session.context?.pct ?? null;
-  const cpu = session.proc_stats?.cpu_pct ?? null;
   const needs = session.awaiting_permission;
   return (
     <div
       role="row"
-      onClick={() => onSelect?.(session)}
-      className="group relative cursor-pointer rounded-lg pl-4 pr-2 transition-colors hover:bg-surface-raised"
+      aria-expanded={expanded}
+      onClick={() => onToggleExpand(session)}
+      className="group relative cursor-pointer rounded-xl px-3 py-2 transition-colors hover:bg-surface-raised"
     >
-      {/* Lacquered status rail — status is readable from the edge alone. */}
+      {/* Lacquered status rail — status at a glance from the edge. */}
       <span
         aria-hidden
-        className={`absolute left-1 top-1.5 bottom-1.5 w-[3px] rounded-full ${needs ? "animate-needs" : ""}`}
+        className={`absolute left-1 top-2 bottom-2 w-[3px] rounded-full ${needs ? "animate-needs" : ""}`}
         style={{ background: statusRailVar(session.status) }}
       />
 
-      {/* Primary line. */}
-      <div className="flex items-center gap-3 py-1.5 text-[13px]">
-        <Gauge value={ctx} title={`context ${formatPct(ctx)}`} />
-        <span className={`w-9 shrink-0 text-right font-mono text-xs tabular-nums ${heatClass(ctx)}`}>
-          {formatPct(ctx)}
-        </span>
-        <span className="w-12 shrink-0 text-xs lowercase" style={{ color: statusRailVar(session.status) }}>
-          {session.status}
-        </span>
-        <span className="flex w-40 shrink-0 items-center gap-1.5 truncate text-ink-soft">
-          <span className={`text-[10px] leading-none ${providerAccent(session.provider)}`}>●</span>
-          <span className="truncate">{session.model ?? "—"}</span>
-        </span>
-        <span className="w-36 shrink-0 truncate font-mono text-xs text-ink-muted">
-          {session.branch ?? "—"}
+      {/* Top line: identity on the left, live meta on the right. */}
+      <div className="flex items-center gap-2.5 pl-2 text-[13px]">
+        <span
+          aria-hidden
+          className={`w-2 shrink-0 text-[9px] text-ink-faint transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+        >
+          ▶
         </span>
         <span
-          className="min-w-0 flex-1 truncate text-ink-muted"
-          title={session.last_prompt ?? ""}
-        >
-          {session.last_prompt ?? ""}
+          title={session.status}
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: statusRailVar(session.status) }}
+        />
+        <span className="flex min-w-0 items-center gap-1.5 font-medium text-ink">
+          <span className={`text-[9px] leading-none ${providerAccent(session.provider)}`}>●</span>
+          <span className="truncate">{session.model ?? "—"}</span>
         </span>
+        {session.branch && (
+          <span className="hidden max-w-[13rem] shrink truncate font-mono text-xs text-ink-faint sm:inline">
+            {session.branch}
+          </span>
+        )}
 
-        {needs && (
-          <span
-            title="Waiting on a permission decision"
-            className="animate-needs shrink-0 rounded-md bg-needs-fill px-1.5 py-0.5 text-xs text-needs ring-1 ring-inset ring-needs-ring"
-          >
-            ⏸ needs you
-          </span>
-        )}
-        {session.sub_agent_count > 0 && (
-          <span className="shrink-0 font-mono text-xs text-ink-faint" title="sub-agents">
-            ⌥{session.sub_agent_count}
-          </span>
-        )}
-        {session.ports.length > 0 && (
-          <PortChips ports={session.ports} onFreePort={onFreePort} />
-        )}
-        <span className="w-10 shrink-0 text-right">
-          {onKill && isKillable(session) && (
-            <button
-              type="button"
-              aria-label={`Stop session ${session.id}`}
-              title="Stop session (SIGTERM)"
-              onClick={(e) => {
-                e.stopPropagation(); // don't also open the detail panel
-                onKill(session);
-              }}
-              className="rounded-md px-1.5 py-0.5 text-xs text-ink-faint opacity-0 transition hover:bg-danger-fill hover:text-danger group-hover:opacity-100"
+        <span className="ml-auto flex shrink-0 items-center gap-2.5">
+          {needs && (
+            <span
+              title="Waiting on a permission decision"
+              className="animate-needs rounded-md bg-needs-fill px-1.5 py-0.5 text-xs text-needs ring-1 ring-inset ring-needs-ring"
             >
-              stop
-            </button>
+              ⏸ needs you
+            </span>
           )}
+          {session.sub_agent_count > 0 && (
+            <span className="font-mono text-xs text-ink-faint" title="sub-agents">
+              ⌥{session.sub_agent_count}
+            </span>
+          )}
+          {session.ports.length > 0 && (
+            <PortChips ports={session.ports} onFreePort={onFreePort} />
+          )}
+          <span className="flex items-center gap-1.5" title={`context ${formatPct(ctx)}`}>
+            <Gauge value={ctx} />
+            <span className={`w-9 text-right font-mono text-xs tabular-nums ${heatClass(ctx)}`}>
+              {formatPct(ctx)}
+            </span>
+          </span>
+          <span className="w-8 text-right">
+            {onKill && isKillable(session) && (
+              <button
+                type="button"
+                aria-label={`Stop session ${session.id}`}
+                title="Stop session (SIGTERM)"
+                onClick={(e) => {
+                  e.stopPropagation(); // don't also toggle the panel
+                  onKill(session);
+                }}
+                className="rounded-md px-1.5 py-0.5 text-xs text-ink-faint opacity-0 transition hover:bg-danger-fill hover:text-danger group-hover:opacity-100"
+              >
+                stop
+              </button>
+            )}
+          </span>
         </span>
       </div>
 
-      {/* Secondary stats — revealed on hover (progressive disclosure). */}
-      <div className="hidden gap-3 pb-1.5 pl-[34px] font-mono text-[11px] text-ink-faint group-hover:flex">
-        <span>pid {session.pid ?? "—"}</span>
-        <span>cpu {formatCpu(cpu)}</span>
-        <span>mem {formatMem(session.proc_stats?.mem_bytes ?? 0)}</span>
-        <span>up {formatUptime(session.proc_stats?.uptime_secs)}</span>
-        <span>{hostAppLabel(session.host_app)}</span>
-      </div>
+      {/* The current prompt on its own readable line — the "what's happening". */}
+      {session.last_prompt && (
+        <p
+          className="mt-1 truncate pl-[26px] text-[13px] leading-snug text-ink-muted"
+          title={session.last_prompt}
+        >
+          {session.last_prompt}
+        </p>
+      )}
+
+      {/* Inline expandable detail — calm, labeled sections. */}
+      {expanded && (
+        <SessionExpand
+          session={session}
+          metric={metric}
+          onSelect={onSelect}
+          onFreePort={onFreePort}
+        />
+      )}
     </div>
   );
 }
@@ -174,12 +147,18 @@ function SessionRow({
 function ProjectGroup({
   project,
   sessions,
+  expandedId,
+  onToggleExpand,
+  getMetric,
   onKill,
   onFreePort,
   onSelect,
 }: {
   project: Project;
   sessions: Session[];
+  expandedId: string | null;
+  onToggleExpand: (session: Session) => void;
+  getMetric: (id: string) => SessionMetric | undefined;
   onKill?: (session: Session) => void;
   onFreePort?: (port: Port) => void;
   onSelect?: (session: Session) => void;
@@ -188,35 +167,38 @@ function ProjectGroup({
   return (
     <section className="mb-4">
       <Card pad="none" className="overflow-hidden">
-      <header className="flex items-baseline gap-2 px-4 pt-3">
-        <span aria-hidden className="text-xs text-burgundy">
-          ◆
-        </span>
-        <h2 className="text-sm font-semibold text-ink">{project.name}</h2>
-        <span className="text-xs text-ink-faint">
-          {busy > 0 && <span className="text-busy">{busy} busy</span>}
-          {busy > 0 && " · "}
-          {sessions.length} shown
-        </span>
-        {project.remote && (
-          <span className="ml-auto truncate font-mono text-[11px] text-ink-faint">
-            {project.remote}
+        <header className="flex items-baseline gap-2 px-4 pt-3">
+          <span aria-hidden className="text-xs text-burgundy">
+            ◆
           </span>
-        )}
-      </header>
-      {/* Ticked divider. */}
-      <div className="mx-4 mt-2 mb-1 border-t border-dashed border-line-strong" />
-      <div className="px-2 pb-2">
-        {sessions.map((s) => (
-          <SessionRow
-            key={s.id}
-            session={s}
-            onKill={onKill}
-            onFreePort={onFreePort}
-            onSelect={onSelect}
-          />
-        ))}
-      </div>
+          <h2 className="text-sm font-semibold text-ink">{project.name}</h2>
+          <span className="text-xs text-ink-faint">
+            {busy > 0 && <span className="text-busy">{busy} busy</span>}
+            {busy > 0 && " · "}
+            {sessions.length} shown
+          </span>
+          {project.remote && (
+            <span className="ml-auto truncate font-mono text-[11px] text-ink-faint">
+              {project.remote}
+            </span>
+          )}
+        </header>
+        {/* Ticked divider. */}
+        <div className="mx-4 mt-2 mb-1 border-t border-dashed border-line-strong" />
+        <div className="space-y-0.5 px-2 pb-2">
+          {sessions.map((s) => (
+            <SessionRow
+              key={s.id}
+              session={s}
+              expanded={expandedId === s.id}
+              onToggleExpand={onToggleExpand}
+              metric={getMetric(s.id)}
+              onKill={onKill}
+              onFreePort={onFreePort}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
       </Card>
     </section>
   );
@@ -275,7 +257,7 @@ function matchesFilter(s: Session, q: string): boolean {
 /**
  * The monitor view: sessions grouped under their project, with a filter box,
  * a sort control, an awaiting-permission inbox filter, and an orphan-port
- * section. Rendered purely from the streamed snapshot.
+ * section. Clicking a session expands a calm, labeled detail panel inline.
  */
 export function Monitor({
   snapshot,
@@ -291,7 +273,9 @@ export function Monitor({
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
   const [onlyBlocked, setOnlyBlocked] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
+  const getMetric = useSessionMetrics(snapshot);
 
   // "/" focuses the filter box (a power-user shortcut).
   useEffect(() => {
@@ -311,6 +295,8 @@ export function Monitor({
 
   const byId = new Map(snapshot.sessions.map((s) => [s.id, s]));
   const blockedCount = snapshot.sessions.filter((s) => s.awaiting_permission).length;
+  const toggleExpand = (s: Session) =>
+    setExpandedId((cur) => (cur === s.id ? null : s.id));
 
   const groups = snapshot.projects
     .map((project) => {
@@ -380,6 +366,9 @@ export function Monitor({
             key={project.id}
             project={project}
             sessions={sessions}
+            expandedId={expandedId}
+            onToggleExpand={toggleExpand}
+            getMetric={getMetric}
             onKill={onKill}
             onFreePort={onFreePort}
             onSelect={onSelect}

@@ -9,6 +9,11 @@ export type TranscriptEvent = {
  */
 kind: string, 
 /**
- * A short human summary of the entry.
+ * A short human summary of the entry (≤160 chars) — for compact lists.
  */
-summary: string, };
+summary: string, 
+/**
+ * The full entry text (generously bounded) — for the readable reader and
+ * for recovering the untruncated current prompt.
+ */
+text: string, };
