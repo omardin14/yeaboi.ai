@@ -273,6 +273,8 @@ pub struct SubAgent {
     pub kind: String,
     /// The task description it was given, or `""`.
     pub description: String,
+    /// Whether its result has come back (`true`) or it's still running.
+    pub done: bool,
 }
 
 /// Process metrics keyed by pid, plus parent→children adjacency. Produced by

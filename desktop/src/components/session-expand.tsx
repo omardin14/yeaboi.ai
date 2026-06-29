@@ -265,12 +265,24 @@ export function SessionExpand({
           <p className="text-[11px] text-ink-faint">Loading…</p>
         ) : (
           <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-xs text-ink-muted">
-              <span className="font-mono tabular-nums text-ink">
-                {subAgents.length || session.sub_agent_count}
+            <p className="text-[11px] leading-snug text-ink-faint">
+              Helper agents this session spawned to run focused sub-tasks in parallel
+              (e.g. <span className="text-merge">Explore</span> = read-only code search,{" "}
+              <span className="text-merge">Plan</span> = design), each returning its result
+              to the main session.
+            </p>
+            {/* Status summary. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span className="text-ink-muted">
+                <span className="font-mono tabular-nums text-ink">{subAgents.length}</span> launched
               </span>
-              sub-agents launched
-              <InfoDot label="Each Task/Agent sub-agent spawned in this session, with its type and task." />
+              {subAgents.some((a) => !a.done) && (
+                <span className="animate-needs text-needs">
+                  {subAgents.filter((a) => !a.done).length} running
+                </span>
+              )}
+              <span className="text-busy">{subAgents.filter((a) => a.done).length} done</span>
+              <InfoDot label="Each Task/Agent sub-agent spawned in this session. 'done' means its result has returned; 'running' means it's still in flight." />
             </div>
             {/* Breakdown by type. */}
             <div className="flex flex-wrap gap-1">
@@ -283,15 +295,18 @@ export function SessionExpand({
                 </span>
               ))}
             </div>
-            {/* Aligned, scrollable list. */}
+            {/* Status · type · task — scrollable. */}
             {subAgents.length === 0 ? (
               <p className="text-[11px] text-ink-faint">Per-agent details unavailable.</p>
             ) : (
-              <ul className="max-h-56 space-y-0.5 overflow-auto pr-1">
+              <ul className="max-h-56 space-y-1 overflow-auto pr-1">
                 {subAgents.map((a, i) => (
                   <li key={i} className="flex items-baseline gap-2 text-xs">
-                    <span className="w-5 shrink-0 text-right font-mono text-[10px] text-ink-faint">
-                      {i + 1}
+                    <span
+                      title={a.done ? "done" : "running"}
+                      className={`shrink-0 text-[10px] leading-none ${a.done ? "text-busy" : "animate-needs text-needs"}`}
+                    >
+                      {a.done ? "✓" : "●"}
                     </span>
                     <span className="w-24 shrink-0 truncate font-mono text-[11px] text-merge">
                       {a.kind || "agent"}

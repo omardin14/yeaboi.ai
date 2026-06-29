@@ -11,4 +11,8 @@ kind: string,
 /**
  * The task description it was given, or `""`.
  */
-description: string, };
+description: string, 
+/**
+ * Whether its result has come back (`true`) or it's still running.
+ */
+done: boolean, };

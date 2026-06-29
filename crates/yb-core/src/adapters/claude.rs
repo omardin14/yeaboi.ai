@@ -285,7 +285,8 @@ pub fn transcript_events(
 }
 
 /// Scan a session's transcript for the sub-agents (`Task`/`Agent` tool calls)
-/// it launched, with their type + description. A missing transcript → empty.
+/// it launched — type, description, and whether the result came back yet
+/// (matched by tool-call id). A missing transcript → empty.
 pub fn transcript_sub_agents(
     claude_home: &Path,
     session_id: &str,
@@ -295,21 +296,34 @@ pub fn transcript_sub_agents(
         return Ok(Vec::new());
     };
     let text = std::fs::read_to_string(&path)?;
-    let mut out = Vec::new();
+
+    // Calls (id, type, description) in order, and the ids whose results landed.
+    let mut calls: Vec<(String, String, String)> = Vec::new();
+    let mut completed: std::collections::HashSet<String> = std::collections::HashSet::new();
     for line in text.lines() {
-        sub_agents_from_line(line, &mut out);
+        collect_sub_agent_line(line, &mut calls, &mut completed);
     }
-    Ok(out)
+    Ok(calls
+        .into_iter()
+        .map(|(id, kind, description)| crate::model::SubAgent {
+            kind,
+            description,
+            // No id (older transcripts) → assume done, not perpetually "running".
+            done: id.is_empty() || completed.contains(&id),
+        })
+        .collect())
 }
 
-fn sub_agents_from_line(line: &str, out: &mut Vec<crate::model::SubAgent>) {
+fn collect_sub_agent_line(
+    line: &str,
+    calls: &mut Vec<(String, String, String)>,
+    completed: &mut std::collections::HashSet<String>,
+) {
     use serde_json::Value;
     let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
         return;
     };
-    if v.get("type").and_then(Value::as_str) != Some("assistant") {
-        return;
-    }
+    let kind = v.get("type").and_then(Value::as_str);
     let Some(blocks) = v
         .get("message")
         .and_then(|m| m.get("content"))
@@ -317,26 +331,46 @@ fn sub_agents_from_line(line: &str, out: &mut Vec<crate::model::SubAgent>) {
     else {
         return;
     };
-    for b in blocks {
-        if b.get("type").and_then(Value::as_str) != Some("tool_use") {
-            continue;
+    match kind {
+        Some("assistant") => {
+            for b in blocks {
+                if b.get("type").and_then(Value::as_str) != Some("tool_use") {
+                    continue;
+                }
+                let name = b.get("name").and_then(Value::as_str).unwrap_or("");
+                if name != "Task" && name != "Agent" {
+                    continue;
+                }
+                let id = b
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let input = b.get("input");
+                let field = |k: &str| {
+                    input
+                        .and_then(|i| i.get(k))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string()
+                };
+                calls.push((
+                    id,
+                    field("subagent_type"),
+                    crate::util::truncate(&field("description"), 200),
+                ));
+            }
         }
-        let name = b.get("name").and_then(Value::as_str).unwrap_or("");
-        if name != "Task" && name != "Agent" {
-            continue;
+        Some("user") => {
+            for b in blocks {
+                if b.get("type").and_then(Value::as_str) == Some("tool_result")
+                    && let Some(id) = b.get("tool_use_id").and_then(Value::as_str)
+                {
+                    completed.insert(id.to_string());
+                }
+            }
         }
-        let input = b.get("input");
-        let field = |k: &str| {
-            input
-                .and_then(|i| i.get(k))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string()
-        };
-        out.push(crate::model::SubAgent {
-            kind: field("subagent_type"),
-            description: crate::util::truncate(&field("description"), 200),
-        });
+        _ => {}
     }
 }
 
@@ -1118,22 +1152,28 @@ mod tests {
     }
 
     #[test]
-    fn transcript_sub_agents_lists_task_calls_with_type_and_description() {
+    fn transcript_sub_agents_lists_calls_with_type_description_and_done() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let task = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","input":{"subagent_type":"Explore","description":"map the code"}}]}}"#;
-        let bash = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}"#;
+        // Two Task calls; only the first one's result has come back.
+        let t1 = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"Explore","description":"map the code"}}]}}"#;
+        let r1 = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#;
+        let t2 = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Task","input":{"subagent_type":"Plan","description":"design it"}}]}}"#;
+        let bash = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"ls"}}]}}"#;
         write_session(
             home,
             "sess-sa",
             r#"{"pid":1,"sessionId":"sess-sa","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
-            &[task, bash],
+            &[t1, r1, t2, bash],
         );
         let agents = transcript_sub_agents(home, "sess-sa").unwrap();
-        // Only the Task call is a sub-agent; Bash is ignored.
-        assert_eq!(agents.len(), 1);
+        // Only Task calls are sub-agents; Bash is ignored.
+        assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].kind, "Explore");
         assert!(agents[0].description.contains("map the code"));
+        assert!(agents[0].done, "its result came back");
+        assert_eq!(agents[1].kind, "Plan");
+        assert!(!agents[1].done, "no result yet → still running");
     }
 
     #[test]
