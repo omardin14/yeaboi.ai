@@ -33,15 +33,28 @@ const session: Session = {
 
 beforeEach(() => {
   workingDiffMock.mockReset().mockResolvedValue("diff --git a b\n+added line");
+  const ev = (over: Record<string, unknown>) => ({
+    kind: "user",
+    summary: "",
+    text: "",
+    at: "2026-06-27T21:42:32.000Z",
+    model: "",
+    in_tokens: 0,
+    out_tokens: 0,
+    ...over,
+  });
   transcriptMock.mockReset().mockResolvedValue([
-    { kind: "user", summary: "do the thing", text: "do the thing", at: "2026-06-27T21:42:32.000Z" },
-    { kind: "assistant", summary: "on it", text: "on it", at: "2026-06-27T21:42:35.000Z" },
-    {
-      kind: "tool_result",
-      summary: "exit 0",
-      text: "3 tests passed",
-      at: "2026-06-27T21:43:01.000Z",
-    },
+    ev({ kind: "user", summary: "do the thing", text: "do the thing" }),
+    ev({
+      kind: "assistant",
+      summary: "on it",
+      text: "on it",
+      at: "2026-06-27T21:42:35.000Z",
+      model: "claude-opus-4-8",
+      in_tokens: 6300,
+      out_tokens: 240,
+    }),
+    ev({ kind: "tool_result", text: "3 tests passed", at: "2026-06-27T21:43:01.000Z" }),
   ]);
 });
 
@@ -51,10 +64,12 @@ test("loads and shows the working diff", async () => {
   expect(workingDiffMock).toHaveBeenCalledWith("/repo");
 });
 
-test("switches to the transcript and shows speakers, times, and turns", async () => {
+test("switches to the transcript and shows speakers, times, metadata, and tool output", async () => {
   render(<SessionDetail session={session} onClose={() => {}} />);
   // Wait for the transcript to load, then open its tab.
-  await waitFor(() => expect(transcriptMock).toHaveBeenCalledWith("s1"));
+  await waitFor(() =>
+    expect(transcriptMock).toHaveBeenCalledWith("s1", expect.any(Number)),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
 
   // Speaker attribution + the conversation text render (no scrubbing slider).
@@ -64,9 +79,12 @@ test("switches to the transcript and shows speakers, times, and turns", async ()
   expect(screen.getByText("on it")).toBeInTheDocument();
   // A clock (HH:MM:SS) appears on entries.
   expect(screen.getAllByText(/^\d{2}:\d{2}:\d{2}$/).length).toBeGreaterThan(0);
-  // The tool result is a collapsible heavy entry (its summary shows as a label).
-  expect(screen.getByText("exit 0")).toBeInTheDocument();
+  // Per-turn metadata (model + tokens) on the assistant turn (the session
+  // header also shows the model, so match the token-bearing meta line).
+  expect(screen.getByText(/opus-4-8 · 6k→240 tok/)).toBeInTheDocument();
+  // The tool result output is shown in full (not a "(tool result)" stub).
   expect(screen.getByText(/Tool result/)).toBeInTheDocument();
+  expect(screen.getByText("3 tests passed")).toBeInTheDocument();
   expect(
     screen.queryByRole("slider", { name: "Transcript position" }),
   ).not.toBeInTheDocument();

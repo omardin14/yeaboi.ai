@@ -20,4 +20,16 @@ text: string,
 /**
  * ISO8601 timestamp of the source line, or `""` if absent.
  */
-at: string, };
+at: string, 
+/**
+ * Model for an assistant turn (e.g. `claude-opus-4-8`), else `""`.
+ */
+model: string, 
+/**
+ * Context tokens going in (input + cache) on an assistant turn, else 0.
+ */
+in_tokens: number, 
+/**
+ * Tokens generated on an assistant turn, else 0.
+ */
+out_tokens: number, };

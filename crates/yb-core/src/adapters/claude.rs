@@ -287,63 +287,97 @@ fn event(kind: &str, full: &str, at: &str) -> crate::model::TranscriptEvent {
         // Generously bounded so one huge tool result can't bloat the wire.
         text: crate::util::truncate(full, 4000),
         at: at.to_string(),
+        model: String::new(),
+        in_tokens: 0,
+        out_tokens: 0,
     }
 }
 
 /// Segment one transcript line into atomic, speaker-attributed events: an
 /// assistant line fans out into its text / thinking / tool-call blocks, and a
-/// user line into the real prompt and/or any tool-result outputs. Redundant or
-/// structural lines (`last-prompt`, summaries) are dropped from the reader.
+/// user line into the real prompt and/or any tool-result outputs. Everything
+/// else — `system`, `last-prompt`, meta/structural lines — is dropped so the
+/// reader shows only the actual conversation + tool activity.
 fn events_from_line(line: &str) -> Vec<crate::model::TranscriptEvent> {
     use serde_json::Value;
     let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
         return Vec::new();
     };
-    let Some(kind) = v.get("type").and_then(Value::as_str) else {
+    // Injected/meta lines (caveats, command echoes, hook noise) are not the
+    // conversation — skip them outright.
+    if v.get("isMeta").and_then(Value::as_bool) == Some(true) {
         return Vec::new();
-    };
-    let at = v.get("timestamp").and_then(Value::as_str).unwrap_or("");
-    match kind {
-        "assistant" => assistant_events(&v, at),
-        "user" => user_events(&v, at),
-        // Redundant with the user line / purely structural — not shown.
-        "last-prompt" | "summary" | "file-history-snapshot" => Vec::new(),
-        "system" => vec![event("system", &system_text(&v), at)],
-        other => vec![event(other, other, at)],
     }
+    let at = v.get("timestamp").and_then(Value::as_str).unwrap_or("");
+    match v.get("type").and_then(Value::as_str) {
+        Some("assistant") => assistant_events(&v, at),
+        Some("user") => user_events(&v, at),
+        _ => Vec::new(),
+    }
+}
+
+/// Context tokens (input + both cache reads) and generated tokens for a turn.
+fn turn_tokens(message: &serde_json::Value) -> (u32, u32) {
+    let u = message.get("usage");
+    let get = |k: &str| -> u32 {
+        u.and_then(|u| u.get(k))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32
+    };
+    let input =
+        get("input_tokens") + get("cache_creation_input_tokens") + get("cache_read_input_tokens");
+    (input, get("output_tokens"))
 }
 
 fn assistant_events(v: &serde_json::Value, at: &str) -> Vec<crate::model::TranscriptEvent> {
     use serde_json::Value;
-    let Some(blocks) = v
-        .get("message")
+    let message = v.get("message");
+    let model = message
+        .and_then(|m| m.get("model"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let (in_tokens, out_tokens) = message.map(turn_tokens).unwrap_or((0, 0));
+    // Attach the turn's model/usage to the first emitted segment only.
+    let tag = |e: crate::model::TranscriptEvent, first: bool| crate::model::TranscriptEvent {
+        model: model.clone(),
+        in_tokens: if first { in_tokens } else { 0 },
+        out_tokens: if first { out_tokens } else { 0 },
+        ..e
+    };
+
+    let Some(blocks) = message
         .and_then(|m| m.get("content"))
         .and_then(Value::as_array)
     else {
-        return vec![event("assistant", "(assistant)", at)];
+        return vec![tag(event("assistant", "(assistant)", at), true)];
     };
     let mut out = Vec::new();
     for b in blocks {
-        match b.get("type").and_then(Value::as_str) {
+        let ev = match b.get("type").and_then(Value::as_str) {
             Some("text") => {
                 let t = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
-                if !t.is_empty() {
-                    out.push(event("assistant", t, at));
+                if t.is_empty() {
+                    continue;
                 }
+                event("assistant", t, at)
             }
-            Some("thinking") => {
-                let t = b.get("thinking").and_then(Value::as_str).unwrap_or("");
-                out.push(event("thinking", t, at));
-            }
+            Some("thinking") => event(
+                "thinking",
+                b.get("thinking").and_then(Value::as_str).unwrap_or(""),
+                at,
+            ),
             Some("tool_use") => {
                 let name = b.get("name").and_then(Value::as_str).unwrap_or("?");
-                out.push(event("tool_use", &tool_use_text(name, b.get("input")), at));
+                event("tool_use", &tool_use_text(name, b.get("input")), at)
             }
-            _ => {}
-        }
+            _ => continue,
+        };
+        let first = out.is_empty();
+        out.push(tag(ev, first));
     }
     if out.is_empty() {
-        out.push(event("assistant", "(assistant)", at));
+        out.push(tag(event("assistant", "(assistant)", at), true));
     }
     out
 }
@@ -424,16 +458,6 @@ fn tool_result_text(block: &serde_json::Value) -> String {
     } else {
         joined.trim().to_string()
     }
-}
-
-fn system_text(v: &serde_json::Value) -> String {
-    use serde_json::Value;
-    v.get("content")
-        .and_then(Value::as_str)
-        .or_else(|| v.get("text").and_then(Value::as_str))
-        .unwrap_or("(system)")
-        .trim()
-        .to_string()
 }
 
 /// Derived state accumulated from a transcript tail.
@@ -1034,15 +1058,19 @@ mod tests {
 
     #[test]
     fn events_from_line_segments_each_arm() {
-        // An assistant line fans out into one event per content block.
+        // An assistant line fans out into one event per content block, carrying
+        // the turn's model + token usage on the first segment.
         let a = events_from_line(
-            r#"{"type":"assistant","timestamp":"2026-06-27T21:42:35.935Z","message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"tool_use","name":"Bash","input":{"command":"cargo test"}}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-06-27T21:42:35.935Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":10,"cache_read_input_tokens":90,"output_tokens":7},"content":[{"type":"thinking","thinking":"hmm"},{"type":"tool_use","name":"Bash","input":{"command":"cargo test"}}]}}"#,
         );
         assert_eq!(a.len(), 2);
         assert_eq!(a[0].kind, "thinking");
         assert_eq!(a[0].text, "hmm");
+        assert_eq!(a[0].model, "claude-opus-4-8");
+        assert_eq!((a[0].in_tokens, a[0].out_tokens), (100, 7));
         assert_eq!(a[1].kind, "tool_use");
         assert!(a[1].summary.contains("Bash: cargo test"));
+        assert_eq!((a[1].in_tokens, a[1].out_tokens), (0, 0)); // only first is tagged
         // The ISO timestamp is carried through.
         assert_eq!(a[0].at, "2026-06-27T21:42:35.935Z");
 
@@ -1062,14 +1090,19 @@ mod tests {
         assert_eq!(u[0].kind, "user");
         assert!(u[0].text.contains("go ahead"));
 
-        // Empty content and structural lines emit nothing.
+        // Empty content, structural/system/meta lines, and unknown types all
+        // emit nothing — only the real conversation + tools survive.
         assert!(events_from_line(r#"{"type":"user","message":{"content":[]}}"#).is_empty());
         assert!(events_from_line(r#"{"type":"last-prompt","lastPrompt":"hi"}"#).is_empty());
-
-        // Unknown type passes through as a single event; non-JSON is skipped.
-        let other = events_from_line(r#"{"type":"mode","mode":"normal"}"#);
-        assert_eq!(other.len(), 1);
-        assert_eq!(other[0].kind, "mode");
+        assert!(events_from_line(r#"{"type":"system","content":"(system)"}"#).is_empty());
+        assert!(events_from_line(r#"{"type":"mode","mode":"normal"}"#).is_empty());
+        // isMeta lines (caveats, command echoes) are skipped even when user-typed.
+        assert!(
+            events_from_line(
+                r#"{"type":"user","isMeta":true,"message":{"content":[{"type":"text","text":"caveat"}]}}"#
+            )
+            .is_empty()
+        );
         assert!(events_from_line("not json").is_empty());
     }
 

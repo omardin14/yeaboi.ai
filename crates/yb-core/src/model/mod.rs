@@ -253,6 +253,12 @@ pub struct TranscriptEvent {
     pub text: String,
     /// ISO8601 timestamp of the source line, or `""` if absent.
     pub at: String,
+    /// Model for an assistant turn (e.g. `claude-opus-4-8`), else `""`.
+    pub model: String,
+    /// Context tokens going in (input + cache) on an assistant turn, else 0.
+    pub in_tokens: u32,
+    /// Tokens generated on an assistant turn, else 0.
+    pub out_tokens: u32,
 }
 
 /// Process metrics keyed by pid, plus parent→children adjacency. Produced by

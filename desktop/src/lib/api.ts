@@ -89,9 +89,12 @@ export function workingDiff(cwd: string): Promise<string> {
   return invoke<string>("working_diff", { cwd });
 }
 
-/** A session's transcript timeline for replay. */
-export function sessionTranscript(sessionId: string): Promise<TranscriptEvent[]> {
-  return invoke<TranscriptEvent[]>("session_transcript", { sessionId });
+/** A session's transcript timeline (most recent `limit` entries). */
+export function sessionTranscript(
+  sessionId: string,
+  limit: number,
+): Promise<TranscriptEvent[]> {
+  return invoke<TranscriptEvent[]>("session_transcript", { sessionId, limit });
 }
 
 // ---- worktrees ----

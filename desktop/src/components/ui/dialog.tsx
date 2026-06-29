@@ -39,7 +39,9 @@ export function Drawer({
         aria-label={ariaLabel}
         onClick={(e) => e.stopPropagation()}
         className={cx(
-          "h-full w-full max-w-xl overflow-y-auto border-l border-line bg-overlay p-5 shadow-2xl",
+          "h-full w-full overflow-y-auto border-l border-line bg-overlay p-5 shadow-2xl",
+          // Default width unless the caller sets its own `max-w-*`.
+          !className?.includes("max-w-") && "max-w-xl",
           className,
         )}
       >

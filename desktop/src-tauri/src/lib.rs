@@ -209,10 +209,15 @@ async fn working_diff(cwd: String) -> Result<String, String> {
     .await
 }
 
-/// A session's transcript timeline for replay (most recent entries).
+/// A session's transcript timeline (most recent `limit` entries). The frontend
+/// raises `limit` to page in earlier history on demand.
 #[tauri::command]
-async fn session_transcript(session_id: String) -> Result<Vec<TranscriptEvent>, String> {
-    blocking(move || yb_core::transcript_events(&session_id, 500).map_err(|e| e.to_string())).await
+async fn session_transcript(
+    session_id: String,
+    limit: usize,
+) -> Result<Vec<TranscriptEvent>, String> {
+    blocking(move || yb_core::transcript_events(&session_id, limit).map_err(|e| e.to_string()))
+        .await
 }
 
 // ---- worktrees (yb-worktree) ------------------------------------------------

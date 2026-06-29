@@ -114,7 +114,7 @@ export function SessionExpand({
   useEffect(() => {
     let active = true;
     setFullPrompt(null);
-    sessionTranscript(session.id)
+    sessionTranscript(session.id, 80)
       .then((events) => {
         if (!active) return;
         const latest = [...events]

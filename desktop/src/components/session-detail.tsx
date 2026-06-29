@@ -1,77 +1,136 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 import { sessionTranscript, workingDiff } from "@/lib/api";
-import { formatAgo, formatClock, isoMs } from "@/lib/format";
+import { formatAgo, formatClock, formatDay, humanTokens, isoMs } from "@/lib/format";
 import { Drawer } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { cx } from "@/components/ui/cx";
 
-type Meta = { label: string; icon: string; heavy: boolean; rail: string; tone: string };
+const INITIAL_LIMIT = 200;
+const PAGE = 400;
 
-/** Speaker label, icon, rail color, and whether the entry is collapsed-by-default. */
-function kindMeta(kind: string): Meta {
-  switch (kind) {
-    case "user":
-      return { label: "You", icon: "", heavy: false, rail: "border-l-idle", tone: "text-idle" };
-    case "assistant":
-      return { label: "Assistant", icon: "", heavy: false, rail: "border-l-busy", tone: "text-busy" };
-    case "thinking":
-      return { label: "Thinking", icon: "💭", heavy: true, rail: "border-l-merge", tone: "text-merge" };
-    case "tool_use":
-      return { label: "Tool call", icon: "⚙", heavy: true, rail: "border-l-line-strong", tone: "text-ink-muted" };
-    case "tool_result":
-      return { label: "Tool result", icon: "↩", heavy: true, rail: "border-l-line-strong", tone: "text-ink-muted" };
-    default:
-      return { label: "System", icon: "·", heavy: true, rail: "border-l-line-strong", tone: "text-ink-faint" };
-  }
+/** Drop the `claude-` prefix for a compact model label. */
+function shortModel(m: string): string {
+  return m.replace(/^claude-/, "");
 }
 
-/** One transcript entry: time + speaker, text inline, heavy entries collapsed. */
-function TranscriptTurn({ ev }: { ev: TranscriptEvent }) {
-  const meta = kindMeta(ev.kind);
-  const clock = formatClock(ev.at);
-  const ago = formatAgo(isoMs(ev.at));
+/** `opus-4-8 · 6k→240 tok` metadata for an assistant turn (or ""). */
+function metaLine(ev: TranscriptEvent): string {
+  const parts: string[] = [];
+  if (ev.model) parts.push(shortModel(ev.model));
+  if (ev.out_tokens > 0) {
+    parts.push(`${humanTokens(ev.in_tokens)}→${humanTokens(ev.out_tokens)} tok`);
+  }
+  return parts.join(" · ");
+}
 
-  const header = (
-    <div className="flex items-center gap-2 text-[10px]">
+/** Time + speaker line shared by every entry. */
+function EntryHead({
+  at,
+  align,
+  children,
+}: {
+  at: string;
+  align?: "end";
+  children: ReactNode;
+}) {
+  const clock = formatClock(at);
+  return (
+    <div
+      className={cx(
+        "mb-0.5 flex items-center gap-2 text-[10px] text-ink-faint",
+        align === "end" && "justify-end",
+      )}
+    >
       {clock && (
-        <span className="font-mono text-ink-faint" title={ago}>
+        <span className="font-mono" title={formatAgo(isoMs(at))}>
           {clock}
         </span>
       )}
-      <span className={cx("font-semibold uppercase tracking-wide", meta.tone)}>
-        {meta.icon && `${meta.icon} `}
-        {meta.label}
-      </span>
+      {children}
     </div>
   );
+}
 
-  return (
-    <div className={cx("border-l-2 pl-2.5", meta.rail)}>
-      {meta.heavy ? (
-        <details className="group/d">
-          <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-            <span className="shrink-0 text-[9px] text-ink-faint transition-transform group-open/d:rotate-90">
-              ▶
-            </span>
-            <div className="min-w-0 flex-1">
-              {header}
-              <span className="block truncate text-xs text-ink-muted">{ev.summary}</span>
+/** One transcript entry, styled by speaker: you (right) / assistant (left) /
+ *  tool calls + results (mono cards, expanded) / thinking (collapsible). */
+function ChatEntry({ ev }: { ev: TranscriptEvent }) {
+  switch (ev.kind) {
+    case "user":
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[85%]">
+            <EntryHead at={ev.at} align="end">
+              <span className="font-semibold uppercase tracking-wide text-idle">You</span>
+            </EntryHead>
+            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-burgundy-tint px-3 py-2 text-sm text-ink">
+              {ev.text}
             </div>
+          </div>
+        </div>
+      );
+    case "assistant": {
+      const meta = metaLine(ev);
+      return (
+        <div className="flex justify-start">
+          <div className="max-w-[85%]">
+            <EntryHead at={ev.at}>
+              <span className="font-semibold uppercase tracking-wide text-busy">Assistant</span>
+              {meta && <span className="font-mono normal-case">{meta}</span>}
+            </EntryHead>
+            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm border border-line bg-surface px-3 py-2 text-sm text-ink-soft">
+              {ev.text}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    case "thinking":
+      return (
+        <details className="group/d ml-2">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-[10px] text-ink-faint [&::-webkit-details-marker]:hidden">
+            <span className="transition-transform group-open/d:rotate-90">▶</span>
+            {formatClock(ev.at) && (
+              <span className="font-mono" title={formatAgo(isoMs(ev.at))}>
+                {formatClock(ev.at)}
+              </span>
+            )}
+            <span className="font-semibold uppercase tracking-wide text-merge">💭 Thinking</span>
           </summary>
-          <p className="mt-1 whitespace-pre-wrap break-words pl-4 text-xs leading-relaxed text-ink-soft">
+          <p className="mt-1 whitespace-pre-wrap break-words pl-4 text-xs leading-relaxed text-ink-muted">
             {ev.text}
           </p>
         </details>
-      ) : (
-        <>
-          {header}
-          <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-soft">
-            {ev.text || ev.summary}
-          </p>
-        </>
-      )}
+      );
+    case "tool_use":
+    case "tool_result": {
+      const isCall = ev.kind === "tool_use";
+      return (
+        <div className="ml-2">
+          <EntryHead at={ev.at}>
+            <span className="font-semibold uppercase tracking-wide text-ink-muted">
+              {isCall ? "⚙ Tool call" : "↩ Tool result"}
+            </span>
+          </EntryHead>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line-strong bg-surface-sunken px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ink-soft">
+            {ev.text}
+          </pre>
+        </div>
+      );
+    }
+    default:
+      return null;
+  }
+}
+
+function DayDivider({ label }: { label: string }) {
+  return (
+    <div className="my-1 flex items-center gap-2">
+      <div className="h-px flex-1 bg-line" />
+      <span className="font-mono text-[10px] uppercase tracking-wide text-ink-faint">{label}</span>
+      <div className="h-px flex-1 bg-line" />
     </div>
   );
 }
@@ -87,8 +146,12 @@ export function SessionDetail({
   const [tab, setTab] = useState<"diff" | "transcript">("diff");
   const [diff, setDiff] = useState<string | null>(null);
   const [events, setEvents] = useState<TranscriptEvent[] | null>(null);
+  const [limit, setLimit] = useState(INITIAL_LIMIT);
+  const [reachedStart, setReachedStart] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readerEndRef = useRef<HTMLDivElement>(null);
+  const scrolledRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -102,27 +165,45 @@ export function SessionDetail({
     };
   }, [session.cwd]);
 
+  // Reset paging + scroll state when switching sessions.
+  useEffect(() => {
+    setEvents(null);
+    setLimit(INITIAL_LIMIT);
+    setReachedStart(false);
+    scrolledRef.current = false;
+  }, [session.id]);
+
+  // (Re)load the transcript whenever the session or the page size changes.
   useEffect(() => {
     let active = true;
-    setEvents(null);
-    sessionTranscript(session.id)
-      .then((ev) => active && setEvents(ev))
-      .catch((e) => active && setError(`Could not load transcript: ${e}`));
+    setLoading(true);
+    sessionTranscript(session.id, limit)
+      .then((ev) => {
+        if (!active) return;
+        setEvents(ev);
+        setReachedStart(ev.length < limit); // got fewer than asked → at the start
+      })
+      .catch((e) => active && setError(`Could not load transcript: ${e}`))
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     return () => {
       active = false;
     };
-  }, [session.id]);
+  }, [session.id, limit]);
 
-  // Jump to the latest turn once the transcript renders (most recent is last).
+  // Jump to the latest turn on first load (not when paging in earlier history).
   useEffect(() => {
-    if (tab === "transcript" && events && events.length > 0) {
-      // Optional-call: jsdom doesn't implement scrollIntoView.
+    if (tab === "transcript" && events && events.length > 0 && !scrolledRef.current) {
       readerEndRef.current?.scrollIntoView?.({ block: "end" });
+      scrolledRef.current = true;
     }
   }, [tab, events]);
 
+  let prevDay = "";
+
   return (
-    <Drawer onClose={onClose} ariaLabel={`Session ${session.id}`}>
+    <Drawer onClose={onClose} ariaLabel={`Session ${session.id}`} className="max-w-3xl">
       <header className="mb-3 flex items-baseline justify-between">
         <h3 className="font-mono text-sm text-ink">
           {session.model ?? "—"} · {session.branch ?? "—"}
@@ -165,7 +246,7 @@ export function SessionDetail({
         ) : diff.trim() === "" ? (
           <p className="text-xs text-ink-muted">No uncommitted changes.</p>
         ) : (
-          <Card tone="sunken" pad="sm" className="max-h-[70vh] overflow-auto">
+          <Card tone="sunken" pad="sm" className="max-h-[80vh] overflow-auto">
             <pre className="text-xs leading-relaxed text-ink-soft">{diff}</pre>
           </Card>
         ))}
@@ -176,10 +257,25 @@ export function SessionDetail({
         ) : events.length === 0 ? (
           <p className="text-xs text-ink-muted">No transcript entries.</p>
         ) : (
-          <Card tone="sunken" pad="sm" className="max-h-[70vh] space-y-3 overflow-auto">
-            {events.map((ev, i) => (
-              <TranscriptTurn key={i} ev={ev} />
-            ))}
+          <Card tone="sunken" pad="sm" className="max-h-[80vh] space-y-2.5 overflow-auto">
+            {!reachedStart && (
+              <div className="flex justify-center pb-1">
+                <Button variant="ghost" size="sm" disabled={loading} onClick={() => setLimit((l) => l + PAGE)}>
+                  {loading ? "Loading…" : "△ Load earlier"}
+                </Button>
+              </div>
+            )}
+            {events.map((ev, i) => {
+              const day = formatDay(ev.at);
+              const showDay = day !== "" && day !== prevDay;
+              if (day) prevDay = day;
+              return (
+                <Fragment key={i}>
+                  {showDay && <DayDivider label={day} />}
+                  <ChatEntry ev={ev} />
+                </Fragment>
+              );
+            })}
             <div ref={readerEndRef} />
           </Card>
         ))}
