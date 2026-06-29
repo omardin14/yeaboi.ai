@@ -3,33 +3,29 @@ import type { Snapshot } from "@/lib/bindings/Snapshot";
 import type { Session } from "@/lib/bindings/Session";
 import type { Project } from "@/lib/bindings/Project";
 import type { Port } from "@/lib/bindings/Port";
-import type { ActivityStatus } from "@/lib/bindings/ActivityStatus";
 import {
   formatCpu,
   formatMem,
   formatPct,
+  formatUptime,
   heatClass,
-  statusBadgeClass,
+  hostAppLabel,
+  providerAccent,
+  statusRailVar,
 } from "@/lib/format";
-
-function StatusBadge({ status }: { status: ActivityStatus }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-wide ring-1 ring-inset ${statusBadgeClass(
-        status,
-      )}`}
-    >
-      {status}
-    </span>
-  );
-}
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/input";
+import { Gauge } from "@/components/ui/gauge";
+import { EmptyState } from "@/components/ui/empty-state";
 
 /** A session can be stopped only if it has a live process. */
 function isKillable(session: Session): boolean {
   return session.pid != null && session.status !== "Dead";
 }
 
-const CHIP_CLS = "rounded bg-zinc-800 px-1 font-mono text-xs text-sky-300";
+const CHIP_CLS =
+  "rounded-md bg-surface-sunken px-1.5 font-mono text-xs text-idle";
 
 function PortChip({
   port,
@@ -56,7 +52,7 @@ function PortChip({
         e.stopPropagation();
         onFreePort(port);
       }}
-      className={`${CHIP_CLS} hover:bg-rose-500/15 hover:text-rose-300`}
+      className={`${CHIP_CLS} transition-colors hover:bg-danger-fill hover:text-danger`}
     >
       {label}
     </button>
@@ -92,66 +88,86 @@ function SessionRow({
 }) {
   const ctx = session.context?.pct ?? null;
   const cpu = session.proc_stats?.cpu_pct ?? null;
+  const needs = session.awaiting_permission;
   return (
-    <tr
+    <div
+      role="row"
       onClick={() => onSelect?.(session)}
-      className="group cursor-pointer border-b border-zinc-900 last:border-0 hover:bg-zinc-900/40"
+      className="group relative cursor-pointer rounded-lg pl-4 pr-2 transition-colors hover:bg-surface-raised"
     >
-      <td className="py-1.5 pr-3">
-        <StatusBadge status={session.status} />
-        {session.awaiting_permission && (
+      {/* Lacquered status rail — status is readable from the edge alone. */}
+      <span
+        aria-hidden
+        className={`absolute left-1 top-1.5 bottom-1.5 w-[3px] rounded-full ${needs ? "animate-needs" : ""}`}
+        style={{ background: statusRailVar(session.status) }}
+      />
+
+      {/* Primary line. */}
+      <div className="flex items-center gap-3 py-1.5 text-[13px]">
+        <Gauge value={ctx} title={`context ${formatPct(ctx)}`} />
+        <span className={`w-9 shrink-0 text-right font-mono text-xs tabular-nums ${heatClass(ctx)}`}>
+          {formatPct(ctx)}
+        </span>
+        <span className="w-12 shrink-0 text-xs lowercase" style={{ color: statusRailVar(session.status) }}>
+          {session.status}
+        </span>
+        <span className="flex w-40 shrink-0 items-center gap-1.5 truncate text-ink-soft">
+          <span className={`text-[10px] leading-none ${providerAccent(session.provider)}`}>●</span>
+          <span className="truncate">{session.model ?? "—"}</span>
+        </span>
+        <span className="w-36 shrink-0 truncate font-mono text-xs text-ink-muted">
+          {session.branch ?? "—"}
+        </span>
+        <span
+          className="min-w-0 flex-1 truncate text-ink-muted"
+          title={session.last_prompt ?? ""}
+        >
+          {session.last_prompt ?? ""}
+        </span>
+
+        {needs && (
           <span
             title="Waiting on a permission decision"
-            className="ml-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-400 ring-1 ring-inset ring-amber-500/30"
+            className="animate-needs shrink-0 rounded-md bg-needs-fill px-1.5 py-0.5 text-xs text-needs ring-1 ring-inset ring-needs-ring"
           >
             ⏸ needs you
           </span>
         )}
-      </td>
-      <td className="py-1.5 pr-3 font-mono text-xs text-zinc-500">
-        {session.pid ?? "—"}
-      </td>
-      <td className="py-1.5 pr-3 text-zinc-300">{session.model ?? "—"}</td>
-      <td className={`py-1.5 pr-3 text-right tabular-nums ${heatClass(ctx)}`}>
-        {formatPct(ctx)}
-      </td>
-      <td
-        className={`py-1.5 pr-3 text-right tabular-nums ${heatClass(
-          cpu == null ? null : cpu / 100,
-        )}`}
-      >
-        {formatCpu(cpu)}
-      </td>
-      <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-400">
-        {formatMem(session.proc_stats?.mem_bytes ?? 0)}
-      </td>
-      <td className="py-1.5 pr-3 text-zinc-400">{session.branch ?? "—"}</td>
-      <td className="py-1.5 pr-3 text-zinc-500">
-        {session.sub_agent_count > 0 ? `⌥${session.sub_agent_count}` : ""}
-      </td>
-      <td className="py-1.5 pr-3">
-        <PortChips ports={session.ports} onFreePort={onFreePort} />
-      </td>
-      <td className="max-w-md truncate py-1.5 pr-3 text-zinc-500" title={session.last_prompt ?? ""}>
-        {session.last_prompt ?? ""}
-      </td>
-      <td className="py-1.5 text-right">
-        {onKill && isKillable(session) && (
-          <button
-            type="button"
-            aria-label={`Stop session ${session.id}`}
-            title="Stop session (SIGTERM)"
-            onClick={(e) => {
-              e.stopPropagation(); // don't also open the detail panel
-              onKill(session);
-            }}
-            className="rounded px-1.5 py-0.5 text-xs text-zinc-600 opacity-0 transition hover:bg-rose-500/10 hover:text-rose-400 group-hover:opacity-100"
-          >
-            stop
-          </button>
+        {session.sub_agent_count > 0 && (
+          <span className="shrink-0 font-mono text-xs text-ink-faint" title="sub-agents">
+            ⌥{session.sub_agent_count}
+          </span>
         )}
-      </td>
-    </tr>
+        {session.ports.length > 0 && (
+          <PortChips ports={session.ports} onFreePort={onFreePort} />
+        )}
+        <span className="w-10 shrink-0 text-right">
+          {onKill && isKillable(session) && (
+            <button
+              type="button"
+              aria-label={`Stop session ${session.id}`}
+              title="Stop session (SIGTERM)"
+              onClick={(e) => {
+                e.stopPropagation(); // don't also open the detail panel
+                onKill(session);
+              }}
+              className="rounded-md px-1.5 py-0.5 text-xs text-ink-faint opacity-0 transition hover:bg-danger-fill hover:text-danger group-hover:opacity-100"
+            >
+              stop
+            </button>
+          )}
+        </span>
+      </div>
+
+      {/* Secondary stats — revealed on hover (progressive disclosure). */}
+      <div className="hidden gap-3 pb-1.5 pl-[34px] font-mono text-[11px] text-ink-faint group-hover:flex">
+        <span>pid {session.pid ?? "—"}</span>
+        <span>cpu {formatCpu(cpu)}</span>
+        <span>mem {formatMem(session.proc_stats?.mem_bytes ?? 0)}</span>
+        <span>up {formatUptime(session.proc_stats?.uptime_secs)}</span>
+        <span>{hostAppLabel(session.host_app)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -170,32 +186,38 @@ function ProjectGroup({
 }) {
   const busy = sessions.filter((s) => s.status === "Busy").length;
   return (
-    <section className="mb-5">
-      <header className="mb-1 flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-zinc-200">{project.name}</h2>
-        <span className="text-xs text-zinc-500">
-          {busy > 0 && (
-            <>
-              <span className="text-emerald-400">{busy} busy</span>
-              {" · "}
-            </>
-          )}
+    <section className="mb-4">
+      <Card pad="none" className="overflow-hidden">
+      <header className="flex items-baseline gap-2 px-4 pt-3">
+        <span aria-hidden className="text-xs text-burgundy">
+          ◆
+        </span>
+        <h2 className="text-sm font-semibold text-ink">{project.name}</h2>
+        <span className="text-xs text-ink-faint">
+          {busy > 0 && <span className="text-busy">{busy} busy</span>}
+          {busy > 0 && " · "}
           {sessions.length} shown
         </span>
+        {project.remote && (
+          <span className="ml-auto truncate font-mono text-[11px] text-ink-faint">
+            {project.remote}
+          </span>
+        )}
       </header>
-      <table className="w-full border-collapse text-sm">
-        <tbody>
-          {sessions.map((s) => (
-            <SessionRow
-              key={s.id}
-              session={s}
-              onKill={onKill}
-              onFreePort={onFreePort}
-              onSelect={onSelect}
-            />
-          ))}
-        </tbody>
-      </table>
+      {/* Ticked divider. */}
+      <div className="mx-4 mt-2 mb-1 border-t border-dashed border-line-strong" />
+      <div className="px-2 pb-2">
+        {sessions.map((s) => (
+          <SessionRow
+            key={s.id}
+            session={s}
+            onKill={onKill}
+            onFreePort={onFreePort}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+      </Card>
     </section>
   );
 }
@@ -210,13 +232,13 @@ function OrphanPorts({
 }) {
   if (ports.length === 0) return null;
   return (
-    <section className="mb-5 rounded border border-amber-500/20 bg-amber-500/5 p-3">
-      <h2 className="mb-1 text-sm font-semibold text-amber-300">Orphan ports</h2>
-      <p className="mb-2 text-xs text-zinc-500">
+    <Card tone="outline" className="mb-4 border-needs-ring bg-needs-fill/40">
+      <h2 className="mb-1 text-sm font-semibold text-needs">Orphan ports</h2>
+      <p className="mb-2 text-xs text-ink-muted">
         Listeners left by a session that's gone — free a stuck dev-server port.
       </p>
       <PortChips ports={ports} onFreePort={onFreePort} />
-    </section>
+    </Card>
   );
 }
 
@@ -284,7 +306,7 @@ export function Monitor({
   }, []);
 
   if (!snapshot) {
-    return <p className="text-sm text-zinc-500">Connecting…</p>;
+    return <p className="text-sm text-ink-muted">Connecting…</p>;
   }
 
   const byId = new Map(snapshot.sessions.map((s) => [s.id, s]));
@@ -315,46 +337,43 @@ export function Monitor({
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <input
+        <Input
           ref={filterRef}
           aria-label="Filter sessions"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter…  ( / )"
-          className="w-48 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
+          className="w-48"
         />
-        <select
+        <Select
           aria-label="Sort by"
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200"
         >
           <option value="recent">Recent</option>
           <option value="context">Context %</option>
           <option value="cpu">CPU</option>
           <option value="status">Status</option>
-        </select>
+        </Select>
         {blockedCount > 0 && (
-          <button
-            type="button"
+          <Button
+            variant={onlyBlocked ? "primary" : "outline"}
             onClick={() => setOnlyBlocked((v) => !v)}
-            className={`rounded px-2 py-1 text-xs ${
-              onlyBlocked
-                ? "bg-amber-500/20 text-amber-300"
-                : "border border-zinc-700 text-zinc-400 hover:bg-zinc-800"
-            }`}
           >
             ⏸ {blockedCount} need you
-          </button>
+          </Button>
         )}
       </div>
 
       <OrphanPorts ports={snapshot.orphan_ports} onFreePort={onFreePort} />
 
       {snapshot.sessions.length === 0 ? (
-        <p className="text-sm text-zinc-500">No active sessions.</p>
+        <EmptyState
+          title="No active sessions"
+          hint="Start Claude Code or Codex and the session shows up here, live."
+        />
       ) : groups.length === 0 ? (
-        <p className="text-sm text-zinc-500">No sessions match.</p>
+        <EmptyState glyph="⌕" title="No sessions match" hint="Clear the filter to see everything again." />
       ) : (
         groups.map(({ project, sessions }) => (
           <ProjectGroup

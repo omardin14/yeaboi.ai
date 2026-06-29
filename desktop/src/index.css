@@ -1,7 +1,176 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────────
+   yeaboi.ai — "Cream & Burgundy" instrument-panel theme.
+
+   Raw palette values live under :root (light "Parchment") and
+   [data-theme="noir"] (dark "Burgundy Noir"). `@theme inline` maps them to
+   Tailwind color tokens so utilities like `bg-surface` / `text-ink` /
+   `ring-busy-ring` emit `var(--…)` and a runtime theme swap just works.
+   ───────────────────────────────────────────────────────────────────────── */
+
 :root {
-  color-scheme: dark;
+  /* Surfaces — warm parchment, cards lift above the canvas. */
+  --canvas: #f1e7d6;
+  --surface: #fbf6ec;
+  --surface-raised: #fffdf8;
+  --surface-sunken: #e9dcc6;
+  --overlay: #fffcf6;
+  --scrim: rgba(42, 26, 18, 0.45);
+
+  /* Burgundy ramp (brand / primary). */
+  --burgundy-strong: #5a1226;
+  --burgundy: #73182f; /* primary */
+  --burgundy-bright: #a83250; /* accent / hover */
+  --burgundy-soft: #c25a72;
+  --burgundy-tint: #f2d9de;
+  --burgundy-pale: #f8e9ec;
+  --on-burgundy: #fbf6ec; /* cream text on burgundy fills */
+
+  /* Ink — warm espresso, never pure black. */
+  --ink: #2a1a12;
+  --ink-soft: #4a382e;
+  --ink-muted: #7a6657;
+  --ink-faint: #9c8a7b;
+  --line: #e2d3be;
+  --line-strong: #d8c6ad;
+
+  /* Status semantics — saturated/earthy text on a tinted fill + ring. */
+  --busy: #186b41;
+  --busy-fill: #ddeee2;
+  --busy-ring: #b2d6be;
+  --idle: #2f6f86;
+  --idle-fill: #e0edf1;
+  --idle-ring: #b7d4dd;
+  --dead: #8b7a68;
+  --dead-fill: #ece3d5;
+  --dead-ring: #d8c9b4;
+  --needs: #9a5b00;
+  --needs-fill: #fbeac4;
+  --needs-ring: #e8c879;
+  --danger: #b3261e;
+  --danger-fill: #fae1dc;
+  --danger-ring: #ecb1a9;
+  --merge: #6d399e;
+  --merge-fill: #ece2f6;
+  --merge-ring: #cdb6e6;
+
+  /* Heat ramp (context % + cpu %): forest → gold → burnt → brick. */
+  --heat-low: #2e7d52;
+  --heat-mid: #b08900;
+  --heat-high: #c0691a;
+  --heat-crit: #b3261e;
+
+  /* Provider accent chips. */
+  --provider-claude: #8c1d3a;
+  --provider-codex: #4a382e;
+}
+
+[data-theme="noir"] {
+  --canvas: #1b0f13;
+  --surface: #251419;
+  --surface-raised: #2f1a20;
+  --surface-sunken: #150b0e;
+  --overlay: #2a171d;
+  --scrim: rgba(0, 0, 0, 0.6);
+
+  --burgundy-strong: #8c1d3a;
+  --burgundy: #c25a72; /* primary lifts on dark */
+  --burgundy-bright: #d98b9c;
+  --burgundy-soft: #a83250;
+  --burgundy-tint: rgba(194, 90, 114, 0.18);
+  --burgundy-pale: rgba(194, 90, 114, 0.1);
+  --on-burgundy: #1b0f13;
+
+  --ink: #f3e7d8;
+  --ink-soft: #c9b6a3;
+  --ink-muted: #9a8678;
+  --ink-faint: #7a6857;
+  --line: #3a2228;
+  --line-strong: #4a2e36;
+
+  --busy: #5fcb92;
+  --busy-fill: rgba(95, 203, 146, 0.14);
+  --busy-ring: rgba(95, 203, 146, 0.3);
+  --idle: #6fb4cc;
+  --idle-fill: rgba(111, 180, 204, 0.14);
+  --idle-ring: rgba(111, 180, 204, 0.3);
+  --dead: #9a8678;
+  --dead-fill: rgba(154, 134, 120, 0.14);
+  --dead-ring: rgba(154, 134, 120, 0.3);
+  --needs: #e7a53a;
+  --needs-fill: rgba(231, 165, 58, 0.15);
+  --needs-ring: rgba(231, 165, 58, 0.32);
+  --danger: #f08a7e;
+  --danger-fill: rgba(240, 138, 126, 0.15);
+  --danger-ring: rgba(240, 138, 126, 0.32);
+  --merge: #c3a0e0;
+  --merge-fill: rgba(195, 160, 224, 0.15);
+  --merge-ring: rgba(195, 160, 224, 0.32);
+
+  --heat-low: #4cc289;
+  --heat-mid: #e0b341;
+  --heat-high: #e08a3c;
+  --heat-crit: #f08a7e;
+
+  --provider-claude: #d98b9c;
+  --provider-codex: #c9b6a3;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-overlay: var(--overlay);
+
+  --color-burgundy: var(--burgundy);
+  --color-burgundy-strong: var(--burgundy-strong);
+  --color-burgundy-bright: var(--burgundy-bright);
+  --color-burgundy-soft: var(--burgundy-soft);
+  --color-burgundy-tint: var(--burgundy-tint);
+  --color-burgundy-pale: var(--burgundy-pale);
+  --color-on-burgundy: var(--on-burgundy);
+
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-busy: var(--busy);
+  --color-busy-fill: var(--busy-fill);
+  --color-busy-ring: var(--busy-ring);
+  --color-idle: var(--idle);
+  --color-idle-fill: var(--idle-fill);
+  --color-idle-ring: var(--idle-ring);
+  --color-dead: var(--dead);
+  --color-dead-fill: var(--dead-fill);
+  --color-dead-ring: var(--dead-ring);
+  --color-needs: var(--needs);
+  --color-needs-fill: var(--needs-fill);
+  --color-needs-ring: var(--needs-ring);
+  --color-danger: var(--danger);
+  --color-danger-fill: var(--danger-fill);
+  --color-danger-ring: var(--danger-ring);
+  --color-merge: var(--merge);
+  --color-merge-fill: var(--merge-fill);
+  --color-merge-ring: var(--merge-ring);
+
+  --color-heat-low: var(--heat-low);
+  --color-heat-mid: var(--heat-mid);
+  --color-heat-high: var(--heat-high);
+  --color-heat-crit: var(--heat-crit);
+
+  --color-provider-claude: var(--provider-claude);
+  --color-provider-codex: var(--provider-codex);
+
+  --font-display: ui-serif, "New York", Georgia, "Times New Roman", serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Geist Mono", "JetBrains Mono", Menlo,
+    Consolas, monospace;
 }
 
 html,
@@ -12,4 +181,79 @@ body,
 
 body {
   margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Warm, themed scrollbars (instrument panel, not OS default). */
+* {
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* ── "Shapes": instrument-panel background motif ──────────────────────────
+   A low-opacity burgundy radial arc bleeding from the top-right + a faint
+   dot grid. Fixed, behind everything, zero layout cost. */
+.app-bg::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      120% 90% at 100% -10%,
+      var(--burgundy-tint) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      90% 70% at -10% 110%,
+      var(--burgundy-pale) 0%,
+      transparent 50%
+    );
+}
+
+.app-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: radial-gradient(
+    var(--line-strong) 0.5px,
+    transparent 0.5px
+  );
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(
+    100% 100% at 50% 0%,
+    #000 0%,
+    transparent 75%
+  );
+  mask-image: radial-gradient(100% 100% at 50% 0%, #000 0%, transparent 75%);
+}
+
+/* ── Motion (used sparingly; disabled under reduced-motion) ───────────────── */
+@keyframes yb-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-needs {
+  animation: yb-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-needs {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
 }

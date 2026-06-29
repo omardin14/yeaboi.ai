@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
 
 /**
  * A small modal confirmation. Deliberately a React component (not the native
@@ -34,37 +35,28 @@ export function ConfirmDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
       onClick={onCancel}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-900 p-5 shadow-xl"
+        className="w-full max-w-sm rounded-2xl border border-line bg-overlay p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-2 text-sm font-semibold text-zinc-100">{title}</h2>
-        <div className="mb-4 text-xs text-zinc-400">{children}</div>
+        <h2 className="mb-2 text-sm font-semibold text-ink">{title}</h2>
+        <div className="mb-4 text-xs text-ink-muted">{children}</div>
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-          >
+          <Button variant="outline" onClick={onCancel}>
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant={danger ? "danger" : "primary"}
             onClick={onConfirm}
-            className={`rounded px-3 py-1.5 text-xs font-medium text-white ${
-              danger
-                ? "bg-rose-600 hover:bg-rose-500"
-                : "bg-sky-600 hover:bg-sky-500"
-            }`}
           >
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

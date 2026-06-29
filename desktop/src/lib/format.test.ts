@@ -12,7 +12,7 @@ test("format helpers guard NaN/Infinity rather than rendering garbage", () => {
   expect(formatPct(NaN)).toBe("—");
   expect(formatCpu(NaN)).toBe("—");
   expect(formatPct(Infinity)).toBe("—");
-  expect(heatClass(NaN)).toContain("zinc");
+  expect(heatClass(NaN)).toContain("ink-faint");
 });
 
 test("formatMem scales bytes to MB/GB", () => {
@@ -40,18 +40,18 @@ test("formatUptime is compact", () => {
 });
 
 test("heatClass escalates across all bands", () => {
-  expect(heatClass(null)).toContain("zinc");
-  expect(heatClass(0.1)).toContain("emerald");
-  expect(heatClass(0.5)).toContain("yellow");
-  expect(heatClass(0.75)).toContain("amber");
-  expect(heatClass(0.95)).toContain("rose");
+  expect(heatClass(null)).toContain("ink-faint");
+  expect(heatClass(0.1)).toContain("heat-low");
+  expect(heatClass(0.5)).toContain("heat-mid");
+  expect(heatClass(0.75)).toContain("heat-high");
+  expect(heatClass(0.95)).toContain("heat-crit");
 });
 
 test("statusBadgeClass differs per status", () => {
-  expect(statusBadgeClass("Busy")).toContain("emerald");
-  expect(statusBadgeClass("Idle")).toContain("sky");
-  expect(statusBadgeClass("Dead")).toContain("zinc");
-  expect(statusBadgeClass("Unknown")).toContain("amber");
+  expect(statusBadgeClass("Busy")).toContain("busy");
+  expect(statusBadgeClass("Idle")).toContain("idle");
+  expect(statusBadgeClass("Dead")).toContain("dead");
+  expect(statusBadgeClass("Unknown")).toContain("needs");
 });
 
 test("hostAppLabel handles the Other variant", () => {

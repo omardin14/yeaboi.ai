@@ -11,6 +11,10 @@ import {
 } from "@/lib/api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Banner } from "@/components/banner";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
 
 /**
  * The worktree board: pick a project, see its worktrees, create one, run/stop
@@ -75,117 +79,117 @@ export function WorktreeBoard({ projects }: { projects: Project[] }) {
   }
 
   if (projects.length === 0) {
-    return <p className="text-sm text-zinc-500">No projects to manage worktrees for yet.</p>;
+    return <EmptyState title="No projects yet" hint="Projects show up here once a session is running." />;
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <select
+        <Select
           aria-label="Project"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
-          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
         >
           {projects.map((p) => (
             <option key={p.id} value={p.root}>
               {p.name}
             </option>
           ))}
-        </select>
-        <input
+        </Select>
+        <Input
           aria-label="New worktree name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void doCreate()}
           placeholder="new-worktree-name"
-          className="w-48 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
+          className="w-48"
         />
-        <button
-          type="button"
-          disabled={busy || !name.trim()}
-          onClick={() => void doCreate()}
-          className="rounded bg-sky-600 px-2 py-1 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-        >
+        <Button variant="primary" disabled={busy || !name.trim()} onClick={() => void doCreate()}>
           Create
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
           disabled={busy}
           onClick={() => void run(() => pruneWorktrees(repo), "Pruned merged worktrees.")}
-          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
         >
           Prune merged
-        </button>
+        </Button>
       </div>
 
       {error && <Banner kind="error">{error}</Banner>}
       {notice && <Banner kind="notice">{notice}</Banner>}
 
       {worktrees == null ? (
-        <p className="text-sm text-zinc-500">Loading worktrees…</p>
+        <p className="text-sm text-ink-muted">Loading worktrees…</p>
+      ) : worktrees.length === 0 ? (
+        <EmptyState glyph="⑂" title="No worktrees" hint="Create one above to spin up an isolated branch + dev port." />
       ) : (
-        <table className="w-full border-collapse text-sm">
-          <tbody>
-            {worktrees.map((wt) => (
-              <tr key={wt.path} className="border-b border-zinc-900 last:border-0">
-                <td className="py-1.5 pr-3 font-medium text-zinc-200">
-                  {wt.is_main ? <span className="text-zinc-500">{wt.name}</span> : wt.name}
-                </td>
-                <td className="py-1.5 pr-3 font-mono text-xs text-zinc-400">{wt.branch}</td>
-                <td className="py-1.5 pr-3">
-                  <span className="rounded bg-zinc-800 px-1 font-mono text-xs text-sky-300">
-                    :{wt.port}
+        <Card pad="none" className="overflow-hidden">
+          {worktrees.map((wt, i) => (
+            <div
+              key={wt.path}
+              className={`flex items-center gap-3 px-4 py-2 text-sm ${i > 0 ? "border-t border-line" : ""}`}
+            >
+              <span className="w-40 shrink-0 truncate font-medium text-ink">
+                {wt.is_main ? (
+                  <span className="text-ink-muted">{wt.name} </span>
+                ) : (
+                  wt.name
+                )}
+                {wt.is_main && (
+                  <span className="ml-1 rounded-md bg-surface-sunken px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-faint">
+                    home
                   </span>
-                </td>
-                <td className="max-w-xs truncate py-1.5 pr-3 font-mono text-xs text-zinc-600" title={wt.path}>
-                  {wt.path}
-                </td>
-                <td className="py-1.5 text-right">
-                  {!wt.is_main && (
-                    <span className="flex justify-end gap-1">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(
-                            () => startWorktreeServices(repo, wt.name),
-                            `Started services for “${wt.name}”.`,
-                          )
-                        }
-                        className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 disabled:opacity-50"
-                      >
-                        start
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(
-                            () => stopWorktreeServices(repo, wt.name),
-                            `Stopped services for “${wt.name}”.`,
-                          )
-                        }
-                        className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 disabled:opacity-50"
-                      >
-                        stop
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        aria-label={`Remove worktree ${wt.name}`}
-                        onClick={() => setRemoveTarget(wt)}
-                        className="rounded px-1.5 py-0.5 text-xs text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"
-                      >
-                        remove
-                      </button>
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                )}
+              </span>
+              <span className="w-40 shrink-0 truncate font-mono text-xs text-ink-muted">
+                {wt.branch}
+              </span>
+              <span className="rounded-md bg-surface-sunken px-1.5 font-mono text-xs text-idle">
+                :{wt.port}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-faint" title={wt.path}>
+                {wt.path}
+              </span>
+              {!wt.is_main && (
+                <span className="flex shrink-0 justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(
+                        () => startWorktreeServices(repo, wt.name),
+                        `Started services for “${wt.name}”.`,
+                      )
+                    }
+                  >
+                    start
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(
+                        () => stopWorktreeServices(repo, wt.name),
+                        `Stopped services for “${wt.name}”.`,
+                      )
+                    }
+                  >
+                    stop
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    aria-label={`Remove worktree ${wt.name}`}
+                    onClick={() => setRemoveTarget(wt)}
+                    className="text-danger hover:bg-danger-fill"
+                  >
+                    remove
+                  </Button>
+                </span>
+              )}
+            </div>
+          ))}
+        </Card>
       )}
 
       {removeTarget && (

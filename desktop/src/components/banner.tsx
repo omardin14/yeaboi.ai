@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** A small inline status banner — red for errors, green for notices. */
+/** A small inline status banner — brick for errors, forest for notices. */
 export function Banner({
   kind,
   children,
@@ -10,9 +10,11 @@ export function Banner({
 }) {
   const cls =
     kind === "error"
-      ? "border-rose-500/30 bg-rose-500/10 text-rose-400"
-      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
+      ? "border-danger-ring bg-danger-fill text-danger"
+      : "border-busy-ring bg-busy-fill text-busy";
   return (
-    <div className={`mb-4 rounded border px-3 py-2 text-sm ${cls}`}>{children}</div>
+    <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${cls}`}>
+      {children}
+    </div>
   );
 }
