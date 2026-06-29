@@ -246,8 +246,11 @@ pub struct Snapshot {
 pub struct TranscriptEvent {
     /// `user` | `assistant` | `tool_use` | `tool_result` | `thinking` | …
     pub kind: String,
-    /// A short human summary of the entry.
+    /// A short human summary of the entry (≤160 chars) — for compact lists.
     pub summary: String,
+    /// The full entry text (generously bounded) — for the readable reader and
+    /// for recovering the untruncated current prompt.
+    pub text: String,
 }
 
 /// Process metrics keyed by pid, plus parent→children adjacency. Produced by

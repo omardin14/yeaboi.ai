@@ -3,6 +3,11 @@ import { Monitor } from "@/components/monitor";
 import type { Snapshot } from "@/lib/bindings/Snapshot";
 import type { Session } from "@/lib/bindings/Session";
 
+// The inline detail panel lazily fetches the transcript for the full prompt.
+vi.mock("@/lib/api", () => ({
+  sessionTranscript: vi.fn().mockResolvedValue([]),
+}));
+
 function session(over: Partial<Session> = {}): Session {
   return {
     id: "s1",
@@ -286,12 +291,35 @@ test("sorting by context orders rows high-to-low", () => {
   expect(rows[1].textContent).toContain("low one");
 });
 
-test("selecting a row fires onSelect", () => {
+test("clicking a row expands its detail panel inline (not onSelect)", () => {
   const onSelect = vi.fn();
   render(<Monitor snapshot={snapshot} onSelect={onSelect} />);
   fireEvent.click(screen.getByText("alpha task"));
+  // The row expands inline rather than opening the side panel directly.
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("region", { name: "Details for s1" }),
+  ).toBeInTheDocument();
+});
+
+test("Full detail in the expanded panel fires onSelect", () => {
+  const onSelect = vi.fn();
+  render(<Monitor snapshot={snapshot} onSelect={onSelect} />);
+  fireEvent.click(screen.getByText("alpha task"));
+  const panel = screen.getByRole("region", { name: "Details for s1" });
+  fireEvent.click(within(panel).getByRole("button", { name: /Full detail/ }));
   expect(onSelect).toHaveBeenCalledTimes(1);
   expect(onSelect.mock.calls[0][0].id).toBe("s1");
+});
+
+test("only one row is expanded at a time", () => {
+  render(<Monitor snapshot={snapshot} />);
+  fireEvent.click(screen.getByText("alpha task"));
+  expect(screen.getByRole("region", { name: "Details for s1" })).toBeInTheDocument();
+  // Expanding another collapses the first.
+  fireEvent.click(screen.getByText("beta task"));
+  expect(screen.getByRole("region", { name: "Details for s2" })).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Details for s1" })).not.toBeInTheDocument();
 });
 
 test("the needs-you filter shows only awaiting sessions", () => {

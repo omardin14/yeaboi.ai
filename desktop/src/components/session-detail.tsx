@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 import { sessionTranscript, workingDiff } from "@/lib/api";
@@ -6,7 +6,21 @@ import { Drawer } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { cx } from "@/components/ui/cx";
 
-/** Detail panel for one session: metadata + working diff + transcript replay. */
+/** Left-rule color per transcript turn kind, so the reader scans at a glance. */
+function kindRail(kind: string): string {
+  switch (kind) {
+    case "user":
+      return "border-l-idle";
+    case "assistant":
+      return "border-l-busy";
+    case "thinking":
+      return "border-l-merge";
+    default:
+      return "border-l-line-strong";
+  }
+}
+
+/** Detail panel for one session: metadata + working diff + transcript reader. */
 export function SessionDetail({
   session,
   onClose,
@@ -17,8 +31,8 @@ export function SessionDetail({
   const [tab, setTab] = useState<"diff" | "transcript">("diff");
   const [diff, setDiff] = useState<string | null>(null);
   const [events, setEvents] = useState<TranscriptEvent[] | null>(null);
-  const [pos, setPos] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const readerEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -35,18 +49,21 @@ export function SessionDetail({
   useEffect(() => {
     let active = true;
     setEvents(null);
-    setPos(0);
     sessionTranscript(session.id)
-      .then((ev) => {
-        if (!active) return;
-        setEvents(ev);
-        setPos(ev.length > 0 ? ev.length - 1 : 0);
-      })
+      .then((ev) => active && setEvents(ev))
       .catch((e) => active && setError(`Could not load transcript: ${e}`));
     return () => {
       active = false;
     };
   }, [session.id]);
+
+  // Jump to the latest turn once the transcript renders (most recent is last).
+  useEffect(() => {
+    if (tab === "transcript" && events && events.length > 0) {
+      // Optional-call: jsdom doesn't implement scrollIntoView.
+      readerEndRef.current?.scrollIntoView?.({ block: "end" });
+    }
+  }, [tab, events]);
 
   return (
     <Drawer onClose={onClose} ariaLabel={`Session ${session.id}`}>
@@ -103,28 +120,19 @@ export function SessionDetail({
         ) : events.length === 0 ? (
           <p className="text-xs text-ink-muted">No transcript entries.</p>
         ) : (
-          <div>
-            <div className="mb-2 flex items-center gap-2">
-              <input
-                type="range"
-                aria-label="Transcript position"
-                min={0}
-                max={events.length - 1}
-                value={pos}
-                onChange={(e) => setPos(Number(e.target.value))}
-                className="flex-1 accent-[var(--burgundy)]"
-              />
-              <span className="font-mono text-xs text-ink-muted">
-                {pos + 1}/{events.length}
-              </span>
-            </div>
-            <Card tone="sunken" pad="sm">
-              <span className="mr-2 rounded-md bg-surface px-1.5 font-mono text-xs text-idle">
-                {events[pos].kind}
-              </span>
-              <span className="text-xs text-ink-soft">{events[pos].summary}</span>
-            </Card>
-          </div>
+          <Card tone="sunken" pad="sm" className="max-h-[70vh] space-y-3 overflow-auto">
+            {events.map((ev, i) => (
+              <div key={i} className={cx("border-l-2 pl-2.5", kindRail(ev.kind))}>
+                <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-faint">
+                  {ev.kind}
+                </div>
+                <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-soft">
+                  {ev.text || ev.summary}
+                </p>
+              </div>
+            ))}
+            <div ref={readerEndRef} />
+          </Card>
         ))}
     </Drawer>
   );
