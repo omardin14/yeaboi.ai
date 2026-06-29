@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 import { sessionTranscript, workingDiff } from "@/lib/api";
@@ -6,6 +6,7 @@ import { formatAgo, formatClock, formatDay, humanTokens, isoMs } from "@/lib/for
 import { Drawer } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "@/components/ui/markdown";
 import { cx } from "@/components/ui/cx";
 
 const INITIAL_LIMIT = 200;
@@ -26,103 +27,86 @@ function metaLine(ev: TranscriptEvent): string {
   return parts.join(" · ");
 }
 
-/** Time + speaker line shared by every entry. */
-function EntryHead({
-  at,
-  align,
-  children,
-}: {
-  at: string;
-  align?: "end";
-  children: ReactNode;
-}) {
+/** Speaker label + rail color per kind. */
+function speaker(kind: string): { label: string; tone: string; rail: string } {
+  switch (kind) {
+    case "user":
+      return { label: "You", tone: "text-idle", rail: "border-l-idle" };
+    case "assistant":
+      return { label: "Assistant", tone: "text-busy", rail: "border-l-busy" };
+    case "thinking":
+      return { label: "💭 Thinking", tone: "text-merge", rail: "border-l-merge" };
+    case "tool_use":
+      return { label: "⚙ Tool call", tone: "text-ink-muted", rail: "border-l-line-strong" };
+    case "tool_result":
+      return { label: "↩ Tool result", tone: "text-ink-muted", rail: "border-l-line-strong" };
+    default:
+      return { label: kind, tone: "text-ink-faint", rail: "border-l-line-strong" };
+  }
+}
+
+/** A clock with a relative-time hover, or nothing when the stamp is absent. */
+function Clock({ at }: { at: string }) {
   const clock = formatClock(at);
+  if (!clock) return null;
   return (
-    <div
-      className={cx(
-        "mb-0.5 flex items-center gap-2 text-[10px] text-ink-faint",
-        align === "end" && "justify-end",
-      )}
-    >
-      {clock && (
-        <span className="font-mono" title={formatAgo(isoMs(at))}>
-          {clock}
-        </span>
-      )}
-      {children}
-    </div>
+    <span className="font-mono text-ink-faint" title={formatAgo(isoMs(at))}>
+      {clock}
+    </span>
   );
 }
 
-/** One transcript entry, styled by speaker: you (right) / assistant (left) /
- *  tool calls + results (mono cards, expanded) / thinking (collapsible). */
+/** One transcript entry as a clean conversation-log row: a kind-colored rail, a
+ *  speaker/time/meta header, then the body — markdown for messages, mono cards
+ *  for tool calls/results, a collapsible for thinking. No heavy bubbles. */
 function ChatEntry({ ev }: { ev: TranscriptEvent }) {
-  switch (ev.kind) {
-    case "user":
-      return (
-        <div className="flex justify-end">
-          <div className="max-w-[85%]">
-            <EntryHead at={ev.at} align="end">
-              <span className="font-semibold uppercase tracking-wide text-idle">You</span>
-            </EntryHead>
-            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-burgundy-tint px-3 py-2 text-sm text-ink">
-              {ev.text}
-            </div>
-          </div>
-        </div>
-      );
-    case "assistant": {
-      const meta = metaLine(ev);
-      return (
-        <div className="flex justify-start">
-          <div className="max-w-[85%]">
-            <EntryHead at={ev.at}>
-              <span className="font-semibold uppercase tracking-wide text-busy">Assistant</span>
-              {meta && <span className="font-mono normal-case">{meta}</span>}
-            </EntryHead>
-            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm border border-line bg-surface px-3 py-2 text-sm text-ink-soft">
-              {ev.text}
-            </div>
-          </div>
-        </div>
-      );
-    }
-    case "thinking":
-      return (
-        <details className="group/d ml-2">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-[10px] text-ink-faint [&::-webkit-details-marker]:hidden">
-            <span className="transition-transform group-open/d:rotate-90">▶</span>
-            {formatClock(ev.at) && (
-              <span className="font-mono" title={formatAgo(isoMs(ev.at))}>
-                {formatClock(ev.at)}
-              </span>
-            )}
-            <span className="font-semibold uppercase tracking-wide text-merge">💭 Thinking</span>
-          </summary>
-          <p className="mt-1 whitespace-pre-wrap break-words pl-4 text-xs leading-relaxed text-ink-muted">
-            {ev.text}
-          </p>
-        </details>
-      );
-    case "tool_use":
-    case "tool_result": {
-      const isCall = ev.kind === "tool_use";
-      return (
-        <div className="ml-2">
-          <EntryHead at={ev.at}>
-            <span className="font-semibold uppercase tracking-wide text-ink-muted">
-              {isCall ? "⚙ Tool call" : "↩ Tool result"}
-            </span>
-          </EntryHead>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line-strong bg-surface-sunken px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ink-soft">
-            {ev.text}
-          </pre>
-        </div>
-      );
-    }
-    default:
-      return null;
+  const sp = speaker(ev.kind);
+
+  if (ev.kind === "thinking") {
+    return (
+      <details className={cx("group/d border-l-2 pl-3", sp.rail)}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] [&::-webkit-details-marker]:hidden">
+          <span className="text-[9px] text-ink-faint transition-transform group-open/d:rotate-90">▶</span>
+          <span className={cx("font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
+          <Clock at={ev.at} />
+        </summary>
+        <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-muted">
+          {ev.text}
+        </p>
+      </details>
+    );
   }
+
+  const head = (
+    <div className="mb-1 flex items-center gap-2 text-[11px]">
+      <span className={cx("font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
+      <Clock at={ev.at} />
+      {ev.kind === "assistant" && metaLine(ev) && (
+        <span className="font-mono text-ink-faint">{metaLine(ev)}</span>
+      )}
+    </div>
+  );
+
+  if (ev.kind === "tool_use" || ev.kind === "tool_result") {
+    return (
+      <div className={cx("border-l-2 pl-3", sp.rail)}>
+        {head}
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line-strong bg-surface-sunken px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ink-soft">
+          {ev.text}
+        </pre>
+      </div>
+    );
+  }
+
+  // user / assistant — rendered markdown, no heavy bubble.
+  return (
+    <div className={cx("border-l-2 pl-3", sp.rail)}>
+      {head}
+      <div className="text-sm leading-relaxed text-ink-soft">
+        <Markdown text={ev.text} />
+      </div>
+    </div>
+  );
 }
 
 function DayDivider({ label }: { label: string }) {
@@ -257,7 +241,7 @@ export function SessionDetail({
         ) : events.length === 0 ? (
           <p className="text-xs text-ink-muted">No transcript entries.</p>
         ) : (
-          <Card tone="sunken" pad="sm" className="max-h-[80vh] space-y-2.5 overflow-auto">
+          <Card tone="sunken" pad="md" className="max-h-[80vh] space-y-4 overflow-auto">
             {!reachedStart && (
               <div className="flex justify-center pb-1">
                 <Button variant="ghost" size="sm" disabled={loading} onClick={() => setLimit((l) => l + PAGE)}>
