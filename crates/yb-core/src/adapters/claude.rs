@@ -164,6 +164,11 @@ impl ClaudeCollector {
                 .as_deref()
                 .map(|m| self.window_for(m))
                 .unwrap_or(200_000);
+            // A turn can't occupy more than its window; if `used` exceeds it our
+            // model→window table under-detected (e.g. a 1M-context Opus session
+            // reporting a bare `claude-opus-4-8` id) — widen to the smallest
+            // tier that actually holds `used` so the % isn't pinned at 100.
+            let window = if used > window { 1_000_000 } else { window };
             ContextUsage::new(used, window)
         });
 
@@ -271,7 +276,7 @@ pub fn transcript_events(
     let text = std::fs::read_to_string(&path)?;
 
     let mut events: Vec<crate::model::TranscriptEvent> =
-        text.lines().filter_map(event_from_line).collect();
+        text.lines().flat_map(events_from_line).collect();
     // Keep the most recent `limit`; drain the older prefix (saturating, so a
     // short transcript never underflows).
     let drop = events.len().saturating_sub(limit);
@@ -279,77 +284,275 @@ pub fn transcript_events(
     Ok(events)
 }
 
-fn event_from_line(line: &str) -> Option<crate::model::TranscriptEvent> {
-    use serde_json::Value;
-    let v: Value = serde_json::from_str(line.trim()).ok()?;
-    let kind = v.get("type")?.as_str()?.to_string();
-    let summary = match kind.as_str() {
-        "user" => user_text(&v).unwrap_or_else(|| "(user message)".to_string()),
-        "assistant" => assistant_summary(&v),
-        "last-prompt" => v
-            .get("lastPrompt")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        other => other.to_string(),
+/// Scan a session's transcript for the sub-agents (`Task`/`Agent` tool calls)
+/// it launched — type, description, and whether the result came back yet
+/// (matched by tool-call id). A missing transcript → empty.
+pub fn transcript_sub_agents(
+    claude_home: &Path,
+    session_id: &str,
+) -> std::io::Result<Vec<crate::model::SubAgent>> {
+    let projects = claude_home.join("projects");
+    let Some(path) = find_transcript(&projects, session_id, &mut Vec::new()) else {
+        return Ok(Vec::new());
     };
-    Some(crate::model::TranscriptEvent {
-        kind,
-        summary: crate::util::truncate(&summary, 160),
-        // Generously bounded so a single huge tool-result can't bloat the wire,
-        // while still showing whole prompts/turns in the reader.
-        text: crate::util::truncate(&summary, 4000),
-    })
+    let text = std::fs::read_to_string(&path)?;
+
+    // Calls (id, type, description) in order, and the ids whose results landed.
+    let mut calls: Vec<(String, String, String)> = Vec::new();
+    let mut completed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for line in text.lines() {
+        collect_sub_agent_line(line, &mut calls, &mut completed);
+    }
+    Ok(calls
+        .into_iter()
+        .map(|(id, kind, description)| crate::model::SubAgent {
+            kind,
+            description,
+            // No id (older transcripts) → assume done, not perpetually "running".
+            done: id.is_empty() || completed.contains(&id),
+        })
+        .collect())
 }
 
-fn assistant_summary(v: &serde_json::Value) -> String {
+fn collect_sub_agent_line(
+    line: &str,
+    calls: &mut Vec<(String, String, String)>,
+    completed: &mut std::collections::HashSet<String>,
+) {
+    use serde_json::Value;
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return;
+    };
+    let kind = v.get("type").and_then(Value::as_str);
     let Some(blocks) = v
         .get("message")
         .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_array())
+        .and_then(Value::as_array)
     else {
-        return "(assistant)".to_string();
+        return;
     };
-    let mut parts = Vec::new();
-    for b in blocks {
-        match b.get("type").and_then(|t| t.as_str()) {
-            Some("text") => {
-                if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
-                    parts.push(format!("“{}”", t));
+    match kind {
+        Some("assistant") => {
+            for b in blocks {
+                if b.get("type").and_then(Value::as_str) != Some("tool_use") {
+                    continue;
+                }
+                let name = b.get("name").and_then(Value::as_str).unwrap_or("");
+                if name != "Task" && name != "Agent" {
+                    continue;
+                }
+                let id = b
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let input = b.get("input");
+                let field = |k: &str| {
+                    input
+                        .and_then(|i| i.get(k))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string()
+                };
+                calls.push((
+                    id,
+                    field("subagent_type"),
+                    crate::util::truncate(&field("description"), 200),
+                ));
+            }
+        }
+        Some("user") => {
+            for b in blocks {
+                if b.get("type").and_then(Value::as_str) == Some("tool_result")
+                    && let Some(id) = b.get("tool_use_id").and_then(Value::as_str)
+                {
+                    completed.insert(id.to_string());
                 }
             }
-            Some("thinking") => parts.push("thinking".to_string()),
-            Some("tool_use") => parts.push(format!(
-                "tool_use: {}",
-                b.get("name").and_then(|n| n.as_str()).unwrap_or("?")
-            )),
-            _ => {}
         }
-    }
-    if parts.is_empty() {
-        "(assistant)".to_string()
-    } else {
-        parts.join(" · ")
+        _ => {}
     }
 }
 
-fn user_text(v: &serde_json::Value) -> Option<String> {
-    let content = v.get("message")?.get("content")?;
-    if let Some(s) = content.as_str() {
-        return Some(s.to_string());
+/// Build a single transcript event (`summary` compact, `text` full).
+fn event(kind: &str, full: &str, at: &str) -> crate::model::TranscriptEvent {
+    crate::model::TranscriptEvent {
+        kind: kind.to_string(),
+        summary: crate::util::truncate(full, 160),
+        // Generously bounded so one huge tool result can't bloat the wire.
+        text: crate::util::truncate(full, 4000),
+        at: at.to_string(),
+        model: String::new(),
+        in_tokens: 0,
+        out_tokens: 0,
     }
-    for b in content.as_array()? {
-        match b.get("type").and_then(|t| t.as_str()) {
+}
+
+/// Segment one transcript line into atomic, speaker-attributed events: an
+/// assistant line fans out into its text / thinking / tool-call blocks, and a
+/// user line into the real prompt and/or any tool-result outputs. Everything
+/// else — `system`, `last-prompt`, meta/structural lines — is dropped so the
+/// reader shows only the actual conversation + tool activity.
+fn events_from_line(line: &str) -> Vec<crate::model::TranscriptEvent> {
+    use serde_json::Value;
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return Vec::new();
+    };
+    // Injected/meta lines (caveats, command echoes, hook noise) are not the
+    // conversation — skip them outright.
+    if v.get("isMeta").and_then(Value::as_bool) == Some(true) {
+        return Vec::new();
+    }
+    let at = v.get("timestamp").and_then(Value::as_str).unwrap_or("");
+    match v.get("type").and_then(Value::as_str) {
+        Some("assistant") => assistant_events(&v, at),
+        Some("user") => user_events(&v, at),
+        _ => Vec::new(),
+    }
+}
+
+/// Context tokens (input + both cache reads) and generated tokens for a turn.
+fn turn_tokens(message: &serde_json::Value) -> (u32, u32) {
+    let u = message.get("usage");
+    let get = |k: &str| -> u32 {
+        u.and_then(|u| u.get(k))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32
+    };
+    let input =
+        get("input_tokens") + get("cache_creation_input_tokens") + get("cache_read_input_tokens");
+    (input, get("output_tokens"))
+}
+
+fn assistant_events(v: &serde_json::Value, at: &str) -> Vec<crate::model::TranscriptEvent> {
+    use serde_json::Value;
+    let message = v.get("message");
+    let model = message
+        .and_then(|m| m.get("model"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let (in_tokens, out_tokens) = message.map(turn_tokens).unwrap_or((0, 0));
+    // Attach the turn's model/usage to the first emitted segment only.
+    let tag = |e: crate::model::TranscriptEvent, first: bool| crate::model::TranscriptEvent {
+        model: model.clone(),
+        in_tokens: if first { in_tokens } else { 0 },
+        out_tokens: if first { out_tokens } else { 0 },
+        ..e
+    };
+
+    let Some(blocks) = message
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return vec![tag(event("assistant", "(assistant)", at), true)];
+    };
+    let mut out = Vec::new();
+    for b in blocks {
+        let ev = match b.get("type").and_then(Value::as_str) {
             Some("text") => {
-                if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
-                    return Some(t.to_string());
+                let t = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
+                if t.is_empty() {
+                    continue;
+                }
+                event("assistant", t, at)
+            }
+            Some("thinking") => event(
+                "thinking",
+                b.get("thinking").and_then(Value::as_str).unwrap_or(""),
+                at,
+            ),
+            Some("tool_use") => {
+                let name = b.get("name").and_then(Value::as_str).unwrap_or("?");
+                event("tool_use", &tool_use_text(name, b.get("input")), at)
+            }
+            _ => continue,
+        };
+        let first = out.is_empty();
+        out.push(tag(ev, first));
+    }
+    if out.is_empty() {
+        out.push(tag(event("assistant", "(assistant)", at), true));
+    }
+    out
+}
+
+fn user_events(v: &serde_json::Value, at: &str) -> Vec<crate::model::TranscriptEvent> {
+    use serde_json::Value;
+    let Some(content) = v.get("message").and_then(|m| m.get("content")) else {
+        return Vec::new();
+    };
+    if let Some(s) = content.as_str() {
+        let s = s.trim();
+        return if s.is_empty() {
+            Vec::new()
+        } else {
+            vec![event("user", s, at)]
+        };
+    }
+    let Some(blocks) = content.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for b in blocks {
+        match b.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                let t = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
+                if !t.is_empty() {
+                    out.push(event("user", t, at));
                 }
             }
-            Some("tool_result") => return Some("(tool result)".to_string()),
+            // A tool result is the *tool* speaking, not you — its own kind, and
+            // we surface the actual output instead of a "(tool result)" stub.
+            Some("tool_result") => out.push(event("tool_result", &tool_result_text(b), at)),
             _ => {}
         }
     }
-    None
+    out
+}
+
+/// `Bash: cargo test` style label for a tool call, falling back to pretty JSON.
+fn tool_use_text(name: &str, input: Option<&serde_json::Value>) -> String {
+    use serde_json::Value;
+    let Some(input) = input else {
+        return name.to_string();
+    };
+    let snippet = [
+        "command",
+        "description",
+        "file_path",
+        "path",
+        "pattern",
+        "url",
+    ]
+    .iter()
+    .find_map(|k| input.get(*k).and_then(Value::as_str));
+    if let Some(s) = snippet {
+        return format!("{name}: {}", s.trim());
+    }
+    match serde_json::to_string_pretty(input) {
+        Ok(p) if !p.is_empty() && p != "null" && p != "{}" => format!("{name}\n{p}"),
+        _ => name.to_string(),
+    }
+}
+
+/// The text a tool returned (string content, or joined text blocks).
+fn tool_result_text(block: &serde_json::Value) -> String {
+    use serde_json::Value;
+    let joined = match block.get("content") {
+        Some(Value::String(s)) => s.trim().to_string(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|c| c.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    };
+    if joined.trim().is_empty() {
+        "(tool result)".to_string()
+    } else {
+        joined.trim().to_string()
+    }
 }
 
 /// Derived state accumulated from a transcript tail.
@@ -913,11 +1116,14 @@ mod tests {
             &[USER, ASSISTANT, TOOL_USE],
         );
         let events = transcript_events(home, "sess-t", 100).unwrap();
+        // USER → user, ASSISTANT(text) → assistant, TOOL_USE → tool_use.
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].kind, "user");
-        assert!(events[0].summary.contains("go ahead"));
-        assert_eq!(events[2].kind, "assistant");
-        assert!(events[2].summary.contains("tool_use: Bash"));
+        assert!(events[0].text.contains("go ahead"));
+        assert_eq!(events[1].kind, "assistant");
+        assert!(events[1].text.contains("hi"));
+        assert_eq!(events[2].kind, "tool_use");
+        assert!(events[2].summary.contains("Bash"));
     }
 
     #[test]
@@ -930,11 +1136,11 @@ mod tests {
             r#"{"pid":1,"sessionId":"sess-l","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
             &[USER, ASSISTANT, TOOL_USE],
         );
-        // limit 2 over 3 entries → drop the oldest (the user line).
+        // 3 segmented events; limit 2 → drop the oldest (the user line).
         let events = transcript_events(home, "sess-l", 2).unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, "assistant");
-        assert_eq!(events[1].kind, "assistant"); // the tool-use line
+        assert_eq!(events[1].kind, "tool_use");
     }
 
     #[test]
@@ -946,37 +1152,78 @@ mod tests {
     }
 
     #[test]
-    fn event_from_line_covers_each_arm() {
-        // assistant with thinking + tool_use blocks
-        let a = event_from_line(
-            r#"{"type":"assistant","message":{"content":[{"type":"thinking"},{"type":"tool_use","name":"Read"}]}}"#,
-        )
-        .unwrap();
-        assert_eq!(a.kind, "assistant");
-        assert!(a.summary.contains("thinking"));
-        assert!(a.summary.contains("tool_use: Read"));
-
-        // user as a tool_result block
-        let tr =
-            event_from_line(r#"{"type":"user","message":{"content":[{"type":"tool_result"}]}}"#)
-                .unwrap();
-        assert_eq!(tr.summary, "(tool result)");
-
-        // user with no recognizable content → fallback
-        let uf = event_from_line(r#"{"type":"user","message":{"content":[]}}"#).unwrap();
-        assert_eq!(uf.summary, "(user message)");
-
-        // last-prompt + unknown type
-        let lp = event_from_line(r#"{"type":"last-prompt","lastPrompt":"hi"}"#).unwrap();
-        assert_eq!(
-            (lp.kind.as_str(), lp.summary.as_str()),
-            ("last-prompt", "hi")
+    fn transcript_sub_agents_lists_calls_with_type_description_and_done() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // Two Task calls; only the first one's result has come back.
+        let t1 = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"Explore","description":"map the code"}}]}}"#;
+        let r1 = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#;
+        let t2 = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Task","input":{"subagent_type":"Plan","description":"design it"}}]}}"#;
+        let bash = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"ls"}}]}}"#;
+        write_session(
+            home,
+            "sess-sa",
+            r#"{"pid":1,"sessionId":"sess-sa","cwd":"/tmp/x","startedAt":1,"entrypoint":"cli"}"#,
+            &[t1, r1, t2, bash],
         );
-        let other = event_from_line(r#"{"type":"mode","mode":"normal"}"#).unwrap();
-        assert_eq!(other.kind, "mode");
+        let agents = transcript_sub_agents(home, "sess-sa").unwrap();
+        // Only Task calls are sub-agents; Bash is ignored.
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].kind, "Explore");
+        assert!(agents[0].description.contains("map the code"));
+        assert!(agents[0].done, "its result came back");
+        assert_eq!(agents[1].kind, "Plan");
+        assert!(!agents[1].done, "no result yet → still running");
+    }
 
-        // not JSON → skipped
-        assert!(event_from_line("not json").is_none());
+    #[test]
+    fn events_from_line_segments_each_arm() {
+        // An assistant line fans out into one event per content block, carrying
+        // the turn's model + token usage on the first segment.
+        let a = events_from_line(
+            r#"{"type":"assistant","timestamp":"2026-06-27T21:42:35.935Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":10,"cache_read_input_tokens":90,"output_tokens":7},"content":[{"type":"thinking","thinking":"hmm"},{"type":"tool_use","name":"Bash","input":{"command":"cargo test"}}]}}"#,
+        );
+        assert_eq!(a.len(), 2);
+        assert_eq!(a[0].kind, "thinking");
+        assert_eq!(a[0].text, "hmm");
+        assert_eq!(a[0].model, "claude-opus-4-8");
+        assert_eq!((a[0].in_tokens, a[0].out_tokens), (100, 7));
+        assert_eq!(a[1].kind, "tool_use");
+        assert!(a[1].summary.contains("Bash: cargo test"));
+        assert_eq!((a[1].in_tokens, a[1].out_tokens), (0, 0)); // only first is tagged
+        // The ISO timestamp is carried through.
+        assert_eq!(a[0].at, "2026-06-27T21:42:35.935Z");
+
+        // A tool result is its own kind and surfaces the actual output.
+        let tr = events_from_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"build OK\n3 passed"}]}}"#,
+        );
+        assert_eq!(tr.len(), 1);
+        assert_eq!(tr[0].kind, "tool_result");
+        assert!(tr[0].text.contains("3 passed"));
+
+        // A real prompt → a single `user` event.
+        let u = events_from_line(
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"go ahead"}]}}"#,
+        );
+        assert_eq!(u.len(), 1);
+        assert_eq!(u[0].kind, "user");
+        assert!(u[0].text.contains("go ahead"));
+
+        // Empty content, structural/system/meta lines, and unknown types all
+        // emit nothing — only the real conversation + tools survive.
+        assert!(events_from_line(r#"{"type":"user","message":{"content":[]}}"#).is_empty());
+        assert!(events_from_line(r#"{"type":"last-prompt","lastPrompt":"hi"}"#).is_empty());
+        assert!(events_from_line(r#"{"type":"system","content":"(system)"}"#).is_empty());
+        assert!(events_from_line(r#"{"type":"mode","mode":"normal"}"#).is_empty());
+        // isMeta lines (caveats, command echoes) are skipped even when user-typed.
+        assert!(
+            events_from_line(
+                r#"{"type":"user","isMeta":true,"message":{"content":[{"type":"text","text":"caveat"}]}}"#
+            )
+            .is_empty()
+        );
+        assert!(events_from_line("not json").is_empty());
     }
 
     #[test]

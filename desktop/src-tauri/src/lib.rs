@@ -15,7 +15,8 @@ use tauri::{Emitter, State};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::watch;
 use yb_core::{
-    CollectOptions, Engine, SessionEventKind, Snapshot, Totals, TranscriptEvent, detect_events,
+    CollectOptions, Engine, SessionEventKind, Snapshot, SubAgent, Totals, TranscriptEvent,
+    detect_events,
 };
 
 /// Event name carrying each new snapshot to the frontend.
@@ -209,10 +210,21 @@ async fn working_diff(cwd: String) -> Result<String, String> {
     .await
 }
 
-/// A session's transcript timeline for replay (most recent entries).
+/// A session's transcript timeline (most recent `limit` entries). The frontend
+/// raises `limit` to page in earlier history on demand.
 #[tauri::command]
-async fn session_transcript(session_id: String) -> Result<Vec<TranscriptEvent>, String> {
-    blocking(move || yb_core::transcript_events(&session_id, 500).map_err(|e| e.to_string())).await
+async fn session_transcript(
+    session_id: String,
+    limit: usize,
+) -> Result<Vec<TranscriptEvent>, String> {
+    blocking(move || yb_core::transcript_events(&session_id, limit).map_err(|e| e.to_string()))
+        .await
+}
+
+/// The sub-agents (`Task`/`Agent` calls) a session launched, with type + task.
+#[tauri::command]
+async fn session_sub_agents(session_id: String) -> Result<Vec<SubAgent>, String> {
+    blocking(move || yb_core::transcript_sub_agents(&session_id).map_err(|e| e.to_string())).await
 }
 
 // ---- worktrees (yb-worktree) ------------------------------------------------
@@ -322,6 +334,7 @@ pub fn run() {
             continue_rebase,
             working_diff,
             session_transcript,
+            session_sub_agents,
             list_worktrees,
             create_worktree,
             remove_worktree,

@@ -244,13 +244,37 @@ pub struct Snapshot {
     ts(export, export_to = "../../../desktop/src/lib/bindings/")
 )]
 pub struct TranscriptEvent {
-    /// `user` | `assistant` | `tool_use` | `tool_result` | `thinking` | …
+    /// One atomic entry: `user` | `assistant` | `thinking` | `tool_use` |
+    /// `tool_result` | `system` | … — the speaker/label is derived from this.
     pub kind: String,
     /// A short human summary of the entry (≤160 chars) — for compact lists.
     pub summary: String,
-    /// The full entry text (generously bounded) — for the readable reader and
-    /// for recovering the untruncated current prompt.
+    /// The full entry text (generously bounded) — the readable reader content.
     pub text: String,
+    /// ISO8601 timestamp of the source line, or `""` if absent.
+    pub at: String,
+    /// Model for an assistant turn (e.g. `claude-opus-4-8`), else `""`.
+    pub model: String,
+    /// Context tokens going in (input + cache) on an assistant turn, else 0.
+    pub in_tokens: u32,
+    /// Tokens generated on an assistant turn, else 0.
+    pub out_tokens: u32,
+}
+
+/// One sub-agent (a `Task`/`Agent` tool call) launched during a session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts",
+    ts(export, export_to = "../../../desktop/src/lib/bindings/")
+)]
+pub struct SubAgent {
+    /// The sub-agent type (e.g. `Explore`, `general-purpose`), or `""`.
+    pub kind: String,
+    /// The task description it was given, or `""`.
+    pub description: String,
+    /// Whether its result has come back (`true`) or it's still running.
+    pub done: bool,
 }
 
 /// Process metrics keyed by pid, plus parent→children adjacency. Produced by

@@ -49,9 +49,27 @@ impl GitRepo {
         self.run(&["rev-parse", "--show-toplevel"])
     }
 
-    /// All uncommitted changes (`git diff HEAD`) — the session's working diff.
+    /// All uncommitted changes — the session's working diff. `git diff HEAD`
+    /// covers tracked edits (staged + unstaged) but misses brand-new files, so
+    /// untracked paths are appended as a `?? path` list (git-status style) and
+    /// the reader can surface them rather than showing "no changes".
     pub fn working_diff(&self) -> Result<String, GitError> {
-        self.run(&["diff", "HEAD"])
+        let tracked = self.run(&["diff", "HEAD"])?;
+        let untracked = self.run(&["ls-files", "--others", "--exclude-standard"])?;
+        let untracked = untracked.trim();
+        if untracked.is_empty() {
+            return Ok(tracked);
+        }
+        let list = untracked
+            .lines()
+            .map(|f| format!("?? {f}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(if tracked.trim().is_empty() {
+            format!("Untracked files:\n{list}\n")
+        } else {
+            format!("{tracked}\n\nUntracked files:\n{list}\n")
+        })
     }
 
     /// Push the current branch to `origin`, setting upstream.
@@ -180,6 +198,29 @@ mod tests {
             Path::new(&repo.toplevel().unwrap()).canonicalize().unwrap(),
             dir.canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn working_diff_includes_tracked_edits_and_untracked_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        git(&["init", "-q"], dir);
+        git(&["config", "user.email", "t@t"], dir);
+        git(&["config", "user.name", "t"], dir);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."], dir);
+        git(&["commit", "-q", "-m", "init"], dir);
+
+        let repo = GitRepo::new(dir);
+        assert_eq!(repo.working_diff().unwrap(), "", "clean tree → empty");
+
+        // A tracked edit plus a brand-new (untracked) file.
+        std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        std::fs::write(dir.join("new.txt"), "fresh\n").unwrap();
+        let diff = repo.working_diff().unwrap();
+        assert!(diff.contains("a.txt"), "tracked edit shown: {diff}");
+        assert!(diff.contains("-one"), "removed line shown: {diff}");
+        assert!(diff.contains("?? new.txt"), "untracked file listed: {diff}");
     }
 
     #[test]

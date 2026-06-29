@@ -5,7 +5,8 @@
  */
 export type TranscriptEvent = { 
 /**
- * `user` | `assistant` | `tool_use` | `tool_result` | `thinking` | …
+ * One atomic entry: `user` | `assistant` | `thinking` | `tool_use` |
+ * `tool_result` | `system` | … — the speaker/label is derived from this.
  */
 kind: string, 
 /**
@@ -13,7 +14,22 @@ kind: string,
  */
 summary: string, 
 /**
- * The full entry text (generously bounded) — for the readable reader and
- * for recovering the untruncated current prompt.
+ * The full entry text (generously bounded) — the readable reader content.
  */
-text: string, };
+text: string, 
+/**
+ * ISO8601 timestamp of the source line, or `""` if absent.
+ */
+at: string, 
+/**
+ * Model for an assistant turn (e.g. `claude-opus-4-8`), else `""`.
+ */
+model: string, 
+/**
+ * Context tokens going in (input + cache) on an assistant turn, else 0.
+ */
+in_tokens: number, 
+/**
+ * Tokens generated on an assistant turn, else 0.
+ */
+out_tokens: number, };

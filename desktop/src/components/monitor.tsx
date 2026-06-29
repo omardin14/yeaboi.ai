@@ -65,10 +65,11 @@ function SessionRow({
           ▶
         </span>
         <span
-          title={session.status}
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: statusRailVar(session.status) }}
-        />
+          className="w-12 shrink-0 text-[11px] font-semibold uppercase tracking-wide"
+          style={{ color: statusRailVar(session.status) }}
+        >
+          {session.status}
+        </span>
         <span className="flex min-w-0 items-center gap-1.5 font-medium text-ink">
           <span className={`text-[9px] leading-none ${providerAccent(session.provider)}`}>●</span>
           <span className="truncate">{session.model ?? "—"}</span>

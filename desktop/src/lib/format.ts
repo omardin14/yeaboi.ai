@@ -157,6 +157,39 @@ export function formatAgo(ms: number | null | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Epoch-ms for an ISO8601 timestamp string, or null if empty/unparseable. */
+export function isoMs(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** Local `HH:MM:SS` clock for an ISO8601 timestamp, or "" if absent/invalid. */
+export function formatClock(iso: string | null | undefined): string {
+  const ms = isoMs(iso);
+  if (ms == null) return "";
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+/** Local day label like `Jun 29` for an ISO8601 timestamp, or "" if absent. */
+export function formatDay(iso: string | null | undefined): string {
+  const ms = isoMs(iso);
+  if (ms == null) return "";
+  return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+/** Compact token count (`147k`, `1.2M`, `840`). */
+export function humanTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1000)}k`;
+  return `${n}`;
+}
+
 /** Short host-app label. */
 export function hostAppLabel(host: HostApp): string {
   if (host === "Cli") return "cli";

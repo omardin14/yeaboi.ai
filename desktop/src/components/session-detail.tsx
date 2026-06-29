@@ -1,23 +1,150 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 import { sessionTranscript, workingDiff } from "@/lib/api";
+import { formatAgo, formatClock, formatDay, humanTokens, isoMs } from "@/lib/format";
 import { Drawer } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Markdown } from "@/components/ui/markdown";
+import { StatusBadge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { cx } from "@/components/ui/cx";
 
-/** Left-rule color per transcript turn kind, so the reader scans at a glance. */
-function kindRail(kind: string): string {
+/** Per-line color for a unified diff (additions, deletions, hunks, untracked). */
+function diffLineClass(line: string): string {
+  if (line.startsWith("@@")) return "text-merge";
+  if (
+    line.startsWith("diff --git") ||
+    line.startsWith("index ") ||
+    line.startsWith("+++") ||
+    line.startsWith("---")
+  )
+    return "font-semibold text-ink-faint";
+  if (line.startsWith("Untracked files:") || line.startsWith("?? ")) return "text-idle";
+  if (line.startsWith("+")) return "bg-busy-fill text-busy";
+  if (line.startsWith("-")) return "bg-danger-fill text-danger";
+  return "text-ink-soft";
+}
+
+/** A colored, scrollable unified-diff view. */
+function DiffView({ text }: { text: string }) {
+  return (
+    <Card tone="sunken" pad="none" className="max-h-[78vh] overflow-auto">
+      <pre className="py-1.5 text-xs leading-relaxed">
+        {text.split("\n").map((line, i) => (
+          <div key={i} className={cx("whitespace-pre-wrap break-words px-3", diffLineClass(line))}>
+            {line || " "}
+          </div>
+        ))}
+      </pre>
+    </Card>
+  );
+}
+
+const INITIAL_LIMIT = 200;
+const PAGE = 400;
+
+/** Drop the `claude-` prefix for a compact model label. */
+function shortModel(m: string): string {
+  return m.replace(/^claude-/, "");
+}
+
+/** `opus-4-8 · 6k→240 tok` metadata for an assistant turn (or ""). */
+function metaLine(ev: TranscriptEvent): string {
+  const parts: string[] = [];
+  if (ev.model) parts.push(shortModel(ev.model));
+  if (ev.out_tokens > 0) {
+    parts.push(`${humanTokens(ev.in_tokens)}→${humanTokens(ev.out_tokens)} tok`);
+  }
+  return parts.join(" · ");
+}
+
+/** Speaker label + rail color per kind. */
+function speaker(kind: string): { label: string; tone: string; rail: string } {
   switch (kind) {
     case "user":
-      return "border-l-idle";
+      return { label: "You", tone: "text-idle", rail: "border-l-idle" };
     case "assistant":
-      return "border-l-busy";
+      return { label: "Assistant", tone: "text-busy", rail: "border-l-busy" };
     case "thinking":
-      return "border-l-merge";
+      return { label: "💭 Thinking", tone: "text-merge", rail: "border-l-merge" };
+    case "tool_use":
+      return { label: "⚙ Tool call", tone: "text-ink-muted", rail: "border-l-line-strong" };
+    case "tool_result":
+      return { label: "↩ Tool result", tone: "text-ink-muted", rail: "border-l-line-strong" };
     default:
-      return "border-l-line-strong";
+      return { label: kind, tone: "text-ink-faint", rail: "border-l-line-strong" };
   }
+}
+
+/** A clock with a relative-time hover, or nothing when the stamp is absent. */
+function Clock({ at }: { at: string }) {
+  const clock = formatClock(at);
+  if (!clock) return null;
+  return (
+    <span className="font-mono text-ink-faint" title={formatAgo(isoMs(at))}>
+      {clock}
+    </span>
+  );
+}
+
+/** One transcript entry as a clean conversation-log row: a kind-colored rail, a
+ *  speaker/time/meta header, then the body — markdown for messages, mono cards
+ *  for tool calls/results, a collapsible for thinking. No heavy bubbles. */
+function ChatEntry({ ev }: { ev: TranscriptEvent }) {
+  const sp = speaker(ev.kind);
+
+  // Tool calls, tool results, and thinking collapse to a one-line preview so
+  // they don't dominate the timeline — click to expand the full text.
+  if (ev.kind === "tool_use" || ev.kind === "tool_result" || ev.kind === "thinking") {
+    const isTool = ev.kind !== "thinking";
+    return (
+      <details className={cx("group/d border-l-2 pl-3", sp.rail)}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] [&::-webkit-details-marker]:hidden">
+          <span className="shrink-0 text-[9px] text-ink-faint transition-transform group-open/d:rotate-90">▶</span>
+          <span className={cx("shrink-0 font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
+          <Clock at={ev.at} />
+          <span className="min-w-0 flex-1 truncate font-mono text-ink-faint">{ev.summary}</span>
+        </summary>
+        {isTool ? (
+          <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line-strong bg-surface-sunken px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ink-soft">
+            {ev.text}
+          </pre>
+        ) : (
+          <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-muted">
+            {ev.text}
+          </p>
+        )}
+      </details>
+    );
+  }
+
+  // user / assistant — rendered markdown, always shown.
+  return (
+    <div className={cx("border-l-2 pl-3", sp.rail)}>
+      <div className="mb-1 flex items-center gap-2 text-[11px]">
+        <span className={cx("font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
+        <Clock at={ev.at} />
+        {ev.kind === "assistant" && metaLine(ev) && (
+          <span className="font-mono text-ink-faint">{metaLine(ev)}</span>
+        )}
+      </div>
+      <div className="text-sm leading-relaxed text-ink-soft">
+        <Markdown text={ev.text} />
+      </div>
+    </div>
+  );
+}
+
+function DayDivider({ label }: { label: string }) {
+  return (
+    <div className="my-1 flex items-center gap-2">
+      <div className="h-px flex-1 bg-line" />
+      <span className="font-mono text-[10px] uppercase tracking-wide text-ink-faint">{label}</span>
+      <div className="h-px flex-1 bg-line" />
+    </div>
+  );
 }
 
 /** Detail panel for one session: metadata + working diff + transcript reader. */
@@ -31,8 +158,24 @@ export function SessionDetail({
   const [tab, setTab] = useState<"diff" | "transcript">("diff");
   const [diff, setDiff] = useState<string | null>(null);
   const [events, setEvents] = useState<TranscriptEvent[] | null>(null);
+  const [limit, setLimit] = useState(INITIAL_LIMIT);
+  const [reachedStart, setReachedStart] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readerEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrolledRef = useRef(false);
+  const pagingRef = useRef(false);
+  const prevHeightRef = useRef(0);
+
+  // Page in earlier history (via the button or scrolling near the top). Captures
+  // the scroll height first so a layout effect can keep the reading position put.
+  function loadEarlier() {
+    if (reachedStart || loading || pagingRef.current) return;
+    prevHeightRef.current = scrollRef.current?.scrollHeight ?? 0;
+    pagingRef.current = true;
+    setLimit((l) => l + PAGE);
+  }
 
   useEffect(() => {
     let active = true;
@@ -46,42 +189,79 @@ export function SessionDetail({
     };
   }, [session.cwd]);
 
+  // Reset paging + scroll state when switching sessions.
+  useEffect(() => {
+    setEvents(null);
+    setLimit(INITIAL_LIMIT);
+    setReachedStart(false);
+    scrolledRef.current = false;
+    pagingRef.current = false;
+  }, [session.id]);
+
+  // After earlier history prepends, restore the prior reading position (anchor
+  // to the same content) so scrolling up doesn't jump — and so an at-top scroll
+  // doesn't immediately re-trigger another load.
+  useLayoutEffect(() => {
+    if (pagingRef.current && scrollRef.current) {
+      scrollRef.current.scrollTop =
+        scrollRef.current.scrollHeight - prevHeightRef.current;
+      pagingRef.current = false;
+    }
+  }, [events]);
+
+  // (Re)load the transcript whenever the session or the page size changes.
   useEffect(() => {
     let active = true;
-    setEvents(null);
-    sessionTranscript(session.id)
-      .then((ev) => active && setEvents(ev))
-      .catch((e) => active && setError(`Could not load transcript: ${e}`));
+    setLoading(true);
+    sessionTranscript(session.id, limit)
+      .then((ev) => {
+        if (!active) return;
+        setEvents(ev);
+        setReachedStart(ev.length < limit); // got fewer than asked → at the start
+      })
+      .catch((e) => active && setError(`Could not load transcript: ${e}`))
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     return () => {
       active = false;
     };
-  }, [session.id]);
+  }, [session.id, limit]);
 
-  // Jump to the latest turn once the transcript renders (most recent is last).
+  // Jump to the latest turn on first load (not when paging in earlier history).
   useEffect(() => {
-    if (tab === "transcript" && events && events.length > 0) {
-      // Optional-call: jsdom doesn't implement scrollIntoView.
+    if (tab === "transcript" && events && events.length > 0 && !scrolledRef.current) {
       readerEndRef.current?.scrollIntoView?.({ block: "end" });
+      scrolledRef.current = true;
     }
   }, [tab, events]);
 
+  let prevDay = "";
+
   return (
-    <Drawer onClose={onClose} ariaLabel={`Session ${session.id}`}>
-      <header className="mb-3 flex items-baseline justify-between">
-        <h3 className="font-mono text-sm text-ink">
-          {session.model ?? "—"} · {session.branch ?? "—"}
-        </h3>
+    <Drawer onClose={onClose} ariaLabel={`Session ${session.id}`} className="max-w-3xl">
+      <header className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={session.status} />
+            <span className="font-mono text-sm text-ink">{session.model ?? "—"}</span>
+            {session.branch && (
+              <span className="font-mono text-xs text-ink-muted">⎇ {session.branch}</span>
+            )}
+          </div>
+          <p className="truncate font-mono text-xs text-ink-faint" title={session.cwd}>
+            {session.cwd}
+          </p>
+        </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close detail"
-          className="rounded-md px-2 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-soft"
+          className="shrink-0 rounded-md px-2 py-0.5 text-sm text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-soft"
         >
           ✕
         </button>
       </header>
-
-      <p className="mb-3 font-mono text-xs text-ink-faint">{session.cwd}</p>
 
       <nav className="mb-3 flex gap-1 text-xs">
         {(["diff", "transcript"] as const).map((t) => (
@@ -107,11 +287,13 @@ export function SessionDetail({
         (diff == null ? (
           <p className="text-xs text-ink-muted">Loading diff…</p>
         ) : diff.trim() === "" ? (
-          <p className="text-xs text-ink-muted">No uncommitted changes.</p>
+          <EmptyState
+            glyph="✓"
+            title="No uncommitted changes"
+            hint="This session's working tree is clean — nothing staged, modified, or new."
+          />
         ) : (
-          <Card tone="sunken" pad="sm" className="max-h-[70vh] overflow-auto">
-            <pre className="text-xs leading-relaxed text-ink-soft">{diff}</pre>
-          </Card>
+          <DiffView text={diff} />
         ))}
 
       {tab === "transcript" &&
@@ -120,19 +302,33 @@ export function SessionDetail({
         ) : events.length === 0 ? (
           <p className="text-xs text-ink-muted">No transcript entries.</p>
         ) : (
-          <Card tone="sunken" pad="sm" className="max-h-[70vh] space-y-3 overflow-auto">
-            {events.map((ev, i) => (
-              <div key={i} className={cx("border-l-2 pl-2.5", kindRail(ev.kind))}>
-                <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-faint">
-                  {ev.kind}
-                </div>
-                <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-soft">
-                  {ev.text || ev.summary}
-                </p>
+          <div
+            ref={scrollRef}
+            onScroll={() => {
+              if ((scrollRef.current?.scrollTop ?? 99) <= 40) loadEarlier();
+            }}
+            className="max-h-[80vh] space-y-4 overflow-auto rounded-2xl border border-line-strong bg-surface-sunken p-4"
+          >
+            {!reachedStart && (
+              <div className="flex justify-center pb-1">
+                <Button variant="ghost" size="sm" disabled={loading} onClick={loadEarlier}>
+                  {loading ? "Loading…" : "△ Load earlier — or scroll up"}
+                </Button>
               </div>
-            ))}
+            )}
+            {events.map((ev, i) => {
+              const day = formatDay(ev.at);
+              const showDay = day !== "" && day !== prevDay;
+              if (day) prevDay = day;
+              return (
+                <Fragment key={i}>
+                  {showDay && <DayDivider label={day} />}
+                  <ChatEntry ev={ev} />
+                </Fragment>
+              );
+            })}
             <div ref={readerEndRef} />
-          </Card>
+          </div>
         ))}
     </Drawer>
   );
