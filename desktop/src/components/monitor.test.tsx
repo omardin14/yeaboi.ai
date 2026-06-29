@@ -298,9 +298,13 @@ test("clicking a row expands its detail panel inline (not onSelect)", () => {
   fireEvent.click(screen.getByText("alpha task"));
   // The row expands inline rather than opening the side panel directly.
   expect(onSelect).not.toHaveBeenCalled();
-  expect(
-    screen.getByRole("region", { name: "Details for s1" }),
-  ).toBeInTheDocument();
+  const panel = screen.getByRole("region", { name: "Details for s1" });
+  expect(panel).toBeInTheDocument();
+  // The vitals tiles + prompt hero render.
+  for (const label of ["Context", "CPU", "Memory", "Uptime"]) {
+    expect(within(panel).getByText(label)).toBeInTheDocument();
+  }
+  expect(within(panel).getByText("Latest prompt")).toBeInTheDocument();
 });
 
 test("Full detail in the expanded panel fires onSelect", () => {

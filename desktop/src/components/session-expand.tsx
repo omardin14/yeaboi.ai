@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { Port } from "@/lib/bindings/Port";
 import type { SubAgent } from "@/lib/bindings/SubAgent";
@@ -9,20 +9,17 @@ import {
   formatMem,
   formatPct,
   formatUptime,
+  heatClass,
   hostAppLabel,
 } from "@/lib/format";
-import { useMonitorPrefs, type MetricId } from "@/lib/monitor-prefs";
 import type { SessionMetric } from "@/lib/session-metrics";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Gauge } from "@/components/ui/gauge";
-import { Section } from "@/components/ui/collapsible";
 import { StatusBadge } from "@/components/ui/badge";
-import { InfoDot } from "@/components/ui/tooltip";
 import { Sparkline } from "@/components/ui/sparkline";
+import { Tile } from "@/components/ui/tile";
 import { PortChips } from "@/components/port-chips";
-
-type Prefs = ReturnType<typeof useMonitorPrefs>;
 
 /** Count sub-agents by type, most frequent first. */
 function agentCounts(agents: SubAgent[]): [string, number][] {
@@ -34,75 +31,12 @@ function agentCounts(agents: SubAgent[]): [string, number][] {
   return [...m.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-const METRIC_INFO: Record<MetricId, string> = {
-  cpu: "CPU use of this process, averaged over recent samples so it doesn't flicker.",
-  mem: "Resident memory this process is currently holding.",
-  uptime: "How long this process has been running.",
-  pid: "Operating-system process id — what a stop signal targets.",
-  host: "Where the session runs: CLI, VS Code, or another host app.",
-};
-
-const METRIC_LABEL: Record<MetricId, string> = {
-  cpu: "CPU",
-  mem: "Memory",
-  uptime: "Uptime",
-  pid: "PID",
-  host: "Host",
-};
-
-/** A single labeled metric line: label + ⓘ, then a right-aligned value cell. */
-function Metric({
-  id,
-  children,
-}: {
-  id: MetricId;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-2 py-0.5">
-      <span className="flex w-20 shrink-0 items-center gap-1 text-xs text-ink-muted">
-        {METRIC_LABEL[id]}
-        <InfoDot label={METRIC_INFO[id]} />
-      </span>
-      <span className="flex flex-1 items-center gap-2 font-mono text-xs tabular-nums text-ink-soft">
-        {children}
-      </span>
-    </div>
-  );
-}
-
-/** The gear popover that toggles which Resources metrics are shown. */
-function MetricToggles({ prefs }: { prefs: Prefs }) {
-  const ids: MetricId[] = ["cpu", "mem", "uptime", "pid", "host"];
-  return (
-    <details className="relative">
-      <summary className="flex cursor-pointer list-none items-center rounded-md px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:bg-surface-sunken hover:text-ink-muted marker:hidden">
-        ⚙ shown
-      </summary>
-      <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-line bg-overlay p-2 text-xs shadow-lg">
-        {ids.map((id) => (
-          <label
-            key={id}
-            className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-ink-soft hover:bg-surface-sunken"
-          >
-            <input
-              type="checkbox"
-              checked={!prefs.isHidden(id)}
-              onChange={() => prefs.toggleMetric(id)}
-              className="accent-[var(--burgundy)]"
-            />
-            {METRIC_LABEL[id]}
-          </label>
-        ))}
-      </div>
-    </details>
-  );
-}
+const EYEBROW = "text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-faint";
 
 /**
- * The inline expanded detail for one session: calm, labeled, collapsible
- * sections with per-metric explanations. The heavy stuff (full transcript +
- * working diff) lives behind "Full detail ↗", which opens the side drawer.
+ * The inline expanded detail for one session: a strip of raised vitals tiles,
+ * the latest prompt as a hero, a compact meta line, and a contained agents
+ * panel. Heavy reading (full transcript + diff) lives behind "Full detail ↗".
  */
 export function SessionExpand({
   session,
@@ -115,29 +49,26 @@ export function SessionExpand({
   onSelect?: (session: Session) => void;
   onFreePort?: (port: Port) => void;
 }) {
-  const prefs = useMonitorPrefs();
   const [fullPrompt, setFullPrompt] = useState<string | null>(null);
   const [subAgents, setSubAgents] = useState<SubAgent[] | null>(null);
 
-  // Lazily fetch the session's sub-agents (Task/Agent calls) for the Agents
-  // section — their type + task, scanned from the whole transcript.
+  // Lazily fetch the session's sub-agents (Task/Agent calls) — type, task, and
+  // whether the result has returned — scanned from the whole transcript.
   useEffect(() => {
     let active = true;
     setSubAgents(null);
     sessionSubAgents(session.id)
       .then((a) => active && setSubAgents(a))
       .catch(() => {
-        /* best-effort; the count badge still shows */
+        /* best-effort; the count still shows */
       });
     return () => {
       active = false;
     };
   }, [session.id]);
 
-  // Lazily fetch the untruncated current prompt: the latest `user` event. Tool
-  // results are now their own `tool_result` kind, so the most recent `user`
-  // entry is genuinely what the human typed. Falls back to the (truncated) row
-  // prompt while loading or if none is found.
+  // Lazily fetch the untruncated current prompt: the latest `user` event (tool
+  // results are their own kind). Falls back to the row prompt while loading.
   useEffect(() => {
     let active = true;
     setFullPrompt(null);
@@ -150,7 +81,7 @@ export function SessionExpand({
         if (latest) setFullPrompt(latest.text);
       })
       .catch(() => {
-        /* fall back to last_prompt — not worth a toast on the inline panel */
+        /* fall back to last_prompt */
       });
     return () => {
       active = false;
@@ -162,144 +93,95 @@ export function SessionExpand({
   const memValue = metric?.mem.value ?? ps?.mem_bytes ?? null;
   const prompt = fullPrompt ?? session.last_prompt ?? "";
   const ctx = session.context?.pct ?? null;
+  const ctxTokens = session.context
+    ? `${formatTokens(session.context.used)} / ${formatTokens(session.context.window)} tokens`
+    : undefined;
 
-  const sec = (id: Parameters<Prefs["isCollapsed"]>[0]) => ({
-    open: !prefs.isCollapsed(id),
-    onOpenChange: () => prefs.toggleSection(id),
-  });
+  const running = subAgents?.filter((a) => !a.done).length ?? 0;
+  const done = subAgents?.filter((a) => a.done).length ?? 0;
 
   return (
     <Card
       tone="sunken"
-      pad="sm"
+      pad="md"
       role="region"
       aria-label={`Details for ${session.id}`}
       className="mb-1 ml-[34px] space-y-3"
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Activity */}
-      <Section label="Activity" {...sec("activity")}>
-        <div className="space-y-2">
-          <div>
-            <div className="mb-0.5 flex items-center gap-1 text-[11px] text-ink-faint">
-              Latest prompt
-              <InfoDot label="The most recent prompt sent in this session." />
-            </div>
-            <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-soft">
-              {prompt || "—"}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-muted">
-            <StatusBadge status={session.status} />
-            <span>started {formatAgo(session.started_at_ms)}</span>
-            <span className="flex items-center gap-1">
-              active {formatAgo(session.updated_at_ms)}
-              <InfoDot label="Time since the last observed transcript activity." />
-            </span>
-          </div>
-        </div>
-      </Section>
+      {/* Vitals — raised tiles floating above the tan. */}
+      <div className="flex flex-wrap gap-2">
+        <Tile label="Context" title={ctxTokens}>
+          <Gauge value={ctx} size={22} />
+          <span className={heatClass(ctx)}>{formatPct(ctx)}</span>
+        </Tile>
+        <Tile label="CPU">
+          {formatCpu(cpuValue)}
+          {metric && <Sparkline data={metric.cpu.history} width={40} height={14} />}
+        </Tile>
+        <Tile label="Memory">
+          {formatMem(memValue ?? 0)}
+          {metric && <Sparkline data={metric.mem.history} width={40} height={14} />}
+        </Tile>
+        <Tile label="Uptime">{formatUptime(ps?.uptime_secs)}</Tile>
+        <Tile label="Status">
+          <StatusBadge status={session.status} />
+        </Tile>
+      </div>
 
-      {/* Resources */}
-      <Section
-        label="Resources"
-        {...sec("resources")}
-        action={<MetricToggles prefs={prefs} />}
-      >
-        {!ps && (
-          <p className="mb-1 text-[11px] text-ink-faint">
-            No live process (e.g. a remote Codex thread).
+      {/* Latest prompt — the hero. */}
+      <div>
+        <div className={`mb-1 ${EYEBROW}`}>Latest prompt</div>
+        <Card tone="surface" pad="sm">
+          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-soft">
+            {prompt || "—"}
           </p>
-        )}
-        {!prefs.isHidden("cpu") && (
-          <Metric id="cpu">
-            {formatCpu(cpuValue)}
-            <Sparkline data={metric?.cpu.history ?? []} />
-          </Metric>
-        )}
-        {!prefs.isHidden("mem") && (
-          <Metric id="mem">
-            {formatMem(memValue ?? 0)}
-            <Sparkline data={metric?.mem.history ?? []} />
-          </Metric>
-        )}
-        {!prefs.isHidden("uptime") && (
-          <Metric id="uptime">{formatUptime(ps?.uptime_secs)}</Metric>
-        )}
-        {!prefs.isHidden("pid") && <Metric id="pid">{session.pid ?? "—"}</Metric>}
-        {!prefs.isHidden("host") && (
-          <Metric id="host">{hostAppLabel(session.host_app)}</Metric>
-        )}
-      </Section>
+        </Card>
+      </div>
 
-      {/* Context */}
-      <Section label="Context" {...sec("context")}>
-        <div className="flex items-center gap-3">
-          <Gauge value={ctx} size={28} title={`context ${formatPct(ctx)}`} />
-          <div className="font-mono text-xs text-ink-soft">
-            <div className="flex items-center gap-1">
-              {session.context
-                ? `${formatTokens(session.context.used)} / ${formatTokens(session.context.window)} tokens`
-                : "no reading"}
-              <InfoDot label="Input + cached tokens occupying the model's context window right now." />
-            </div>
-            <div className="text-[11px] text-ink-faint">{formatPct(ctx)} of window used</div>
-          </div>
-        </div>
-      </Section>
-
-      {/* Network */}
-      <Section label="Network" {...sec("network")}>
-        {session.ports.length > 0 ? (
+      {/* Meta — one quiet mono line. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-ink-muted">
+        <span>started {formatAgo(session.started_at_ms)}</span>
+        <span>active {formatAgo(session.updated_at_ms)}</span>
+        <span>pid {session.pid ?? "—"}</span>
+        <span>{hostAppLabel(session.host_app)}</span>
+        {session.ports.length > 0 && (
           <PortChips ports={session.ports} onFreePort={onFreePort} />
-        ) : (
-          <p className="text-[11px] text-ink-faint">No listening ports.</p>
         )}
-      </Section>
+      </div>
 
-      {/* Agents */}
-      <Section label="Agents" {...sec("agents")}>
-        {session.sub_agent_count === 0 ? (
-          <p className="text-[11px] text-ink-faint">No sub-agents launched.</p>
-        ) : subAgents == null ? (
-          <p className="text-[11px] text-ink-faint">Loading…</p>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-[11px] leading-snug text-ink-faint">
-              Helper agents this session spawned to run focused sub-tasks in parallel
-              (e.g. <span className="text-merge">Explore</span> = read-only code search,{" "}
-              <span className="text-merge">Plan</span> = design), each returning its result
-              to the main session.
-            </p>
-            {/* Status summary. */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span className="text-ink-muted">
-                <span className="font-mono tabular-nums text-ink">{subAgents.length}</span> launched
-              </span>
-              {subAgents.some((a) => !a.done) && (
-                <span className="animate-needs text-needs">
-                  {subAgents.filter((a) => !a.done).length} running
-                </span>
-              )}
-              <span className="text-busy">{subAgents.filter((a) => a.done).length} done</span>
-              <InfoDot label="Each Task/Agent sub-agent spawned in this session. 'done' means its result has returned; 'running' means it's still in flight." />
-            </div>
-            {/* Breakdown by type. */}
-            <div className="flex flex-wrap gap-1">
-              {agentCounts(subAgents).map(([kind, n]) => (
-                <span
-                  key={kind}
-                  className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-merge"
-                >
-                  {kind} ×{n}
-                </span>
-              ))}
-            </div>
-            {/* Status · type · task — scrollable. */}
-            {subAgents.length === 0 ? (
-              <p className="text-[11px] text-ink-faint">Per-agent details unavailable.</p>
+      {/* Agents. */}
+      {session.sub_agent_count > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className={EYEBROW}>Agents</span>
+            {subAgents == null ? (
+              <span className="text-ink-faint">loading…</span>
             ) : (
-              <ul className="max-h-56 space-y-1 overflow-auto pr-1">
+              <>
+                <span className="text-ink-muted">
+                  <span className="font-mono tabular-nums text-ink">{subAgents.length}</span> launched
+                </span>
+                {running > 0 && (
+                  <span className="animate-needs text-needs">{running} running</span>
+                )}
+                <span className="text-busy">{done} done</span>
+                <span className="ml-auto flex flex-wrap gap-1">
+                  {agentCounts(subAgents).map(([kind, n]) => (
+                    <span
+                      key={kind}
+                      className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-merge"
+                    >
+                      {kind} ×{n}
+                    </span>
+                  ))}
+                </span>
+              </>
+            )}
+          </div>
+          {subAgents && subAgents.length > 0 && (
+            <Card tone="surface" pad="sm" className="max-h-56 overflow-auto">
+              <ul className="space-y-1">
                 {subAgents.map((a, i) => (
                   <li key={i} className="flex items-baseline gap-2 text-xs">
                     <span
@@ -315,10 +197,10 @@ export function SessionExpand({
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
-        )}
-      </Section>
+            </Card>
+          )}
+        </div>
+      )}
 
       <div className="flex justify-end border-t border-line pt-2">
         <Button variant="ghost" size="sm" onClick={() => onSelect?.(session)}>
