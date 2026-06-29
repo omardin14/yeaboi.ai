@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Session } from "@/lib/bindings/Session";
 import type { TranscriptEvent } from "@/lib/bindings/TranscriptEvent";
 import { sessionTranscript, workingDiff } from "@/lib/api";
@@ -130,7 +130,19 @@ export function SessionDetail({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readerEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
+  const pagingRef = useRef(false);
+  const prevHeightRef = useRef(0);
+
+  // Page in earlier history (via the button or scrolling near the top). Captures
+  // the scroll height first so a layout effect can keep the reading position put.
+  function loadEarlier() {
+    if (reachedStart || loading || pagingRef.current) return;
+    prevHeightRef.current = scrollRef.current?.scrollHeight ?? 0;
+    pagingRef.current = true;
+    setLimit((l) => l + PAGE);
+  }
 
   useEffect(() => {
     let active = true;
@@ -150,7 +162,19 @@ export function SessionDetail({
     setLimit(INITIAL_LIMIT);
     setReachedStart(false);
     scrolledRef.current = false;
+    pagingRef.current = false;
   }, [session.id]);
+
+  // After earlier history prepends, restore the prior reading position (anchor
+  // to the same content) so scrolling up doesn't jump — and so an at-top scroll
+  // doesn't immediately re-trigger another load.
+  useLayoutEffect(() => {
+    if (pagingRef.current && scrollRef.current) {
+      scrollRef.current.scrollTop =
+        scrollRef.current.scrollHeight - prevHeightRef.current;
+      pagingRef.current = false;
+    }
+  }, [events]);
 
   // (Re)load the transcript whenever the session or the page size changes.
   useEffect(() => {
@@ -236,11 +260,17 @@ export function SessionDetail({
         ) : events.length === 0 ? (
           <p className="text-xs text-ink-muted">No transcript entries.</p>
         ) : (
-          <Card tone="sunken" pad="md" className="max-h-[80vh] space-y-4 overflow-auto">
+          <div
+            ref={scrollRef}
+            onScroll={() => {
+              if ((scrollRef.current?.scrollTop ?? 99) <= 40) loadEarlier();
+            }}
+            className="max-h-[80vh] space-y-4 overflow-auto rounded-2xl border border-line-strong bg-surface-sunken p-4"
+          >
             {!reachedStart && (
               <div className="flex justify-center pb-1">
-                <Button variant="ghost" size="sm" disabled={loading} onClick={() => setLimit((l) => l + PAGE)}>
-                  {loading ? "Loading…" : "△ Load earlier"}
+                <Button variant="ghost" size="sm" disabled={loading} onClick={loadEarlier}>
+                  {loading ? "Loading…" : "△ Load earlier — or scroll up"}
                 </Button>
               </div>
             )}
@@ -256,7 +286,7 @@ export function SessionDetail({
               );
             })}
             <div ref={readerEndRef} />
-          </Card>
+          </div>
         ))}
     </Drawer>
   );
