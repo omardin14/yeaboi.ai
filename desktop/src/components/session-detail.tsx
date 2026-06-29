@@ -7,7 +7,40 @@ import { Drawer } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
+import { StatusBadge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { cx } from "@/components/ui/cx";
+
+/** Per-line color for a unified diff (additions, deletions, hunks, untracked). */
+function diffLineClass(line: string): string {
+  if (line.startsWith("@@")) return "text-merge";
+  if (
+    line.startsWith("diff --git") ||
+    line.startsWith("index ") ||
+    line.startsWith("+++") ||
+    line.startsWith("---")
+  )
+    return "font-semibold text-ink-faint";
+  if (line.startsWith("Untracked files:") || line.startsWith("?? ")) return "text-idle";
+  if (line.startsWith("+")) return "bg-busy-fill text-busy";
+  if (line.startsWith("-")) return "bg-danger-fill text-danger";
+  return "text-ink-soft";
+}
+
+/** A colored, scrollable unified-diff view. */
+function DiffView({ text }: { text: string }) {
+  return (
+    <Card tone="sunken" pad="none" className="max-h-[78vh] overflow-auto">
+      <pre className="py-1.5 text-xs leading-relaxed">
+        {text.split("\n").map((line, i) => (
+          <div key={i} className={cx("whitespace-pre-wrap break-words px-3", diffLineClass(line))}>
+            {line || " "}
+          </div>
+        ))}
+      </pre>
+    </Card>
+  );
+}
 
 const INITIAL_LIMIT = 200;
 const PAGE = 400;
@@ -207,21 +240,28 @@ export function SessionDetail({
 
   return (
     <Drawer onClose={onClose} ariaLabel={`Session ${session.id}`} className="max-w-3xl">
-      <header className="mb-3 flex items-baseline justify-between">
-        <h3 className="font-mono text-sm text-ink">
-          {session.model ?? "—"} · {session.branch ?? "—"}
-        </h3>
+      <header className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={session.status} />
+            <span className="font-mono text-sm text-ink">{session.model ?? "—"}</span>
+            {session.branch && (
+              <span className="font-mono text-xs text-ink-muted">⎇ {session.branch}</span>
+            )}
+          </div>
+          <p className="truncate font-mono text-xs text-ink-faint" title={session.cwd}>
+            {session.cwd}
+          </p>
+        </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close detail"
-          className="rounded-md px-2 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-soft"
+          className="shrink-0 rounded-md px-2 py-0.5 text-sm text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-soft"
         >
           ✕
         </button>
       </header>
-
-      <p className="mb-3 font-mono text-xs text-ink-faint">{session.cwd}</p>
 
       <nav className="mb-3 flex gap-1 text-xs">
         {(["diff", "transcript"] as const).map((t) => (
@@ -247,11 +287,13 @@ export function SessionDetail({
         (diff == null ? (
           <p className="text-xs text-ink-muted">Loading diff…</p>
         ) : diff.trim() === "" ? (
-          <p className="text-xs text-ink-muted">No uncommitted changes.</p>
+          <EmptyState
+            glyph="✓"
+            title="No uncommitted changes"
+            hint="This session's working tree is clean — nothing staged, modified, or new."
+          />
         ) : (
-          <Card tone="sunken" pad="sm" className="max-h-[80vh] overflow-auto">
-            <pre className="text-xs leading-relaxed text-ink-soft">{diff}</pre>
-          </Card>
+          <DiffView text={diff} />
         ))}
 
       {tab === "transcript" &&
