@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Gauge } from "@/components/ui/gauge";
 import { Section } from "@/components/ui/collapsible";
+import { StatusBadge } from "@/components/ui/badge";
 import { InfoDot } from "@/components/ui/tooltip";
 import { Sparkline } from "@/components/ui/sparkline";
 import { PortChips } from "@/components/port-chips";
@@ -106,16 +107,20 @@ export function SessionExpand({
   const prefs = useMonitorPrefs();
   const [fullPrompt, setFullPrompt] = useState<string | null>(null);
 
-  // Lazily fetch the untruncated current prompt from the transcript's latest
-  // user turn. Falls back to the (truncated) row prompt while loading.
+  // Lazily fetch the untruncated current prompt. Use the `last-prompt` event —
+  // NOT `user`, since tool results are also recorded as `user` lines and would
+  // surface a tool result instead of what the human actually typed. Falls back
+  // to the (truncated) row prompt while loading or if none is found.
   useEffect(() => {
     let active = true;
     setFullPrompt(null);
     sessionTranscript(session.id)
       .then((events) => {
         if (!active) return;
-        const lastUser = [...events].reverse().find((e) => e.kind === "user");
-        if (lastUser) setFullPrompt(lastUser.text);
+        const latest = [...events]
+          .reverse()
+          .find((e) => e.kind === "last-prompt" && e.text.trim() !== "");
+        if (latest) setFullPrompt(latest.text);
       })
       .catch(() => {
         /* fall back to last_prompt — not worth a toast on the inline panel */
@@ -157,7 +162,8 @@ export function SessionExpand({
               {prompt || "—"}
             </p>
           </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-ink-muted">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-muted">
+            <StatusBadge status={session.status} />
             <span>started {formatAgo(session.started_at_ms)}</span>
             <span className="flex items-center gap-1">
               active {formatAgo(session.updated_at_ms)}

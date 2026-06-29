@@ -47,77 +47,89 @@ function SessionRow({
       role="row"
       aria-expanded={expanded}
       onClick={() => onToggleExpand(session)}
-      className="group relative cursor-pointer rounded-lg pl-4 pr-2 transition-colors hover:bg-surface-raised"
+      className="group relative cursor-pointer rounded-xl px-3 py-2 transition-colors hover:bg-surface-raised"
     >
-      {/* Lacquered status rail — status is readable from the edge alone. */}
+      {/* Lacquered status rail — status at a glance from the edge. */}
       <span
         aria-hidden
-        className={`absolute left-1 top-1.5 bottom-1.5 w-[3px] rounded-full ${needs ? "animate-needs" : ""}`}
+        className={`absolute left-1 top-2 bottom-2 w-[3px] rounded-full ${needs ? "animate-needs" : ""}`}
         style={{ background: statusRailVar(session.status) }}
       />
 
-      {/* Primary line. */}
-      <div className="flex items-center gap-3 py-1.5 text-[13px]">
+      {/* Top line: identity on the left, live meta on the right. */}
+      <div className="flex items-center gap-2.5 pl-2 text-[13px]">
         <span
           aria-hidden
           className={`w-2 shrink-0 text-[9px] text-ink-faint transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
         >
           ▶
         </span>
-        <Gauge value={ctx} title={`context ${formatPct(ctx)}`} />
-        <span className={`w-9 shrink-0 text-right font-mono text-xs tabular-nums ${heatClass(ctx)}`}>
-          {formatPct(ctx)}
-        </span>
-        <span className="w-12 shrink-0 text-xs lowercase" style={{ color: statusRailVar(session.status) }}>
-          {session.status}
-        </span>
-        <span className="flex w-40 shrink-0 items-center gap-1.5 truncate text-ink-soft">
-          <span className={`text-[10px] leading-none ${providerAccent(session.provider)}`}>●</span>
+        <span
+          title={session.status}
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: statusRailVar(session.status) }}
+        />
+        <span className="flex min-w-0 items-center gap-1.5 font-medium text-ink">
+          <span className={`text-[9px] leading-none ${providerAccent(session.provider)}`}>●</span>
           <span className="truncate">{session.model ?? "—"}</span>
         </span>
-        <span className="w-36 shrink-0 truncate font-mono text-xs text-ink-muted">
-          {session.branch ?? "—"}
-        </span>
-        <span
-          className="min-w-0 flex-1 truncate text-ink-muted"
-          title={session.last_prompt ?? ""}
-        >
-          {session.last_prompt ?? ""}
-        </span>
+        {session.branch && (
+          <span className="hidden max-w-[13rem] shrink truncate font-mono text-xs text-ink-faint sm:inline">
+            {session.branch}
+          </span>
+        )}
 
-        {needs && (
-          <span
-            title="Waiting on a permission decision"
-            className="animate-needs shrink-0 rounded-md bg-needs-fill px-1.5 py-0.5 text-xs text-needs ring-1 ring-inset ring-needs-ring"
-          >
-            ⏸ needs you
-          </span>
-        )}
-        {session.sub_agent_count > 0 && (
-          <span className="shrink-0 font-mono text-xs text-ink-faint" title="sub-agents">
-            ⌥{session.sub_agent_count}
-          </span>
-        )}
-        {session.ports.length > 0 && (
-          <PortChips ports={session.ports} onFreePort={onFreePort} />
-        )}
-        <span className="w-10 shrink-0 text-right">
-          {onKill && isKillable(session) && (
-            <button
-              type="button"
-              aria-label={`Stop session ${session.id}`}
-              title="Stop session (SIGTERM)"
-              onClick={(e) => {
-                e.stopPropagation(); // don't also toggle the panel
-                onKill(session);
-              }}
-              className="rounded-md px-1.5 py-0.5 text-xs text-ink-faint opacity-0 transition hover:bg-danger-fill hover:text-danger group-hover:opacity-100"
+        <span className="ml-auto flex shrink-0 items-center gap-2.5">
+          {needs && (
+            <span
+              title="Waiting on a permission decision"
+              className="animate-needs rounded-md bg-needs-fill px-1.5 py-0.5 text-xs text-needs ring-1 ring-inset ring-needs-ring"
             >
-              stop
-            </button>
+              ⏸ needs you
+            </span>
           )}
+          {session.sub_agent_count > 0 && (
+            <span className="font-mono text-xs text-ink-faint" title="sub-agents">
+              ⌥{session.sub_agent_count}
+            </span>
+          )}
+          {session.ports.length > 0 && (
+            <PortChips ports={session.ports} onFreePort={onFreePort} />
+          )}
+          <span className="flex items-center gap-1.5" title={`context ${formatPct(ctx)}`}>
+            <Gauge value={ctx} />
+            <span className={`w-9 text-right font-mono text-xs tabular-nums ${heatClass(ctx)}`}>
+              {formatPct(ctx)}
+            </span>
+          </span>
+          <span className="w-8 text-right">
+            {onKill && isKillable(session) && (
+              <button
+                type="button"
+                aria-label={`Stop session ${session.id}`}
+                title="Stop session (SIGTERM)"
+                onClick={(e) => {
+                  e.stopPropagation(); // don't also toggle the panel
+                  onKill(session);
+                }}
+                className="rounded-md px-1.5 py-0.5 text-xs text-ink-faint opacity-0 transition hover:bg-danger-fill hover:text-danger group-hover:opacity-100"
+              >
+                stop
+              </button>
+            )}
+          </span>
         </span>
       </div>
+
+      {/* The current prompt on its own readable line — the "what's happening". */}
+      {session.last_prompt && (
+        <p
+          className="mt-1 truncate pl-[26px] text-[13px] leading-snug text-ink-muted"
+          title={session.last_prompt}
+        >
+          {session.last_prompt}
+        </p>
+      )}
 
       {/* Inline expandable detail — calm, labeled sections. */}
       {expanded && (
@@ -173,7 +185,7 @@ function ProjectGroup({
         </header>
         {/* Ticked divider. */}
         <div className="mx-4 mt-2 mb-1 border-t border-dashed border-line-strong" />
-        <div className="px-2 pb-2">
+        <div className="space-y-0.5 px-2 pb-2">
           {sessions.map((s) => (
             <SessionRow
               key={s.id}
