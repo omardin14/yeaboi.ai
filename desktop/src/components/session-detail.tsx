@@ -62,46 +62,41 @@ function Clock({ at }: { at: string }) {
 function ChatEntry({ ev }: { ev: TranscriptEvent }) {
   const sp = speaker(ev.kind);
 
-  if (ev.kind === "thinking") {
+  // Tool calls, tool results, and thinking collapse to a one-line preview so
+  // they don't dominate the timeline — click to expand the full text.
+  if (ev.kind === "tool_use" || ev.kind === "tool_result" || ev.kind === "thinking") {
+    const isTool = ev.kind !== "thinking";
     return (
       <details className={cx("group/d border-l-2 pl-3", sp.rail)}>
         <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] [&::-webkit-details-marker]:hidden">
-          <span className="text-[9px] text-ink-faint transition-transform group-open/d:rotate-90">▶</span>
-          <span className={cx("font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
+          <span className="shrink-0 text-[9px] text-ink-faint transition-transform group-open/d:rotate-90">▶</span>
+          <span className={cx("shrink-0 font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
           <Clock at={ev.at} />
+          <span className="min-w-0 flex-1 truncate font-mono text-ink-faint">{ev.summary}</span>
         </summary>
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-muted">
-          {ev.text}
-        </p>
+        {isTool ? (
+          <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line-strong bg-surface-sunken px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ink-soft">
+            {ev.text}
+          </pre>
+        ) : (
+          <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-ink-muted">
+            {ev.text}
+          </p>
+        )}
       </details>
     );
   }
 
-  const head = (
-    <div className="mb-1 flex items-center gap-2 text-[11px]">
-      <span className={cx("font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
-      <Clock at={ev.at} />
-      {ev.kind === "assistant" && metaLine(ev) && (
-        <span className="font-mono text-ink-faint">{metaLine(ev)}</span>
-      )}
-    </div>
-  );
-
-  if (ev.kind === "tool_use" || ev.kind === "tool_result") {
-    return (
-      <div className={cx("border-l-2 pl-3", sp.rail)}>
-        {head}
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line-strong bg-surface-sunken px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-ink-soft">
-          {ev.text}
-        </pre>
-      </div>
-    );
-  }
-
-  // user / assistant — rendered markdown, no heavy bubble.
+  // user / assistant — rendered markdown, always shown.
   return (
     <div className={cx("border-l-2 pl-3", sp.rail)}>
-      {head}
+      <div className="mb-1 flex items-center gap-2 text-[11px]">
+        <span className={cx("font-semibold uppercase tracking-wide", sp.tone)}>{sp.label}</span>
+        <Clock at={ev.at} />
+        {ev.kind === "assistant" && metaLine(ev) && (
+          <span className="font-mono text-ink-faint">{metaLine(ev)}</span>
+        )}
+      </div>
       <div className="text-sm leading-relaxed text-ink-soft">
         <Markdown text={ev.text} />
       </div>
