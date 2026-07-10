@@ -403,7 +403,7 @@ Version is defined in two places that **must be kept in sync**:
 
 The `__version__` is imported by `cli.py` for the `--version` flag. Package entry point: `scrum-agent = "scrum_agent.cli:main"`.
 
-Releasing: bump version in both files and merge to main. The `publish.yml` workflow triggers on `v*` tag push → PyPI → GitHub Release → Homebrew tap update.
+Releasing: bump version in both files and merge to main. The `publish.yml` workflow triggers on `v*` tag push → PyPI → GitHub Release. Distribution is PyPI-only (via `uv tool install` / `pipx install`); Homebrew is not supported because a required dependency (`sqlite-vec`) ships no sdist, so the `omardin14/homebrew-tap` formula is permanently disabled.
 
 ## CI/CD
 
@@ -412,12 +412,12 @@ Workflows in `.github/workflows/`:
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | Every push | Lint + test |
-| `publish.yml` | Tag push `v*` | test → build → PyPI publish (OIDC) → GitHub Release → Homebrew tap update |
+| `publish.yml` | Tag push `v*` | test → build → PyPI publish (OIDC) → GitHub Release |
 | `smoke.yml` | Weekly cron | Live API smoke tests |
 | `claude.yml` | PR | Claude Code review |
 | `claude-code-review.yml` | PR | Claude Code review (alternate) |
 
-The `publish.yml` dispatches a `repository_dispatch` event to `omardin14/homebrew-tap` to auto-update the formula SHA256 and version on each release.
+There is no Homebrew tap auto-update: the `omardin14/homebrew-tap` formula is disabled (see Version Management) and `publish.yml` no longer dispatches to it.
 
 ## OpenClaw Skill
 
