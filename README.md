@@ -49,10 +49,11 @@ pipx install "scrum-agent[voice]"              # equivalent with pipx
 ```
 
 > **Voice input** transcribes on-device with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-> — **no API key**, works with every LLM provider (Anthropic, Bedrock, …). It needs the PortAudio native
-> library (`brew install portaudio` on macOS, `sudo apt install portaudio19-dev` on Debian/Ubuntu) and
-> downloads a small Whisper model on first use (~140 MB for the default `base`; set `VOICE_MODEL` to
-> `tiny`/`small`/`medium`/`large-v3` to trade size for accuracy).
+> — **no API key**, works with every LLM provider (Anthropic, Bedrock, …). On **macOS/Windows** the
+> `[voice]` extra is fully self-contained (the `sounddevice` wheel bundles PortAudio). On **Linux**, also
+> install the system library: `sudo apt install libportaudio2`. A small Whisper model downloads on first
+> use (~140 MB for the default `base`; set `VOICE_MODEL` to `tiny`/`small`/`medium`/`large-v3` to trade
+> size for accuracy).
 
 > **Homebrew is not supported.** A required dependency (`sqlite-vec`) ships no
 > source distribution, which Homebrew's source-build model can't handle, so

@@ -17,8 +17,9 @@ Design notes / architectural decisions:
   `faster_whisper` for transcription) are imported *inside* functions, mirroring
   the optional-provider pattern in `agent/llm.py`. Importing this module never
   fails; the deps are only needed when voice is actually used. Install with:
-  ``uv sync --extra voice`` (also needs the PortAudio native lib, e.g.
-  ``brew install portaudio`` on macOS).
+  ``uv sync --extra voice``. The sounddevice wheels bundle PortAudio on macOS
+  and Windows (nothing else to install); on Linux the wheel is pure-Python and
+  needs the system library too (e.g. ``sudo apt install libportaudio2``).
 - **Cheap availability probe.** :func:`is_voice_available` uses
   ``importlib.util.find_spec`` so a per-render hint check never triggers the
   heavy ``faster_whisper`` / ``ctranslate2`` import; real mic/model failures are
@@ -74,7 +75,7 @@ def is_voice_available() -> tuple[bool, str]:
     available, otherwise a short human-readable explanation for the UI.
     """
     if not _installed("sounddevice"):
-        return False, "Install voice extra: uv sync --extra voice (needs PortAudio)"
+        return False, "Install voice extra: uv sync --extra voice (Linux also: apt install libportaudio2)"
     if not _installed("faster_whisper"):
         return False, "Install voice extra: uv sync --extra voice"
     return True, ""
