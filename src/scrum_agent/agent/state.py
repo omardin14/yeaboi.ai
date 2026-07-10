@@ -302,6 +302,65 @@ class StandupReport:
     warnings: tuple[str, ...] = ()  # surfaced problems (missing API key, source 401/403) — shown, never silent
 
 
+# See README: "Session Management" — Retro mode artifacts
+#
+# The Retro (retrospective) mode produces a RetroReport: every sticky card the
+# team added to the four-grid board (What went well / What didn't go well /
+# Action items / Demos), plus the distinct participants who contributed. Like
+# every other artifact here it is a FROZEN dataclass — immutable once built and
+# serializable via asdict() — so it round-trips through the retro store. Cards
+# are gathered live during the session by the mutable RetroBoard (retro/board.py,
+# which owns the threading lock); RetroReport is the finalized snapshot the store
+# and exporter consume. Every field is defaulted so old serialized reports still
+# deserialize (see CLAUDE.md "Frozen dataclass backward compatibility").
+@dataclass(frozen=True)
+class RetroCard:
+    """One sticky card on the retro board.
+
+    ``id`` is assigned server-side (never trusted from the browser client) so a
+    LAN peer cannot forge or overwrite an existing card. ``origin`` distinguishes
+    human-authored web cards from AI-generated action items so both the TUI and
+    the browser can badge them.
+    """
+
+    id: str = ""  # server-assigned uuid4().hex[:12]
+    grid: str = ""  # one of RETRO_GRIDS (went_well/didnt_go_well/action_items/demos)
+    text: str = ""  # raw card text — escaped only at render time, never pre-escaped
+    author: str = ""  # display name from the browser name prompt (or "AI")
+    created_at: str = ""  # ISO-8601 UTC timestamp
+    origin: str = "web"  # "web" (a teammate) | "ai" (LLM-generated action item)
+    # (emoji, count) pairs — a tuple (not a dict) so the card stays frozen/hashable and
+    # serializes cleanly, exactly like StandupReport.activity_counts. Populated only at
+    # report time by board_to_report(); the live board keeps reactions in its own map.
+    reactions: tuple[tuple[str, int], ...] = ()
+
+
+@dataclass(frozen=True)
+class RetroReport:
+    """A finished retrospective for one project session.
+
+    Produced by retro/board.py:board_to_report(). Persisted by RetroStore and
+    rendered to Markdown + HTML by retro/export.py.
+    """
+
+    date: str = ""  # ISO date the retro was held, e.g. "2026-07-10"
+    session_id: str = ""
+    project_name: str = ""
+    sprint_name: str = ""
+    cards: tuple[RetroCard, ...] = ()  # every card across all four grids
+    participants: tuple[str, ...] = ()  # distinct human authors who contributed
+    generated_at: str = ""  # ISO-8601 UTC timestamp the report was assembled
+
+    def by_grid(self) -> dict[str, list[RetroCard]]:
+        """Group this report's cards by grid key, preserving insertion order."""
+        from scrum_agent.retro.board import RETRO_GRIDS
+
+        out: dict[str, list[RetroCard]] = {g: [] for g in RETRO_GRIDS}
+        for c in self.cards:
+            out.setdefault(c.grid, []).append(c)
+        return out
+
+
 # See README: "Scrum Standards" — prompt quality rating
 @dataclass(frozen=True)
 class PromptQualityRating:

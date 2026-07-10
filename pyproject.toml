@@ -43,6 +43,9 @@ dependencies = [
     # Bank/public holiday detection by country — used by detect_bank_holidays tool
     # to auto-populate capacity deductions during intake.
     "holidays",
+    # Pure-python QR generator (no deps) — used to render the Retro "invite" QR
+    # (retro/server.py:/api/qr) so teammates can scan to join. Offline, no CDN.
+    "segno",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +95,11 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# page.py is an embedded front-end asset (inline HTML/CSS/JS in string constants);
+# line length carries no meaning there, so exempt it from E501 only.
+"src/scrum_agent/retro/page.py" = ["E501"]
 
 [dependency-groups]
 dev = [

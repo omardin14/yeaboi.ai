@@ -12,12 +12,18 @@ Directory structure:
     ├── exports/
     │   ├── analysis/             # Team analysis exports (HTML + MD)
     │   │   └── {project_key}/
-    │   └── planning/             # Planning exports (HTML + MD + scrum-docs)
+    │   ├── planning/             # Planning exports (HTML + MD + scrum-docs)
+    │   │   └── {project_key}/
+    │   ├── standup/              # Daily Standup exports (HTML + MD)
+    │   │   └── {project_key}/
+    │   └── retro/                # Retro exports (HTML + MD)
     │       └── {project_key}/
     ├── logs/
     │   ├── tui/                  # Main TUI log (scrum-agent.log + rotations)
     │   ├── analysis/             # Per-analysis-run logs
-    │   └── planning/             # Per-planning-session logs
+    │   ├── planning/             # Per-planning-session logs
+    │   ├── standup/              # Daily Standup logs
+    │   └── retro/                # Retro logs
     ├── scrum-docs/               # SCRUM.md files for each project
     ├── .env                      # Environment variables
     └── repl-history              # REPL command history
@@ -55,6 +61,7 @@ EXPORTS_DIR = ROOT_DIR / "exports"
 ANALYSIS_EXPORTS_DIR = EXPORTS_DIR / "analysis"
 PLANNING_EXPORTS_DIR = EXPORTS_DIR / "planning"
 STANDUP_EXPORTS_DIR = EXPORTS_DIR / "standup"
+RETRO_EXPORTS_DIR = EXPORTS_DIR / "retro"
 
 # ---------------------------------------------------------------------------
 # Logs
@@ -63,6 +70,7 @@ STANDUP_EXPORTS_DIR = EXPORTS_DIR / "standup"
 LOGS_DIR = ROOT_DIR / "logs"
 TUI_LOGS_DIR = LOGS_DIR / "tui"
 STANDUP_LOGS_DIR = LOGS_DIR / "standup"
+RETRO_LOGS_DIR = LOGS_DIR / "retro"
 ANALYSIS_LOGS_DIR = LOGS_DIR / "analysis"
 PLANNING_LOGS_DIR = LOGS_DIR / "planning"
 
@@ -76,6 +84,7 @@ LEGACY_TUI_LOG = ROOT_DIR / "scrum-agent.log"
 SCRUM_DOCS_DIR = ROOT_DIR / "scrum-docs"
 ENV_FILE = ROOT_DIR / ".env"
 REPL_HISTORY = ROOT_DIR / "repl-history"
+BIN_DIR = ROOT_DIR / "bin"  # app-managed helper binaries (e.g. cloudflared for retro tunnels)
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +161,13 @@ def get_standup_export_dir(project_key: str) -> Path:
     return d
 
 
+def get_retro_export_dir(project_key: str) -> Path:
+    """Return the Retro export directory for a project, creating it if needed."""
+    d = RETRO_EXPORTS_DIR / project_key.lower()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_tui_log_path() -> Path:
     """Return the main TUI log path."""
     TUI_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -174,6 +190,18 @@ def get_standup_log_dir() -> Path:
     """Return the Daily Standup logs directory, creating it if needed."""
     STANDUP_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return STANDUP_LOGS_DIR
+
+
+def get_retro_log_dir() -> Path:
+    """Return the Retro logs directory, creating it if needed."""
+    RETRO_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return RETRO_LOGS_DIR
+
+
+def get_bin_dir() -> Path:
+    """Return the app-managed helper-binary directory, creating it if needed."""
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    return BIN_DIR
 
 
 def migrate_legacy_paths() -> None:

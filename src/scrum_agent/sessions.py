@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See README: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 6  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup
+CURRENT_SCHEMA_VERSION = 7  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -501,6 +501,13 @@ class SessionStore:
 
             self._conn.executescript(_STANDUP_SCHEMA)
             logger.info("Migration v6: created standup tables")
+
+        if from_version < 7:
+            # v7: Retro mode — one retro_history table. Schema lives in retro/store.py.
+            from scrum_agent.retro.store import _RETRO_SCHEMA
+
+            self._conn.executescript(_RETRO_SCHEMA)
+            logger.info("Migration v7: created retro tables")
 
     # ── Token usage persistence ──────────────────────────────────────────
 

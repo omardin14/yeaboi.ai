@@ -3376,6 +3376,154 @@ def _build_standup_screen(
     )
 
 
+def _build_retro_screen(
+    retro_data: dict,
+    *,
+    scroll_offset: int = 0,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+) -> Panel:
+    """Build the Retro board screen using shared TUI components.
+
+    Shows the live share code + URL teammates use to join, then the four retro
+    grids (What went well / What didn't go well / Action items / Demos) with the
+    cards added so far. Uses RETRO_THEME (teal) with shared buttons, scrollbar,
+    and viewport. The host's TUI is a monitoring view — the four-column layout
+    lives in the browser; here the grids stack vertically so narrow terminals and
+    the shared scrollbar behave like every other page.
+
+    retro_data keys: session_name, display_code, url, message (transient status),
+    grids (dict[grid_key -> list[RetroCard]]), public_url (optional remote tunnel
+    URL), actions (optional button-label list).
+
+    # See README: "Retro" — TUI page
+    """
+    from scrum_agent.retro.board import RETRO_GRID_LABELS, RETRO_GRIDS
+    from scrum_agent.ui.shared._components import RETRO_THEME, retro_title
+
+    theme = RETRO_THEME
+    title = retro_title()
+    session_name = retro_data.get("session_name", "")
+    sub_text = f"Sprint retro for {session_name}" if session_name else "Sprint retro"
+    sub = Text(_PAD + sub_text, style="dim", justify="left")
+
+    body_lines: list = []
+
+    def _heading(text: str) -> None:
+        body_lines.append(Text(""))
+        h = Text(_PAD + "  ", justify="left")
+        h.append(text, style=f"bold {theme.accent}")
+        body_lines.append(h)
+        body_lines.append(Text(_PAD + "  " + "─" * min(len(text), 40), style=theme.sep, justify="left"))
+
+    def _row(label: str, value: str, value_style: str = "") -> None:
+        r = Text(_PAD + "    ", justify="left")
+        r.append(f"{label}:  ", style=theme.muted)
+        r.append(str(value), style=value_style or theme.value)
+        body_lines.append(r)
+
+    def _line(text: str, style: str = "") -> None:
+        body_lines.append(Text(_PAD + "    " + text, style=style or theme.value, justify="left"))
+
+    def _wrapped(text: str, style: str, *, indent: str = "      ") -> None:
+        import textwrap
+
+        wrap_w = max(24, width - len(_PAD) - len(indent) - 6)
+        for chunk in textwrap.wrap(text, width=wrap_w) or [""]:
+            body_lines.append(Text(_PAD + indent + chunk, style=style, justify="left"))
+
+    # ── Transient status message (e.g. after Generate / Export) ───
+    message = retro_data.get("message", "")
+    if message:
+        body_lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+
+    # ── Join info ─────────────────────────────────────────────────
+    _heading("Join this retro")
+    _row("Share code", retro_data.get("display_code", "—"), f"bold {theme.accent_bright}")
+    _row("LAN URL", retro_data.get("url", "—"), theme.value)
+    _line("Teammates on the same Wi-Fi open the LAN URL in a browser to add cards.", theme.muted)
+    public_url = retro_data.get("public_url", "")
+    if public_url:
+        _row("Remote URL", public_url, f"bold {theme.accent_bright}")
+        _line("Off-network teammates open the Remote URL (public HTTPS link).", theme.muted)
+
+    # ── The four grids ────────────────────────────────────────────
+    grids = retro_data.get("grids") or {}
+    total_cards = 0
+    for key in RETRO_GRIDS:
+        cards = grids.get(key, [])
+        total_cards += len(cards)
+        _heading(f"{RETRO_GRID_LABELS[key]}  ({len(cards)})")
+        if cards:
+            for c in cards:
+                if getattr(c, "origin", "web") == "ai":
+                    who = "🤖 AI"
+                    card_style = theme.accent
+                else:
+                    who = getattr(c, "author", "") or "anon"
+                    card_style = theme.value
+                _wrapped(c.text, card_style, indent="    • ")
+                body_lines.append(Text(_PAD + "        " + f"— {who}", style=theme.dim, justify="left"))
+        else:
+            _line("No cards yet.", theme.muted)
+
+    # ── Layout using shared components ────────────────────────────
+    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    actual_scroll = min(scroll_offset, max_scroll)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    actions = retro_data.get("actions") or ["Generate Action Items", "Export", "Close"]
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions, action_sel)
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(
+            show_header=False,
+            show_edge=False,
+            box=None,
+            padding=0,
+            pad_edge=False,
+            expand=True,
+        )
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _build_standup_input_screen(
     prompt: str,
     value: str,

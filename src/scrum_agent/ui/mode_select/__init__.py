@@ -1460,6 +1460,227 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
         _render()
 
 
+def _resolve_retro_session() -> tuple[str, str, str, str]:
+    """Resolve the retro's target session → (session_id, session_name, project_name, sprint_name).
+
+    Like the standup page, the retro targets the most recently modified session.
+    Returns empty strings when there is no session yet.
+    """
+    try:
+        from scrum_agent.sessions import SessionStore, make_display_name
+
+        with SessionStore(_ana_dbp) as store:
+            session_id = store.get_latest_session_id()
+            if not session_id:
+                return "", "", "", ""
+            meta = store.get_session(session_id) or {}
+            state = store.load_state(session_id) or {}
+        session_name = make_display_name(meta) if meta else session_id
+        project_name = state.get("project_name", "") or session_name
+        # Sprint name is best-effort: the export/report titles degrade gracefully if blank.
+        sprint_name = str(state.get("sprint_name", "") or "")
+        return session_id, session_name, project_name, sprint_name
+    except Exception:
+        logger.warning("retro: failed to resolve latest session", exc_info=True)
+        return "", "", "", ""
+
+
+def _run_retro_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Event loop for the collaborative Retro board page.
+
+    Starts a small LAN web server so teammates can add cards from a browser; the
+    board refreshes every frame as cards arrive — the existing frame-timed
+    read_key loop IS the live-update mechanism, so no extra TUI-side thread is
+    needed (the only background thread is the HTTP server itself). Buttons:
+    [Generate Action Items, Export, Close]. Up/Down scroll, Left/Right select,
+    Enter activates. On exit the board is flushed to RetroStore and the server is
+    torn down (in a finally, so Ctrl-C/exception still persists + stops it).
+
+    # See README: "Retro" — TUI page, LAN collaboration
+    """
+    from scrum_agent.ui.mode_select.screens._screens_secondary import _build_retro_screen
+
+    def _render(data: dict, scroll: int, sel: int) -> None:
+        w, h = console.size
+        # Leave a one-row safety margin (same reason as the standup page).
+        live.update(_build_retro_screen(data, scroll_offset=scroll, width=w, height=max(10, h - 1), action_sel=sel))
+
+    session_id, session_name, project_name, sprint_name = _resolve_retro_session()
+    if not session_id:
+        logger.info("retro: no session available — showing notice")
+        data = {
+            "session_name": "",
+            "display_code": "—",
+            "url": "—",
+            "message": "No project session yet — create one in Planning first, then start a retro.",
+            "grids": {},
+        }
+        _render(data, 0, 2)
+        while True:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+            if k in ("enter", " ", "esc", "q"):
+                break
+            _render(data, 0, 2)
+        return
+
+    from scrum_agent.config import get_retro_server_port
+    from scrum_agent.retro.board import RetroBoard, board_to_report
+    from scrum_agent.retro.server import RetroServer
+    from scrum_agent.retro.store import RetroStore
+
+    board = RetroBoard(session_id, project_name=project_name, sprint_name=sprint_name)
+    server = RetroServer(board, port=get_retro_server_port())
+    try:
+        server.start()
+    except OSError as e:
+        logger.error("retro: failed to start server: %s", e, exc_info=True)
+        data = {
+            "session_name": session_name,
+            "display_code": "—",
+            "url": "—",
+            "message": f"Could not start the retro server: {e}",
+            "grids": {},
+        }
+        _render(data, 0, 2)
+        while True:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+            if k in ("enter", " ", "esc", "q"):
+                break
+            _render(data, 0, 2)
+        return
+
+    logger.info("retro: page opened for session=%s on %s", session_id, server.url.split("?")[0])
+    scroll, sel = 0, 0
+    message = "Server ready — share the code below so teammates can add cards from their browser."
+
+    # Remote tunnel state. Setup (binary download + tunnel handshake) is slow, so
+    # it runs on a worker thread; the frame-timed loop shows its progress and the
+    # public URL as soon as it's ready. `active`/`starting` drive the button label.
+    import threading as _threading
+
+    remote: dict = {"tunnel": None, "url": "", "status": "", "active": False, "starting": False}
+
+    def _start_remote() -> None:
+        def _worker() -> None:
+            try:
+                from scrum_agent.retro.tunnel import CloudflareTunnel, ensure_cloudflared
+
+                remote["status"] = "Setting up remote link — fetching cloudflared (first use, ~40MB)…"
+                binary = ensure_cloudflared()
+                if binary is None:
+                    remote["status"] = "Remote link failed — could not obtain cloudflared (see logs)."
+                    return
+                remote["status"] = "Starting secure Cloudflare tunnel…"
+                tunnel = CloudflareTunnel(server.port, binary=binary)
+                public = tunnel.start(timeout=30)
+                if not public:
+                    tunnel.stop()
+                    remote["status"] = "Remote link failed — tunnel did not start (see logs)."
+                    return
+                remote["tunnel"] = tunnel
+                remote["url"] = f"{public}/?token={server.token}"
+                remote["active"] = True
+                remote["status"] = "Remote link ready — share the Remote URL with off-network teammates."
+            except Exception as e:  # never let the worker crash anything
+                logger.error("retro: remote tunnel setup failed: %s", e, exc_info=True)
+                remote["status"] = f"Remote link failed — {e}"
+            finally:
+                remote["starting"] = False
+
+        remote["starting"] = True
+        remote["status"] = "Setting up remote link…"
+        _threading.Thread(target=_worker, name="retro-tunnel-setup", daemon=True).start()
+
+    def _stop_remote() -> None:
+        tunnel = remote.get("tunnel")
+        if tunnel is not None:
+            tunnel.stop()
+        remote.update({"tunnel": None, "url": "", "active": False, "starting": False})
+        remote["status"] = "Remote link stopped — LAN sharing still on."
+
+    def _share_label() -> str:
+        if remote["active"]:
+            return "Stop Sharing"
+        if remote["starting"]:
+            return "Sharing…"
+        return "Share Remotely"
+
+    def _actions() -> list[str]:
+        # Buttons: 0 Generate, 1 Share/Stop, 2 Export, 3 Close.
+        return ["Generate Action Items", _share_label(), "Export", "Close"]
+
+    def _data() -> dict:
+        return {
+            "session_name": session_name,
+            "display_code": server.display_code,
+            "url": server.url,
+            "public_url": remote["url"],
+            "message": remote["status"] or message,
+            "grids": board.cards_by_grid(),
+            "actions": _actions(),
+        }
+
+    n_buttons = 4  # Generate Action Items, Share Remotely, Export, Close
+
+    try:
+        _render(_data(), scroll, sel)
+        while True:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+            if k in ("up", "scroll_up"):
+                scroll = max(0, scroll - 1)
+            elif k in ("down", "scroll_down"):
+                scroll += 1
+            elif k == "left":
+                sel = max(0, sel - 1)
+            elif k == "right":
+                sel = min(n_buttons - 1, sel + 1)
+            elif k in ("enter", " "):
+                if sel == 3:  # Close
+                    break
+                if sel == 0:  # Generate Action Items (one LLM call, never raises)
+                    try:
+                        from scrum_agent.retro.engine import generate_action_items
+
+                        message = generate_action_items(board)
+                    except Exception as e:  # defensive — never let it crash the TUI
+                        logger.error("retro: generate action items failed: %s", e, exc_info=True)
+                        message = f"Generate failed: {e}"
+                    scroll = 0
+                elif sel == 1:  # Share Remotely / Stop Sharing (public Cloudflare tunnel)
+                    if remote["active"]:
+                        _stop_remote()
+                    elif not remote["starting"]:
+                        _start_remote()
+                    scroll = 0
+                elif sel == 2:  # Export → Markdown + HTML
+                    try:
+                        from scrum_agent.retro.export import export_retro
+
+                        report = board_to_report(board, sprint_name=sprint_name)
+                        paths = export_retro(report, project_name=project_name or session_name)
+                        message = f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
+                    except Exception as e:
+                        logger.error("retro: export failed: %s", e, exc_info=True)
+                        message = f"Export failed: {e}"
+                    scroll = 0
+            elif k in ("esc", "q"):
+                break
+            _render(_data(), scroll, sel)
+    finally:
+        # Always flush the board, stop the tunnel, and tear the server down — even
+        # on exception or Ctrl-C — so the retro persists and no process leaks.
+        try:
+            report = board_to_report(board, sprint_name=sprint_name)
+            with RetroStore(_ana_dbp) as store:
+                store.record_run(report)
+        except Exception as e:
+            logger.warning("retro: flush to store failed: %s", e)
+        if remote.get("tunnel") is not None:
+            remote["tunnel"].stop()
+        server.stop()
+        logger.info("retro: page closed for session=%s", session_id)
+
+
 def select_mode(
     console: Console | None = None, *, dry_run: bool = False, _read_key_fn=None
 ) -> tuple[str, str | None, str | None] | None:
@@ -2621,6 +2842,14 @@ def select_mode(
             if chosen["key"] == "daily-standup":
                 logger.info("Daily Standup mode selected")
                 _run_standup_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                _restart_mode_select = True
+                _skip_fade_in = True
+                continue
+
+            # ── Route: Retro mode → collaborative board page ─────────────
+            if chosen["key"] == "retro":
+                logger.info("Retro mode selected")
+                _run_retro_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue

@@ -1,0 +1,76 @@
+"""Unit tests for the Retro Markdown + HTML exporters (incl. escaping)."""
+
+from scrum_agent.agent.state import RetroCard, RetroReport
+from scrum_agent.retro.export import build_retro_html, build_retro_markdown, export_retro
+
+
+def _report():
+    return RetroReport(
+        date="2026-07-10",
+        session_id="sess-1",
+        project_name="Demo",
+        sprint_name="Sprint 5",
+        cards=(
+            RetroCard(grid="went_well", text="fast deploys", author="Sam", origin="web"),
+            RetroCard(
+                grid="didnt_go_well",
+                text="flaky tests",
+                author="Rae",
+                origin="web",
+                reactions=(("👍", 3), ("🔥", 1)),
+            ),
+            RetroCard(grid="action_items", text="add retry guard", author="AI", origin="ai"),
+        ),
+        participants=("Sam", "Rae"),
+    )
+
+
+class TestMarkdown:
+    def test_contains_headings_and_cards(self):
+        md = build_retro_markdown(_report())
+        assert "# Sprint Retro — Sprint 5" in md
+        assert "## What went well" in md
+        assert "fast deploys" in md
+        assert "add retry guard" in md and "_(AI)_" in md
+
+    def test_empty_grid_shows_placeholder(self):
+        md = build_retro_markdown(RetroReport(date="2026-07-10"))
+        assert "_No cards._" in md
+
+    def test_reaction_counts_shown(self):
+        md = build_retro_markdown(_report())
+        assert "👍 3" in md and "🔥 1" in md
+
+
+class TestHtml:
+    def test_self_contained_and_has_cards(self):
+        html = build_retro_html(_report())
+        assert "<!DOCTYPE html>" in html and "<style>" in html
+        assert "fast deploys" in html
+        assert "Sam" in html
+        assert "👍 3" in html  # reaction counts rendered
+
+    def test_escapes_card_text(self):
+        rep = RetroReport(
+            date="2026-07-10",
+            cards=(RetroCard(grid="demos", text="<script>alert(1)</script>", author="<b>x</b>"),),
+        )
+        html = build_retro_html(rep)
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;" in html
+        assert "<b>x</b>" not in html
+
+
+class TestExportWrites:
+    def test_writes_md_and_html(self, tmp_path, monkeypatch):
+        # Redirect the export dir into tmp_path.
+        target = tmp_path / "demo"
+
+        def _fake_dir(key):
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+
+        monkeypatch.setattr("scrum_agent.paths.get_retro_export_dir", _fake_dir)
+        paths = export_retro(_report(), project_name="Demo")
+        assert paths["markdown"].exists() and paths["html"].exists()
+        assert paths["markdown"].read_text().startswith("# Sprint Retro")

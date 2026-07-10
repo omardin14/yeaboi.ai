@@ -191,6 +191,15 @@ src/scrum_agent/
     render.py           — StandupReport → plaintext (Slack/email) + Rich (terminal/TUI)
     export.py           — StandupReport → Markdown + self-contained HTML (auto-saved every run; Export button)
     store.py            — StandupStore (standup_config/history/updates tables, schema v6)
+  retro/                — Retro mode (collaborative, LAN browser board)
+    __init__.py         — public API (RetroBoard, RetroServer, RetroStore, board_to_report)
+    board.py            — RetroBoard (threading.Lock-guarded live cards) + board_to_report()
+    server.py           — RetroServer: stdlib ThreadingHTTPServer, token auth, LAN IP, share-code encode/decode
+    page.py             — build_board_html(): self-contained dark browser page (4 grids, polling, XSS-safe)
+    engine.py           — generate_action_items(): one LLM call (parse → fallback) from feedback cards
+    tunnel.py           — optional Cloudflare quick tunnel (off-network joining); auto-downloads cloudflared, zero-setup
+    export.py           — RetroReport → Markdown + self-contained HTML (Export button)
+    store.py            — RetroStore (retro_history table, schema v7)
   tools/
     __init__.py         — get_tools() factory (lazy imports all tool modules)
     github.py           — GitHub repo/file/issues/readme (4 tools) + recent-activity helpers
@@ -412,6 +421,8 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - `STANDUP_GITHUB_REPO` — optional, GitHub repo (owner/repo) scanned for Daily Standup code activity
 - `SLACK_WEBHOOK_URL` — optional, Slack incoming-webhook URL for Daily Standup delivery
 - `STANDUP_SMTP_HOST` / `STANDUP_SMTP_PORT` / `STANDUP_SMTP_USER` / `STANDUP_SMTP_PASSWORD` / `STANDUP_SMTP_SENDER` / `STANDUP_EMAIL_RECIPIENTS` — optional, SMTP email delivery for Daily Standup
+- `RETRO_PORT` — optional, base port for the Retro LAN collaboration server (default 5173; walks upward if busy)
+- `CLOUDFLARED_PATH` — optional, path to an existing `cloudflared` binary for Retro remote tunnels (else the app auto-downloads one to `~/.scrum-agent/bin/`)
 - `SESSION_PRUNE_DAYS` — auto-prune sessions older than N days (default: 30, 0 = disabled)
 - `LOG_LEVEL` — file logger level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
 - `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` — optional, enables LangSmith tracing
@@ -490,6 +501,28 @@ The `src/scrum_agent/standup/` package implements a daily scrum that detects tea
 **Persistence**: `store.py` defines `_STANDUP_SCHEMA` (schema v6 in `sessions.py`) with `standup_config` / `standup_history` / `standup_updates`. `StandupReport`/`MemberUpdate` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat).
 
 **TUI**: the magenta **Standup** card → `_build_standup_screen` + `_run_standup_page` in `ui/mode_select/`, with **Generate / My Update / Configure / Export / Back** actions. Logs go to `~/.scrum-agent/logs/standup/`; readable output (Markdown + HTML) is auto-saved to `~/.scrum-agent/exports/standup/<project>/` every run and via the Export button (`export.py`, `paths.get_standup_export_dir`).
+
+## Retro Mode
+
+The `src/scrum_agent/retro/` package implements a **collaborative** sprint retrospective: the host opens the Retro page and teammates add sticky cards to four grids — *What went well*, *What didn't go well*, *Action items*, *Demos* — from their own browsers on the LAN.
+
+**Design choice — LAN browser board, stdlib-only.** A retro needs the whole team, but the app is a local terminal tool. So the host's TUI starts a small **`http.server.ThreadingHTTPServer`** (NOT FastAPI/Flask — matches the stdlib-only ethos of `standup/delivery.py`) bound to `0.0.0.0`, and shows a **share code + URL**. Teammates open the URL in any browser (no install) and POST cards; the page (`page.py`) polls every 2 s. There is **no new dependency**.
+
+**Live board + thread safety** (`board.py`): `RetroBoard` is the single source of truth during a session — a `threading.Lock`-guarded card list with a `_revision` counter. The background HTTP threads call `add_card`; the TUI render thread calls `snapshot()`/`cards_by_grid()` each frame. Readers copy inside the lock and render outside it; the lock never wraps a Rich render or JSON dump. **No extra TUI-side thread is needed** — the existing frame-timed `read_key` loop re-renders from `snapshot()` every frame, so cards appear within one frame. `RetroCard`/`RetroReport` are frozen dataclasses in `agent/state.py` (all fields defaulted).
+
+**Security** (`server.py`): access is gated by a per-session `secrets.token_urlsafe(16)` token checked with `secrets.compare_digest`; `GET /` serves the harmless page but every `/api/*` call requires the token. POST body capped 4 KB, card text ≤500 / author ≤60. It's a **LAN-trust model, no TLS — do not port-forward.** Card text is escaped on browser render (`textContent`), in exported HTML (`html.escape`), and framed as untrusted data in the LLM prompt. Concurrency: `daemon_threads=True`; `shutdown()` is called from the TUI thread (never the server thread — deadlock), then `server_close()`; every response sets `Content-Length` (HTTP/1.1 keep-alive).
+
+**AI action items** (`engine.py`): `generate_action_items(board)` makes one `get_llm()` call (prompt in `prompts/retro.py`, ARC framework) from the "didn't go well" cards (+ selectively "went well"), following the standup **parse → fallback** convention — an auth/billing error becomes a status message + deterministic fallback, never a crash. Added cards get `origin="ai"` and are badged in both the TUI and browser.
+
+**Persistence & export**: `store.py` defines `_RETRO_SCHEMA` (schema **v7** in `sessions.py`) with one `retro_history` table; the board is flushed via `RetroStore.record_run` in a `finally` on page exit. `export.py` writes Markdown + HTML to `~/.scrum-agent/exports/retro/<project>/` (`paths.get_retro_export_dir`), reusing `html_exporter._CSS`.
+
+**Live web interface** (`page.py`, one self-contained offline page): teammates get emoji **reactions** on cards (fixed `REACTION_EMOJIS` set, click to toggle), **drag** to reorder/move cards between grids, **edit/delete** their *own* cards (author-only), a shared **countdown timer** (presets + custom, synced via the server clock, **confetti + Web-Audio alarm** on finish), a join modal with an **avatar picker** + 🎲 **random-name** generator (**renamable later** via the `#me` pill), a **theme switcher** (5 `[data-theme]` palettes), and **Web-Audio-generated music** (ambient/lofi/focus/**hip-hop**/**jazz**, no files, offline) with a live `AnalyserNode` **visualizer**. The **header** is a compact toolbar: brand + card count, a distinct "you" `me-chip`, an **others-only** overlapping-avatar presence stack (the current user is filtered out so they're never shown twice), a **👥 room count** that opens a left-anchored **roster** popover listing everyone present (you tagged "you", live "typing…" tags), and small icon buttons (`♪` Music / `⏱` Timer / `◑` Theme / Invite) that each open a **popover** (`.pop`, one open at a time, closed on click-outside/Esc) holding that control's UI — Theme is a row of colour **swatches**, the running timer's `MM:SS` shows inline on its button. Per-grid **typing indicators** sit under each column. All of it is driven by a **unified `/api/state`** polled ~1.2 s — the page POSTs `/api/presence` (heartbeat + fetch in one round-trip) and renders the returned `{cards, reactions, presence, typing, timer}`; each card carries a `mine` flag (owner == viewer `pid`) that drives the ✎/✕ controls without ever putting raw pids on the wire. Reactions/presence/typing/timer/ownership are lock-guarded board state (`board.py`); `REACTION_EMOJIS`/`AVATARS` are server-validated (LAN peers untrusted). Card mutations go through `/api/card/{edit,delete,move}` (edit/delete owner-checked server-side; move open to all). Reactions fold into `RetroCard.reactions` at report time (shown in MD/HTML exports; fed to the AI as a priority hint). The big CSS/JS lives in plain `_CSS`/`_JS` module strings filled by placeholder `str.replace`; `page.py` is E501-exempt in `pyproject.toml` as an embedded asset.
+
+**Joining & token security** (`server.py`): the served `/` page is **token-free** — `GET /` is unauthenticated, so the token is *never* baked into the HTML (it would leak to any LAN peer). The client reads the token from its own URL `?token=`, or a teammate opens the bare host address and types the short **join code** into the code-entry gate → `POST /api/join` (unauthenticated; `compare_digest(code, join_code)` → returns the token). `RetroServer.join_code` (an 8-char unambiguous code, shown in the TUI as `display_code`) is a LAN-trust convenience credential; the 128-bit `token` still guards direct URLs/QR. `GET /api/qr` (token-gated) renders a scannable **QR** of `scheme://<Host header>/?token=…` via `segno` (pure-python dep) — the Host header makes it correct for LAN *and* tunnel automatically, and being token-gated it can't leak the token to unauthenticated visitors.
+
+**Remote joining — Cloudflare tunnel** (`tunnel.py`): the LAN server only reaches same-network teammates. The **Share Remotely** button starts a **Cloudflare quick tunnel** (`cloudflared tunnel --url http://localhost:<port>`) exposing a public `https://…trycloudflare.com` URL that forwards to the token-gated server. It's genuinely **zero-setup**: no Cloudflare account/token (unlike ngrok, which forces a per-user authtoken), so the app owns the whole flow — `ensure_cloudflared()` downloads the platform binary on first use to `~/.scrum-agent/bin/` (cached; honours a `cloudflared` already on PATH or `CLOUDFLARED_PATH`). Setup runs on a **worker thread** (download + handshake are slow) while the frame-timed loop shows progress; the button toggles **Stop Sharing**. The tunnel is torn down in the page's `finally`. Everything is best-effort — a failed download/tunnel never raises, the retro stays LAN-only. The public URL is internet-reachable while up (token-gated, HTTPS); the browser page uses relative fetch URLs so it works identically over LAN or tunnel.
+
+**TUI**: the teal **Retro** card → `_build_retro_screen` + `_run_retro_page` in `ui/mode_select/`, with **Generate Action Items / Share Remotely / Export / Close** actions. Targets the most recent session; logs go to `~/.scrum-agent/logs/retro/`. Configure the server port with `RETRO_PORT` (default 5173, walks upward if busy).
 
 ## Deployment (AWS Lightsail)
 

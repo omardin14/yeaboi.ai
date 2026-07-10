@@ -1212,3 +1212,37 @@ _Bring Azure DevOps to full feature parity with Jira — read board/velocity, cr
 - [x] Auto-export on every run (TUI/headless/scheduled) to `~/.scrum-agent/exports/standup/<project>/standup-YYYY-MM-DD.{md,html}` (best-effort, in `engine.run_standup`)
 - [x] **Export** button on the standup page (`_standup_export`) — re-writes the latest report on demand, like the other pages
 - [x] Tests: markdown/html content + escaping, empty report, auto-export writes files, re-run overwrite, slug helper, 5-button render
+
+## Phase 24: Retro Mode (collaborative sprint retrospective)
+- [x] `RetroCard` + `RetroReport` frozen dataclasses in `agent/state.py` (defaults for backward-compat), exported from `agent/__init__.py`
+- [x] `retro/board.py` — `RetroBoard` (threading.Lock-guarded live cards, `_revision`, input caps) + `board_to_report()`; 4 canonical grids
+- [x] `retro/server.py` — stdlib `ThreadingHTTPServer`, per-session `secrets` token auth (`compare_digest`), `get_lan_ip()`, share-code encode/decode, port-walk, clean shutdown from TUI thread
+- [x] `retro/page.py` — self-contained dark browser board (4 grids, name prompt, 2 s polling); XSS-safe render via `textContent`; token baked as JS literal via `json.dumps`
+- [x] `retro/engine.py` + `prompts/retro.py` — AI action items from feedback cards (one `get_llm()` call, parse → fallback, ARC prompt, untrusted-data framing)
+- [x] `retro/store.py` — `RetroStore` + `_RETRO_SCHEMA` (retro_history); schema **v7** migration in `sessions.py`
+- [x] `retro/export.py` — RetroReport → Markdown + self-contained HTML (reuses plan `_CSS`, `html.escape`); `paths.get_retro_export_dir()` + `RETRO_EXPORTS_DIR`
+- [x] Retro TUI page — teal `RETRO_THEME`, `retro_title()`, `COLOR_RGB` + `_BTN_COLORS` entries, `_MODE_CARDS` entry, `_build_retro_screen`, `_run_retro_page` (Generate Action Items / Share Remotely / Export / Close), routing; flush to store + server/tunnel teardown in `finally`
+- [x] `config.get_retro_server_port()` (`RETRO_PORT`, default 5173); `paths.get_retro_log_dir()`; `.env.example` + CLAUDE.md docs
+- [x] Remote joining — `retro/tunnel.py`: zero-setup Cloudflare quick tunnel (`ensure_cloudflared()` auto-downloads the binary to `~/.scrum-agent/bin/`, honours PATH/`CLOUDFLARED_PATH`); `CloudflareTunnel` start/stop; **Share Remotely** button runs setup on a worker thread and shows the public HTTPS URL; `paths.get_bin_dir()`
+- [x] Tests: board add/caps/thread-safety/snapshot/report, share-code round-trip, server GET/403/POST/404, engine parse+fallback (mocked LLM), store round-trip + backward-compat, export MD/HTML + escaping, screen render, browser-page safety, tunnel asset-name/regex/ensure-resolution/start-stop (fake binary, no network)
+
+## Phase 25: Retro Web Interface — UX & feature upgrade
+- [x] Live board state (`board.py`): `REACTION_EMOJIS`/`AVATARS` sets; lock-guarded reactions (`toggle_reaction`/`reaction_counts`), presence + typing (`heartbeat`/`presence_list`/`typing_list`, TTL), shared timer (`start_timer`/`stop_timer`), unified `state_snapshot()`; `RetroCard.reactions` field (defaulted); `board_to_report` folds in reaction counts
+- [x] Server endpoints (`server.py`): `GET /api/state`; `POST /api/presence` (heartbeat+state), `/api/react`, `/api/timer`; `do_POST` dispatch; all token-gated + body-capped
+- [x] Browser page (`page.py`): emoji reactions, avatars + 🎲 random names, per-grid typing indicators + presence row, shared countdown timer (presets/custom), Web-Audio ambient music (offline, zero files); ~1.2 s unified poll; CSS/JS placeholder strings; E501-exempt in `pyproject.toml`
+- [x] Export/AI: reaction counts shown in MD/HTML (escaped); AI prompt gets `[N reactions]` priority hint; store (de)serialization backward-compat for `reactions`
+- [x] Tests: reactions toggle/reject, presence heartbeat + TTL expiry, typing list, timer clamp/start/stop, `state_snapshot` shape, new server endpoints, reactions round-trip + export, page markup/offline/pid/injected-sets; live browser smoke (join → react → timer → music, no console errors)
+
+## Phase 26: Retro Web Interface — Round 2 (identity, themes, music, drag/edit, join UX)
+- [x] Board (`board.py`): `_card_owner` map + `add_card(pid=…)`; `edit_card`/`delete_card` (author-only) + `move_card` (open); `state_snapshot(viewer_pid)` adds per-card `mine` (no raw pids on the wire)
+- [x] **Security fix**: served page is **token-free** — `build_board_html()` no longer bakes the token (GET / is unauthenticated); client reads it from the URL or the join code
+- [x] Server (`server.py`): `make_join_code()` + `RetroServer.join_code` (TUI `display_code`); `POST /api/join` (unauth code→token); `GET /api/qr` (token-gated `segno` SVG from Host header → LAN+tunnel); `POST /api/card/{edit,delete,move}`; pid plumbed into `add_card`/`state_snapshot`; `segno` dependency
+- [x] Page (`page.py`): token-from-URL + **code-entry join gate**; **invite QR** popover; **rename** (`#me` pill → profile modal); **theme switcher** (5 `[data-theme]` palettes); richer **Web-Audio** music (hip-hop boom-bap + jazz swing/walking bass) + `AnalyserNode` **visualizer**; **drag** cards (reorder/move); author-only **edit/delete**; timer-finish **confetti + alarm**
+- [x] Tests: board edit/delete/move/mine (owner-allowed vs rejected), server join/qr/card-mutation endpoints + token-free page assertion, page round-2 markup + no-dangling-id regression guard
+- [x] Live browser smoke: code gate → join; rename; Synthwave theme; own-card ✎/✕ (seeded cards have none); Jazz music + animated visualizer; 3 s timer → confetti + alarm; Invite → QR renders — **zero console errors**
+
+## Phase 27: Retro header/toolbar redesign
+- [x] Compact toolbar (`page.py` only): brand + card count, a distinct "you" `me-chip` + an **others-only** overlapping-avatar presence stack (fixes the duplicate-self pill), and icon buttons `♪`/`⏱`/`◑`/Invite
+- [x] Popovers (`.pop`, one-at-a-time, click-outside/Esc close) for Music (play/volume/mood), Timer (segmented presets + custom + start/stop), Theme (colour **swatches**); running timer shows inline `MM:SS` on its button; mini-viz appears only while playing
+- [x] `[data-theme="midnight"]` block added so the default theme's swatch renders correctly; theme applied via `data-theme` attribute
+- [x] Tests updated (compact-toolbar markers, swatch/theme-pop, others-only presence) + no-dangling-id guard; live Chrome smoke (Midnight + Synthwave, popovers, inline timer, mini-viz) — zero console errors

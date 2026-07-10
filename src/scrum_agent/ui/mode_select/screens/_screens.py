@@ -45,6 +45,13 @@ _MODE_CARDS: list[dict[str, Any]] = [
         "color": "rgb(200,100,180)",
     },
     {
+        "key": "retro",
+        "title": "Retro",
+        "description": "Run a collaborative sprint retro: teammates add cards from a browser, then AI drafts actions.",
+        "available": True,
+        "color": "rgb(80,190,190)",
+    },
+    {
         "key": "usage",
         "title": "Usage",
         "description": "View API token usage, session history, and cost estimates.",
