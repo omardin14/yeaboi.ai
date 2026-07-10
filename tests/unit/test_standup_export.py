@@ -1,6 +1,5 @@
 """Unit tests for Daily Standup Markdown + HTML export."""
 
-
 from scrum_agent.agent.state import MemberUpdate, StandupReport
 from scrum_agent.standup import export
 from scrum_agent.standup.export import build_standup_html, build_standup_markdown, export_standup

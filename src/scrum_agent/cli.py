@@ -606,8 +606,7 @@ def _run_standup(args: argparse.Namespace) -> int:
         report = run_standup(session_id, channels=channels, deliver=True)
         warn = f" ({len(report.warnings)} notice(s))" if report.warnings else ""
         print(
-            f"Standup delivered for session '{session_id}' "
-            f"(day {report.sprint_day}/{report.sprint_total_days}){warn}."
+            f"Standup delivered for session '{session_id}' (day {report.sprint_day}/{report.sprint_total_days}){warn}."
         )
         return 0
     except Exception as e:

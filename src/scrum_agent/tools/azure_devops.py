@@ -925,9 +925,7 @@ def azdevops_active_sprint_progress(project: str = "") -> dict:
         committed = 0.0
         completed = 0.0
         if wi_ids:
-            items = wit_client.get_work_items(
-                wi_ids, fields=["System.State", "Microsoft.VSTS.Scheduling.StoryPoints"]
-            )
+            items = wit_client.get_work_items(wi_ids, fields=["System.State", "Microsoft.VSTS.Scheduling.StoryPoints"])
             for item in items or []:
                 pts = item.fields.get("Microsoft.VSTS.Scheduling.StoryPoints")
                 try:

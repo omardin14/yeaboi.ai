@@ -770,7 +770,7 @@ def jira_active_sprint_progress(project_key: str = "") -> dict:
             return total
 
         out["completed_points"] = _sum_points(f'project = "{key}" AND sprint = {sprint.id} AND status = Done')
-        out["committed_points"] = _sum_points(f"project = \"{key}\" AND sprint = {sprint.id}")
+        out["committed_points"] = _sum_points(f'project = "{key}" AND sprint = {sprint.id}')
         logger.info(
             "jira_active_sprint_progress: sprint=%r completed=%.1f committed=%.1f",
             sprint.name,

@@ -1432,9 +1432,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                 break
             if sel == 0:  # Generate — ask for the user's own update first, then run
                 try:
-                    proceed = _standup_generate_flow(
-                        console, live, read_key, frame_time, supports_timeout, session_id
-                    )
+                    proceed = _standup_generate_flow(console, live, read_key, frame_time, supports_timeout, session_id)
                 except Exception as e:  # never let a prompt crash the TUI
                     logger.error("standup generate failed: %s", e, exc_info=True)
                     proceed = f"Generate failed: {e}"
