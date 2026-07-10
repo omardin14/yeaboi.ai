@@ -22,6 +22,8 @@ screens already re-render at 30–60 fps).
 from __future__ import annotations
 
 import logging
+import math
+import time
 
 from rich.live import Live
 from rich.panel import Panel
@@ -35,6 +37,24 @@ logger = logging.getLogger(__name__)
 # The MusicLive currently rendering the app, so music.py can nudge it after a
 # state change. Set on every update(); there is only ever one live screen.
 _active: MusicLive | None = None
+
+# Rising block glyphs for the mini equalizer, tallest last.
+_EQ_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def _eq_bars(count: int = 4) -> str:
+    """Return a tiny animated equalizer string, driven by the wall clock.
+
+    Each bar bounces at a slightly different rate/phase so the row looks lively.
+    Because it reads ``time.monotonic()`` it advances on every render frame while
+    music plays (the planning screens re-render continuously), with no timer of
+    its own. Pure/stateless apart from the clock.
+    """
+    t = time.monotonic()
+    return "".join(
+        _EQ_CHARS[int((math.sin(t * (6.0 + 1.7 * i) + i) + 1.0) / 2.0 * (len(_EQ_CHARS) - 1))]
+        for i in range(count)
+    )
 
 
 def build_music_subtitle(theme: Theme = PLANNING_THEME) -> Text:
@@ -58,9 +78,14 @@ def build_music_subtitle(theme: Theme = PLANNING_THEME) -> Text:
         line.append("♪ ", style=theme.accent)
         line.append(music.current_channel_name(), style=theme.accent_bright)
         line.append(" · ", style=theme.muted)
-        line.append("playing" if status == "playing" else "paused", style=theme.value)
+        if status == "playing":
+            line.append("playing ", style=theme.value)
+            line.append(_eq_bars(), style=theme.accent_bright)  # animated equalizer
+            toggle_hint = "^P pause"
+        else:
+            line.append("paused", style=theme.value)
+            toggle_hint = "^P play"
         line.append("  ", style=theme.muted)
-        toggle_hint = "^P pause" if status == "playing" else "^P play"
     line.append(f"  {toggle_hint} · ^O channel ", style=theme.dim)
     return line
 
@@ -79,6 +104,15 @@ class MusicLive(Live):
         self._last_renderable = renderable
         self._stamp(renderable)
         super().update(renderable, refresh=refresh)
+
+    def refresh(self) -> None:
+        # Re-stamp before every auto-refresh tick so the equalizer keeps animating
+        # even on screens whose input loop only redraws on a keypress. Live already
+        # runs a background refresh thread at refresh_per_second, so this is what
+        # drives the animation app-wide with no timer of our own.
+        if self._last_renderable is not None:
+            self._stamp(self._last_renderable)
+        super().refresh()
 
     def _stamp(self, renderable) -> None:
         """Set the music subtitle on a bare Panel; leave popups and non-Panels alone."""

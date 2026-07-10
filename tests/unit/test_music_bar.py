@@ -6,7 +6,14 @@ from rich.text import Text
 
 from scrum_agent import music
 from scrum_agent.ui.shared import _music_bar
-from scrum_agent.ui.shared._music_bar import MusicLive, build_music_subtitle, make_live, nudge_music_bar
+from scrum_agent.ui.shared._music_bar import (
+    _EQ_CHARS,
+    MusicLive,
+    _eq_bars,
+    build_music_subtitle,
+    make_live,
+    nudge_music_bar,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +51,18 @@ def test_subtitle_when_paused():
     text = build_music_subtitle().plain
     assert "paused" in text
     assert "^P play" in text
+
+
+def test_eq_bars_shape():
+    bars = _eq_bars(4)
+    assert len(bars) == 4
+    assert all(c in _EQ_CHARS for c in bars)
+
+
+def test_playing_subtitle_includes_equalizer():
+    music._state.status = "playing"
+    text = build_music_subtitle().plain
+    assert any(c in _EQ_CHARS for c in text)
 
 
 # ── MusicLive stamping ────────────────────────────────────────────────────────

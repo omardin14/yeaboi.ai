@@ -37,10 +37,15 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        # Disable XON/XOFF flow control so Ctrl+S (\x13) reaches the app
-        # instead of freezing the terminal (XOFF). Restored by tcsetattr below.
+        # Disable two terminal features so their control chars reach the app
+        # instead of being consumed by the line discipline (restored below):
+        #   - IXON  — XON/XOFF flow control, so Ctrl+S (\x13) doesn't freeze us.
+        #   - IEXTEN — extended input, so Ctrl+O (\x0f, VDISCARD on macOS/BSD)
+        #     is delivered as a keypress (used for the music channel-switch chord)
+        #     rather than swallowed as "discard output".
         new_settings = termios.tcgetattr(fd)
-        new_settings[0] &= ~termios.IXON  # input flags
+        new_settings[0] &= ~termios.IXON  # input flags (c_iflag)
+        new_settings[3] &= ~termios.IEXTEN  # local flags (c_lflag)
         termios.tcsetattr(fd, termios.TCSANOW, new_settings)
         if timeout is not None:
             try:
