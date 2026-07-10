@@ -73,8 +73,13 @@ def _phase_description_input(
         _bw, _bh = console.size
         _border, _line = voice_indicator(status, tick)
         return _build_description_screen(
-            input_lines, cursor_row, cursor_col, width=_bw, height=_bh,
-            border_override=_border, status_line=_line,
+            input_lines,
+            cursor_row,
+            cursor_col,
+            width=_bw,
+            height=_bh,
+            border_override=_border,
+            status_line=_line,
         )
 
     def _run_voice() -> None:
@@ -528,18 +533,35 @@ def _question_input_loop(
         _border, _line = voice_indicator(status, tick)
         if use_accordion:
             return _build_accordion_question_screen(
-                question_text, input_value, questionnaire,
-                choices=choices, suggestion=suggestion, progress=progress,
-                phase_label=phase_label, selected_choice=selected_choice,
+                question_text,
+                input_value,
+                questionnaire,
+                choices=choices,
+                suggestion=suggestion,
+                progress=progress,
+                phase_label=phase_label,
+                selected_choice=selected_choice,
                 selected_choices=selected_choices if multi_select else None,
-                scroll_offset=scroll_offset, width=_bw, height=_bh, cursor_pos=cursor_pos,
-                border_override=_border, edit_hint=_line,
+                scroll_offset=scroll_offset,
+                width=_bw,
+                height=_bh,
+                cursor_pos=cursor_pos,
+                border_override=_border,
+                edit_hint=_line,
             )
         return _build_question_screen(
-            question_text, input_value, choices=choices, suggestion=suggestion,
-            progress=progress, phase_label=phase_label, preamble_lines=preamble_lines,
-            selected_choice=selected_choice, width=_bw, height=_bh,
-            border_override=_border, status_line=_line,
+            question_text,
+            input_value,
+            choices=choices,
+            suggestion=suggestion,
+            progress=progress,
+            phase_label=phase_label,
+            preamble_lines=preamble_lines,
+            selected_choice=selected_choice,
+            width=_bw,
+            height=_bh,
+            border_override=_border,
+            status_line=_line,
         )
 
     def _run_voice() -> None:
