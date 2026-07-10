@@ -208,6 +208,16 @@ Comprehensive task list for building the project. Check items off as they're com
 - [x] Dark/light `--theme` flag
 - [x] Show "Includes: X, Y, Z" line on export so user knows it is cumulative (all content generated so far)
 
+### 6H: Background Music (cliamp)
+
+- [x] `music.py` controller — optional, auto-detected `cliamp` daemon + IPC, built-in radio channels
+- [x] Persistent music status bar on every screen (`MusicLive` stamps `Panel.subtitle`, one `make_live` factory)
+- [x] App-wide control chords in `read_key` — `Ctrl+P` play/pause, `Ctrl+O` switch channel
+- [x] Auto-pause music while recording a voice note; resume when recording stops
+- [x] Music tip added to the rotating welcome-screen tips
+- [x] Persist on/off + channel preference; stop daemon on exit
+- [x] Unit tests (`test_music.py`, `test_music_bar.py`, voice-hook tests) + README section
+
 ---
 
 ## Phase 7: Tools

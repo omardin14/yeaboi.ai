@@ -37,10 +37,15 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        # Disable XON/XOFF flow control so Ctrl+S (\x13) reaches the app
-        # instead of freezing the terminal (XOFF). Restored by tcsetattr below.
+        # Disable two terminal features so their control chars reach the app
+        # instead of being consumed by the line discipline (restored below):
+        #   - IXON  — XON/XOFF flow control, so Ctrl+S (\x13) doesn't freeze us.
+        #   - IEXTEN — extended input, so Ctrl+O (\x0f, VDISCARD on macOS/BSD)
+        #     is delivered as a keypress (used for the music channel-switch chord)
+        #     rather than swallowed as "discard output".
         new_settings = termios.tcgetattr(fd)
-        new_settings[0] &= ~termios.IXON  # input flags
+        new_settings[0] &= ~termios.IXON  # input flags (c_iflag)
+        new_settings[3] &= ~termios.IEXTEN  # local flags (c_lflag)
         termios.tcsetattr(fd, termios.TCSANOW, new_settings)
         if timeout is not None:
             try:
@@ -230,6 +235,20 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
             return "alt+enter"
         if ch == "\x13":
             return "ctrl+s"
+        # Ctrl+P / Ctrl+O — global background-music controls. Handled here (the one
+        # input chokepoint every screen's loop reads through) so music works app-wide
+        # with no per-loop changes, and works even inside text fields because these
+        # control bytes are never printable text. The action mutates music state and
+        # nudges the status bar; we return "" (idle) so loops just re-render.
+        # # See README: "Music (cliamp)"
+        if ch in ("\x10", "\x0f"):
+            from scrum_agent import music
+
+            if ch == "\x10":
+                music.toggle()  # Ctrl+P → play/pause
+            else:
+                music.cycle_channel()  # Ctrl+O → next channel
+            return ""
         if ch == "\x03":
             raise KeyboardInterrupt
         if ch.isprintable():

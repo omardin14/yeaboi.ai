@@ -19,7 +19,6 @@ import time
 from pathlib import Path
 
 from rich.console import Console
-from rich.live import Live
 
 from scrum_agent.paths import get_db_path as _get_db_path
 from scrum_agent.ui.mode_select.screens._project_cards import (  # noqa: F401
@@ -64,6 +63,7 @@ from scrum_agent.ui.shared._animations import (
     ease_out_cubic,
 )
 from scrum_agent.ui.shared._input import read_key as _read_key
+from scrum_agent.ui.shared._music_bar import make_live
 
 logger = logging.getLogger(__name__)
 
@@ -1137,7 +1137,7 @@ def select_mode(
     # active, let Live manage it normally with screen=True.
     _screen_managed_by_live = not console.is_alt_screen
 
-    with Live(
+    with make_live(
         _build_mode_screen(
             selected,
             width=w,

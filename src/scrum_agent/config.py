@@ -97,6 +97,46 @@ def set_tips_enabled(enabled: bool) -> None:
     logger.info("Tips %s (persisted to %s)", "enabled" if enabled else "disabled", config_file)
 
 
+def is_music_enabled() -> bool:
+    """Return True if background music was left enabled (default off).
+
+    Only records the on/off preference so the status bar can reflect it; playback
+    itself is never auto-started (that would be surprise noise). Mirrors
+    :func:`is_tips_enabled`.
+    """
+    return os.getenv("MUSIC_ENABLED", "false").strip().lower() == "true"
+
+
+def set_music_enabled(enabled: bool) -> None:
+    """Persist the music on/off preference to ~/.scrum-agent/.env and apply it now."""
+    from dotenv import set_key
+
+    value = "true" if enabled else "false"
+    config_file = get_config_file()
+    set_key(str(config_file), "MUSIC_ENABLED", value)
+    os.environ["MUSIC_ENABLED"] = value
+    logger.info("Music %s (persisted to %s)", "enabled" if enabled else "disabled", config_file)
+
+
+def get_music_channel() -> int:
+    """Return the persisted music channel index (defaults to 0)."""
+    try:
+        return int(os.getenv("MUSIC_CHANNEL", "0").strip())
+    except ValueError:
+        return 0
+
+
+def set_music_channel(idx: int) -> None:
+    """Persist the selected music channel index to ~/.scrum-agent/.env."""
+    from dotenv import set_key
+
+    value = str(int(idx))
+    config_file = get_config_file()
+    set_key(str(config_file), "MUSIC_CHANNEL", value)
+    os.environ["MUSIC_CHANNEL"] = value
+    logger.info("Music channel set to %s (persisted to %s)", value, config_file)
+
+
 # Proxy environment variables to check (both uppercase and lowercase conventions).
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 

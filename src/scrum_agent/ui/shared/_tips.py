@@ -42,10 +42,13 @@ _GENERAL_TIPS: tuple[str, ...] = (
 def get_tips() -> tuple[str, ...]:
     """Return the ordered tips shown on the welcome screen.
 
-    The first entry is the voice tip and adapts to whether the voice extra is
-    installed; the rest are static product tips. Memoised because voice
-    availability is fixed for the life of the process.
+    The first entry is the voice tip and the last is the music tip; both adapt to
+    whether their optional dependency is installed (dictation extra / the cliamp
+    binary), showing an install hint otherwise. The middle entries are static
+    product tips. Memoised because availability is fixed for the life of the
+    process.
     """
+    from scrum_agent.music import is_music_available
     from scrum_agent.voice import is_voice_available
 
     available, _reason = is_voice_available()
@@ -54,7 +57,13 @@ def get_tips() -> tuple[str, ...]:
         if available
         else "\U0001f3a4 Tip: enable dictation with — uv sync --extra voice"
     )
-    return (voice_tip, *_GENERAL_TIPS)
+    music_available, _music_reason = is_music_available()
+    music_tip = (
+        "\U0001f3b5 Tip: press Ctrl+P for focus music · Ctrl+O to switch channel"
+        if music_available
+        else "\U0001f3b5 Tip: play focus music while you plan — brew install bjarneo/cliamp/cliamp"
+    )
+    return (voice_tip, *_GENERAL_TIPS, music_tip)
 
 
 def tip_count() -> int:

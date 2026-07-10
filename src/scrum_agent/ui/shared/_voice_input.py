@@ -118,11 +118,19 @@ def record_voice_input(live: Live, console: Console, _key, render_status=None) -
         _flash(live, console, _key, reason, _ERR_BORDER)
         return None
 
+    # Silence any background music so it doesn't bleed into the recording. Resumed
+    # the moment recording stops (below), including on the mic-failure path.
+    # # See README: "Music (cliamp)"
+    from scrum_agent import music
+
+    music.pause_for_voice()
+
     logger.info("Voice input: starting recording")
     try:
         recorder = Recorder()
     except Exception:
         logger.warning("Failed to start microphone", exc_info=True)
+        music.resume_after_voice()
         _flash(live, console, _key, "Could not access microphone", _ERR_BORDER)
         return None
 
@@ -146,6 +154,7 @@ def record_voice_input(live: Live, console: Console, _key, render_status=None) -
         cancelled = True
 
     wav_bytes = recorder.stop()
+    music.resume_after_voice()  # recording done — bring music back while we transcribe
     if cancelled:
         logger.info("Voice input: cancelled by user")
         return None

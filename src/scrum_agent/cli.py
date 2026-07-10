@@ -1156,6 +1156,10 @@ def main(argv: list[str] | None = None) -> None:
             mode_result = None
         finally:
             disable_mouse_tracking()
+            # Stop any background music daemon so it doesn't outlive the app.
+            from scrum_agent import music
+
+            music.shutdown()
             if console.is_alt_screen:
                 console.set_alt_screen(False)
         # Surface a friendly, one-line message (never a raw traceback) now that

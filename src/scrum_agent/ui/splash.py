@@ -16,11 +16,11 @@ import time
 
 import rich.box
 from rich.console import Console, Group
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 from scrum_agent.ui.shared._ascii_font import render_ascii_text
+from scrum_agent.ui.shared._music_bar import make_live
 
 # ---------------------------------------------------------------------------
 # Animation constants
@@ -137,7 +137,7 @@ def show_splash(console: Console) -> None:
     console.set_alt_screen(True)
     console.clear()
 
-    with Live(
+    with make_live(
         _build_splash_frame(text_lines, width=w, height=h, opacity=0.0),
         console=console,
         refresh_per_second=60,

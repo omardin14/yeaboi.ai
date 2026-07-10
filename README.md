@@ -143,6 +143,8 @@ scrum-agent --non-interactive --description @project-brief.txt --output html --t
 
 📊 **Usage Dashboard** — Track token consumption per session, per provider, and lifetime totals with a dedicated usage page
 
+🎵 **Focus Music** — Optional background music via [cliamp](https://github.com/bjarneo/cliamp): `Ctrl+P` play/pause, `Ctrl+O` to switch channel, from any screen. Auto-pauses while you dictate a voice note
+
 ---
 
 ## 🏁 Getting Started
@@ -594,6 +596,27 @@ scrum-agent [OPTIONS]
 | Flag | Description |
 |------|-------------|
 | `--export-questionnaire [PATH]` | Export a blank questionnaire template as Markdown |
+
+### 🎵 Music (cliamp)
+
+Play focus music while you plan. This is an **optional** integration with
+[cliamp](https://github.com/bjarneo/cliamp), a standalone terminal music player — install it
+separately (`brew install bjarneo/cliamp/cliamp`, or `go install github.com/bjarneo/cliamp@latest`).
+If the `cliamp` binary isn't on your `PATH`, the feature is disabled — the status bar shows a dim
+`♪ music: brew install bjarneo/cliamp/cliamp` hint and the controls are no-ops until you install it.
+
+Once installed, a compact player status appears on the bottom border of **every** screen, and two
+control chords work app-wide — even while typing in a text field:
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+P` | Play / pause (starts the current channel when stopped) |
+| `Ctrl+O` | Switch to the next channel (Lofi → Jazz → Classical → Ambient) |
+
+Music **auto-pauses while you record a voice note** (double-tap Space) and resumes when the
+recording ends, so it never bleeds into your dictation. The on/off state and selected channel are
+remembered between runs. Under the hood, playback runs as a headless `cliamp --daemon` process that
+is stopped automatically when you exit.
 
 <details>
 <summary>💻 In-session commands</summary>
