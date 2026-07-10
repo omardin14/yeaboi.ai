@@ -210,3 +210,90 @@ class TestGetSessionPruneDays:
     def test_invalid_falls_back_to_30(self, monkeypatch):
         monkeypatch.setenv("SESSION_PRUNE_DAYS", "abc")
         assert get_session_prune_days() == 30
+
+
+class TestStandupConfig:
+    def test_github_repo(self, monkeypatch):
+        from scrum_agent.config import get_standup_github_repo
+
+        monkeypatch.setenv("STANDUP_GITHUB_REPO", "owner/repo")
+        assert get_standup_github_repo() == "owner/repo"
+
+    def test_github_repo_default_empty(self, monkeypatch):
+        from scrum_agent.config import get_standup_github_repo
+
+        monkeypatch.delenv("STANDUP_GITHUB_REPO", raising=False)
+        assert get_standup_github_repo() == ""
+
+    def test_slack_webhook(self, monkeypatch):
+        from scrum_agent.config import get_slack_webhook_url
+
+        monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/x")
+        assert get_slack_webhook_url() == "https://hooks.slack.com/x"
+
+    def test_smtp_port_default(self, monkeypatch):
+        from scrum_agent.config import get_smtp_port
+
+        monkeypatch.delenv("STANDUP_SMTP_PORT", raising=False)
+        assert get_smtp_port() == 587
+
+    def test_smtp_port_invalid_falls_back(self, monkeypatch):
+        from scrum_agent.config import get_smtp_port
+
+        monkeypatch.setenv("STANDUP_SMTP_PORT", "notaport")
+        assert get_smtp_port() == 587
+
+    def test_smtp_sender_defaults_to_user(self, monkeypatch):
+        from scrum_agent.config import get_smtp_sender
+
+        monkeypatch.delenv("STANDUP_SMTP_SENDER", raising=False)
+        monkeypatch.setenv("STANDUP_SMTP_USER", "me@example.com")
+        assert get_smtp_sender() == "me@example.com"
+
+    def test_email_recipients_parsed(self, monkeypatch):
+        from scrum_agent.config import get_standup_email_recipients
+
+        monkeypatch.setenv("STANDUP_EMAIL_RECIPIENTS", "a@x.com, b@x.com ,")
+        assert get_standup_email_recipients() == ["a@x.com", "b@x.com"]
+
+    def test_email_recipients_empty(self, monkeypatch):
+        from scrum_agent.config import get_standup_email_recipients
+
+        monkeypatch.delenv("STANDUP_EMAIL_RECIPIENTS", raising=False)
+        assert get_standup_email_recipients() == []
+
+    def test_set_slack_webhook_persists(self, monkeypatch, tmp_path):
+        from scrum_agent import config as cfg
+
+        monkeypatch.setattr(cfg, "get_config_file", lambda: tmp_path / ".env")
+        cfg.set_slack_webhook_url("https://hooks.slack.com/persisted")
+        assert os.environ["SLACK_WEBHOOK_URL"] == "https://hooks.slack.com/persisted"
+        assert "SLACK_WEBHOOK_URL" in (tmp_path / ".env").read_text()
+
+    def test_user_name_default(self, monkeypatch):
+        from scrum_agent.config import get_standup_user_name
+
+        monkeypatch.delenv("STANDUP_USER_NAME", raising=False)
+        assert get_standup_user_name() == "Me"
+
+    def test_user_name_from_env(self, monkeypatch):
+        from scrum_agent.config import get_standup_user_name
+
+        monkeypatch.setenv("STANDUP_USER_NAME", "Omar")
+        assert get_standup_user_name() == "Omar"
+
+    def test_is_llm_configured_anthropic(self, monkeypatch):
+        from scrum_agent.config import is_llm_configured
+
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+        assert is_llm_configured() == (True, "ANTHROPIC_API_KEY not set")
+
+    def test_is_llm_configured_missing_key(self, monkeypatch):
+        from scrum_agent.config import is_llm_configured
+
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        ok, msg = is_llm_configured()
+        assert ok is False
+        assert "ANTHROPIC_API_KEY" in msg

@@ -54,6 +54,7 @@ LEGACY_PROJECTS_FILE = ROOT_DIR / "projects.json"
 EXPORTS_DIR = ROOT_DIR / "exports"
 ANALYSIS_EXPORTS_DIR = EXPORTS_DIR / "analysis"
 PLANNING_EXPORTS_DIR = EXPORTS_DIR / "planning"
+STANDUP_EXPORTS_DIR = EXPORTS_DIR / "standup"
 
 # ---------------------------------------------------------------------------
 # Logs
@@ -61,6 +62,7 @@ PLANNING_EXPORTS_DIR = EXPORTS_DIR / "planning"
 
 LOGS_DIR = ROOT_DIR / "logs"
 TUI_LOGS_DIR = LOGS_DIR / "tui"
+STANDUP_LOGS_DIR = LOGS_DIR / "standup"
 ANALYSIS_LOGS_DIR = LOGS_DIR / "analysis"
 PLANNING_LOGS_DIR = LOGS_DIR / "planning"
 
@@ -143,6 +145,13 @@ def get_planning_export_dir(project_key: str) -> Path:
     return d
 
 
+def get_standup_export_dir(project_key: str) -> Path:
+    """Return the Daily Standup export directory for a project, creating it if needed."""
+    d = STANDUP_EXPORTS_DIR / project_key.lower()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_tui_log_path() -> Path:
     """Return the main TUI log path."""
     TUI_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -159,6 +168,12 @@ def get_planning_log_dir() -> Path:
     """Return the planning session logs directory, creating it if needed."""
     PLANNING_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return PLANNING_LOGS_DIR
+
+
+def get_standup_log_dir() -> Path:
+    """Return the Daily Standup logs directory, creating it if needed."""
+    STANDUP_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return STANDUP_LOGS_DIR
 
 
 def migrate_legacy_paths() -> None:

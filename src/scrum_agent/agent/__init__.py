@@ -17,15 +17,24 @@ from scrum_agent.agent.nodes import (
     story_writer,
     task_decomposer,
 )
-from scrum_agent.agent.state import Discipline, ProjectAnalysis, PromptQualityRating, ScrumState
+from scrum_agent.agent.state import (
+    Discipline,
+    MemberUpdate,
+    ProjectAnalysis,
+    PromptQualityRating,
+    ScrumState,
+    StandupReport,
+)
 from scrum_agent.prompts.intake import AnswerSource
 
 __all__ = [
     "AnswerSource",
     "Discipline",
+    "MemberUpdate",
     "ProjectAnalysis",
     "PromptQualityRating",
     "ScrumState",
+    "StandupReport",
     "call_model",
     "create_graph",
     "feature_generator",

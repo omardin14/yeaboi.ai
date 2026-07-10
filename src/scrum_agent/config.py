@@ -212,6 +212,88 @@ def get_confluence_space_key() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Daily Standup configuration
+# ---------------------------------------------------------------------------
+# Non-secret standup settings (schedule time, channels) live in the SQLite
+# standup_config table, keyed by session. Secrets and single-value integration
+# creds live here in .env, same as the other integrations. get_standup_* getters
+# read env; the two secret-bearing setters use dotenv.set_key like set_tips_enabled.
+
+
+def get_standup_github_repo() -> str:
+    """Return the GitHub repo (owner/repo or URL) to scan for standup code activity."""
+    return os.getenv("STANDUP_GITHUB_REPO", "") or ""
+
+
+def get_slack_webhook_url() -> str:
+    """Return the Slack incoming-webhook URL for standup delivery, or '' if unset."""
+    return os.getenv("SLACK_WEBHOOK_URL", "") or ""
+
+
+def set_slack_webhook_url(url: str) -> None:
+    """Persist the Slack webhook URL to ~/.scrum-agent/.env and apply it now."""
+    from dotenv import set_key
+
+    config_file = get_config_file()
+    set_key(str(config_file), "SLACK_WEBHOOK_URL", url)
+    os.environ["SLACK_WEBHOOK_URL"] = url
+    logger.info("Slack webhook URL persisted to %s", config_file)
+
+
+def get_smtp_host() -> str:
+    """Return the SMTP host for standup email delivery, or '' if unset."""
+    return os.getenv("STANDUP_SMTP_HOST", "") or ""
+
+
+def get_smtp_port() -> int:
+    """Return the SMTP port (default 587)."""
+    try:
+        return int(os.getenv("STANDUP_SMTP_PORT", "587") or "587")
+    except ValueError:
+        return 587
+
+
+def get_smtp_user() -> str:
+    """Return the SMTP username, or '' if unset."""
+    return os.getenv("STANDUP_SMTP_USER", "") or ""
+
+
+def get_smtp_password() -> str:
+    """Return the SMTP password, or '' if unset."""
+    return os.getenv("STANDUP_SMTP_PASSWORD", "") or ""
+
+
+def set_smtp_password(password: str) -> None:
+    """Persist the SMTP password to ~/.scrum-agent/.env and apply it now."""
+    from dotenv import set_key
+
+    config_file = get_config_file()
+    set_key(str(config_file), "STANDUP_SMTP_PASSWORD", password)
+    os.environ["STANDUP_SMTP_PASSWORD"] = password
+    logger.info("SMTP password persisted to %s", config_file)
+
+
+def get_smtp_sender() -> str:
+    """Return the From address for standup emails (defaults to the SMTP user)."""
+    return os.getenv("STANDUP_SMTP_SENDER", "") or get_smtp_user()
+
+
+def get_standup_email_recipients() -> list[str]:
+    """Return the standup email recipient list, parsed from a comma-separated env var."""
+    raw = os.getenv("STANDUP_EMAIL_RECIPIENTS", "") or ""
+    return [addr.strip() for addr in raw.split(",") if addr.strip()]
+
+
+def get_standup_user_name() -> str:
+    """Return the display name for the current user's self-reported standup update.
+
+    Reads STANDUP_USER_NAME; defaults to "Me" so a solo user still gets a sensible
+    label without configuration.
+    """
+    return os.getenv("STANDUP_USER_NAME", "").strip() or "Me"
+
+
+# ---------------------------------------------------------------------------
 # LLM provider configuration
 # ---------------------------------------------------------------------------
 
@@ -277,6 +359,27 @@ def get_openai_api_key() -> str | None:
 def get_google_api_key() -> str | None:
     """Return the Google AI API key, or None if not set."""
     return os.getenv("GOOGLE_API_KEY") or None
+
+
+def is_llm_configured() -> tuple[bool, str]:
+    """Return (ok, message) for whether the selected LLM provider has credentials.
+
+    Cheap, no network call — just checks the env var the active provider needs.
+    Callers (e.g. the standup engine) use this to surface a clear "set your API
+    key" message instead of silently degrading. Bedrock uses IAM, so a configured
+    AWS region/profile counts as ready.
+    """
+    provider = get_llm_provider()
+    if provider == "anthropic":
+        return (bool(os.getenv("ANTHROPIC_API_KEY")), "ANTHROPIC_API_KEY not set")
+    if provider == "openai":
+        return (bool(get_openai_api_key()), "OPENAI_API_KEY not set")
+    if provider == "google":
+        return (bool(get_google_api_key()), "GOOGLE_API_KEY not set")
+    if provider == "bedrock":
+        ok = bool(os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or get_aws_profile())
+        return (ok, "AWS credentials/region not configured for Bedrock")
+    return (bool(os.getenv("ANTHROPIC_API_KEY")), f"No API key configured for provider '{provider}'")
 
 
 def get_voice_model() -> str:

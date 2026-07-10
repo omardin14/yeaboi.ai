@@ -380,3 +380,60 @@ def confluence_update_page(
     except Exception as e:
         logger.error("Unexpected error in confluence_update_page: %s", e)
         return f"Error: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Recent-activity helper for Daily Standup mode
+# ---------------------------------------------------------------------------
+# Plain function (not @tool) the standup collector calls directly. Returns
+# structured data and degrades gracefully to [] on error/missing config.
+# See README: "Daily Standup" — recent-activity collection
+
+
+def confluence_recent_pages(space_key: str = "", days: int = 1) -> list[dict]:
+    """Return Confluence pages modified within the last ``days`` days.
+
+    Each item: {author, kind='page', title, timestamp, key(id)}. Returns [] when
+    Confluence is unconfigured or the CQL query fails.
+    """
+    logger.info("confluence_recent_pages: space=%r days=%d", space_key, days)
+    conf = _make_confluence_client()
+    if conf is None:
+        logger.warning("confluence_recent_pages skipped — Confluence not configured")
+        return []
+
+    key = space_key.strip() or (get_confluence_space_key() or "")
+    space_filter = f' AND space = "{key}"' if key else ""
+    try:
+        # CQL date math: lastModified >= now("-Nd"). Order newest first.
+        cql = f'type = page AND lastModified >= now("-{int(days)}d"){space_filter} ORDER BY lastModified DESC'
+        results = conf.cql(cql, limit=50, expand="history.lastUpdated")
+        pages = results.get("results", []) if isinstance(results, dict) else []
+        items: list[dict] = []
+        for page in pages:
+            content = page.get("content", page)  # cql may nest the page under "content"
+            history = content.get("history", {}) if isinstance(content, dict) else {}
+            last_updated = history.get("lastUpdated", {}) if isinstance(history, dict) else {}
+            author = last_updated.get("by", {}).get("displayName", "") if isinstance(last_updated, dict) else ""
+            items.append(
+                {
+                    "author": author,
+                    "kind": "page",
+                    "title": content.get("title", page.get("title", "Untitled")),
+                    "timestamp": (last_updated.get("when", "") or "")[:19] if isinstance(last_updated, dict) else "",
+                    "key": content.get("id", page.get("id", "")),
+                }
+            )
+        logger.info("confluence_recent_pages: %d page(s) in last %d day(s)", len(items), days)
+        return items
+    except HTTPError as e:
+        code = getattr(getattr(e, "response", None), "status_code", 0)
+        if code in (401, 403):
+            from scrum_agent.standup.errors import StandupSourceError
+
+            raise StandupSourceError("confluence", "authentication failed — check Atlassian API token") from e
+        logger.warning("confluence_recent_pages failed: %s", _confluence_error_msg(e))
+        return []
+    except Exception as e:
+        logger.warning("confluence_recent_pages unexpected error: %s", e)
+        return []

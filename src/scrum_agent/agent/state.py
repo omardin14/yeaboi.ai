@@ -260,6 +260,48 @@ class Sprint:
     story_ids: tuple[str, ...]
 
 
+# See README: "Session Management" — Daily Standup mode artifacts
+#
+# The Daily Standup mode produces a StandupReport for a given day: one
+# MemberUpdate per team member (either self-reported by the person or inferred
+# by the LLM from their recent ticket/code activity), a team-level narrative,
+# and a deterministic sprint-progress confidence score. Like every other
+# artifact in this module it is a FROZEN dataclass — immutable once built and
+# serializable via asdict() — so it round-trips cleanly through the session
+# store. Every field has a default so old serialized reports still deserialize
+# (see CLAUDE.md "Frozen dataclass backward compatibility").
+@dataclass(frozen=True)
+class MemberUpdate:
+    """One team member's standup update for a given day."""
+
+    name: str = ""
+    summary: str = ""  # what they did — inferred from activity or self-reported
+    blockers: str = ""  # anything blocking them (empty if none)
+    source: str = "inferred"  # "inferred" (LLM from activity) | "self-reported" (user-typed)
+
+
+@dataclass(frozen=True)
+class StandupReport:
+    """A full daily standup for one project session on one day.
+
+    Produced by standup/engine.py:run_standup(). Rendered to the TUI and
+    delivered to configured channels (terminal/desktop/Slack/email).
+    """
+
+    date: str = ""  # ISO date the standup covers, e.g. "2026-07-10"
+    session_id: str = ""
+    sprint_name: str = ""
+    sprint_day: int = 0  # which working day of the sprint we're on (1-indexed)
+    sprint_total_days: int = 0  # total working days in the sprint
+    confidence_pct: int = 0  # 0-100 confidence we'll hit the sprint goal
+    confidence_label: str = ""  # "On track" | "At risk" | "Behind" | "Insufficient data"
+    confidence_rationale: str = ""  # short human-readable explanation
+    team_summary: str = ""  # LLM-synthesized team-level narrative
+    member_updates: tuple[MemberUpdate, ...] = ()
+    activity_counts: tuple[tuple[str, int], ...] = ()  # (source, count) — tuple so it stays frozen/serializable
+    warnings: tuple[str, ...] = ()  # surfaced problems (missing API key, source 401/403) — shown, never silent
+
+
 # See README: "Scrum Standards" — prompt quality rating
 @dataclass(frozen=True)
 class PromptQualityRating:

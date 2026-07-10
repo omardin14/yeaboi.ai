@@ -1039,3 +1039,62 @@ class TestClearSessions:
         console = MagicMock()
         _clear_sessions(console)
         console.print.assert_called_with("[hint]No saved sessions found.[/hint]")
+
+
+class TestStandupCLI:
+    def test_standup_run_flag_parses(self):
+        parser = build_parser()
+        args = parser.parse_args(["--standup-run"])
+        assert args.standup_run is True
+
+    def test_standup_run_default_false(self):
+        parser = build_parser()
+        args = parser.parse_args([])
+        assert args.standup_run is False
+
+    def test_standup_session_and_output(self):
+        parser = build_parser()
+        args = parser.parse_args(["--standup-run", "--standup-session", "s1", "--standup-output", "slack"])
+        assert args.standup_session == "s1"
+        assert args.standup_output == "slack"
+
+    def test_standup_output_rejects_bad_channel(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--standup-output", "carrier-pigeon"])
+
+    def test_run_standup_no_session_returns_2(self, tmp_path, monkeypatch):
+        from scrum_agent import cli
+
+        monkeypatch.setattr("scrum_agent.paths.get_db_path", lambda: tmp_path / "sessions.db")
+        monkeypatch.setattr("scrum_agent.paths.get_standup_log_dir", lambda: tmp_path)
+        parser = build_parser()
+        args = parser.parse_args(["--standup-run"])
+        assert cli._run_standup(args) == 2
+
+    def test_run_standup_invokes_engine(self, tmp_path, monkeypatch):
+        from scrum_agent import cli
+        from scrum_agent.agent.state import StandupReport
+        from scrum_agent.sessions import SessionStore
+
+        db = tmp_path / "sessions.db"
+        with SessionStore(db) as store:
+            store.create_session("s1", project_name="Demo")
+        monkeypatch.setattr("scrum_agent.paths.get_db_path", lambda: db)
+        monkeypatch.setattr("scrum_agent.paths.get_standup_log_dir", lambda: tmp_path)
+
+        calls = {}
+
+        def fake_run(session_id, channels=None, deliver=True):
+            calls["session_id"] = session_id
+            calls["channels"] = channels
+            return StandupReport(session_id=session_id, sprint_day=2, sprint_total_days=10)
+
+        monkeypatch.setattr("scrum_agent.standup.engine.run_standup", fake_run)
+        parser = build_parser()
+        args = parser.parse_args(["--standup-run", "--standup-session", "s1", "--standup-output", "all"])
+        rc = cli._run_standup(args)
+        assert rc == 0
+        assert calls["session_id"] == "s1"
+        # "all" expands to every channel
+        assert set(calls["channels"]) == {"terminal", "desktop", "slack", "email"}
