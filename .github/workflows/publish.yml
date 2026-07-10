@@ -1,69 +1,86 @@
 name: Publish to PyPI
 
+# Auto-release on version bump. On every push to main, publish to PyPI *iff* the
+# version in pyproject.toml has no matching git tag yet. So releasing is just:
+# bump `version` in pyproject.toml and merge to main — CI publishes, tags, and
+# cuts a GitHub Release. Normal merges (version unchanged) are a cheap no-op.
+#
+# The workflow filename MUST stay "publish.yml" to keep PyPI's OIDC trusted-
+# publisher configuration valid.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  workflow_dispatch: {} # allow a manual re-run from the Actions tab
 
 permissions:
-  contents: write   # GitHub Release
-  id-token: write   # PyPI trusted publishing (OIDC)
+  contents: read
 
 jobs:
+  check:
+    name: Check for version bump
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.v.outputs.should_release }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history + tags to check for an existing release
+      - id: v
+        run: |
+          VERSION=$(grep -m1 -E '^version = ' pyproject.toml | sed -E 's/^version = "([^"]+)".*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$VERSION is already released — nothing to publish."
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::New version v$VERSION detected — building and publishing."
+          fi
+
   test:
     name: Lint & Test
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Lint
-        run: make lint
-
-      - name: Test
-        run: make test
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --extra dev
+      - run: make lint
+      - run: make test
 
   publish:
     name: Build & Publish to PyPI
-    needs: test
+    needs: [check, test]
+    if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      id-token: write # PyPI trusted publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Build
-        run: uv build
-
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true # idempotent: re-runs won't fail if already published
 
   release:
-    name: GitHub Release
-    needs: publish
+    name: Tag & GitHub Release
+    needs: [check, publish]
+    if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag + GitHub Release
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create GitHub Release
+      - name: Create tag and GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.check.outputs.version }}
+          name: v${{ needs.check.outputs.version }}
           generate_release_notes: true
-
-  # Note: no Homebrew tap update. scrum-agent can't be packaged for Homebrew
-  # (the sqlite-vec dependency ships no sdist), so the tap formula is disabled
-  # and steers users to `uv tool install` / `pipx install`. Distribution is
-  # PyPI-only via the `publish` job above.
