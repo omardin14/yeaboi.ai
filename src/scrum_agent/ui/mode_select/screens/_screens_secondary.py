@@ -3331,7 +3331,9 @@ def _build_standup_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(["Generate", "My Update", "Configure", "Back"], action_sel)
+    btn_top, btn_mid, btn_bot = build_action_buttons(
+        ["Generate", "My Update", "Configure", "Export", "Back"], action_sel
+    )
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable

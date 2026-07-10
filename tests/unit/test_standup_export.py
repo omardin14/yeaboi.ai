@@ -1,0 +1,90 @@
+"""Unit tests for Daily Standup Markdown + HTML export."""
+
+
+from scrum_agent.agent.state import MemberUpdate, StandupReport
+from scrum_agent.standup import export
+from scrum_agent.standup.export import build_standup_html, build_standup_markdown, export_standup
+
+
+def _report(**over) -> StandupReport:
+    base = dict(
+        date="2026-07-10",
+        session_id="demo",
+        sprint_name="Sprint 5",
+        sprint_day=3,
+        sprint_total_days=10,
+        confidence_pct=82,
+        confidence_label="At risk",
+        confidence_rationale="behind ideal burn",
+        team_summary="steady progress",
+        member_updates=(
+            MemberUpdate(name="Alice", summary="login page", source="inferred"),
+            MemberUpdate(name="Bob", summary="paired on auth", blockers="waiting on review", source="self-reported"),
+        ),
+        activity_counts=(("github", 2), ("jira", 1)),
+        warnings=("Jira: authentication failed — check token",),
+    )
+    base.update(over)
+    return StandupReport(**base)
+
+
+class TestMarkdown:
+    def test_contains_key_sections(self):
+        md = build_standup_markdown(_report())
+        assert "# Daily Standup — 2026-07-10" in md
+        assert "day 3 of 10" in md
+        assert "**Confidence:** At risk (82%)" in md
+        assert "## ⚠ Notices" in md
+        assert "Jira: authentication failed" in md
+        assert "## Team Summary" in md
+        assert "### Bob _(you)_" in md
+        assert "**Blocker:** waiting on review" in md
+        assert "github: 2, jira: 1" in md
+
+    def test_empty_report(self):
+        md = build_standup_markdown(StandupReport(date="2026-07-10"))
+        assert "# Daily Standup" in md
+        assert "_No individual updates._" in md
+
+
+class TestHtml:
+    def test_selfcontained_and_escaped(self):
+        rep = _report(team_summary="<script>alert(1)</script>")
+        html = build_standup_html(rep)
+        assert html.startswith("<!DOCTYPE html>")
+        assert "<style>" in html  # inline CSS, self-contained
+        assert "data-table" in html
+        assert "At risk" in html
+        assert "Jira: authentication failed" in html
+        # user content is escaped, not injected
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_empty_report(self):
+        html = build_standup_html(StandupReport(date="2026-07-10"))
+        assert "No individual updates." in html
+
+
+class TestExportWrites:
+    def test_writes_md_and_html(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("scrum_agent.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
+        paths = export_standup(_report(), project_name="My Demo Project")
+        assert paths["markdown"].exists() and paths["markdown"].suffix == ".md"
+        assert paths["html"].exists() and paths["html"].suffix == ".html"
+        # slug of project name is used for the subdir
+        assert paths["markdown"].parent.name == "my-demo-project"
+        assert "Daily Standup" in paths["markdown"].read_text()
+        assert paths["html"].read_text().startswith("<!DOCTYPE html>")
+
+    def test_rerun_same_day_overwrites(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("scrum_agent.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
+        export_standup(_report(confidence_pct=50), project_name="Demo")
+        paths = export_standup(_report(confidence_pct=90), project_name="Demo")
+        # one dated file per day, latest wins
+        files = list(paths["markdown"].parent.glob("standup-2026-07-10.*"))
+        assert len(files) == 2  # .md + .html
+        assert "(90%)" in paths["markdown"].read_text()
+
+    def test_slug_helper(self):
+        assert export._slug("My Project!!") == "my-project"
+        assert export._slug("") == "standup"

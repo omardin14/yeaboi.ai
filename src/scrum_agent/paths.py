@@ -54,6 +54,7 @@ LEGACY_PROJECTS_FILE = ROOT_DIR / "projects.json"
 EXPORTS_DIR = ROOT_DIR / "exports"
 ANALYSIS_EXPORTS_DIR = EXPORTS_DIR / "analysis"
 PLANNING_EXPORTS_DIR = EXPORTS_DIR / "planning"
+STANDUP_EXPORTS_DIR = EXPORTS_DIR / "standup"
 
 # ---------------------------------------------------------------------------
 # Logs
@@ -140,6 +141,13 @@ def get_analysis_export_dir(project_key: str) -> Path:
 def get_planning_export_dir(project_key: str) -> Path:
     """Return the planning export directory for a project, creating it if needed."""
     d = PLANNING_EXPORTS_DIR / project_key.lower()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_standup_export_dir(project_key: str) -> Path:
+    """Return the Daily Standup export directory for a project, creating it if needed."""
+    d = STANDUP_EXPORTS_DIR / project_key.lower()
     d.mkdir(parents=True, exist_ok=True)
     return d
 

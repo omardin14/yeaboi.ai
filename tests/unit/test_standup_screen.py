@@ -74,7 +74,7 @@ class TestBuildStandupScreen:
 
     def test_action_selection_variants(self):
         data = {"report": _report(), "schedule": {}}
-        for sel in range(4):
+        for sel in range(5):  # Generate, My Update, Configure, Export, Back
             assert isinstance(_build_standup_screen(data, width=80, height=24, action_sel=sel), Panel)
 
     def test_report_renders_as_themed_rows_not_emoji(self):

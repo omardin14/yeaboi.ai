@@ -189,6 +189,21 @@ class TestRunStandup:
         report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
         assert any("Jira: authentication failed" in w for w in report.warnings)
 
+    def test_auto_exports_md_and_html(self, monkeypatch, db_path, seeded_session, tmp_path):
+        _patch_common(monkeypatch, items=[], counts=[])
+        monkeypatch.setattr("scrum_agent.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
+        llm_json = json.dumps(
+            {"members": [{"name": "Alice", "summary": "x"}, {"name": "Bob", "summary": "y"}], "team_summary": "ok"}
+        )
+        monkeypatch.setattr(
+            "scrum_agent.agent.llm.get_llm",
+            lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
+        )
+        engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        # A dated .md + .html were written under the standup exports dir.
+        exports = list((tmp_path / "exports" / "standup").rglob("standup-2026-07-10.*"))
+        assert {p.suffix for p in exports} == {".md", ".html"}
+
     def test_records_run_to_history(self, monkeypatch, db_path, seeded_session):
         _patch_common(monkeypatch, items=[], counts=[])
         # No members with activity and no self-reports besides roster → LLM still called for inferred roster.

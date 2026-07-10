@@ -1172,6 +1172,23 @@ def _standup_generate(session_id: str) -> str:
         return f"Generate failed: {e}"
 
 
+def _standup_export(session_id: str, data: dict) -> str:
+    """Export the latest standup report as Markdown + HTML. Returns a status message."""
+    from scrum_agent.standup.export import export_standup
+    from scrum_agent.standup.store import StandupStore
+
+    with StandupStore(_ana_dbp) as store:
+        report = store.get_latest_report(session_id)
+    if report is None:
+        return "Nothing to export yet — press Generate first."
+    try:
+        paths = export_standup(report, project_name=data.get("session_name", "") or session_id)
+        return f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
+    except Exception as e:
+        logger.error("standup export failed: %s", e, exc_info=True)
+        return f"Export failed: {e}"
+
+
 def _standup_generate_flow(
     console: Console, live, read_key, frame_time, supports_timeout, session_id: str
 ) -> str | None:
@@ -1388,7 +1405,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
 
     data = _collect_standup_data()
     scroll, sel = 0, 0
-    n_buttons = 4  # Generate, My Update, Configure, Back
+    n_buttons = 5  # Generate, My Update, Configure, Export, Back
 
     def _render() -> None:
         w, h = console.size
@@ -1409,7 +1426,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
             sel = min(n_buttons - 1, sel + 1)
         elif k in ("enter", " "):
             session_id = data.get("session_id", "")
-            if sel == 3 or not session_id:  # Back (or nothing to act on)
+            if sel == 4 or not session_id:  # Back (or nothing to act on)
                 if not session_id:
                     logger.info("standup: no session available — returning to mode select")
                 break
@@ -1426,6 +1443,9 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                     scroll = 0
                 else:
                     data = _collect_standup_data()
+            elif sel == 3:  # Export — write the latest report as Markdown + HTML
+                data = _collect_standup_data(message=_standup_export(session_id, data))
+                scroll = 0
             else:  # My Update / Configure — in-TUI themed input (stays inside Live)
                 try:
                     if sel == 1:

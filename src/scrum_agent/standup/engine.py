@@ -333,6 +333,16 @@ def run_standup(
     with StandupStore(db_path) as store:
         store.record_run(report, delivery_status=delivery_status, status=status)
 
+    # Persist readable output (Markdown + HTML) alongside the logs, so a standup's
+    # result is a shareable document — not something you can only reconstruct from
+    # a log file. Best-effort: never fail the run over an export I/O error.
+    try:
+        from scrum_agent.standup.export import export_standup
+
+        export_standup(report, project_name=state.get("project_name", "") or session_id)
+    except Exception as e:
+        logger.warning("standup export failed: %s", e)
+
     logger.info(
         "run_standup complete: session=%s day=%d/%d confidence=%d%% status=%s",
         session_id,

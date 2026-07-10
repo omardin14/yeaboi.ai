@@ -1206,3 +1206,9 @@ _Bring Azure DevOps to full feature parity with Jira — read board/velocity, cr
 - [x] Enter the STANDUP time; job fires `lead_minutes` earlier (default 10, editable). `standup/scheduler.run_time()`; `lead_minutes` column on standup_config
 - [x] Surface API-key / source 401-403 as ⚠ Notices instead of empty content: `standup/errors.StandupSourceError`, `ActivityBundle.errors`, `config.is_llm_configured()`, `StandupReport.warnings` rendered in dashboard + delivery; LLM auth no longer re-raises
 - [x] Tests: interactive (TTY fallback/confirm/timeout), run_time/lead, warnings (no-key + auth + source), lead_minutes persistence, notices render, config getters
+
+## Phase 23: Daily Standup Exports
+- [x] `standup/export.py` — StandupReport → Markdown + self-contained HTML (reuses plan `_CSS`); `paths.get_standup_export_dir()` + `STANDUP_EXPORTS_DIR`
+- [x] Auto-export on every run (TUI/headless/scheduled) to `~/.scrum-agent/exports/standup/<project>/standup-YYYY-MM-DD.{md,html}` (best-effort, in `engine.run_standup`)
+- [x] **Export** button on the standup page (`_standup_export`) — re-writes the latest report on demand, like the other pages
+- [x] Tests: markdown/html content + escaping, empty report, auto-export writes files, re-run overwrite, slug helper, 5-button render

@@ -189,6 +189,7 @@ src/scrum_agent/
     errors.py           — StandupSourceError (surfaces source 401/403 as warnings)
     scheduler.py        — OS-native scheduling (launchd on macOS, crontab on Linux); lead-time aware
     render.py           — StandupReport → plaintext (Slack/email) + Rich (terminal/TUI)
+    export.py           — StandupReport → Markdown + self-contained HTML (auto-saved every run; Export button)
     store.py            — StandupStore (standup_config/history/updates tables, schema v6)
   tools/
     __init__.py         — get_tools() factory (lazy imports all tool modules)
@@ -488,7 +489,7 @@ The `src/scrum_agent/standup/` package implements a daily scrum that detects tea
 
 **Persistence**: `store.py` defines `_STANDUP_SCHEMA` (schema v6 in `sessions.py`) with `standup_config` / `standup_history` / `standup_updates`. `StandupReport`/`MemberUpdate` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat).
 
-**TUI**: the magenta **Standup** card → `_build_standup_screen` + `_run_standup_page` in `ui/mode_select/`, with **Generate / My Update / Configure / Back** actions. Logs go to `~/.scrum-agent/logs/standup/`.
+**TUI**: the magenta **Standup** card → `_build_standup_screen` + `_run_standup_page` in `ui/mode_select/`, with **Generate / My Update / Configure / Export / Back** actions. Logs go to `~/.scrum-agent/logs/standup/`; readable output (Markdown + HTML) is auto-saved to `~/.scrum-agent/exports/standup/<project>/` every run and via the Export button (`export.py`, `paths.get_standup_export_dir`).
 
 ## Deployment (AWS Lightsail)
 

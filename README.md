@@ -857,6 +857,10 @@ Non-secret settings (time, channels) live per-session in SQLite. Secrets/creds g
 
 Everything uses the Python standard library (Slack via `urllib`, email via `smtplib`, desktop via `osascript`/`notify-send`) — **no new dependencies**.
 
+### Exports
+
+Every standup — generated in the TUI, run headlessly, or fired on a schedule — is auto-saved as **Markdown and self-contained HTML** under `~/.scrum-agent/exports/standup/<project>/` (dated `standup-YYYY-MM-DD.md` / `.html`), so the output is a shareable document rather than something you reconstruct from logs. The **Export** button on the page re-writes the latest report on demand, just like the Analysis and Planning pages.
+
 ### Try it
 
 ```bash
@@ -864,7 +868,7 @@ scrum-agent                                                   # open the Standup
 scrum-agent --standup-run --standup-session latest --standup-output terminal
 ```
 
-Standup runs are logged to `~/.scrum-agent/logs/standup/` and persisted to the `standup_history` table.
+Standup runs are logged to `~/.scrum-agent/logs/standup/`, exported to `~/.scrum-agent/exports/standup/`, and persisted to the `standup_history` table.
 
 ---
 
