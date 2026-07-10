@@ -52,8 +52,7 @@ def _eq_bars(count: int = 4) -> str:
     """
     t = time.monotonic()
     return "".join(
-        _EQ_CHARS[int((math.sin(t * (6.0 + 1.7 * i) + i) + 1.0) / 2.0 * (len(_EQ_CHARS) - 1))]
-        for i in range(count)
+        _EQ_CHARS[int((math.sin(t * (6.0 + 1.7 * i) + i) + 1.0) / 2.0 * (len(_EQ_CHARS) - 1))] for i in range(count)
     )
 
 
