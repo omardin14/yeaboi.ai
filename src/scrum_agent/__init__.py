@@ -2,6 +2,8 @@
 
 import logging
 import warnings
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 # Suppress LangChain's Pydantic V1 compatibility warning on Python 3.14+.
 # langchain-core internally imports pydantic.v1 shims which don't work on
@@ -64,4 +66,9 @@ _ls_logger = logging.getLogger("langsmith")
 _ls_logger.addHandler(_ls_handler)
 _ls_logger.propagate = False  # stop records reaching the root StreamHandler
 
-__version__ = "1.3.0"
+# Single source of truth: the version lives only in pyproject.toml and is read
+# here from the installed package metadata. Bump pyproject.toml to release.
+try:
+    __version__ = _pkg_version("scrum-agent")
+except PackageNotFoundError:  # running from a raw source tree without an install
+    __version__ = "0.0.0+dev"
