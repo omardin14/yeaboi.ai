@@ -12,7 +12,9 @@ from scrum_agent.config import (
     get_config_file,
     get_session_prune_days,
     is_langsmith_enabled,
+    is_tips_enabled,
     load_user_config,
+    set_tips_enabled,
 )
 
 
@@ -43,6 +45,54 @@ def test_langsmith_disabled_when_tracing_off(monkeypatch):
     monkeypatch.setenv("LANGSMITH_TRACING", "false")
     monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-test-key")
     assert is_langsmith_enabled() is False
+
+
+def test_tips_enabled_by_default(monkeypatch):
+    monkeypatch.delenv("TIPS_ENABLED", raising=False)
+    assert is_tips_enabled() is True
+
+
+def test_tips_enabled_true_value(monkeypatch):
+    monkeypatch.setenv("TIPS_ENABLED", "true")
+    assert is_tips_enabled() is True
+
+
+def test_tips_disabled_when_false(monkeypatch):
+    monkeypatch.setenv("TIPS_ENABLED", "false")
+    assert is_tips_enabled() is False
+
+
+def test_tips_disabled_case_insensitive(monkeypatch):
+    monkeypatch.setenv("TIPS_ENABLED", "FALSE")
+    assert is_tips_enabled() is False
+
+
+def test_set_tips_enabled_round_trips(monkeypatch, tmp_path):
+    # Point config at a temp file so we don't touch the real ~/.scrum-agent/.env.
+    config_file = tmp_path / ".env"
+    monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
+    monkeypatch.delenv("TIPS_ENABLED", raising=False)
+
+    set_tips_enabled(False)
+    assert os.environ["TIPS_ENABLED"] == "false"
+    assert "TIPS_ENABLED" in config_file.read_text()
+    assert is_tips_enabled() is False
+
+    set_tips_enabled(True)
+    assert os.environ["TIPS_ENABLED"] == "true"
+    assert is_tips_enabled() is True
+
+
+def test_set_tips_enabled_preserves_other_keys(monkeypatch, tmp_path):
+    config_file = tmp_path / ".env"
+    config_file.write_text("ANTHROPIC_API_KEY=sk-existing\n")
+    monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
+
+    set_tips_enabled(False)
+
+    contents = config_file.read_text()
+    assert "ANTHROPIC_API_KEY=sk-existing" in contents
+    assert "TIPS_ENABLED" in contents
 
 
 class TestProxyDetection:

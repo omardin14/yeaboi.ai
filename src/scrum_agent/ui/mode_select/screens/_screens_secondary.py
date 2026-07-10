@@ -3439,6 +3439,9 @@ def _build_settings_screen(
     _heading("Advanced")
     _row("Log Level", config_data.get("LOG_LEVEL", "WARNING"))
     _row("Session Prune Days", config_data.get("SESSION_PRUNE_DAYS", "30"))
+    # Tips default on; only the literal "false" disables them (matches is_tips_enabled).
+    _tips_on = config_data.get("TIPS_ENABLED", "").strip().lower() != "false"
+    _row("Tips", "on" if _tips_on else "off", value_style=theme.good if _tips_on else theme.muted)
     langsmith = "enabled" if config_data.get("LANGSMITH_TRACING") == "true" else "disabled"
     _row("LangSmith", langsmith)
     _row("Config File", config_data.get("_config_path", ""))

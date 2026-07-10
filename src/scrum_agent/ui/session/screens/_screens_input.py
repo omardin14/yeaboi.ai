@@ -25,12 +25,17 @@ _INPUT_BOX_W_MAX = 74
 def _voice_hint() -> str:
     """Return a discoverability suffix for voice input on text-entry screens.
 
-    Always advertises the feature so users know it exists. When the voice extra
-    is installed it prompts to speak; otherwise it shows how to enable it —
-    hiding it entirely (the old behaviour) meant the feature was invisible to
-    anyone who hadn't already set it up.
+    Advertises the feature so users know it exists. When the voice extra is
+    installed it prompts to speak; otherwise it shows how to enable it — hiding
+    it entirely meant the feature was invisible to anyone who hadn't set it up.
+    Returns "" when tips are switched off, so disabling tips hides this inline
+    hint too (the double-tap Space shortcut still works regardless).
     """
+    from scrum_agent.config import is_tips_enabled
     from scrum_agent.voice import is_voice_available
+
+    if not is_tips_enabled():
+        return ""
 
     available, _reason = is_voice_available()
     if available:
