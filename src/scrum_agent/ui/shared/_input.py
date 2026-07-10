@@ -230,6 +230,20 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
             return "alt+enter"
         if ch == "\x13":
             return "ctrl+s"
+        # Ctrl+P / Ctrl+O — global background-music controls. Handled here (the one
+        # input chokepoint every screen's loop reads through) so music works app-wide
+        # with no per-loop changes, and works even inside text fields because these
+        # control bytes are never printable text. The action mutates music state and
+        # nudges the status bar; we return "" (idle) so loops just re-render.
+        # # See README: "Music (cliamp)"
+        if ch in ("\x10", "\x0f"):
+            from scrum_agent import music
+
+            if ch == "\x10":
+                music.toggle()  # Ctrl+P → play/pause
+            else:
+                music.cycle_channel()  # Ctrl+O → next channel
+            return ""
         if ch == "\x03":
             raise KeyboardInterrupt
         if ch.isprintable():

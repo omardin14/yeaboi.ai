@@ -16,7 +16,6 @@ import math
 import time
 
 from rich.console import Console
-from rich.live import Live
 
 from scrum_agent.ui.provider_select._config import _save_progress  # noqa: F401
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIONS
@@ -31,6 +30,7 @@ from scrum_agent.ui.provider_select.screens._screens_vc import (
 from scrum_agent.ui.shared._animations import COLOR_RGB, FADE_IN_LEVELS, FADE_OUT_LEVELS, FRAME_TIME_30FPS
 from scrum_agent.ui.shared._input import disable_bracketed_paste, enable_bracketed_paste
 from scrum_agent.ui.shared._input import read_key as _read_key  # noqa: F401 — re-export for compat
+from scrum_agent.ui.shared._music_bar import make_live
 
 
 def _detect_aws_region() -> str | None:
@@ -116,7 +116,7 @@ def select_provider(
     step = 0
 
     w, h = console.size
-    with Live(
+    with make_live(
         _build_select_screen(0, width=w, height=h, shimmer_tick=0.0),
         console=console,
         refresh_per_second=30,

@@ -22,6 +22,7 @@ from scrum_agent.ui.provider_select._constants import _ISSUE_TRACKING_OPTIONS
 from scrum_agent.ui.provider_select._verification import _verify_azdevops, _verify_jira
 from scrum_agent.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
 from scrum_agent.ui.shared._animations import FRAME_TIME_30FPS
+from scrum_agent.ui.shared._music_bar import make_live
 
 
 def _run_issue_tracking(
@@ -359,7 +360,7 @@ def _run_issue_tracking(
         # Use a placeholder screen for the Live context
         from rich.text import Text
 
-        with Live(
+        with make_live(
             Text(""),
             console=console,
             refresh_per_second=30,

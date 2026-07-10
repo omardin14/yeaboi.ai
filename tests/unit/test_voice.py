@@ -397,3 +397,30 @@ class TestRecordVoiceInput:
     def test_empty_transcript_returns_none(self, monkeypatch):
         mod = self._patch_voice(monkeypatch, transcript="")
         assert mod.record_voice_input(_FakeLive(), _console(), _KeySequence(["enter"])) is None
+
+    def test_pauses_and_resumes_music_around_recording(self, monkeypatch):
+        # Background music must duck while recording, then come back.
+        from scrum_agent import music
+
+        events = []
+        monkeypatch.setattr(music, "pause_for_voice", lambda: events.append("pause"))
+        monkeypatch.setattr(music, "resume_after_voice", lambda: events.append("resume"))
+        mod = self._patch_voice(monkeypatch, transcript="hi")
+        mod.record_voice_input(_FakeLive(), _console(), _KeySequence(["", "enter"]))
+        assert events == ["pause", "resume"]
+
+    def test_resumes_music_when_mic_fails(self, monkeypatch):
+        from scrum_agent import music
+        from scrum_agent.ui.shared import _voice_input
+
+        events = []
+        monkeypatch.setattr(music, "pause_for_voice", lambda: events.append("pause"))
+        monkeypatch.setattr(music, "resume_after_voice", lambda: events.append("resume"))
+        monkeypatch.setattr(voice, "is_voice_available", lambda: (True, ""))
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("no mic")
+
+        monkeypatch.setattr(voice, "Recorder", _boom)
+        _voice_input.record_voice_input(_FakeLive(), _console(), _KeySequence(["x"]))
+        assert events == ["pause", "resume"]  # music restored even on mic failure
