@@ -38,6 +38,13 @@ _MODE_CARDS: list[dict[str, Any]] = [
         "color": "rgb(110,140,220)",
     },
     {
+        "key": "daily-standup",
+        "title": "Standup",
+        "description": "Run a daily standup: detect team activity, sprint-day confidence, and deliver a summary.",
+        "available": True,
+        "color": "rgb(200,100,180)",
+    },
+    {
         "key": "usage",
         "title": "Usage",
         "description": "View API token usage, session history, and cost estimates.",

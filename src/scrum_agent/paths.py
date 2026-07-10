@@ -61,6 +61,7 @@ PLANNING_EXPORTS_DIR = EXPORTS_DIR / "planning"
 
 LOGS_DIR = ROOT_DIR / "logs"
 TUI_LOGS_DIR = LOGS_DIR / "tui"
+STANDUP_LOGS_DIR = LOGS_DIR / "standup"
 ANALYSIS_LOGS_DIR = LOGS_DIR / "analysis"
 PLANNING_LOGS_DIR = LOGS_DIR / "planning"
 
@@ -159,6 +160,12 @@ def get_planning_log_dir() -> Path:
     """Return the planning session logs directory, creating it if needed."""
     PLANNING_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return PLANNING_LOGS_DIR
+
+
+def get_standup_log_dir() -> Path:
+    """Return the Daily Standup logs directory, creating it if needed."""
+    STANDUP_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return STANDUP_LOGS_DIR
 
 
 def migrate_legacy_paths() -> None:

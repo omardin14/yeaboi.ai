@@ -1,5 +1,6 @@
 """Tests for the scrum agent state schema."""
 
+import json
 from dataclasses import FrozenInstanceError, asdict
 
 import pytest
@@ -12,6 +13,7 @@ from scrum_agent.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
+    MemberUpdate,
     OutputFormat,
     Priority,
     ProjectAnalysis,
@@ -21,6 +23,7 @@ from scrum_agent.agent.state import (
     ReviewDecision,
     ScrumState,
     Sprint,
+    StandupReport,
     StoryPointValue,
     Task,
     TaskLabel,
@@ -767,3 +770,103 @@ class TestAzDevOpsKeyMappingFields:
         """StateGraph must compile without errors when ScrumState has Azure DevOps dict fields."""
         graph = StateGraph(ScrumState)
         assert graph is not None
+
+
+# ── Daily Standup artifact tests ──────────────────────────────────────
+
+
+class TestMemberUpdate:
+    def test_defaults(self):
+        """All fields default so old serialized reports still deserialize."""
+        m = MemberUpdate()
+        assert m.name == ""
+        assert m.summary == ""
+        assert m.blockers == ""
+        assert m.source == "inferred"
+
+    def test_frozen(self):
+        m = MemberUpdate(name="Alice")
+        with pytest.raises(FrozenInstanceError):
+            m.name = "Bob"  # type: ignore[misc]
+
+    def test_asdict(self):
+        m = MemberUpdate(name="Alice", summary="Shipped login", blockers="none", source="self-reported")
+        assert asdict(m) == {
+            "name": "Alice",
+            "summary": "Shipped login",
+            "blockers": "none",
+            "source": "self-reported",
+        }
+
+
+class TestStandupReport:
+    def test_defaults(self):
+        r = StandupReport()
+        assert r.date == ""
+        assert r.sprint_day == 0
+        assert r.confidence_pct == 0
+        assert r.member_updates == ()
+        assert r.activity_counts == ()
+
+    def test_frozen(self):
+        r = StandupReport(date="2026-07-10")
+        with pytest.raises(FrozenInstanceError):
+            r.date = "2026-07-11"  # type: ignore[misc]
+
+    def test_asdict_serializable(self):
+        r = StandupReport(
+            date="2026-07-10",
+            session_id="s1",
+            sprint_name="Sprint 5",
+            sprint_day=3,
+            sprint_total_days=10,
+            confidence_pct=82,
+            confidence_label="At risk",
+            member_updates=(MemberUpdate(name="Alice", summary="x"),),
+            activity_counts=(("jira", 4), ("github", 2)),
+        )
+        d = asdict(r)
+        assert d["confidence_pct"] == 82
+        assert d["member_updates"][0]["name"] == "Alice"
+        # asdict preserves tuples; only json.dumps converts them to lists
+        assert d["activity_counts"] == (("jira", 4), ("github", 2))
+        assert json.loads(json.dumps(d))["activity_counts"] == [["jira", 4], ["github", 2]]
+
+    def test_round_trip_via_store_helpers(self):
+        """StandupReport survives serialize -> JSON -> reconstruct with types intact."""
+        from scrum_agent.standup.store import _dict_to_standup_report, _standup_report_to_json
+
+        original = StandupReport(
+            date="2026-07-10",
+            session_id="s1",
+            sprint_name="Sprint 5",
+            sprint_day=3,
+            sprint_total_days=10,
+            confidence_pct=82,
+            confidence_label="At risk",
+            confidence_rationale="behind ideal burn",
+            team_summary="team did stuff",
+            member_updates=(
+                MemberUpdate(name="Alice", summary="login", blockers="", source="inferred"),
+                MemberUpdate(name="Bob", summary="api", blockers="waiting on review", source="self-reported"),
+            ),
+            activity_counts=(("jira", 4), ("github", 2)),
+            warnings=("Jira: authentication failed", "AI summary unavailable — key not set"),
+        )
+        restored = _dict_to_standup_report(json.loads(_standup_report_to_json(original)))
+        assert restored == original
+        # tuples must be reconstructed as tuples, not lists
+        assert isinstance(restored.member_updates, tuple)
+        assert isinstance(restored.activity_counts, tuple)
+        assert isinstance(restored.activity_counts[0], tuple)
+        assert isinstance(restored.warnings, tuple)
+        assert restored.warnings[0] == "Jira: authentication failed"
+
+    def test_reconstruct_backfills_missing_fields(self):
+        """A report dict from an older version (missing keys) still deserializes."""
+        from scrum_agent.standup.store import _dict_to_standup_report
+
+        restored = _dict_to_standup_report({"date": "2026-07-10", "session_id": "s1"})
+        assert restored.date == "2026-07-10"
+        assert restored.confidence_pct == 0
+        assert restored.member_updates == ()

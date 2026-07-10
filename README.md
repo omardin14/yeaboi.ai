@@ -135,6 +135,8 @@ scrum-agent --non-interactive --description @project-brief.txt --output html --t
 
 📄 **SCRUM.md Context** — Drop a `SCRUM.md` in your project directory; the agent reads it to pre-fill answers and ground output
 
+☀️ **Daily Standup** — Detects team activity (Jira/AzDO/GitHub/Confluence/git), infers per-person updates or takes your own, scores sprint-day confidence, and delivers to terminal/desktop/Slack/email — on an OS schedule that runs even when the app is closed
+
 🔬 **Team Analysis Mode** — Connect your Jira or Azure DevOps board to analyze your team's real patterns: velocity, sprint cadence, story structure, acceptance criteria style, naming conventions, and per-developer breakdown
 
 🎯 **Analysis-Calibrated Planning** — Select a team analysis profile when planning and the agent auto-fills intake questions, matches your team's story/task counts, enforces your AC format, uses your Definition of Done, and shows calibration banners at every pipeline stage
@@ -573,6 +575,15 @@ scrum-agent [OPTIONS]
 | `--team-size N` | Team size (maps to intake Q6) |
 | `--sprint-length {1,2,3,4}` | Sprint length in weeks (maps to intake Q8) |
 
+### Daily Standup
+
+| Flag | Description |
+|------|-------------|
+| `--standup-run` | Run a daily standup headlessly and deliver it (what the OS scheduler invokes) |
+| `--standup-interactive` | With `--standup-run`: prompt for your update + confirm (timed) before generating; falls back to headless with no TTY |
+| `--standup-session ID` | Session to run the standup for (default: most recent) |
+| `--standup-output {terminal,desktop,slack,email,all}` | Override the session's saved delivery channels |
+
 ### Session management
 
 | Flag | Description |
@@ -806,6 +817,54 @@ After intake, the analysis review screen shows a deterministic quality rating:
 - **Low-confidence areas**: defaulted essential questions flagged for downstream spike recommendations
 
 </details>
+
+---
+
+## ☀️ Daily Standup
+
+A first-class TUI mode (peer to Analysis and Planning) that runs your team's daily scrum — detecting what everyone did since the last standup, estimating sprint progress, and delivering a summary. It can run **on a schedule even when scrum-agent is closed**, so a 09:50 standup lands before your 10:00 call.
+
+Open it from the mode-selection screen (the magenta **Standup** card) or run it headlessly with `--standup-run`.
+
+### What it does
+
+1. **Detects recent activity** across every configured source — Jira issues, Azure DevOps work items, GitHub commits + PRs, recently-updated Confluence pages, and a local git log. Each source is best-effort: an unconfigured or failing source is skipped, never fatal. An **authentication failure (401/403) surfaces as a Notice**, not silence.
+2. **Asks for your own update first**, then infers everyone else. Press **Generate** and it prompts for your update (Enter to skip); people without a self-report get an inferred summary from a single LLM call.
+3. **Computes sprint day + confidence** deterministically (no LLM): which working day of the sprint you're on (weekends and bank holidays excluded), and how actual "Done" points compare to the ideal linear burn-down → **On track / At risk / Behind**.
+4. **Delivers** the summary to any combination of **terminal, desktop notification, Slack, and email**.
+5. **Never shows blank content** — if the LLM has no API key or a source returns 401/403, a **⚠ Notices** section tells you exactly what to fix.
+
+### Scheduling (runs when the app is closed)
+
+Press **Configure** on the Standup page to set the **standup time** (e.g. `10:00`), how many **minutes early** to run (default 10), weekdays, and delivery channels. You enter when the meeting *happens* — the job fires a few minutes before (10:00 → runs 09:50), so the summary lands before you start.
+
+Enabling a schedule installs an **OS-native job** — a `launchd` agent on macOS (`~/Library/LaunchAgents/`) or a `crontab` entry on Linux. On macOS it **opens a Terminal** at run time and gives you a short, timed window to type your update and confirm (auto-proceeds if you don't respond); on a headless Linux run it just generates and delivers. Under the hood the job runs:
+
+```bash
+scrum-agent --standup-run --standup-interactive --standup-session <id>
+```
+
+No background daemon is kept alive; the operating system fires the job, so it works even with scrum-agent fully quit and survives reboots.
+
+### Delivery configuration
+
+Non-secret settings (time, channels) live per-session in SQLite. Secrets/creds go in `~/.scrum-agent/.env` (see `.env.example`):
+
+- **Slack** — `SLACK_WEBHOOK_URL` (an [incoming webhook](https://api.slack.com/messaging/webhooks))
+- **Email** — `STANDUP_SMTP_HOST/PORT/USER/PASSWORD`, `STANDUP_SMTP_SENDER`, `STANDUP_EMAIL_RECIPIENTS`
+- **GitHub activity** — `STANDUP_GITHUB_REPO` (owner/repo)
+- **Desktop / Terminal** — no configuration required
+
+Everything uses the Python standard library (Slack via `urllib`, email via `smtplib`, desktop via `osascript`/`notify-send`) — **no new dependencies**.
+
+### Try it
+
+```bash
+scrum-agent                                                   # open the Standup card, press Generate
+scrum-agent --standup-run --standup-session latest --standup-output terminal
+```
+
+Standup runs are logged to `~/.scrum-agent/logs/standup/` and persisted to the `standup_history` table.
 
 ---
 

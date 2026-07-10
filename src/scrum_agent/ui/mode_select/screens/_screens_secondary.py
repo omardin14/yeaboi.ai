@@ -3186,6 +3186,258 @@ def _build_usage_screen(
     )
 
 
+def _build_standup_screen(
+    standup_data: dict,
+    *,
+    scroll_offset: int = 0,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+) -> Panel:
+    """Build the Daily Standup dashboard screen using shared TUI components.
+
+    Shows the schedule status, the latest generated standup (sprint day,
+    confidence, team + member updates), and activity counts. Uses STANDUP_THEME
+    (magenta) with shared buttons, scrollbar, and viewport.
+
+    standup_data keys: session_name, config (dict|None), schedule (dict),
+    report (StandupReport|None), message (str, transient status line).
+
+    # See README: "Daily Standup" — TUI page
+    """
+    from scrum_agent.ui.shared._components import STANDUP_THEME, standup_title
+
+    theme = STANDUP_THEME
+    title = standup_title()
+    session_name = standup_data.get("session_name", "")
+    sub_text = f"Daily standup for {session_name}" if session_name else "Daily standup"
+    sub = Text(_PAD + sub_text, style="dim", justify="left")
+
+    body_lines: list = []
+
+    def _heading(text: str) -> None:
+        body_lines.append(Text(""))
+        h = Text(_PAD + "  ", justify="left")
+        h.append(text, style=f"bold {theme.accent}")
+        body_lines.append(h)
+        body_lines.append(Text(_PAD + "  " + "─" * min(len(text), 40), style=theme.sep, justify="left"))
+
+    def _row(label: str, value: str, value_style: str = "") -> None:
+        r = Text(_PAD + "    ", justify="left")
+        r.append(f"{label}:  ", style=theme.muted)
+        r.append(str(value), style=value_style or theme.value)
+        body_lines.append(r)
+
+    def _line(text: str, style: str = "") -> None:
+        body_lines.append(Text(_PAD + "    " + text, style=style or theme.value, justify="left"))
+
+    def _wrapped(text: str, style: str, *, indent: str = "    ") -> None:
+        """Append word-wrapped lines for a long value, keeping the viewport tidy."""
+        import textwrap
+
+        wrap_w = max(24, width - len(_PAD) - len(indent) - 6)
+        for chunk in textwrap.wrap(text, width=wrap_w) or [""]:
+            body_lines.append(Text(_PAD + indent + chunk, style=style, justify="left"))
+
+    def _confidence_style(label: str) -> str:
+        return {
+            "On track": theme.good,
+            "At risk": theme.warn,
+            "Behind": theme.bad,
+        }.get(label, theme.muted)
+
+    # ── Transient status message (e.g. after Generate) ────────────
+    message = standup_data.get("message", "")
+    if message:
+        body_lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+
+    # ── Schedule ──────────────────────────────────────────────────
+    _heading("Schedule")
+    config = standup_data.get("config") or {}
+    schedule = standup_data.get("schedule") or {}
+    if config:
+        _row("Enabled", "yes" if config.get("enabled") else "no", theme.good if config.get("enabled") else theme.muted)
+        standup_time = config.get("time", "—")
+        lead = config.get("lead_minutes", 10)
+        _row("Standup time", standup_time)
+        if standup_time and standup_time != "—":
+            from scrum_agent.standup.scheduler import run_time_str
+
+            _row("Runs at", f"{run_time_str(standup_time, lead)}  ({lead} min before)")
+        _row("Weekdays", config.get("weekdays", "—"))
+        _row("Channels", ", ".join(config.get("delivery_channels", [])) or "—")
+    else:
+        _line("Not configured — press Configure to set a time and delivery.", theme.muted)
+    installed = schedule.get("installed")
+    if installed is not None:
+        _row(
+            "OS schedule",
+            f"installed ({schedule.get('platform', '?')})" if installed else "not installed",
+            theme.good if installed else theme.muted,
+        )
+
+    # ── Latest standup ────────────────────────────────────────────
+    report = standup_data.get("report")
+    if report is not None:
+        # Notices first — auth/API-key problems must be seen, never silently empty.
+        if report.warnings:
+            _heading("⚠ Notices")
+            for w in report.warnings:
+                _wrapped(w, theme.warn, indent="    ")
+        _heading(f"Latest Standup — {report.date}")
+        _row("Sprint", report.sprint_name or "unknown")
+        if report.sprint_total_days:
+            _row("Day", f"{report.sprint_day} of {report.sprint_total_days}")
+        conf = report.confidence_label or "unknown"
+        if report.confidence_label and report.confidence_label != "Insufficient data":
+            conf = f"{report.confidence_label}  ·  {report.confidence_pct}%"
+        _row("Confidence", conf, _confidence_style(report.confidence_label))
+        if report.confidence_rationale:
+            _wrapped(report.confidence_rationale, theme.dim, indent="      ")
+        if report.activity_counts:
+            _row("Activity", ", ".join(f"{src}: {n}" for src, n in report.activity_counts))
+
+        if report.team_summary:
+            _heading("Team Summary")
+            _wrapped(report.team_summary, theme.value)
+
+        _heading("Updates")
+        if report.member_updates:
+            for m in report.member_updates:
+                tag = "  (you)" if m.source == "self-reported" else ""
+                name_row = Text(_PAD + "    ", justify="left")
+                name_row.append(m.name, style=f"bold {theme.value}")
+                if tag:
+                    name_row.append(tag, style=theme.dim)
+                body_lines.append(name_row)
+                _wrapped(m.summary or "No activity detected.", theme.desc, indent="      ")
+                if m.blockers:
+                    _wrapped(f"Blocker: {m.blockers}", theme.warn, indent="      ")
+        else:
+            _line("No individual updates.", theme.muted)
+    else:
+        _heading("Latest Standup")
+        _line("No standup generated yet. Press Generate to create one.", theme.muted)
+
+    # ── Layout using shared components ────────────────────────────
+    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    actual_scroll = min(scroll_offset, max_scroll)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    btn_top, btn_mid, btn_bot = build_action_buttons(["Generate", "My Update", "Configure", "Back"], action_sel)
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(
+            show_header=False,
+            show_edge=False,
+            box=None,
+            padding=0,
+            pad_edge=False,
+            expand=True,
+        )
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
+def _build_standup_input_screen(
+    prompt: str,
+    value: str,
+    *,
+    step: str = "",
+    default: str = "",
+    width: int = 80,
+    height: int = 24,
+    border_style: str = "",
+    status: str = "",
+) -> Panel:
+    """Build a themed single-line input screen for the Daily Standup flows.
+
+    Stays inside the Live display (driven by read_key), so it matches the app's
+    full-screen style and never drops to a raw terminal prompt. Supports voice
+    dictation (double-tap Space): pass ``border_style``/``status`` to show the
+    recording/transcribing indicator on the same screen.
+
+    # See README: "Daily Standup" — TUI page
+    # See README: "TUI system" — voice input overlay
+    """
+    from scrum_agent.ui.session.screens._screens_input import _voice_hint
+    from scrum_agent.ui.shared._components import STANDUP_THEME, standup_title
+
+    theme = STANDUP_THEME
+    title = standup_title()
+    sub = Text(_PAD + (step or "Configure standup"), style="dim", justify="left")
+    box_style = border_style or theme.accent
+
+    # Prompt label + a bordered input field showing the current value and a cursor.
+    label = Text(_PAD + "  ", justify="left")
+    label.append(prompt, style=f"bold {theme.accent}")
+    if default:
+        label.append(f"   (default: {default})", style=theme.dim)
+
+    field_inner = f" {value}█ "
+    box_top = Text(_PAD + "  ╭" + "─" * max(len(field_inner), 40) + "╮", style=box_style)
+    box_mid = Text(_PAD + "  │", style=box_style)
+    box_mid.append(field_inner.ljust(max(len(field_inner), 40)), style=f"bold {theme.accent_bright}")
+    box_mid.append("│", style=box_style)
+    box_bot = Text(_PAD + "  ╰" + "─" * max(len(field_inner), 40) + "╯", style=box_style)
+
+    # While recording/transcribing, the voice status replaces the usual hint.
+    if status:
+        hint_line = Text(_PAD + "  " + status, style=box_style or theme.accent, justify="left")
+    else:
+        hint_line = Text(_PAD + "  Enter to confirm  ·  Esc to cancel" + _voice_hint(), style=theme.dim, justify="left")
+
+    # Vertically pad the middle so the field sits in the upper-third like the dashboard.
+    body: list = [label, Text(""), box_top, box_mid, box_bot, Text(""), hint_line]
+    pad_rows = max(0, calc_viewport(height, header_h=6, action_h=1) - len(body))
+    body.extend(Text("") for _ in range(pad_rows))
+
+    content = Group(Text(""), title, Text(""), sub, Text(""), *body)
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Profile picker screen (planning mode — select which analysis to use)
 # ---------------------------------------------------------------------------
@@ -3413,6 +3665,16 @@ def _build_settings_screen(
     # ── GitHub ────────────────────────────────────────────────────
     _heading("GitHub")
     _row("Token", config_data.get("GITHUB_TOKEN", ""), masked=True)
+
+    # ── Daily Standup delivery ────────────────────────────────────
+    # Secrets (Slack webhook, SMTP password) are masked like every other credential.
+    _heading("Daily Standup")
+    _row("GitHub Repo", config_data.get("STANDUP_GITHUB_REPO", ""))
+    _row("Slack Webhook", config_data.get("SLACK_WEBHOOK_URL", ""), masked=True)
+    _row("SMTP Host", config_data.get("STANDUP_SMTP_HOST", ""))
+    _row("SMTP User", config_data.get("STANDUP_SMTP_USER", ""))
+    _row("SMTP Password", config_data.get("STANDUP_SMTP_PASSWORD", ""), masked=True)
+    _row("Email Recipients", config_data.get("STANDUP_EMAIL_RECIPIENTS", ""))
 
     # ── Voice Input ───────────────────────────────────────────────
     # Local, offline dictation (double-tap Space in any text field) — works with every

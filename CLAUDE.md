@@ -177,9 +177,23 @@ src/scrum_agent/
     story_writer.py     — Story writing prompt with few-shot examples
     task_decomposer.py  — Task decomposition prompt
     sprint_planner.py   — Sprint planning prompt
+    standup.py          — Daily Standup summary prompt (ARC framework)
+  standup/              — Daily Standup mode (headless-capable, OS-scheduled)
+    __init__.py         — public API (run_standup, StandupStore)
+    engine.py           — run_standup() pipeline (collect → confidence → LLM summary → deliver → record)
+    collector.py        — fan-out recent-activity collection across all sources (graceful skip)
+    confidence.py       — deterministic sprint-day + burn-down confidence
+    sprint_context.py   — sprint dates/points from plan state + live Jira/AzDO progress
+    delivery.py         — NotificationDelivery ABC + Terminal/Desktop/Slack/Email + deliver()
+    interactive.py      — timed, TTY-aware scheduled run (prompts for update + confirm; headless fallback)
+    errors.py           — StandupSourceError (surfaces source 401/403 as warnings)
+    scheduler.py        — OS-native scheduling (launchd on macOS, crontab on Linux); lead-time aware
+    render.py           — StandupReport → plaintext (Slack/email) + Rich (terminal/TUI)
+    store.py            — StandupStore (standup_config/history/updates tables, schema v6)
   tools/
     __init__.py         — get_tools() factory (lazy imports all tool modules)
-    github.py           — GitHub repo/file/issues/readme (4 tools)
+    github.py           — GitHub repo/file/issues/readme (4 tools) + recent-activity helpers
+    local_git.py        — local `git log` recent-commit reader (standup, no SDK/creds)
     azure_devops.py     — Azure DevOps repo/file/work items/board/velocity/create (9 tools)
     jira.py             — Jira board/velocity/sprint/epic/story (6 tools)
     confluence.py       — Confluence search/read/write (5 tools)
@@ -247,6 +261,10 @@ Key flags to know about when modifying the CLI:
 | `--dry-run` | TUI with mock data, no LLM calls |
 | `--setup` | Re-run first-time setup wizard |
 | `--install-skill [DIR]` | Install bundled OpenClaw skill to `~/.openclaw/skills/` (or custom dir) |
+| `--standup-run` | Headless: run a daily standup and deliver it (what the OS scheduler invokes) |
+| `--standup-interactive` | With `--standup-run`: timed prompt for the user's update + confirm before generating (TTY-aware; headless fallback) |
+| `--standup-session ID` | Session to run the standup for (default: most recent) |
+| `--standup-output {terminal,desktop,slack,email,all}` | Override the session's saved delivery channels |
 
 Validation rules in `main()`:
 - `--non-interactive` requires `--description`
@@ -350,7 +368,7 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 
 ### Schema versioning
 
-- `CURRENT_SCHEMA_VERSION = 5` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage)
+- `CURRENT_SCHEMA_VERSION = 6` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup config/history/updates)
 - On startup: if stored version > current → `schema_mismatch = True` (warn user); if stored version < current → run migrations
 - Session IDs: internal `new-<8hex>-<YYYY-MM-DD>`, display `<project-slug>-<YYYY-MM-DD>`
 
@@ -389,6 +407,10 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - `AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TEAM` — optional, for Azure DevOps board sync
 - `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` — optional, for Jira integration
 - `CONFLUENCE_SPACE_KEY` — optional, shares Atlassian auth with Jira
+- `STANDUP_USER_NAME` — optional, your display name for your own standup update (default: "Me")
+- `STANDUP_GITHUB_REPO` — optional, GitHub repo (owner/repo) scanned for Daily Standup code activity
+- `SLACK_WEBHOOK_URL` — optional, Slack incoming-webhook URL for Daily Standup delivery
+- `STANDUP_SMTP_HOST` / `STANDUP_SMTP_PORT` / `STANDUP_SMTP_USER` / `STANDUP_SMTP_PASSWORD` / `STANDUP_SMTP_SENDER` / `STANDUP_EMAIL_RECIPIENTS` — optional, SMTP email delivery for Daily Standup
 - `SESSION_PRUNE_DAYS` — auto-prune sessions older than N days (default: 30, 0 = disabled)
 - `LOG_LEVEL` — file logger level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
 - `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` — optional, enables LangSmith tracing
@@ -447,6 +469,26 @@ The `skills/scrum-planner/` directory contains an OpenClaw skill that replicates
 scrum-agent --install-skill          # installs to ~/.openclaw/skills/
 scrum-agent --install-skill /path    # custom directory
 ```
+
+## Daily Standup Mode
+
+The `src/scrum_agent/standup/` package implements a daily scrum that detects team activity, scores sprint progress, and delivers a summary — runnable from the TUI or headlessly on an OS schedule.
+
+**Design choice — standalone pipeline, not a LangGraph node.** `engine.run_standup()` calls `get_llm()`/`track_usage()` directly following the node **parse → fallback → format** convention, but is *not* a compiled graph — the scheduled headless run must be fast and checkpoint-free. Activity gathering + confidence are deterministic function calls; the LLM is used only to synthesize prose (one call).
+
+**Pipeline** (`engine.run_standup(session_id)`): load session state + `StandupStore.load_config` → `collector.collect_recent_activity` (fan-out, graceful per-source skip) → `sprint_context.gather` + `confidence.compute` (deterministic sprint day + burn-down) → self-reported updates verbatim / others summarized by one LLM call → `StandupReport` → `delivery.deliver` → `StandupStore.record_run`.
+
+**Recent-activity helpers** are plain functions (not `@tool`) on each tool module: `jira_recent_activity`, `azdevops_recent_activity`, `github_recent_commits`/`github_recent_prs`, `confluence_recent_pages`, `tools/local_git.local_git_recent_commits`, plus `*_active_sprint_progress` for burn-down. All return normalized `list[dict]` and degrade to `[]` on error. The collector lazy-imports them (optional SDKs).
+
+**Scheduling** (`scheduler.py`) is OS-native so standups fire when the app is closed. The user configures the **standup time** (when the meeting happens) + `lead_minutes` (default 10); the job fires `standup_time − lead` (`run_time()` helper). On macOS it opens a **Terminal** at run time (a launcher script under `~/Library/Application Support/scrum-agent/` + `osascript`) so the run can prompt; on Linux it's a crontab entry that runs headless. Both invoke `scrum-agent --standup-run --standup-interactive --standup-session <id>`; `interactive.py` prompts only when a TTY is attached, else falls back to headless. Windows is unsupported (graceful message).
+
+**Warnings, not empty content** (`errors.py` + engine): activity helpers raise `StandupSourceError` on 401/403 → collector records `ActivityBundle.errors`. The engine also checks `config.is_llm_configured()` and catches LLM auth/billing errors (no longer re-raised) — all fold into `StandupReport.warnings`, rendered as a **⚠ Notices** section in the dashboard and delivery output. `Generate` also prompts for the user's own update first (`STANDUP_USER_NAME`, default "Me").
+
+**Delivery** (`delivery.py`) is stdlib-only: Terminal (Rich), Desktop (`osascript`/`notify-send`), Slack (`urllib` webhook), Email (`smtplib`). `deliver()` fans out and returns per-channel status; one channel failing → `status="partial"`, never raises.
+
+**Persistence**: `store.py` defines `_STANDUP_SCHEMA` (schema v6 in `sessions.py`) with `standup_config` / `standup_history` / `standup_updates`. `StandupReport`/`MemberUpdate` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat).
+
+**TUI**: the magenta **Standup** card → `_build_standup_screen` + `_run_standup_page` in `ui/mode_select/`, with **Generate / My Update / Configure / Back** actions. Logs go to `~/.scrum-agent/logs/standup/`.
 
 ## Deployment (AWS Lightsail)
 

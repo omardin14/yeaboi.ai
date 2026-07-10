@@ -1183,3 +1183,26 @@ _Bring Azure DevOps to full feature parity with Jira — read board/velocity, cr
 - [x] Inline `_voice_hint()` returns "" when tips off (silences input-screen hints too); setup-wizard onboarding line gated on tips
 - [x] Settings page "Tips: on/off" row + `TIPS_ENABLED` in `_collect_settings_data`; `.env.example` documented
 - [x] Unit tests: `tests/unit/test_tips.py`, `tests/unit/test_tips_ui.py`, plus `TIPS_ENABLED` cases in `test_config.py`
+
+## Phase 21: Daily Standup Mode
+- [x] `StandupReport` + `MemberUpdate` frozen dataclasses in `agent/state.py` (defaults for backward-compat) + serialization round-trip tests
+- [x] `standup/store.py` — `StandupStore` + `_STANDUP_SCHEMA` (standup_config/history/updates); schema v6 migration in `sessions.py`
+- [x] Recent-activity helpers: `jira_recent_activity`, `azdevops_recent_activity`, `github_recent_commits`/`github_recent_prs`, `confluence_recent_pages`, `tools/local_git.py`; `*_active_sprint_progress` for burn-down
+- [x] `standup/collector.py` — fan-out activity collection with graceful per-source skip (lazy SDK imports)
+- [x] `standup/confidence.py` — deterministic sprint-day + burn-down confidence (On track / At risk / Behind)
+- [x] `standup/sprint_context.py` — sprint dates/points from plan state + live Jira/AzDO progress
+- [x] `standup/engine.py` + `prompts/standup.py` — run_standup() pipeline (parse → fallback → format, one LLM call)
+- [x] `standup/delivery.py` — Terminal/Desktop/Slack/Email channels + `deliver()` fan-out (stdlib only, no new deps)
+- [x] `standup/scheduler.py` — OS-native scheduling (launchd/crontab) so standups run when the app is closed
+- [x] `standup/render.py` — plaintext (Slack/email) + Rich (terminal/TUI) rendering
+- [x] `config.py` standup getters/setters (Slack/SMTP/GitHub repo) + `paths.get_standup_log_dir()` + `.env.example`
+- [x] CLI `--standup-run` / `--standup-session` / `--standup-output` + `_run_standup()`
+- [x] Daily Standup TUI page — COLOR_RGB, `STANDUP_THEME`, `standup_title()`, `_MODE_CARDS` entry, `_build_standup_screen`, `_run_standup_page` (Generate/My Update/Configure/Back); standup secrets masked in Settings
+- [x] Tests: store, activity helpers, collector, confidence, engine (mock LLM), delivery, scheduler, screen render, config, CLI
+
+## Phase 22: Daily Standup Workflow Refinements
+- [x] Generate now prompts for your own update first (voice-enabled in-TUI input), then generates (`STANDUP_USER_NAME`, default "Me")
+- [x] Scheduled OS run is interactive: opens a Terminal (macOS launcher script + osascript), timed update prompt + confirm with auto-proceed; TTY-aware headless fallback (`standup/interactive.py`, `--standup-interactive`)
+- [x] Enter the STANDUP time; job fires `lead_minutes` earlier (default 10, editable). `standup/scheduler.run_time()`; `lead_minutes` column on standup_config
+- [x] Surface API-key / source 401-403 as ⚠ Notices instead of empty content: `standup/errors.StandupSourceError`, `ActivityBundle.errors`, `config.is_llm_configured()`, `StandupReport.warnings` rendered in dashboard + delivery; LLM auth no longer re-raises
+- [x] Tests: interactive (TTY fallback/confirm/timeout), run_time/lead, warnings (no-key + auth + source), lead_minutes persistence, notices render, config getters

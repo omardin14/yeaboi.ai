@@ -59,6 +59,15 @@ _KEY_FILES = {
 }
 
 
+def _raise_if_azdo_auth(e: Exception) -> None:
+    """Re-raise an Azure DevOps 401/403 as a StandupSourceError so the standup surfaces it."""
+    msg = str(e).lower()
+    if any(t in msg for t in ("401", "unauthorized", "403", "forbidden", "access denied")):
+        from scrum_agent.standup.errors import StandupSourceError
+
+        raise StandupSourceError("azure_devops", "authentication failed — check AZURE_DEVOPS_TOKEN permissions")
+
+
 def _azdo_error_msg(e: Exception) -> str:
     """Return a user-friendly message for common AzDO HTTP error codes."""
     msg = str(e).lower()
@@ -791,3 +800,159 @@ def add_work_items_to_iteration(work_item_ids: list[str], iteration_path: str, p
             JsonPatchOperation(op="add", path="/fields/System.IterationPath", value=iteration_path),
         ]
         wit_client.update_work_item(document=document, id=int(wi_id), project=project)
+
+
+# ---------------------------------------------------------------------------
+# Recent-activity helper for Daily Standup mode
+# ---------------------------------------------------------------------------
+# Plain function (not @tool) the standup collector calls directly. Returns
+# structured data and degrades gracefully to [] on error/missing config.
+# See README: "Daily Standup" — recent-activity collection
+
+
+def azdevops_recent_activity(project: str = "", days: int = 1) -> list[dict]:
+    """Return work items changed within the last ``days`` days.
+
+    Each item: {author, kind='work_item', title, status, timestamp, key(#id)}.
+    Returns [] when Azure DevOps is unconfigured or the WIQL query fails.
+    """
+    project = project or get_azure_devops_project() or ""
+    logger.info("azdevops_recent_activity: project=%r days=%d", project, days)
+    if not project:
+        logger.warning("azdevops_recent_activity skipped — no project configured")
+        return []
+    try:
+        from azure.devops.v7_1.work_item_tracking.models import Wiql
+
+        wit_client, _ = _make_azdo_clients()
+        wiql = Wiql(
+            query=(
+                "SELECT [System.Id] FROM WorkItems"
+                f" WHERE [System.TeamProject] = '{project}'"
+                f" AND [System.ChangedDate] >= @Today - {int(days)}"
+                " ORDER BY [System.ChangedDate] DESC"
+            )
+        )
+        result = wit_client.query_by_wiql(wiql, top=100)
+        if not result.work_items:
+            logger.info("azdevops_recent_activity: 0 work items in last %d day(s)", days)
+            return []
+        ids = [wi.id for wi in result.work_items]
+        fields = [
+            "System.Id",
+            "System.Title",
+            "System.State",
+            "System.AssignedTo",
+            "System.ChangedDate",
+        ]
+        work_items = wit_client.get_work_items(ids, fields=fields)
+        items: list[dict] = []
+        for item in work_items:
+            f = item.fields
+            assigned_raw = f.get("System.AssignedTo")
+            if isinstance(assigned_raw, dict):
+                author = assigned_raw.get("displayName", "")
+            else:
+                author = str(assigned_raw) if assigned_raw else ""
+            items.append(
+                {
+                    "author": author,
+                    "kind": "work_item",
+                    "title": f.get("System.Title", ""),
+                    "status": f.get("System.State", ""),
+                    "timestamp": str(f.get("System.ChangedDate", ""))[:19],
+                    "key": f"#{f.get('System.Id', '')}",
+                }
+            )
+        logger.info("azdevops_recent_activity: %d work item(s) in last %d day(s)", len(items), days)
+        return items
+    except ValueError as e:
+        logger.warning("azdevops_recent_activity skipped: %s", e)
+        return []
+    except AzureDevOpsServiceError as e:
+        _raise_if_azdo_auth(e)
+        logger.warning("azdevops_recent_activity failed: %s", _azdo_error_msg(e))
+        return []
+    except Exception as e:
+        logger.warning("azdevops_recent_activity unexpected error: %s", e)
+        return []
+
+
+def azdevops_active_sprint_progress(project: str = "") -> dict:
+    """Return live progress for the active iteration: start date + burn-down points.
+
+    Returns {sprint_name, start_date, completed_points, committed_points}; omits
+    missing pieces; returns {} when unconfigured or on failure. Used by the
+    standup engine. Reuses the Microsoft.VSTS.Scheduling.StoryPoints field like
+    azdevops_fetch_velocity.
+    """
+    project = project or get_azure_devops_project() or ""
+    logger.info("azdevops_active_sprint_progress: project=%r", project)
+    if not project:
+        return {}
+    try:
+        from datetime import datetime as _dt
+
+        from azure.devops.v7_1.work.models import TeamContext
+
+        wit_client, work_client = _make_azdo_clients()
+        team = get_azure_devops_team() or f"{project} Team"
+        team_context = TeamContext(project=project, team=team)
+
+        all_iterations = work_client.get_team_iterations(team_context) or []
+        now = _dt.now(UTC)
+        current = [
+            it
+            for it in all_iterations
+            if getattr(getattr(it, "attributes", None), "start_date", None)
+            and getattr(it.attributes, "finish_date", None)
+            and it.attributes.start_date <= now <= it.attributes.finish_date
+        ]
+        if not current:
+            return {}
+        cur = current[0]
+        out: dict = {"sprint_name": cur.name}
+        start = getattr(cur.attributes, "start_date", None)
+        if start:
+            out["start_date"] = start.strftime("%Y-%m-%d")
+
+        work_items = work_client.get_iteration_work_items(team_context, cur.id)
+        wi_ids = [
+            rel.target.id
+            for rel in getattr(work_items, "work_item_relations", []) or []
+            if getattr(rel, "target", None)
+        ]
+        committed = 0.0
+        completed = 0.0
+        if wi_ids:
+            items = wit_client.get_work_items(
+                wi_ids, fields=["System.State", "Microsoft.VSTS.Scheduling.StoryPoints"]
+            )
+            for item in items or []:
+                pts = item.fields.get("Microsoft.VSTS.Scheduling.StoryPoints")
+                try:
+                    pts = float(pts) if pts else 0.0
+                except (TypeError, ValueError):
+                    pts = 0.0
+                committed += pts
+                if item.fields.get("System.State", "") in ("Closed", "Done", "Resolved", "Completed"):
+                    completed += pts
+        out["completed_points"] = completed
+        out["committed_points"] = committed
+        logger.info(
+            "azdevops_active_sprint_progress: sprint=%r completed=%.1f committed=%.1f",
+            cur.name,
+            completed,
+            committed,
+        )
+        return out
+    except ValueError as e:
+        logger.warning("azdevops_active_sprint_progress skipped: %s", e)
+        return {}
+    except AzureDevOpsServiceError as e:
+        _raise_if_azdo_auth(e)
+        logger.warning("azdevops_active_sprint_progress failed: %s", _azdo_error_msg(e))
+        return {}
+    except Exception as e:
+        logger.warning("azdevops_active_sprint_progress unexpected error: %s", e)
+        return {}

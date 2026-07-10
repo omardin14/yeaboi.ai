@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See README: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 5  # v1=Phase 8A, v2=Phase 8B, v3=team_profiles, v4=session_mode, v5=token_usage
+CURRENT_SCHEMA_VERSION = 6  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -493,6 +493,14 @@ class SessionStore:
                 )"""
             )
             logger.info("Migration v5: created token_usage table")
+
+        if from_version < 6:
+            # v6: Daily Standup mode — config, run history, self-reported updates.
+            # Schema lives in standup/store.py (executescript handles the 3 CREATEs).
+            from scrum_agent.standup.store import _STANDUP_SCHEMA
+
+            self._conn.executescript(_STANDUP_SCHEMA)
+            logger.info("Migration v6: created standup tables")
 
     # ── Token usage persistence ──────────────────────────────────────────
 

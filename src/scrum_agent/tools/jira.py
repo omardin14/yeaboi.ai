@@ -655,3 +655,133 @@ def jira_fetch_active_sprint(project_key: str = "") -> str:
     except Exception as e:
         logger.error("Unexpected error in jira_fetch_active_sprint: %s", e)
         return f"Error: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Recent-activity helper for Daily Standup mode
+# ---------------------------------------------------------------------------
+# Unlike the @tool functions above (which the ReAct agent calls and which return
+# formatted strings), this is a plain function the standup collector calls
+# directly. It returns structured data (list of dicts) and degrades gracefully:
+# missing config or an API error yields [] plus a warning — a standup must never
+# crash because one source is unavailable.
+# See README: "Daily Standup" — recent-activity collection
+
+
+def _raise_if_auth_error(e: JIRAError, source: str) -> None:
+    """Re-raise a Jira 401/403 as a StandupSourceError so the standup surfaces it.
+
+    Other errors are left for the caller to swallow (best-effort degradation).
+    """
+    if getattr(e, "status_code", 0) in (401, 403):
+        from scrum_agent.standup.errors import StandupSourceError
+
+        raise StandupSourceError(source, "authentication failed — check JIRA_EMAIL / JIRA_API_TOKEN")
+
+
+def jira_recent_activity(project_key: str = "", days: int = 1) -> list[dict]:
+    """Return Jira issues updated within the last ``days`` days.
+
+    Each item: {author, kind, title, status, timestamp, key}. Returns [] when
+    Jira is unconfigured or the query fails (logged at warning).
+    """
+    logger.info("jira_recent_activity: project_key=%r days=%d", project_key, days)
+    jira = _make_jira_client()
+    if jira is None:
+        logger.warning("jira_recent_activity skipped — Jira not configured")
+        return []
+
+    key = project_key.strip() or (get_jira_project_key() or "")
+    if not key:
+        logger.warning("jira_recent_activity skipped — no project key")
+        return []
+
+    try:
+        issues = jira.search_issues(
+            f'project = "{key}" AND updated >= -{int(days)}d ORDER BY updated DESC',
+            maxResults=100,
+            fields="summary,assignee,status,updated",
+        )
+        items: list[dict] = []
+        for issue in issues:
+            assignee = getattr(issue.fields, "assignee", None)
+            status = getattr(issue.fields, "status", None)
+            items.append(
+                {
+                    "author": getattr(assignee, "displayName", "") if assignee else "",
+                    "kind": "issue",
+                    "title": getattr(issue.fields, "summary", ""),
+                    "status": getattr(status, "name", "") if status else "",
+                    "timestamp": (getattr(issue.fields, "updated", "") or "")[:19],
+                    "key": issue.key,
+                }
+            )
+        logger.info("jira_recent_activity: %d issue(s) updated in last %d day(s)", len(items), days)
+        return items
+    except JIRAError as e:
+        _raise_if_auth_error(e, "jira")
+        logger.warning("jira_recent_activity failed: %s", _jira_error_msg(e))
+        return []
+    except Exception as e:
+        logger.warning("jira_recent_activity unexpected error: %s", e)
+        return []
+
+
+def jira_active_sprint_progress(project_key: str = "") -> dict:
+    """Return live progress for the active sprint: start date + burn-down points.
+
+    Returns {sprint_name, start_date, completed_points, committed_points}. Any
+    missing piece is omitted; returns {} when Jira is unconfigured or fails.
+    Used by the standup engine to compute burn-down confidence. Reuses the same
+    customfield_10016 story-point field as jira_create_story / jira_fetch_velocity.
+    """
+    logger.info("jira_active_sprint_progress: project_key=%r", project_key)
+    jira = _make_jira_client()
+    if jira is None:
+        return {}
+    key = project_key.strip() or (get_jira_project_key() or "")
+    if not key:
+        return {}
+    try:
+        boards = jira.boards(projectKeyOrID=key)
+        if not boards:
+            return {}
+        board = boards[0]
+        active = jira.sprints(board.id, state="active")
+        if not active:
+            return {}
+        sprint = active[0]
+        out: dict = {"sprint_name": sprint.name}
+        start = getattr(sprint, "startDate", None) or ""
+        if start:
+            out["start_date"] = start[:10]
+
+        def _sum_points(jql: str) -> float:
+            issues = jira.search_issues(jql, maxResults=500, fields="customfield_10016,story_points")
+            total = 0.0
+            for issue in issues:
+                val = getattr(issue.fields, "customfield_10016", None)
+                if val is None:
+                    val = getattr(issue.fields, "story_points", None)
+                try:
+                    total += float(val) if val is not None else 0.0
+                except (TypeError, ValueError):
+                    pass
+            return total
+
+        out["completed_points"] = _sum_points(f'project = "{key}" AND sprint = {sprint.id} AND status = Done')
+        out["committed_points"] = _sum_points(f"project = \"{key}\" AND sprint = {sprint.id}")
+        logger.info(
+            "jira_active_sprint_progress: sprint=%r completed=%.1f committed=%.1f",
+            sprint.name,
+            out.get("completed_points", 0.0),
+            out.get("committed_points", 0.0),
+        )
+        return out
+    except JIRAError as e:
+        _raise_if_auth_error(e, "jira")
+        logger.warning("jira_active_sprint_progress failed: %s", _jira_error_msg(e))
+        return {}
+    except Exception as e:
+        logger.warning("jira_active_sprint_progress unexpected error: %s", e)
+        return {}

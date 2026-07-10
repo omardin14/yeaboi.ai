@@ -333,3 +333,102 @@ def github_read_readme(repo_url: str) -> str:
     except Exception as e:
         logger.error("Unexpected error in github_read_readme: %s", e)
         return f"Error: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Recent-activity helpers for Daily Standup mode
+# ---------------------------------------------------------------------------
+# Plain functions (not @tool) the standup collector calls directly. They return
+# structured data and degrade gracefully to [] on any error/missing repo — a
+# standup must never crash because GitHub is unreachable.
+# See README: "Daily Standup" — recent-activity collection
+
+
+def _since_dt(days: int):
+    """Return a timezone-aware UTC datetime ``days`` days ago (for GitHub API filters)."""
+    from datetime import UTC, datetime, timedelta
+
+    return datetime.now(UTC) - timedelta(days=int(days))
+
+
+def _raise_if_github_auth(e: Exception) -> None:
+    """Re-raise a GitHub 401/403 credential error as a StandupSourceError.
+
+    Rate-limit 403s are handled separately by the caller; this only fires for
+    bad/expired credentials so the standup can tell the user to fix GITHUB_TOKEN.
+    """
+    status = getattr(e, "status", 0)
+    if isinstance(e, github.BadCredentialsException) or status == 401:
+        from scrum_agent.standup.errors import StandupSourceError
+
+        raise StandupSourceError("github", "authentication failed — check GITHUB_TOKEN")
+
+
+def github_recent_commits(repo_url: str, days: int = 1) -> list[dict]:
+    """Return commits pushed to the default branch within the last ``days`` days.
+
+    Each item: {author, kind='commit', title, timestamp, key(sha)}. Returns []
+    when the repo can't be read (no token / not found / rate-limited).
+    """
+    logger.info("github_recent_commits: repo=%r days=%d", repo_url, days)
+    try:
+        slug = _parse_repo(repo_url)
+        repo = _get_github_client().get_repo(slug)
+        commits = repo.get_commits(since=_since_dt(days))
+        items: list[dict] = []
+        for c in commits[:100]:
+            commit = c.commit
+            author = commit.author.name if commit.author else ""
+            msg = (commit.message or "").splitlines()[0] if commit.message else ""
+            ts = commit.author.date.isoformat()[:19] if commit.author and commit.author.date else ""
+            items.append({"author": author, "kind": "commit", "title": msg, "timestamp": ts, "key": c.sha[:8]})
+        logger.info("github_recent_commits: %d commit(s) in last %d day(s)", len(items), days)
+        return items
+    except github.RateLimitExceededException:
+        logger.warning("github_recent_commits skipped — rate limit reached")
+        return []
+    except Exception as e:
+        _raise_if_github_auth(e)
+        logger.warning("github_recent_commits failed: %s", e)
+        return []
+
+
+def github_recent_prs(repo_url: str, days: int = 1) -> list[dict]:
+    """Return pull requests updated within the last ``days`` days.
+
+    Each item: {author, kind='pr', title, status, timestamp, key(#num)}. Returns
+    [] on any error. Sorted by updated desc; stops once older than the window.
+    """
+    logger.info("github_recent_prs: repo=%r days=%d", repo_url, days)
+    try:
+        slug = _parse_repo(repo_url)
+        repo = _get_github_client().get_repo(slug)
+        cutoff = _since_dt(days)
+        prs = repo.get_pulls(state="all", sort="updated", direction="desc")
+        items: list[dict] = []
+        for pr in prs[:100]:
+            updated = pr.updated_at
+            # updated_at may be naive; compare in UTC terms defensively.
+            if updated is not None and updated.tzinfo is not None and updated < cutoff:
+                break
+            status = "merged" if pr.merged else pr.state
+            ts = updated.isoformat()[:19] if updated else ""
+            items.append(
+                {
+                    "author": pr.user.login if pr.user else "",
+                    "kind": "pr",
+                    "title": pr.title or "",
+                    "status": status,
+                    "timestamp": ts,
+                    "key": f"#{pr.number}",
+                }
+            )
+        logger.info("github_recent_prs: %d PR(s) in last %d day(s)", len(items), days)
+        return items
+    except github.RateLimitExceededException:
+        logger.warning("github_recent_prs skipped — rate limit reached")
+        return []
+    except Exception as e:
+        _raise_if_github_auth(e)
+        logger.warning("github_recent_prs failed: %s", e)
+        return []

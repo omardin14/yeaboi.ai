@@ -430,6 +430,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sprint length in weeks (maps to intake Q8). Only used with --non-interactive.",
     )
 
+    # ── Daily Standup flags ───────────────────────────────────────────────
+    # --standup-run is what the OS scheduler (launchd/cron) invokes: it runs a
+    # standup headlessly and delivers it. See README: "Daily Standup".
+    parser.add_argument(
+        "--standup-run",
+        action="store_true",
+        default=False,
+        help="Run a daily standup headlessly and deliver it (used by the OS scheduler).",
+    )
+    parser.add_argument(
+        "--standup-session",
+        metavar="SESSION_ID",
+        default=None,
+        help="Session to run the standup for. Defaults to the most recent session. Only used with --standup-run.",
+    )
+    parser.add_argument(
+        "--standup-output",
+        choices=["terminal", "desktop", "slack", "email", "all"],
+        default=None,
+        help="Override delivery channel(s) for --standup-run (default: the session's saved channels).",
+    )
+    parser.add_argument(
+        "--standup-interactive",
+        action="store_true",
+        default=False,
+        help="With --standup-run: prompt for your update + confirm (timed) before generating. "
+        "What the scheduler opens in a terminal; falls back to headless when no TTY.",
+    )
+
     # ── Team learning flags ───────────────────────────────────────────────
     parser.add_argument(
         "--learn",
@@ -518,6 +547,73 @@ def _run_headless(args: argparse.Namespace) -> None:
         non_interactive=True,
         output_format=output_format,
     )
+
+
+def _run_standup(args: argparse.Namespace) -> int:
+    """Run a Daily Standup headlessly and deliver it. Returns a process exit code.
+
+    This is what the OS scheduler (launchd plist / crontab entry) invokes at the
+    configured time — even when the interactive app is closed. It resolves the
+    target session (``--standup-session`` or the most recent), runs the engine,
+    and delivers to the configured (or ``--standup-output``-overridden) channels.
+
+    Exit codes: 0 = delivered, 2 = no session found, 1 = unexpected error.
+
+    # See README: "Daily Standup" — scheduling, headless run
+    """
+    import logging as _logging
+
+    from scrum_agent.paths import get_db_path, get_standup_log_dir
+    from scrum_agent.sessions import SessionStore
+
+    # Route standup logs to their own directory so scheduled runs are auditable.
+    log_dir = get_standup_log_dir()
+    handler = _logging.FileHandler(log_dir / "standup-run.log", encoding="utf-8")
+    handler.setFormatter(_logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    root = _logging.getLogger("scrum_agent")
+    root.addHandler(handler)
+    root.setLevel(getattr(_logging, get_log_level(), _logging.INFO))
+
+    db_path = get_db_path()
+    session_id = args.standup_session
+    if not session_id or session_id == "latest":
+        with SessionStore(db_path) as store:
+            session_id = store.get_latest_session_id()
+    if not session_id:
+        print("Error: no session found to run a standup for.", file=sys.stderr)
+        return 2
+
+    # Resolve channel override: "all" expands to every channel.
+    channels = None
+    if args.standup_output:
+        if args.standup_output == "all":
+            from scrum_agent.standup.delivery import ALL_CHANNELS
+
+            channels = list(ALL_CHANNELS)
+        else:
+            channels = [args.standup_output]
+
+    # Interactive scheduled run: prompt for the user's update + confirm (timed),
+    # then generate + deliver. Falls back to headless when no TTY is attached.
+    if getattr(args, "standup_interactive", False):
+        from scrum_agent.standup.interactive import run_interactive_standup
+
+        return run_interactive_standup(session_id, channels=channels)
+
+    try:
+        from scrum_agent.standup.engine import run_standup
+
+        report = run_standup(session_id, channels=channels, deliver=True)
+        warn = f" ({len(report.warnings)} notice(s))" if report.warnings else ""
+        print(
+            f"Standup delivered for session '{session_id}' "
+            f"(day {report.sprint_day}/{report.sprint_total_days}){warn}."
+        )
+        return 0
+    except Exception as e:
+        logging.getLogger(__name__).error("Standup run failed: %s", e, exc_info=True)
+        print(f"Error: standup run failed: {e}", file=sys.stderr)
+        return 1
 
 
 def _sync_bedrock_config() -> None:
@@ -934,6 +1030,12 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Error: description file not found: {desc_path}", file=sys.stderr)
             sys.exit(1)
         args.description = desc_path.read_text().strip()
+
+    # ── Daily Standup headless flow ──────────────────────────────────────────
+    # What the OS scheduler (launchd/cron) invokes: run a standup and deliver it,
+    # with no TUI/splash. Runs before the interactive setup below.
+    if args.standup_run:
+        sys.exit(_run_standup(args))
 
     # ── Non-interactive headless flow ────────────────────────────────────────
     # Runs the full pipeline without any TUI, splash, or interactive input.

@@ -1098,11 +1098,348 @@ def _collect_settings_data() -> dict:
         "SESSION_PRUNE_DAYS",
         "LANGSMITH_TRACING",
         "TIPS_ENABLED",
+        # Daily Standup delivery config (secrets masked by the settings screen)
+        "STANDUP_GITHUB_REPO",
+        "SLACK_WEBHOOK_URL",
+        "STANDUP_SMTP_HOST",
+        "STANDUP_SMTP_USER",
+        "STANDUP_SMTP_PASSWORD",
+        "STANDUP_EMAIL_RECIPIENTS",
     ]
     for k in _keys:
         data[k] = os.environ.get(k, "")
     data["_config_path"] = str(get_config_file())
     return data
+
+
+def _collect_standup_data(message: str = "") -> dict:
+    """Gather Daily Standup dashboard data for the most recent session.
+
+    The standup page targets the most recently modified session. Returns the
+    session name, saved standup config, OS-schedule status, and the latest
+    generated StandupReport (if any).
+    """
+    data: dict = {
+        "message": message,
+        "session_id": "",
+        "session_name": "",
+        "config": None,
+        "report": None,
+        "schedule": {},
+    }
+    try:
+        from scrum_agent.sessions import SessionStore, make_display_name
+
+        with SessionStore(_ana_dbp) as store:
+            session_id = store.get_latest_session_id()
+            if not session_id:
+                return data
+            data["session_id"] = session_id
+            meta = store.get_session(session_id) or {}
+            data["session_name"] = make_display_name(meta) if meta else session_id
+    except Exception:
+        logger.warning("standup: failed to resolve latest session", exc_info=True)
+        return data
+
+    session_id = data["session_id"]
+    try:
+        from scrum_agent.standup.store import StandupStore
+
+        with StandupStore(_ana_dbp) as store:
+            data["config"] = store.load_config(session_id)
+            data["report"] = store.get_latest_report(session_id)
+    except Exception:
+        logger.warning("standup: failed to load standup store data", exc_info=True)
+    try:
+        from scrum_agent.standup.scheduler import get_schedule_status
+
+        data["schedule"] = get_schedule_status(session_id)
+    except Exception:
+        logger.warning("standup: failed to read schedule status", exc_info=True)
+    return data
+
+
+def _standup_generate(session_id: str) -> str:
+    """Run a standup for preview (no delivery) and return a status message."""
+    try:
+        from scrum_agent.standup.engine import run_standup
+
+        report = run_standup(session_id, deliver=False, dry_run=True)
+        warn = f" · {len(report.warnings)} notice(s)" if report.warnings else ""
+        return f"Generated — day {report.sprint_day}/{report.sprint_total_days}, {report.confidence_label}{warn}."
+    except Exception as e:
+        logger.error("standup: generate failed: %s", e, exc_info=True)
+        return f"Generate failed: {e}"
+
+
+def _standup_generate_flow(
+    console: Console, live, read_key, frame_time, supports_timeout, session_id: str
+) -> str | None:
+    """Ask the user for their own update, save it, then generate the standup.
+
+    Returns a status message on success, or None if the user pressed Esc at the
+    update prompt (cancel — no run). Pressing Enter with an empty update skips the
+    self-report and generates with inference.
+    """
+    from datetime import date
+
+    from scrum_agent.config import get_standup_user_name
+    from scrum_agent.standup.store import StandupStore
+
+    update = _standup_read_line(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        prompt="Your update for today (Enter to skip)",
+        step="Generate standup  —  add your update",
+        default="",
+    )
+    if update is None:
+        return None  # Esc → cancel the whole Generate
+    if update.strip():
+        member = get_standup_user_name()
+        with StandupStore(_ana_dbp) as store:
+            store.save_my_update(session_id, date.today().isoformat(), member, update.strip())
+    return _standup_generate(session_id)
+
+
+def _standup_read_line(
+    console: Console,
+    live,
+    read_key,
+    frame_time: float,
+    supports_timeout: bool,
+    *,
+    prompt: str,
+    step: str,
+    default: str = "",
+) -> str | None:
+    """Collect a single line of input inside the Live display (themed, read_key-driven).
+
+    Returns the typed value (or the default on empty Enter), or None if the user
+    pressed Esc to cancel. Because it uses read_key — which consumes mouse events
+    and returns printable chars — there's no raw terminal prompt and no mouse-escape
+    leakage.
+
+    Voice dictation (double-tap Space) works here just like the artifact editors:
+    the transcript is inserted at the cursor and the recording indicator renders
+    inline on this same screen.
+    """
+    import time as _time
+
+    from scrum_agent.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
+    from scrum_agent.ui.shared._voice_input import DoubleTapSpace, record_voice_input, voice_indicator
+
+    value = ""
+    _dts = DoubleTapSpace()
+
+    def _render(*, border_style: str = "", status: str = "") -> None:
+        w, h = console.size
+        live.update(
+            _build_standup_input_screen(
+                prompt,
+                value,
+                step=step,
+                default=default,
+                width=w,
+                height=max(10, h - 1),
+                border_style=border_style,
+                status=status,
+            )
+        )
+
+    # Voice overlay re-renders THIS screen (not a popup) with the pulsing
+    # indicator. record_voice_input() calls this and does the live.update itself,
+    # so we only return the renderable.
+    def _render_status(status_name: str, tick: float):
+        w, h = console.size
+        border, line = voice_indicator(status_name, tick)
+        return _build_standup_input_screen(
+            prompt, value, step=step, default=default, width=w, height=max(10, h - 1), border_style=border, status=line
+        )
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if k == "enter":
+            return value.strip() or default
+        if k == "esc":
+            return None
+        if k == "backspace":
+            value = value[:-1]
+        elif k == "clear":  # Ctrl+U
+            value = ""
+        elif k == "word_backspace":  # Ctrl+W
+            value = value.rstrip().rsplit(" ", 1)[0] if " " in value.strip() else ""
+        elif isinstance(k, str) and k.startswith("paste:"):
+            value += k[len("paste:") :]
+        elif k == " " and _dts.is_double(value.endswith(" "), _time.monotonic()):
+            # Double-tap Space → dictate. The first space (already in `value`)
+            # stays as a separator; the transcript is appended after it.
+            spoken = record_voice_input(live, console, read_key, _render_status)
+            if spoken:
+                value += spoken.replace("\n", " ")
+        elif isinstance(k, str) and len(k) == 1 and k.isprintable():
+            value += k
+        _render()
+
+
+def _standup_configure(console: Console, live, read_key, frame_time, supports_timeout, session_id: str) -> str:
+    """Collect schedule/delivery settings in-TUI, persist them, and (un)install the OS schedule.
+
+    Each field defaults to the existing config (Enter keeps it). Esc at any field
+    cancels the whole flow. Returns a status message for the dashboard.
+    """
+    from scrum_agent.standup.delivery import ALL_CHANNELS
+    from scrum_agent.standup.scheduler import install_schedule, remove_schedule
+    from scrum_agent.standup.store import StandupStore
+
+    with StandupStore(_ana_dbp) as store:
+        existing = store.load_config(session_id) or {}
+    cur_time = existing.get("time", "10:00")
+    cur_lead = str(existing.get("lead_minutes", 10))
+    cur_days = existing.get("weekdays", "1-5")
+    cur_channels = ", ".join(existing.get("delivery_channels", ["terminal"]))
+    cur_repo = existing.get("repo_path", "")
+    cur_enabled = "yes" if existing.get("enabled") else "no"
+
+    def _ask(prompt: str, step: str, default: str) -> str | None:
+        return _standup_read_line(
+            console, live, read_key, frame_time, supports_timeout, prompt=prompt, step=step, default=default
+        )
+
+    # Ask for the STANDUP time (when it happens); the job fires a few minutes before.
+    time_in = _ask("Standup time (HH:MM) — the meeting time", "Configure standup  (1/6)", cur_time)
+    if time_in is None:
+        return "Configure cancelled."
+    lead_in = _ask("Run how many minutes before the standup?", "Configure standup  (2/6)", cur_lead)
+    if lead_in is None:
+        return "Configure cancelled."
+    days_in = _ask("Weekdays (e.g. 1-5 or 1,3,5)", "Configure standup  (3/6)", cur_days)
+    if days_in is None:
+        return "Configure cancelled."
+    channels_in = _ask("Delivery channels (terminal, desktop, slack, email)", "Configure standup  (4/6)", cur_channels)
+    if channels_in is None:
+        return "Configure cancelled."
+    repo_in = _ask("Local git repo path (optional)", "Configure standup  (5/6)", cur_repo)
+    if repo_in is None:
+        return "Configure cancelled."
+    enable_in = _ask("Enable scheduled runs? (yes/no)", "Configure standup  (6/6)", cur_enabled)
+    if enable_in is None:
+        return "Configure cancelled."
+
+    enabled = enable_in.strip().lower() in ("y", "yes", "true", "on", "1")
+    channels = [c.strip() for c in channels_in.split(",") if c.strip() in ALL_CHANNELS] or ["terminal"]
+    try:
+        lead_minutes = max(0, int(lead_in))
+    except ValueError:
+        lead_minutes = 10
+
+    with StandupStore(_ana_dbp) as store:
+        store.save_config(
+            session_id,
+            enabled=enabled,
+            time=time_in,
+            lead_minutes=lead_minutes,
+            weekdays=days_in,
+            delivery_channels=channels,
+            repo_path=repo_in,
+        )
+
+    msg = install_schedule(session_id, time_in, days_in, lead_minutes) if enabled else remove_schedule(session_id)
+    logger.info("standup configure: session=%s enabled=%s -> %s", session_id, enabled, msg)
+    return msg
+
+
+def _standup_my_update(console: Console, live, read_key, frame_time, supports_timeout, session_id: str) -> str:
+    """Collect a self-reported update in-TUI and save it for today. Returns a status message."""
+    from datetime import date
+
+    from scrum_agent.standup.store import StandupStore
+
+    member = _standup_read_line(
+        console, live, read_key, frame_time, supports_timeout, prompt="Your name", step="My update  (1/2)", default="Me"
+    )
+    if member is None:
+        return "Update cancelled."
+    text = _standup_read_line(
+        console, live, read_key, frame_time, supports_timeout, prompt="Your update for today", step="My update  (2/2)"
+    )
+    if text is None:
+        return "Update cancelled."
+    if not text.strip():
+        return "No update entered."
+    with StandupStore(_ana_dbp) as store:
+        store.save_my_update(session_id, date.today().isoformat(), member, text.strip())
+    return f"Saved update for {member}."
+
+
+def _run_standup_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Event loop for the Daily Standup dashboard page.
+
+    Buttons: [Generate, My Update, Configure, Back]. Up/Down scrolls the report,
+    Left/Right selects a button, Enter activates it. My Update/Configure open
+    themed in-TUI input screens (driven by read_key, so no raw prompt and no
+    mouse-escape leakage), then refresh the dashboard.
+    """
+    from scrum_agent.ui.mode_select.screens._screens_secondary import _build_standup_screen
+
+    data = _collect_standup_data()
+    scroll, sel = 0, 0
+    n_buttons = 4  # Generate, My Update, Configure, Back
+
+    def _render() -> None:
+        w, h = console.size
+        # Leave a one-row safety margin: a Live renderable exactly equal to the
+        # terminal height loses its last row (the action buttons) to the cursor.
+        live.update(_build_standup_screen(data, scroll_offset=scroll, width=w, height=max(10, h - 1), action_sel=sel))
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if k in ("up", "scroll_up"):
+            scroll = max(0, scroll - 1)
+        elif k in ("down", "scroll_down"):
+            scroll += 1
+        elif k == "left":
+            sel = max(0, sel - 1)
+        elif k == "right":
+            sel = min(n_buttons - 1, sel + 1)
+        elif k in ("enter", " "):
+            session_id = data.get("session_id", "")
+            if sel == 3 or not session_id:  # Back (or nothing to act on)
+                if not session_id:
+                    logger.info("standup: no session available — returning to mode select")
+                break
+            if sel == 0:  # Generate — ask for the user's own update first, then run
+                try:
+                    proceed = _standup_generate_flow(
+                        console, live, read_key, frame_time, supports_timeout, session_id
+                    )
+                except Exception as e:  # never let a prompt crash the TUI
+                    logger.error("standup generate failed: %s", e, exc_info=True)
+                    proceed = f"Generate failed: {e}"
+                if proceed is not None:  # None = user cancelled at the update prompt
+                    data = _collect_standup_data(message=proceed)
+                    scroll = 0
+                else:
+                    data = _collect_standup_data()
+            else:  # My Update / Configure — in-TUI themed input (stays inside Live)
+                try:
+                    if sel == 1:
+                        msg = _standup_my_update(console, live, read_key, frame_time, supports_timeout, session_id)
+                    else:
+                        msg = _standup_configure(console, live, read_key, frame_time, supports_timeout, session_id)
+                except Exception as e:  # never let a prompt crash the TUI
+                    logger.error("standup action failed: %s", e, exc_info=True)
+                    msg = f"Action failed: {e}"
+                data = _collect_standup_data(message=msg)
+                scroll = 0
+        elif k in ("esc", "q"):
+            break
+        _render()
 
 
 def select_mode(
@@ -2261,6 +2598,14 @@ def select_mode(
                 _azdevops_ok,
                 _staleness_days,
             )
+
+            # ── Route: Daily Standup mode → dashboard + actions ──────────
+            if chosen["key"] == "daily-standup":
+                logger.info("Daily Standup mode selected")
+                _run_standup_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                _restart_mode_select = True
+                _skip_fade_in = True
+                continue
 
             # ── Route: Usage mode → single-page dashboard ────────────────
             if chosen["key"] == "usage":
