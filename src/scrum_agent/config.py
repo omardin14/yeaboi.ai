@@ -212,6 +212,18 @@ def get_google_api_key() -> str | None:
     return os.getenv("GOOGLE_API_KEY") or None
 
 
+def get_voice_model() -> str:
+    """Return the local Whisper model size for voice input.
+
+    Transcription runs on-device via faster-whisper, so this is a model *size*,
+    not a cloud model name. Override with the VOICE_MODEL env var. Valid values:
+    ``tiny``, ``base`` (default), ``small``, ``medium``, ``large-v3`` (and the
+    English-only ``.en`` variants). Larger = more accurate but slower and a
+    bigger one-time download.
+    """
+    return os.getenv("VOICE_MODEL") or "base"
+
+
 def get_session_prune_days() -> int:
     """Return the number of days after which old sessions are pruned.
 

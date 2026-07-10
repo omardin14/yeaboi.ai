@@ -22,6 +22,22 @@ _PAD = PAD
 _INPUT_BOX_W_MAX = 74
 
 
+def _voice_hint() -> str:
+    """Return a discoverability suffix for voice input on text-entry screens.
+
+    Always advertises the feature so users know it exists. When the voice extra
+    is installed it prompts to speak; otherwise it shows how to enable it —
+    hiding it entirely (the old behaviour) meant the feature was invisible to
+    anyone who hadn't already set it up.
+    """
+    from scrum_agent.voice import is_voice_available
+
+    available, _reason = is_voice_available()
+    if available:
+        return " · \U0001f3a4 double-tap Space to speak"
+    return " · \U0001f3a4 dictate: uv sync --extra voice"
+
+
 # ---------------------------------------------------------------------------
 # Shared header — "Planning" ASCII title pinned at top of every screen
 # ---------------------------------------------------------------------------
@@ -48,12 +64,15 @@ def _build_description_screen(
     width: int = 80,
     height: int = 24,
     border_override: str = "",
+    status_line: str = "",
 ) -> Panel:
     """Build the multi-line project description input screen.
 
     Shows the Planning title, a "Tell me about your project" subtitle,
     and a multi-line text box. Enter on an empty line submits.
     border_override: if set, overrides the input box border colour (for green pulse).
+    status_line: if set, replaces the submit hint with this text (e.g. the
+        inline voice-recording indicator) so the user stays on this screen.
     """
     title = _planning_title()
     sub = Text(_PAD + "Tell me about your project", style="dim", justify="left")
@@ -119,11 +138,14 @@ def _build_description_screen(
         width=box_w,
     )
 
-    submit_hint = Text(
-        _PAD + "Enter submit \u00b7 \u2303N new line \u00b7 Esc go back \u00b7 \u2325+drag select text",
-        style="dim",
-        justify="left",
-    )
+    if status_line:
+        submit_hint = Text(_PAD + status_line, style="bold white", justify="left")
+    else:
+        submit_hint = Text(
+            _PAD + "Enter submit \u00b7 \u2303N new line \u00b7 Esc go back" + _voice_hint(),
+            style="dim",
+            justify="left",
+        )
 
     # Wrap the example to fit within the box width
     example_lines = _wrap_text(example_text, box_w - 4)
@@ -208,6 +230,7 @@ def _build_question_screen(
     width: int = 80,
     height: int = 24,
     border_override: str = "",
+    status_line: str = "",
 ) -> Panel:
     """Build a single intake question screen.
 
@@ -285,9 +308,13 @@ def _build_question_screen(
             body_h += 1
         body.append(Text(""))
         body_h += 1
-        hint = Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel", style="dim", justify="left")
+        hint = Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel" + _voice_hint(), style="dim", justify="left")
     else:
-        hint = Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel", style="dim", justify="left")
+        hint = Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel" + _voice_hint(), style="dim", justify="left")
+
+    # Inline voice-recording indicator replaces the hint so the user stays here.
+    if status_line:
+        hint = Text(_PAD + status_line, style="bold white", justify="left")
 
     if input_value:
         display = input_value + "\u2588"

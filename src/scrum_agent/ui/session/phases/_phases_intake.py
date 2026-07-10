@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from langchain_core.messages import AIMessage, HumanMessage
 from rich.console import Console
@@ -20,7 +21,11 @@ from scrum_agent.repl._questionnaire import (
 from scrum_agent.repl._ui import _predict_next_node
 from scrum_agent.ui.session._utils import _invoke_with_animation
 from scrum_agent.ui.session.screens._accordion import _build_accordion_question_screen
-from scrum_agent.ui.session.screens._screens_input import _build_description_screen, _build_question_screen
+from scrum_agent.ui.session.screens._screens_input import (
+    _build_description_screen,
+    _build_question_screen,
+    _voice_hint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,35 @@ def _phase_description_input(
 
     w, h = console.size
     live.update(_build_description_screen(input_lines, cursor_row, cursor_col, width=w, height=h))
+
+    # Voice input: double-tap Space to dictate (see DoubleTapSpace for why).
+    from scrum_agent.ui.shared._voice_input import DoubleTapSpace, record_voice_input, voice_indicator
+
+    _dts = DoubleTapSpace()
+
+    def _voice_render(status, tick):
+        _bw, _bh = console.size
+        _border, _line = voice_indicator(status, tick)
+        return _build_description_screen(
+            input_lines, cursor_row, cursor_col, width=_bw, height=_bh,
+            border_override=_border, status_line=_line,
+        )
+
+    def _run_voice() -> None:
+        nonlocal cursor_row, cursor_col
+        spoken = record_voice_input(live, console, _key, render_status=_voice_render)
+        if not spoken:
+            return
+        voice_lines = spoken.split("\n")
+        line = input_lines[cursor_row]
+        tail = line[cursor_col:]
+        input_lines[cursor_row] = line[:cursor_col] + voice_lines[0]
+        cursor_col += len(voice_lines[0])
+        for vl in voice_lines[1:]:
+            cursor_row += 1
+            input_lines.insert(cursor_row, vl)
+            cursor_col = len(vl)
+        input_lines[cursor_row] += tail
 
     while True:
         key = _key()
@@ -150,8 +184,13 @@ def _phase_description_input(
                     input_lines[cursor_row] += line[cursor_col - len(paste_lines[-1]) :]
         elif isinstance(key, str) and len(key) == 1 and key.isprintable():
             line = input_lines[cursor_row]
-            input_lines[cursor_row] = line[:cursor_col] + key + line[cursor_col:]
-            cursor_col += 1
+            if key == " " and _dts.is_double(cursor_col > 0 and line[cursor_col - 1] == " ", time.monotonic()):
+                # Double-tap Space → dictate; the first space stays as a separator
+                # and the second one is swallowed by the gesture (not inserted).
+                _run_voice()
+            else:
+                input_lines[cursor_row] = line[:cursor_col] + key + line[cursor_col:]
+                cursor_col += 1
         elif key == "":
             pass  # timeout, no input
         else:
@@ -459,7 +498,9 @@ def _question_input_loop(
                 height=h,
                 cursor_pos=cursor_pos,
                 edit_hint=(
-                    "Space toggle \u00b7 Enter submit" if multi_select else "Enter/Ctrl+S submit \u00b7 Esc cancel"
+                    "Space toggle \u00b7 Enter submit"
+                    if multi_select
+                    else ("Enter/Ctrl+S submit \u00b7 Esc cancel" + ("" if choices else _voice_hint()))
                 ),
             )
         return _build_question_screen(
@@ -476,6 +517,37 @@ def _question_input_loop(
         )
 
     live.update(_render())
+
+    # Voice input: double-tap Space to dictate (free-text questions only).
+    from scrum_agent.ui.shared._voice_input import DoubleTapSpace, record_voice_input, voice_indicator
+
+    _dts = DoubleTapSpace()
+
+    def _voice_render(status, tick):
+        _bw, _bh = console.size
+        _border, _line = voice_indicator(status, tick)
+        if use_accordion:
+            return _build_accordion_question_screen(
+                question_text, input_value, questionnaire,
+                choices=choices, suggestion=suggestion, progress=progress,
+                phase_label=phase_label, selected_choice=selected_choice,
+                selected_choices=selected_choices if multi_select else None,
+                scroll_offset=scroll_offset, width=_bw, height=_bh, cursor_pos=cursor_pos,
+                border_override=_border, edit_hint=_line,
+            )
+        return _build_question_screen(
+            question_text, input_value, choices=choices, suggestion=suggestion,
+            progress=progress, phase_label=phase_label, preamble_lines=preamble_lines,
+            selected_choice=selected_choice, width=_bw, height=_bh,
+            border_override=_border, status_line=_line,
+        )
+
+    def _run_voice() -> None:
+        nonlocal input_value, cursor_pos
+        spoken = record_voice_input(live, console, _key, render_status=_voice_render)
+        if spoken:
+            input_value = input_value[:cursor_pos] + spoken + input_value[cursor_pos:]
+            cursor_pos += len(spoken)
 
     while True:
         key = _key()
@@ -536,8 +608,12 @@ def _question_input_loop(
             input_value = input_value[:cursor_pos] + pasted + input_value[cursor_pos:]
             cursor_pos += len(pasted)
         elif isinstance(key, str) and len(key) == 1 and key.isprintable():
-            input_value = input_value[:cursor_pos] + key + input_value[cursor_pos:]
-            cursor_pos += 1
+            if key == " " and _dts.is_double(cursor_pos > 0 and input_value[cursor_pos - 1] == " ", time.monotonic()):
+                # Double-tap Space → dictate; the first space stays as a separator.
+                _run_voice()
+            else:
+                input_value = input_value[:cursor_pos] + key + input_value[cursor_pos:]
+                cursor_pos += 1
         elif key == "":
             pass
         else:

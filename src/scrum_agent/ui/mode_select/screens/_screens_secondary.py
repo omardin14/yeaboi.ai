@@ -3414,6 +3414,19 @@ def _build_settings_screen(
     _heading("GitHub")
     _row("Token", config_data.get("GITHUB_TOKEN", ""), masked=True)
 
+    # ── Voice Input ───────────────────────────────────────────────
+    # Local, offline dictation (double-tap Space in any text field) — works with every
+    # LLM provider, no API key. See README: "Voice Input".
+    _heading("Voice Input")
+    from scrum_agent.voice import backend_label, is_voice_available
+
+    _voice_ok, _voice_reason = is_voice_available()
+    if _voice_ok:
+        _row("Dictation", f"available — {backend_label()}", value_style=theme.good)
+    else:
+        _row("Dictation", f"unavailable — {_voice_reason}", value_style=theme.warn)
+    _row("Model Size", config_data.get("VOICE_MODEL", "") or "base (default)")
+
     # ── AWS Bedrock ───────────────────────────────────────────────
     aws_region = config_data.get("AWS_REGION", "")
     aws_profile = config_data.get("AWS_PROFILE", "")
