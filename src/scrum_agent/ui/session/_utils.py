@@ -141,12 +141,43 @@ def _render_to_lines(console: Console, renderable, width: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _classify_api_error(err: Exception) -> str:
-    """Return a user-friendly error message for common API errors.
+def _extract_status_code(err: Exception) -> int | None:
+    """Best-effort extraction of an HTTP status code from any exception.
 
-    Used by TUI error handlers to show actionable feedback instead of
-    silently returning to the project select screen.
+    Works across SDKs without importing them: checks common attributes
+    (``status_code``, ``status``), a nested ``response`` object, and finally
+    parses an ``HTTP <code>`` token from the message (e.g. JIRAError's text).
     """
+    for attr in ("status_code", "status"):
+        val = getattr(err, attr, None)
+        if isinstance(val, int) and not isinstance(val, bool):
+            return val
+    resp = getattr(err, "response", None)
+    if resp is not None:
+        for attr in ("status_code", "status"):
+            val = getattr(resp, attr, None)
+            if isinstance(val, int) and not isinstance(val, bool):
+                return val
+    match = re.search(r"\bHTTP[\s:]+(\d{3})\b", str(err))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _classify_api_error(err: Exception) -> str:
+    """Return a short, user-friendly message for any API/integration error.
+
+    Used by TUI error handlers so users see actionable, one-line feedback
+    instead of a raw exception dump. This is the single place that turns SDK
+    exceptions (Anthropic, Jira, Azure DevOps, GitHub, OpenAI, …) into human
+    text — call it everywhere an external-service error can reach the screen,
+    never render ``str(exc)`` directly (a JIRAError, for example, stringifies to
+    its entire HTTP response including every header).
+
+    Optional-dependency SDKs are matched by class/module name + status code
+    rather than isinstance, so this module never has to import them.
+    """
+    # Anthropic — the default provider, always installed.
     if isinstance(err, anthropic.AuthenticationError):
         return "Authentication failed — check your ANTHROPIC_API_KEY in .env (may be missing, expired, or invalid)."
     if isinstance(err, anthropic.RateLimitError):
@@ -155,11 +186,57 @@ def _classify_api_error(err: Exception) -> str:
         return "Network error — check your internet connection and try again."
     if isinstance(err, anthropic.APIStatusError):
         msg = getattr(err, "message", str(err))
-        # Detect billing/credit errors from the message body
         if "credit balance" in msg.lower() or "billing" in msg.lower():
             return "Insufficient API credits — visit Plans & Billing at console.anthropic.com to add credits."
         return f"API error (status {err.status_code}): {msg}"
-    return f"Unexpected error: {err}"
+
+    name = type(err).__name__
+    module = (type(err).__module__ or "").lower()
+    status = _extract_status_code(err)
+    is_auth = status in (401, 403)
+
+    # Jira (jira.exceptions.JIRAError) — its str() is a full HTTP dump, so we
+    # build the message from the status code and never fall through to str(err).
+    if "jira" in module or name == "JIRAError":
+        if is_auth:
+            return (
+                "Jira authentication failed — check your Jira URL, email, and API token "
+                "(Settings ▸ Issue Tracking, or JIRA_* in .env)."
+            )
+        if status == 404:
+            return "Jira project or board not found — check your JIRA_PROJECT_KEY."
+        return f"Jira request failed{f' (HTTP {status})' if status else ''} — check your Jira configuration."
+
+    # Azure DevOps (azure.devops.exceptions.*) — often lacks a status code.
+    if "azure" in module or "azuredevops" in name.lower():
+        if is_auth:
+            return (
+                "Azure DevOps authentication failed — check your personal access token and organisation URL "
+                "(Settings ▸ Issue Tracking, or AZURE_DEVOPS_* in .env)."
+            )
+        return "Azure DevOps request failed — check your Azure DevOps configuration."
+
+    # GitHub (github.GithubException / BadCredentialsException).
+    if "github" in module or name in ("GithubException", "BadCredentialsException"):
+        if is_auth:
+            return "GitHub authentication failed — check your GITHUB_TOKEN."
+        return f"GitHub request failed{f' (HTTP {status})' if status else ''} — check your GitHub configuration."
+
+    # Any other SDK, matched purely by status code (OpenAI, Google, requests…).
+    if is_auth:
+        return "Authentication failed — check the API key/token for this service in Settings."
+    if status == 429:
+        return "Rate limited — too many requests. Wait a moment and try again."
+    if "connection" in name.lower() or "timeout" in name.lower():
+        return "Network error — check your internet connection and try again."
+
+    # Fallback — bound the length and keep only the first line so a stray dump
+    # (headers, HTML body) can never flood or break the TUI layout.
+    text = str(err).strip()
+    first_line = text.splitlines()[0] if text else name
+    if len(first_line) > 200:
+        first_line = first_line[:197] + "…"
+    return f"Unexpected error: {first_line}"
 
 
 # ---------------------------------------------------------------------------

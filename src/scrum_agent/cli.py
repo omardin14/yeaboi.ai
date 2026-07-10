@@ -1145,17 +1145,26 @@ def main(argv: list[str] | None = None) -> None:
 
         atexit.register(_terminal_cleanup)
         enable_mouse_tracking()
+        _tui_error: Exception | None = None
         try:
             mode_result = select_mode(console, dry_run=args.dry_run)
         except KeyboardInterrupt:
             mode_result = None
-        except Exception:
+        except Exception as _exc:
             logging.getLogger(__name__).exception("Unhandled exception in TUI")
+            _tui_error = _exc
             mode_result = None
         finally:
             disable_mouse_tracking()
             if console.is_alt_screen:
                 console.set_alt_screen(False)
+        # Surface a friendly, one-line message (never a raw traceback) now that
+        # the terminal is restored. See _classify_api_error for the mapping.
+        if _tui_error is not None:
+            from scrum_agent.ui.session._utils import _classify_api_error
+
+            console.print(f"[red]{_classify_api_error(_tui_error)}[/red]")
+            console.print("[dim]See ~/.scrum-agent/logs/tui/scrum-agent.log for details.[/dim]")
         if mode_result is None:
             return
         # mode_result is non-None only for offline import (questionnaire path)
