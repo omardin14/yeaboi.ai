@@ -22,6 +22,8 @@ from scrum_agent.agent.state import (
     MemberUpdate,
     ProjectAnalysis,
     PromptQualityRating,
+    RetroCard,
+    RetroReport,
     ScrumState,
     StandupReport,
 )
@@ -33,6 +35,8 @@ __all__ = [
     "MemberUpdate",
     "ProjectAnalysis",
     "PromptQualityRating",
+    "RetroCard",
+    "RetroReport",
     "ScrumState",
     "StandupReport",
     "call_model",

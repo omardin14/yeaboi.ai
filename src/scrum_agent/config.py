@@ -225,6 +225,17 @@ def get_standup_github_repo() -> str:
     return os.getenv("STANDUP_GITHUB_REPO", "") or ""
 
 
+def get_retro_server_port() -> int:
+    """Return the base port for the Retro collaboration server (default 5173).
+
+    The server walks upward from this port if it is busy (see retro/server.py).
+    """
+    try:
+        return int(os.getenv("RETRO_PORT", "5173"))
+    except ValueError:
+        return 5173
+
+
 def get_slack_webhook_url() -> str:
     """Return the Slack incoming-webhook URL for standup delivery, or '' if unset."""
     return os.getenv("SLACK_WEBHOOK_URL", "") or ""
