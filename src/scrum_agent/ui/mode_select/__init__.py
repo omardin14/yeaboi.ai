@@ -1097,6 +1097,7 @@ def _collect_settings_data() -> dict:
         "LOG_LEVEL",
         "SESSION_PRUNE_DAYS",
         "LANGSMITH_TRACING",
+        "TIPS_ENABLED",
     ]
     for k in _keys:
         data[k] = os.environ.get(k, "")
@@ -1199,6 +1200,13 @@ def select_mode(
                     continue
                 elif key in ("q", "esc"):
                     return None
+                elif key == "t":
+                    # Toggle the rotating tips on/off and persist the choice. The
+                    # live.update() at the bottom of the loop re-renders with the
+                    # new state, so the tip banner hides/shows instantly.
+                    from scrum_agent.config import is_tips_enabled, set_tips_enabled
+
+                    set_tips_enabled(not is_tips_enabled())
 
                 elapsed = time.monotonic() - select_time
                 reveal = elapsed * _DESC_SCROLL_SPEED  # float for sub-char fade

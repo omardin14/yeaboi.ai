@@ -70,6 +70,33 @@ def is_langsmith_enabled() -> bool:
     return os.getenv("LANGSMITH_TRACING", "").lower() == "true" and bool(os.getenv("LANGSMITH_API_KEY"))
 
 
+def is_tips_enabled() -> bool:
+    """Return True if on-screen discoverability tips should be shown (default on).
+
+    Controls the rotating welcome-screen tip banner and the inline voice hints on
+    text-entry screens. Any value other than "false" (case-insensitive) keeps tips
+    on, so an unset var means enabled — the feature should be visible by default.
+    """
+    return os.getenv("TIPS_ENABLED", "true").strip().lower() != "false"
+
+
+def set_tips_enabled(enabled: bool) -> None:
+    """Persist the tips on/off preference to ~/.scrum-agent/.env and apply it now.
+
+    Uses dotenv's set_key so only this one key is updated — save_config() rewrites
+    the whole file and would drop any keys not passed to it. os.environ is updated
+    too so the running session reflects the change immediately (no reload needed).
+    """
+    from dotenv import set_key
+
+    value = "true" if enabled else "false"
+    config_file = get_config_file()
+    # set_key creates the file if missing and preserves existing keys/comments.
+    set_key(str(config_file), "TIPS_ENABLED", value)
+    os.environ["TIPS_ENABLED"] = value
+    logger.info("Tips %s (persisted to %s)", "enabled" if enabled else "disabled", config_file)
+
+
 # Proxy environment variables to check (both uppercase and lowercase conventions).
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 

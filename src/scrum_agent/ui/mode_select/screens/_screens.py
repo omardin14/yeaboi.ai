@@ -178,6 +178,52 @@ def _build_mode_row(
     return items
 
 
+# Colour anchors for the tip cross-fade. Each is (background, full) — the tip
+# lerps from the near-black background up to its full colour by tip_brightness(),
+# so tips dissolve in and out instead of snapping.
+_TIP_BG = (28, 28, 34)
+_TIP_BODY = (198, 198, 208)  # soft grey-white for the tip text
+_TIP_DOT_DIM = (70, 70, 82)  # inactive position dots (matches the app's hollow ○)
+_TIP_DOT_ON = (226, 186, 96)  # warm accent for the active dot
+_TIP_KEY = (210, 210, 220)  # the "t" keycap glyph
+
+
+def _build_tip_rows(shimmer_tick: float) -> list[Text]:
+    """Build the bottom tip block: a rotating, cross-fading tip + a control row.
+
+    Returns two centred rows so the mode list above stays vertically stable
+    whether tips are on or off. When off, both rows are blank. The tip fades in
+    and out via ``tip_brightness`` (see README: "Architecture" — shared UI layer).
+    """
+    from scrum_agent.config import is_tips_enabled
+    from scrum_agent.ui.shared._animations import lerp_color
+    from scrum_agent.ui.shared._tips import current_tip, tip_brightness, tip_count
+
+    if not is_tips_enabled():
+        return [Text(""), Text("")]
+
+    idx, tip_text = current_tip(shimmer_tick)
+    b = tip_brightness(shimmer_tick)
+
+    # Row 1 — the tip, faded from background toward full body colour.
+    tip_line = Text(tip_text, style=lerp_color(b, _TIP_BG, _TIP_BODY), justify="center")
+
+    # Row 2 — position dots (active one accented) + a quiet keycap control hint.
+    dot_dim = lerp_color(b, _TIP_BG, _TIP_DOT_DIM)
+    dot_on = lerp_color(b, _TIP_BG, _TIP_DOT_ON)
+    control = Text(justify="center")
+    for i in range(tip_count()):
+        if i:
+            control.append(" ")
+        control.append("●" if i == idx else "○", style=dot_on if i == idx else dot_dim)
+    control.append("     ")
+    control.append("press ", style=dot_dim)
+    control.append("t", style=f"bold {lerp_color(b, _TIP_BG, _TIP_KEY)}")
+    control.append(" to hide", style=dot_dim)
+
+    return [tip_line, control]
+
+
 def _build_mode_screen(
     selected: int,
     *,
@@ -222,21 +268,16 @@ def _build_mode_screen(
             body.append(Text(""))
             body_h += 1
 
-    # Bottom-pinned discoverability tip for voice input — so users learn the
-    # feature exists from the very first screen, not only inside a session.
-    from scrum_agent.voice import is_voice_available
+    # Bottom-pinned discoverability tip — so users learn features exist from the
+    # very first screen, not only inside a session. Tips rotate every few seconds
+    # off the render loop's shimmer_tick, cross-fading between one another, and can
+    # be switched off entirely. Rendered as two quiet rows: the tip itself, then
+    # position dots + a keycap control hint.
+    tip_rows = _build_tip_rows(shimmer_tick)
 
-    _voice_ok, _ = is_voice_available()
-    tip_text = (
-        "\U0001f3a4  Tip: double-tap Space in any text field to dictate"
-        if _voice_ok
-        else "\U0001f3a4  Voice input supported — enable with: uv sync --extra voice"
-    )
-    tip = Text(tip_text, style="dim", justify="center")
-
-    # Reserve the last row for the tip; centre the mode rows in the space above.
+    # Reserve two rows for the tip block; centre the mode rows in the space above.
     inner_h = height - 4
-    body_area = max(0, inner_h - 1)
+    body_area = max(0, inner_h - len(tip_rows))
     mid_top = max(0, (body_area - body_h) // 2)
     mid_bot = max(0, body_area - body_h - mid_top)
 
@@ -244,7 +285,7 @@ def _build_mode_screen(
         *[Text("") for _ in range(mid_top)],
         *body,
         *[Text("") for _ in range(mid_bot)],
-        tip,
+        *tip_rows,
     )
 
     return Panel(

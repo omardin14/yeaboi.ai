@@ -1164,3 +1164,12 @@ _Bring Azure DevOps to full feature parity with Jira — read board/velocity, cr
 - [x] Route all raw error surfaces through it: team analysis (both flows), epic export (Jira+AzDO), Jira/AzDO sync-all
 - [x] Top-level cli.py catch-all shows a friendly one-line message + log pointer instead of silent blank
 - [x] Unit tests `tests/unit/test_ui_error_classification.py` (16 cases incl. the real 401 dump)
+
+## Phase 20: Rotating, Dismissible Welcome-Screen Tips
+- [x] `ui/shared/_tips.py` — curated general tips (voice + `--resume`, Jira/AzDO export, HTML/JSON export, questionnaire, themes, headless); voice tip stays availability-aware; `@lru_cache`d list; `current_tip(tick)` rotates every `TIP_ROTATE_SECONDS` off the existing render tick (no new timer)
+- [x] `is_tips_enabled()` / `set_tips_enabled()` in `config.py` — `TIPS_ENABLED` env var (default on), persisted via `dotenv.set_key` (single-key, preserves other config), applied to `os.environ` immediately
+- [x] Welcome screen (`_screens.py`) renders the rotating tip + "press t to hide"; blanks the reserved row when off
+- [x] `t` key in the mode-select loop toggles + persists; hides/shows instantly
+- [x] Inline `_voice_hint()` returns "" when tips off (silences input-screen hints too); setup-wizard onboarding line gated on tips
+- [x] Settings page "Tips: on/off" row + `TIPS_ENABLED` in `_collect_settings_data`; `.env.example` documented
+- [x] Unit tests: `tests/unit/test_tips.py`, `tests/unit/test_tips_ui.py`, plus `TIPS_ENABLED` cases in `test_config.py`
