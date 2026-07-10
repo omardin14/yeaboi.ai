@@ -3200,11 +3200,18 @@ class TestPTOSubLoop:
 
     def test_pto_valid_start_asks_for_end(self):
         """Valid start date should ask for end date."""
+        from datetime import date, timedelta
+
         qs = self._make_qs_at_confirmation("standard")
         qs._awaiting_leave_input = True
         qs._leave_input_stage = "start"
         qs._leave_input_buffer = {"person": "Alice"}
-        state = {"messages": [HumanMessage(content="06/04/2026")], "questionnaire": qs}
+        # Q8=2 weeks, Q10=2 sprints → window is today + 4 weeks; pick a date inside it.
+        # Computed relative to today so the test doesn't rot once the date passes.
+        qs.answers[8] = "2 weeks"
+        qs.answers[10] = "2 sprints"
+        start = (date.today() + timedelta(days=7)).strftime("%d/%m/%Y")
+        state = {"messages": [HumanMessage(content=start)], "questionnaire": qs}
         result = project_intake(state)
         assert "end date" in result["messages"][0].content.lower()
         assert result["questionnaire"]._leave_input_stage == "end"
