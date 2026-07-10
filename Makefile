@@ -1,6 +1,6 @@
 UV := $(or $(shell command -v uv 2>/dev/null),$(HOME)/.local/bin/uv)
 
-.PHONY: install dev test test-fast test-v test-all lint format run run-dry clean env pre-commit graph eval contract record smoke-test snapshot-update budget-report build publish help
+.PHONY: install dev test test-fast test-v test-all lint format run run-dry clean env pre-commit graph eval contract record smoke-test snapshot-update budget-report bump-patch bump-minor bump-major build publish help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -63,6 +63,15 @@ budget-report: ## Show live prompt token counts for trend monitoring (runs token
 
 graph: ## Generate agent graph visualisation PNG
 	$(UV) run python scripts/generate_graph_png.py
+
+bump-patch: ## Bump the patch version in pyproject.toml (X.Y.Z -> X.Y.Z+1)
+	$(UV) run python scripts/bump_version.py patch
+
+bump-minor: ## Bump the minor version in pyproject.toml (X.Y.Z -> X.Y+1.0)
+	$(UV) run python scripts/bump_version.py minor
+
+bump-major: ## Bump the major version in pyproject.toml (X.Y.Z -> X+1.0.0)
+	$(UV) run python scripts/bump_version.py major
 
 build: ## Build sdist + wheel into dist/
 	$(UV) build

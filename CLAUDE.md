@@ -401,6 +401,13 @@ Version is **single-sourced in `pyproject.toml`** (`version = "…"`). `src/scru
 
 **Releasing is automatic on a version bump.** To ship a release: bump `version` in `pyproject.toml` (semver) and merge to `main`. On that push, `publish.yml` detects there's no `v<version>` tag yet and runs test → build → PyPI publish (OIDC) → creates the `v<version>` tag + GitHub Release. Merges that don't change the version are a no-op. Never tag manually — the workflow owns tagging.
 
+**The bump itself is automated too (`auto-version.yml`).** On each PR, cheap deterministic guards run first (skip if the version was already changed in the PR, or if no `src/scrum_agent/**` files changed and no `semver:*` label is present); otherwise Claude classifies the diff into a semver level and commits `chore: bump version to X.Y.Z [auto]` **to the PR branch** — so merging fires `publish.yml` with no manual step. Rules:
+- **Bump on the PR branch, not `main`** — a workflow pushing to `main` with the default `GITHUB_TOKEN` would not re-trigger `publish.yml` (recursion suppression); the human merge does. This means no PAT is needed.
+- **Override with a label**: `semver:major` / `semver:minor` / `semver:patch` forces the level; `release:skip` (or `semver:none`) suppresses the bump.
+- **Manual bumps still work** — if you edit `version` yourself, the guard sees it already differs from `main` and leaves it alone.
+- **Mechanics** live in `scripts/bump_version.py` (pure `bump()` + `make bump-patch|bump-minor|bump-major`); the LLM only chooses the level.
+- **Known limitation**: two PRs branched off the same version can pick the same next version — whichever merges second finds the tag already exists and won't publish separately. Acceptable for this repo; the fix (post-merge serialized bump on `main`) would need a PAT to re-trigger `publish.yml`.
+
 Distribution is PyPI-only (via `uv tool install` / `pipx install`); Homebrew is not supported because a required dependency (`sqlite-vec`) ships no sdist, so the `omardin14/homebrew-tap` formula is permanently disabled.
 
 ## CI/CD
@@ -410,6 +417,7 @@ Workflows in `.github/workflows/`:
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | Every push | Lint + test |
+| `auto-version.yml` | PR | Claude classifies the diff and commits a `chore: bump version…` to the PR branch (skips docs/chore-only PRs; `semver:*` / `release:skip` labels override) |
 | `publish.yml` | Push to `main` | if `pyproject.toml` version has no tag yet: test → build → PyPI publish (OIDC) → tag + GitHub Release (else no-op) |
 | `smoke.yml` | Weekly cron | Live API smoke tests |
 | `claude.yml` | PR | Claude Code review |

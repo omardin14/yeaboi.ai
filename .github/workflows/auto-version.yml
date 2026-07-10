@@ -1,0 +1,107 @@
+name: Auto Version Bump
+
+# Classify each PR and, for release-worthy changes, bump the version in
+# pyproject.toml on the PR branch. Merging then triggers publish.yml (which
+# releases whenever the version has no matching tag) — so releases happen with no
+# manual version bump. Cheap deterministic guards run first; the LLM is only asked
+# to choose the semver level when the change actually ships code.
+#
+# The bump lands on the PR *branch* (not main) on purpose: the human merge is what
+# pushes to main and triggers publish.yml. A workflow pushing to main with the
+# default GITHUB_TOKEN would NOT re-trigger publish.yml, so this avoids needing a PAT.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [main]
+
+concurrency:
+  group: auto-version-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Decide & apply version bump
+    # Same-repo PRs only (forks can't push to the head branch or read secrets).
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.state == 'open'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commit the bump to the PR branch
+      pull-requests: write # post the explanation comment
+      id-token: write # claude-code-action OIDC
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Deterministic guards
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          ver() { sed -nE 's/^version = "([^"]+)".*/\1/p' | head -1; }
+          git fetch --no-tags origin "$BASE_REF"
+          BASE_V=$(git show "FETCH_HEAD:pyproject.toml" | ver)
+          HEAD_V=$(ver < pyproject.toml)
+          echo "base=$BASE_V head=$HEAD_V labels=[$LABELS]"
+
+          # 1) Already bumped in this PR (manual, or a prior auto run) -> skip.
+          #    Keeps re-runs on `synchronize` idempotent and respects manual bumps.
+          if [ "$HEAD_V" != "$BASE_V" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::version already changed in this PR ($BASE_V -> $HEAD_V); skipping."
+            exit 0
+          fi
+
+          # 2) A semver:* / release:skip label forces the LLM step to run.
+          case ",$LABELS," in
+            *,semver:major,*|*,semver:minor,*|*,semver:patch,*|*,semver:none,*|*,release:skip,*)
+              echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+
+          # 3) Trivial PR? No shipping code changed -> skip (docs/chore/tests/CI only).
+          if gh pr diff "$PR" --name-only | grep -qE '^src/scrum_agent/'; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::no src/scrum_agent changes; skipping version bump."
+          fi
+
+      - name: Classify & bump with Claude
+        if: steps.guard.outputs.skip == 'false'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash,Read,Edit,Write"'
+          prompt: |
+            You are the release-versioning bot for this repository. Pull request #${{ github.event.pull_request.number }} is open; decide whether and how to bump the project version. The version lives only in pyproject.toml.
+
+            Follow these steps exactly:
+
+            1. Choose a semver level, in this priority order:
+               a. Labels win. If the PR has label `semver:major`, `semver:minor`, or `semver:patch`, use that level. If it has `release:skip` or `semver:none`, treat the level as "none".
+               b. Otherwise classify this PR's diff:
+                  - "major": a backward-incompatible change (removed/renamed CLI flags, changed output formats, breaking behavior or public API).
+                  - "minor": a new user-facing capability or feature.
+                  - "patch": a bug fix, performance, or internal refactor with no new user-facing surface.
+                  - "none": the diff only touches docs, comments, tests, or CI/workflow files.
+
+            2. If the level is "none": do NOT modify any file. Post one short PR comment: "🏷️ auto-version: no release-worthy change — skipping bump." Then stop.
+
+            3. Otherwise run exactly this command (it rewrites pyproject.toml and prints the NEW version):
+                 python scripts/bump_version.py <level>
+               Commit ONLY the pyproject.toml change to this PR branch and push it. Use commit message:
+                 chore: bump version to <new-version> [auto]
+               with trailer:
+                 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+            4. Post one short PR comment naming the level, the new version, and a one-sentence reason.
+
+            Rules: only ever edit pyproject.toml; never bump more than once; keep the comment to one or two lines.
