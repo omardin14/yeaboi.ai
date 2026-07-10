@@ -254,5 +254,18 @@ def run_setup_wizard(console: Console) -> bool:
     os.environ.update({k: v for k, v in merged.items() if v})
 
     console.print(f"\n[green]Setup complete! Config saved to {config_file}[/green]")
+
+    # Onboarding tip: voice input is optional and off by default. Mention it so
+    # new users discover they can dictate answers instead of typing.
+    from scrum_agent.voice import is_voice_available
+
+    if is_voice_available():
+        console.print("[dim]🎤 Voice input is ready — double-tap Space in any text field to dictate.[/dim]")
+    else:
+        console.print(
+            "[dim]🎤 Tip: enable voice input to dictate answers — "
+            "run [/dim][cyan]uv sync --extra voice[/cyan][dim] (works offline, any LLM provider).[/dim]"
+        )
+
     logger.info("Setup wizard completed successfully")
     return True

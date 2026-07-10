@@ -222,14 +222,29 @@ def _build_mode_screen(
             body.append(Text(""))
             body_h += 1
 
+    # Bottom-pinned discoverability tip for voice input — so users learn the
+    # feature exists from the very first screen, not only inside a session.
+    from scrum_agent.voice import is_voice_available
+
+    _voice_ok, _ = is_voice_available()
+    tip_text = (
+        "\U0001f3a4  Tip: double-tap Space in any text field to dictate"
+        if _voice_ok
+        else "\U0001f3a4  Voice input supported — enable with: uv sync --extra voice"
+    )
+    tip = Text(tip_text, style="dim", justify="center")
+
+    # Reserve the last row for the tip; centre the mode rows in the space above.
     inner_h = height - 4
-    mid_top = max(0, (inner_h - body_h) // 2)
-    mid_bot = max(0, inner_h - body_h - mid_top)
+    body_area = max(0, inner_h - 1)
+    mid_top = max(0, (body_area - body_h) // 2)
+    mid_bot = max(0, body_area - body_h - mid_top)
 
     content = Group(
         *[Text("") for _ in range(mid_top)],
         *body,
         *[Text("") for _ in range(mid_bot)],
+        tip,
     )
 
     return Panel(

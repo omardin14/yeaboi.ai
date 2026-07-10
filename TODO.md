@@ -1142,3 +1142,25 @@ _Bring Azure DevOps to full feature parity with Jira — read board/velocity, cr
 - [ ] Feed accuracy data back into team profile (tighten calibration over time)
 - [ ] Show retro report: "Your plan estimated 45pts across 3 sprints; actuals were 52pts across 4 sprints"
 - [ ] Track improvement over time: "Plan accuracy improved from 62% to 78% over 3 projects"
+
+## Phase 18: Voice Input
+- [x] `voice.py` — mic recording (sounddevice) + **local, offline** faster-whisper transcription (no API key, works with any LLM provider), lazy-imported optional `voice` extra
+- [x] Model cache + `is_model_loaded()`/`backend_label()`; `VOICE_MODEL` = local model size (default `base`)
+- [x] Settings page "Voice Input" row showing dictation availability + backend
+- [x] Discoverability: always-on hint on text-entry screens (shows how to enable when not installed), welcome/mode-select footer tip, and setup-wizard completion tip
+- [x] Inline recording UX: pulsing red border + animated status line on the *same* screen (no full-screen popup); transcription runs in a background thread with a spinner; snappier stop-key poll (0.06s)
+- [x] Trigger changed from Ctrl+R → **double-tap Space** (modifier-free, Mac-friendly; `DoubleTapSpace` detector, ~300ms window, first space kept as separator); wired into description, intake question, and editor loops
+- [x] Verified end-to-end: `say`-generated audio → correct transcript, no key
+- [x] `get_voice_model()` config + `VOICE_MODEL` env var, `is_voice_available()` graceful degradation
+- [x] Ctrl+R keybinding in `_input.py` → `"voice"` key
+- [x] Shared `_voice_input.py` overlay (record → transcribe popup) reused by all text-entry loops
+- [x] Wired into project description, intake free-text answers, and artifact editor
+- [x] Discoverability hints (shown only when voice available)
+- [x] Unit tests `tests/unit/test_voice.py`
+
+## Phase 19: Graceful API Error Handling (TUI)
+- [x] Strengthen `_classify_api_error` (ui/session/_utils.py) — Jira/Azure/GitHub/OpenAI/generic via duck-typing, bounded length, never dumps raw `str(exc)`
+- [x] Add `_extract_status_code` helper (status_code/response/HTTP-in-message)
+- [x] Route all raw error surfaces through it: team analysis (both flows), epic export (Jira+AzDO), Jira/AzDO sync-all
+- [x] Top-level cli.py catch-all shows a friendly one-line message + log pointer instead of silent blank
+- [x] Unit tests `tests/unit/test_ui_error_classification.py` (16 cases incl. the real 401 dump)

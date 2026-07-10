@@ -63,15 +63,7 @@ jobs:
         with:
           generate_release_notes: true
 
-  update-homebrew:
-    name: Notify Homebrew Tap
-    needs: publish
-    runs-on: ubuntu-latest
-    steps:
-      - name: Repository Dispatch
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          repository: omardin14/homebrew-tap
-          event-type: update-formula
-          client-payload: '{"version": "${{ github.ref_name }}"}'
+  # Note: no Homebrew tap update. scrum-agent can't be packaged for Homebrew
+  # (the sqlite-vec dependency ships no sdist), so the tap formula is disabled
+  # and steers users to `uv tool install` / `pipx install`. Distribution is
+  # PyPI-only via the `publish` job above.

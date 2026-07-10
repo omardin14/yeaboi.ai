@@ -1091,6 +1091,7 @@ def _collect_settings_data() -> dict:
         "AZURE_DEVOPS_TOKEN",
         "AZURE_DEVOPS_TEAM",
         "GITHUB_TOKEN",
+        "VOICE_MODEL",
         "AWS_REGION",
         "AWS_PROFILE",
         "LOG_LEVEL",
@@ -1939,7 +1940,9 @@ def select_mode(
                                     _ta_profile_box[0] = _result[0]
                                     _ta_examples_box[0] = _result[1]
                             except Exception as exc:
-                                _ta_error_box[0] = str(exc)
+                                from scrum_agent.ui.session._utils import _classify_api_error
+
+                                _ta_error_box[0] = _classify_api_error(exc)
                             finally:
                                 _ta_done.set()
 
@@ -2561,7 +2564,10 @@ def select_mode(
                                         _sync_thread.join()
 
                                         if _sync_result_box[1] is not None:
-                                            path = f"{_tracker_label} sync failed: {_sync_result_box[1]}"
+                                            from scrum_agent.ui.session._utils import _classify_api_error
+
+                                            _sync_err = _classify_api_error(_sync_result_box[1])
+                                            path = f"{_tracker_label} sync failed: {_sync_err}"
                                         elif _sync_result_box[0] is not None:
                                             sr = _sync_result_box[0]
                                             new_gs = _sync_state_box[0]
@@ -3133,7 +3139,9 @@ def select_mode(
                                 _ta_profile_box[0] = _result[0]
                                 _ta_examples_box[0] = _result[1]
                         except Exception as exc:
-                            _ta_error_box[0] = str(exc)
+                            from scrum_agent.ui.session._utils import _classify_api_error
+
+                            _ta_error_box[0] = _classify_api_error(exc)
                         finally:
                             _ta_done.set()
 

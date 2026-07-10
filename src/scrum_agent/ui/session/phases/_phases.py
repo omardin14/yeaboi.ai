@@ -391,7 +391,9 @@ def _handle_tracker_sync(
                     _issue = _j.create_issue(fields=_fields)
                     _ep_result_box[0] = _issue.key
                 except Exception as exc:
-                    _ep_result_box[1] = str(exc)
+                    from scrum_agent.ui.session._utils import _classify_api_error
+
+                    _ep_result_box[1] = _classify_api_error(exc)
             else:
                 try:
                     from azure.devops.v7_0.work_item_tracking.models import JsonPatchOperation
@@ -407,7 +409,9 @@ def _handle_tracker_sync(
                     _wi = _wit.create_work_item(_ops, get_azure_devops_project(), "Epic")
                     _ep_result_box[0] = str(_wi.id)
                 except Exception as exc:
-                    _ep_result_box[1] = str(exc)
+                    from scrum_agent.ui.session._utils import _classify_api_error
+
+                    _ep_result_box[1] = _classify_api_error(exc)
             _ep_done.set()
 
         _ep_thread = threading.Thread(target=_create_epic, daemon=True)

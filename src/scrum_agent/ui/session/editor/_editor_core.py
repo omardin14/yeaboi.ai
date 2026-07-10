@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Callable
 
 import rich.box
@@ -306,6 +307,11 @@ def edit_buffer_loop(
     """
     scroll_offset = 0
 
+    # Voice input: double-tap Space to dictate at the cursor (see DoubleTapSpace).
+    from scrum_agent.ui.shared._voice_input import DoubleTapSpace
+
+    _dts = DoubleTapSpace()
+
     w, h = console.size
     panel, scroll_offset = render_fn(buffer, cursor_row, cursor_col, scroll_offset, w, h)
     live.update(panel)
@@ -425,8 +431,21 @@ def edit_buffer_loop(
             min_col = editable_start_fn(buffer[cursor_row])
             if min_col is not None and cursor_col >= min_col:
                 line = buffer[cursor_row]
-                buffer[cursor_row] = line[:cursor_col] + key + line[cursor_col:]
-                cursor_col += 1
+                prev_space = cursor_col > min_col and line[cursor_col - 1] == " "
+                if key == " " and _dts.is_double(prev_space, time.monotonic()):
+                    # Double-tap Space → dictate at the cursor (first space stays
+                    # as a separator), collapsing any newlines like a paste.
+                    from scrum_agent.ui.shared._voice_input import record_voice_input
+
+                    spoken = record_voice_input(live, console, _key)
+                    if spoken:
+                        spoken = spoken.replace("\n", " ")
+                        cur = buffer[cursor_row]
+                        buffer[cursor_row] = cur[:cursor_col] + spoken + cur[cursor_col:]
+                        cursor_col += len(spoken)
+                else:
+                    buffer[cursor_row] = line[:cursor_col] + key + line[cursor_col:]
+                    cursor_col += 1
 
         elif key == "":
             pass

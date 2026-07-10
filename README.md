@@ -14,7 +14,7 @@
 [![Built with LangGraph](https://img.shields.io/badge/Built%20with-LangGraph-00CED1?style=for-the-badge)](https://langchain-ai.github.io/langgraph/)
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/omardin14/scrum-planning-ai-agent/ci.yml?style=for-the-badge&label=Tests&logo=github)](https://github.com/omardin14/scrum-planning-ai-agent/actions)
-[![Homebrew](https://img.shields.io/badge/Homebrew-Available-orange?style=for-the-badge&logo=homebrew&logoColor=white)](https://github.com/omardin14/homebrew-tap)
+[![PyPI](https://img.shields.io/pypi/v/scrum-agent?style=for-the-badge&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/scrum-agent/)
 
 </div>
 
@@ -30,21 +30,34 @@
 
 ## 🚀 Quick Start
 
-### Homebrew (macOS)
+### Recommended: uv or pipx
+
+The most reliable way to install — pulls the full dependency tree from PyPI and isolates it in its own environment:
 
 ```bash
-brew tap omardin14/tap && brew install scrum-agent
-scrum-agent --setup   # configure your API key
-scrum-agent           # launch the interactive TUI
+uv tool install scrum-agent     # or: pipx install scrum-agent
+scrum-agent --setup             # configure your API key
+scrum-agent                     # launch the interactive TUI
 ```
 
-### pipx
+Optional extras (voice input, extra LLM providers) can be requested at install time:
 
 ```bash
-pipx install scrum-agent
-scrum-agent --setup
-scrum-agent
+uv tool install "scrum-agent[voice]"           # 🎤 dictate answers (double-tap Space) — offline, works with any LLM
+uv tool install "scrum-agent[all-providers]"   # OpenAI, Google, and Bedrock providers
+pipx install "scrum-agent[voice]"              # equivalent with pipx
 ```
+
+> **Voice input** transcribes on-device with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+> — **no API key**, works with every LLM provider (Anthropic, Bedrock, …). It needs the PortAudio native
+> library (`brew install portaudio` on macOS, `sudo apt install portaudio19-dev` on Debian/Ubuntu) and
+> downloads a small Whisper model on first use (~140 MB for the default `base`; set `VOICE_MODEL` to
+> `tiny`/`small`/`medium`/`large-v3` to trade size for accuracy).
+
+> **Homebrew is not supported.** A required dependency (`sqlite-vec`) ships no
+> source distribution, which Homebrew's source-build model can't handle, so
+> `brew install scrum-agent` is intentionally disabled. Use `uv tool install`
+> or `pipx install` above instead.
 
 ### From source
 
@@ -344,7 +357,7 @@ You should see:
 1. **Smart extraction** — the skill detects project, tech stack, team size, integrations from your message
 2. **Follow-up questions** — only asks what's missing (project type, definition of done, target sprints)
 3. **Confirmation summary** — your answers + defaults, with option to override
-4. **TUI recommendation** — for complex projects (3+ features, 5+ engineers), the skill suggests installing the full TUI via `brew install scrum-agent` or `pipx install scrum-agent` for interactive editing, sprint visualisation, and capacity planning. This is informational only — generation always proceeds.
+4. **TUI recommendation** — for complex projects (3+ features, 5+ engineers), the skill suggests installing the full TUI via `uv tool install scrum-agent` or `pipx install scrum-agent` for interactive editing, sprint visualisation, and capacity planning. This is informational only — generation always proceeds.
 5. **Background generation** — progress updates as each phase completes (~3-5 minutes)
 6. **Phase-by-phase review** — features, stories, tasks, sprint plan — each with accept/edit/regenerate
 
