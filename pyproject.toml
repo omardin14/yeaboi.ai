@@ -50,10 +50,11 @@ openai = ["langchain-openai"]
 google = ["langchain-google-genai"]
 pdf = ["pymupdf"]
 bedrock = ["langchain-aws", "boto3"]
-# Voice input — record mic audio (sounddevice/PortAudio) and transcribe locally
-# and offline with faster-whisper. Lazy-imported in voice.py; needs no API key
-# (works with any LLM provider) but the PortAudio native lib (e.g.
-# `brew install portaudio` on macOS) and a one-time Whisper model download.
+# Voice input — record mic audio (sounddevice) and transcribe locally and
+# offline with faster-whisper. Lazy-imported in voice.py; needs no API key
+# (works with any LLM provider). The sounddevice wheels bundle PortAudio on
+# macOS/Windows (self-contained); Linux also needs the system lib
+# (`apt install libportaudio2`). A Whisper model downloads once on first use.
 voice = ["sounddevice", "faster-whisper"]
 all-providers = ["langchain-openai", "langchain-google-genai", "langchain-aws", "boto3"]
 dev = [
