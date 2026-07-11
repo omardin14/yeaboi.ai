@@ -41,6 +41,8 @@ _JSON_SCHEMA = """\
   "out_of_scope": ["string array — explicit exclusions from Q23"],
   "assumptions": ["string array — any defaulted or skipped answers that required assumptions"],
   "skip_features": "boolean — true when project is small enough that feature grouping adds no value. Default false.",
+  "is_low_code": "boolean — true for mostly config/content/no-code projects, not custom engineering. Default false.",
+  "low_code_reason": "string — short phrase why is_low_code is true (e.g. 'Webflow + Zapier site'). Empty when false.",
   "scrum_md_contributions": "JSON field names whose values came from SCRUM.md. Empty list if no SCRUM.md was present."
 }"""
 
@@ -51,9 +53,11 @@ def get_analyzer_prompt(
     velocity_per_sprint: int,
     *,
     repo_context: str | None = None,
+    detected_stack: list[str] | None = None,
     confluence_context: str | None = None,
     user_context: str | None = None,
     team_profile_summary: str = "",
+    ceremony_history: str = "",
     review_feedback: str | None = None,
     review_mode: str | None = None,
     previous_output: str | None = None,
@@ -103,12 +107,16 @@ def get_analyzer_prompt(
     # Inject repo scan results when available, placed between Team Metrics and
     # Questionnaire Answers so the LLM can ground tech_stack / project_type
     # extraction in real codebase data rather than user descriptions alone.
+    # A deterministic "detected stack" (languages + frameworks parsed from the
+    # scan) is offered as a hint so the LLM anchors tech_stack on real signals.
+    detected_stack_line = f"Detected stack (from repo scan): {', '.join(detected_stack)}\n\n" if detected_stack else ""
     repo_section = (
         (
             "\n## Repository Scan\n\n"
             "The following was retrieved directly from the repository. "
             "Use it to ground your tech_stack, project_type, and constraint extraction "
             "— prefer repo-detected data over user descriptions where they conflict.\n\n"
+            f"{detected_stack_line}"
             f"{repo_context}\n"
         )
         if repo_context
@@ -161,6 +169,24 @@ def get_analyzer_prompt(
         else ""
     )
 
+    # Inject the team's recent Standup + Retro history when available. Retro action
+    # items and recurring pain points, plus recent standup confidence, are ground
+    # truth about how delivery is actually going — fold them into risks,
+    # assumptions, and scope so the plan carries the team's own lessons forward.
+    ceremony_section = (
+        (
+            "\n## Standup & Retro History\n\n"
+            "The following summarises the team's recent retrospectives and daily "
+            "standups. Treat it as real signal about delivery: reflect open retro "
+            "action items and recurring pain points in `risks` / `assumptions` / "
+            "`out_of_scope`, and let a low or declining standup confidence make your "
+            "scope and target_sprints more conservative.\n\n"
+            f"{ceremony_history}\n"
+        )
+        if ceremony_history
+        else ""
+    )
+
     base = (
         "You are a project analyst synthesizing intake questionnaire answers into "
         "a structured project analysis.\n\n"
@@ -170,7 +196,8 @@ def get_analyzer_prompt(
         f"{repo_section}"
         f"{confluence_section}"
         f"{user_section}"
-        f"{team_section}\n"
+        f"{team_section}"
+        f"{ceremony_section}\n"
         f"## Questionnaire Answers ({TOTAL_QUESTIONS} questions)\n\n"
         f"{answers_block}\n\n"
         "## Task\n\n"

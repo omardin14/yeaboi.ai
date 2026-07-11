@@ -1410,13 +1410,12 @@ class TestIntakeModeMenu:
     def test_resolve_intake_mode_1_is_smart(self):
         assert _resolve_intake_mode("1") == "smart"
 
-    def test_resolve_intake_mode_2_is_standard(self):
-        assert _resolve_intake_mode("2") == "standard"
-
-    def test_resolve_intake_mode_3_is_offline(self):
-        assert _resolve_intake_mode("3") == "offline"
+    def test_resolve_intake_mode_2_is_offline(self):
+        # The 30-question "standard" mode was retired; offline is now option 2.
+        assert _resolve_intake_mode("2") == "offline"
 
     def test_resolve_intake_mode_invalid_number(self):
+        assert _resolve_intake_mode("3") is None
         assert _resolve_intake_mode("4") is None
         assert _resolve_intake_mode("0") is None
 
@@ -1429,7 +1428,7 @@ class TestIntakeModeMenu:
         _render_intake_mode_menu(console)
         output = _strip_ansi(buf.getvalue())
         assert "Smart intake (recommended)" in output
-        assert "Full intake" in output
+        assert "Full intake" not in output  # retired 30-question mode
         assert "Quick intake" not in output
         assert "Offline questionnaire" in output
 
@@ -1468,19 +1467,12 @@ class TestIntakeModeMenu:
         call_state = mock_graph.invoke.call_args[0][0]
         assert call_state["_intake_mode"] == "smart"
 
-    def test_mode_2_selects_standard(self, monkeypatch):
-        """Typing '2' at the menu sets standard mode."""
-        mock_graph = _mock_graph_factory()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["2", "my project", "exit"]))
-        console, buf = _make_console()
-        run_repl(console=console, intake_mode=None)
-        call_state = mock_graph.invoke.call_args[0][0]
-        assert call_state["_intake_mode"] == "standard"
+    def test_mode_2_selects_offline(self, monkeypatch):
+        """Typing '2' at the menu enters the offline questionnaire flow.
 
-    def test_mode_3_selects_offline(self, monkeypatch):
-        """Typing '3' at the menu enters the offline questionnaire flow."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["3", "1", "exit"]))
+        (Option 2 was the retired "standard" mode; offline moved up from 3 to 2.)
+        """
+        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["2", "1", "exit"]))
         monkeypatch.setattr("scrum_agent.repl.export_questionnaire_md", lambda qs, path: path)
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
@@ -1497,14 +1489,14 @@ class TestIntakeModeMenu:
         assert "Tell me about your project" in output
 
     def test_invalid_input_reprompts(self, monkeypatch):
-        """Invalid input shows 'pick 1, 2, or 3' then accepts a valid choice."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["foo", "7", "2", "exit"]))
+        """Invalid input shows 'pick 1 or 2' then accepts a valid choice."""
+        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["foo", "7", "1", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
         # Should have shown the reprompt message twice (for "foo" and "7")
-        assert output.count("Please pick 1, 2, or 3.") == 2
-        # Should still proceed to the opener after valid input
+        assert output.count("Please pick 1 or 2.") == 2
+        # Should still proceed to the opener after valid input ("1" = smart)
         assert "Tell me about your project" in output
 
     def test_ctrl_c_during_menu_exits_gracefully(self, monkeypatch):
@@ -1529,14 +1521,14 @@ class TestIntakeModeMenu:
         output = _strip_ansi(buf.getvalue())
         assert "Goodbye!" in output
 
-    # --- Offline (option 3) integration tests ---
+    # --- Offline (option 2) integration tests ---
 
     def test_mode_3_export_writes_file_and_exits(self, monkeypatch, tmp_path):
-        """Picking [3] then [1] exports the questionnaire and exits."""
+        """Picking [2] then [1] exports the questionnaire and exits."""
         export_path = tmp_path / "scrum-questionnaire.md"
         monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(export_path))
-        # "3" selects offline, "1" selects export — should return immediately
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["3", "1"]))
+        # "2" selects offline, "1" selects export — should return immediately
+        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["2", "1"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
@@ -1552,7 +1544,7 @@ class TestIntakeModeMenu:
         md_file.write_text("## Q1\nMy project\n\n## Q2\nGreenfield\n")
         monkeypatch.setattr(
             "scrum_agent.repl.PromptSession",
-            _mock_session_factory(["3", "2", str(md_file), "exit"]),
+            _mock_session_factory(["2", "2", str(md_file), "exit"]),
         )
         # Mock _import_questionnaire_file to avoid needing real parse logic
         imported = False
@@ -1578,10 +1570,10 @@ class TestIntakeModeMenu:
         md_file = tmp_path / "scrum-questionnaire.md"
         md_file.write_text("## Q1\nMy project\n")
         monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(md_file))
-        # "3" → offline, "2" → import, "" → press Enter (default path), "exit" → quit
+        # "2" → offline, "2" → import, "" → press Enter (default path), "exit" → quit
         monkeypatch.setattr(
             "scrum_agent.repl.PromptSession",
-            _mock_session_factory(["3", "2", "", "exit"]),
+            _mock_session_factory(["2", "2", "", "exit"]),
         )
         imported_path = None
 
@@ -1603,7 +1595,7 @@ class TestIntakeModeMenu:
         md_file.write_text("## Q1\nMy project\n")
         monkeypatch.setattr(
             "scrum_agent.repl.PromptSession",
-            _mock_session_factory(["3", "2", "/no/such/file.md", str(md_file), "exit"]),
+            _mock_session_factory(["2", "2", "/no/such/file.md", str(md_file), "exit"]),
         )
 
         def fake_import(console, path, state):
@@ -1623,7 +1615,7 @@ class TestIntakeModeMenu:
         monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(export_path))
         monkeypatch.setattr(
             "scrum_agent.repl.PromptSession",
-            _mock_session_factory(["3", "foo", "5", "1"]),
+            _mock_session_factory(["2", "foo", "5", "1"]),
         )
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)

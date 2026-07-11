@@ -322,3 +322,35 @@ class StandupStore:
             }
             for r in rows
         ]
+
+    # ── Team-wide (cross-session) reads — used by ceremony_history to feed
+    #    Planning / Analysis with the team's recent standups. standup_history has
+    #    no project_name column, so these are recency-based (team-wide).
+
+    def get_recent_reports(self, limit: int = 10) -> list[StandupReport]:
+        """Return recent StandupReports across ALL sessions, newest first."""
+        rows = self._conn.execute(
+            "SELECT report_json FROM standup_history WHERE status = 'success' ORDER BY run_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        reports: list[StandupReport] = []
+        for row in rows:
+            if not row[0]:
+                continue
+            try:
+                reports.append(_dict_to_standup_report(json.loads(row[0])))
+            except (json.JSONDecodeError, TypeError, KeyError) as exc:
+                logger.warning("Failed to deserialize a standup report: %s", exc)
+        return reports
+
+    def get_all_history(self, limit: int = 100) -> list[dict]:
+        """Return recent standup run metadata across ALL sessions (for cadence)."""
+        rows = self._conn.execute(
+            "SELECT run_at, standup_date, sprint_day, confidence_pct, status "
+            "FROM standup_history ORDER BY run_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {"run_at": r[0], "standup_date": r[1], "sprint_day": r[2], "confidence_pct": r[3], "status": r[4]}
+            for r in rows
+        ]

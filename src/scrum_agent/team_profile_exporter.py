@@ -74,14 +74,60 @@ def _kv_table(rows: list[tuple[str, str]]) -> str:
     return f'<div class="card" style="padding:0;overflow:hidden;"><table class="data-table">{trs}</table></div>'
 
 
+def _ceremony_rows(ceremony) -> list[tuple[str, str]]:
+    """Cadence / trend key-value rows shared by the HTML and MD renderers."""
+    rows: list[tuple[str, str]] = []
+    if ceremony.retro_cadence:
+        rows.append(("Retro cadence", ceremony.retro_cadence))
+    if ceremony.standup_cadence:
+        rows.append(("Standup cadence", ceremony.standup_cadence))
+    if ceremony.confidence_trend:
+        rows.append(("Standup confidence", ceremony.confidence_trend))
+    if ceremony.action_items:
+        rows.append(("Open retro action items", str(len(ceremony.action_items))))
+    return rows
+
+
+def _ceremony_html(ceremony) -> str:
+    """Render the 'Ceremony Cadence & Trends' section content (HTML)."""
+    parts = [_kv_table(_ceremony_rows(ceremony))]
+    for title, themes in (
+        ("What's been working", ceremony.went_well_themes),
+        ("Recurring pain points", ceremony.didnt_go_well_themes),
+    ):
+        if themes:
+            items = "".join(f"<li>{_e(t)} <span style='color:var(--text-muted);'>({n}×)</span></li>" for t, n in themes)
+            parts.append(f'<div class="card"><strong>{_e(title)}</strong><ul>{items}</ul></div>')
+    return "".join(parts)
+
+
+def _ceremony_md(ceremony) -> list[str]:
+    """Render the 'Ceremony Cadence & Trends' section (Markdown lines)."""
+    lines = ["## Ceremony Cadence & Trends", ""]
+    lines.extend(f"- **{lbl}:** {val}" for lbl, val in _ceremony_rows(ceremony))
+    for title, themes in (
+        ("What's been working", ceremony.went_well_themes),
+        ("Recurring pain points", ceremony.didnt_go_well_themes),
+    ):
+        if themes:
+            lines.extend(["", f"**{title}:**"])
+            lines.extend(f"- {t} ({n}×)" for t, n in themes)
+    lines.append("")
+    return lines
+
+
 def export_team_profile_html(
     profile: TeamProfile,
     output_dir: Path | None = None,
     *,
     examples: dict | None = None,
     sprint_names: list[str] | None = None,
+    ceremony=None,
 ) -> Path:
     """Generate a self-contained HTML report matching the TUI results screen.
+
+    ``ceremony`` is an optional CeremonyContext (agent/ceremony_history.py). When
+    present and non-empty, a "Ceremony Cadence & Trends" section is added.
 
     Returns the path to the generated file.
     """
@@ -176,6 +222,11 @@ def export_team_profile_html(
 
     _nav("velocity", "Velocity")
     sections.append(_section("velocity", "Team &amp; Velocity", _kv_table(vel_rows)))
+
+    # ── Ceremony cadence & trends (Standup + Retro history) ─────────
+    if ceremony is not None and not ceremony.is_empty:
+        _nav("ceremonies", "Ceremonies")
+        sections.append(_section("ceremonies", "Ceremony Cadence &amp; Trends", _ceremony_html(ceremony)))
 
     # ── Recurring work ──────────────────────────────────────────────
     rec_count = ex.get("recurring_count", 0)
@@ -1252,8 +1303,12 @@ def export_team_profile_md(
     *,
     examples: dict | None = None,
     sprint_names: list[str] | None = None,
+    ceremony=None,
 ) -> Path:
     """Generate a Markdown report matching the TUI results screen.
+
+    ``ceremony`` is an optional CeremonyContext; when non-empty, a "Ceremony
+    Cadence & Trends" section is appended after Team & Velocity.
 
     Returns the path to the generated file.
     """
@@ -1283,6 +1338,10 @@ def export_team_profile_md(
                 if isinstance(r, dict):
                     lines.append(f">   - `{r.get('issue_key', '')}` {r.get('summary', '')}")
         lines.append("")
+
+    # ── Ceremony cadence & trends (Standup + Retro history) ─────────
+    if ceremony is not None and not ceremony.is_empty:
+        lines.extend(_ceremony_md(ceremony))
 
     # ── Team & Velocity ─────────────────────────────────────────────
     lines.extend(["## Team & Velocity", ""])

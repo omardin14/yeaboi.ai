@@ -99,18 +99,12 @@ class TestArgParsing:
         parser = build_parser()
         args = parser.parse_args(["--quick"])
         assert args.quick is True
-        assert args.full_intake is False
 
-    def test_full_intake_flag(self):
-        parser = build_parser()
-        args = parser.parse_args(["--full-intake"])
-        assert args.full_intake is True
-        assert args.quick is False
-
-    def test_quick_and_full_intake_mutually_exclusive(self):
+    def test_full_intake_flag_removed(self):
+        # The 30-question "standard" mode (--full-intake) has been retired.
         parser = build_parser()
         with pytest.raises(SystemExit):
-            parser.parse_args(["--quick", "--full-intake"])
+            parser.parse_args(["--full-intake"])
 
 
 class TestNonInteractiveFlags:
@@ -362,12 +356,6 @@ class TestMain:
         main(argv=["--quick", "--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
         assert call_kwargs["intake_mode"] == "quick"
-
-    @patch("scrum_agent.cli.run_repl")
-    def test_full_intake_flag_passes_standard(self, mock_repl):
-        main(argv=["--full-intake", "--mode", "project-planning"])
-        call_kwargs = mock_repl.call_args[1]
-        assert call_kwargs["intake_mode"] == "standard"
 
     @patch("scrum_agent.cli.run_repl")
     def test_default_intake_mode_is_none(self, mock_repl):

@@ -17,7 +17,6 @@ from scrum_agent.agent.state import (
     Task,
     UserStory,
 )
-from scrum_agent.prompts.intake import INTAKE_QUESTIONS
 
 # ── Realistic mock data ────────────────────────────────────────────
 # Used by TestFeatureGenerationScenario and TestMultiTurnFeatureConversation
@@ -523,19 +522,24 @@ class TestIntakeRouting:
     """Tests that the graph routes to intake or agent based on questionnaire state."""
 
     def test_routes_to_intake_without_questionnaire(self):
-        """Without a questionnaire in state, the graph should route to project_intake and ask Q1."""
+        """Without a questionnaire in state, the graph routes to project_intake.
+
+        The default flow is smart intake (the 30-question "standard" Q1-first flow
+        was retired), so it initializes a questionnaire and asks an essential gap
+        rather than starting at Q1.
+        """
         graph = create_graph()
         result = graph.invoke({"messages": []})
 
-        # project_intake should have initialized a QuestionnaireState
+        # project_intake should have initialized a QuestionnaireState in smart mode
         assert "questionnaire" in result
         assert isinstance(result["questionnaire"], QuestionnaireState)
-        assert result["questionnaire"].current_question == 1
+        assert result["questionnaire"].intake_mode == "smart"
 
-        # The AI message should contain Q1
+        # An intake question should have been asked.
         last_msg = result["messages"][-1]
         assert isinstance(last_msg, AIMessage)
-        assert INTAKE_QUESTIONS[1] in last_msg.content
+        assert last_msg.content.strip()
 
     def test_routes_to_analyzer_with_complete_questionnaire(self, monkeypatch):
         """With a completed questionnaire but no analysis, graph routes to project_analyzer."""

@@ -467,13 +467,16 @@ def _run_preview_flow(
     def _do_export():
         """Cumulative export — includes analysis profile + all accepted samples."""
         logger.info("Preview: exporting analysis (HTML + MD)")
+        from scrum_agent.agent.ceremony_history import gather_ceremony_context
         from scrum_agent.team_profile_exporter import (
             export_team_profile_html,
             export_team_profile_md,
         )
 
-        html_path = export_team_profile_html(ta_profile, examples=ta_examples)
-        md_path = export_team_profile_md(ta_profile, examples=ta_examples)
+        # Project-first here — the analysed project_key is known, so its retros sort ahead.
+        ceremony = gather_ceremony_context(ta_profile.project_key)
+        html_path = export_team_profile_html(ta_profile, examples=ta_examples, ceremony=ceremony)
+        md_path = export_team_profile_md(ta_profile, examples=ta_examples, ceremony=ceremony)
         w, h = console.size
         from scrum_agent.ui.mode_select.screens._screens_secondary import (
             _build_project_export_success_screen,
@@ -1687,8 +1690,8 @@ def select_mode(
     """Show full-screen mode selection, then project list → intake mode for Planning.
 
     Returns (mode_key, intake_mode, questionnaire_path) tuple or None if cancelled.
-    - Smart:  ("project-planning", "smart", None)
-    - Full:   ("project-planning", "standard", None)
+    - Small:  ("project-planning", "small_project", None)
+    - Epic:   ("project-planning", "smart", None)
     - Import: ("project-planning", None, "/path/to/questionnaire.md")
     - Export/Cancel: None
     Only available modes can be selected.
@@ -2057,14 +2060,17 @@ def select_mode(
                                     with TeamProfileStore(_tp_db) as _s:
                                         _full_p, _st_ex = _s.load_with_examples(_sel_p.team_id)
                                 if _full_p:
+                                    from scrum_agent.agent.ceremony_history import gather_ceremony_context
+
+                                    _cer = gather_ceremony_context(_full_p.project_key)
                                     if _ana_sub_sel == 0:
                                         from scrum_agent.team_profile_exporter import export_team_profile_html
 
-                                        _ep = export_team_profile_html(_full_p, examples=_st_ex)
+                                        _ep = export_team_profile_html(_full_p, examples=_st_ex, ceremony=_cer)
                                     else:
                                         from scrum_agent.team_profile_exporter import export_team_profile_md
 
-                                        _ep = export_team_profile_md(_full_p, examples=_st_ex)
+                                        _ep = export_team_profile_md(_full_p, examples=_st_ex, ceremony=_cer)
                                     w, h = console.size
                                     live.update(
                                         _build_project_export_success_screen(

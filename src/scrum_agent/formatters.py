@@ -176,6 +176,15 @@ def render_analysis_panel(analysis: ProjectAnalysis, *, compact: bool = False) -
     sections.append(f"[bold]Description:[/bold] {analysis.project_description}")
     sections.append(f"[bold]Type:[/bold] {analysis.project_type}")
 
+    # Low-code advisory — mostly configuration/content/no-code work. Estimation
+    # and task decomposition are scaled lighter downstream (see story_writer /
+    # task_decomposer prompts). Shown prominently near the top of the panel.
+    if getattr(analysis, "is_low_code", False):
+        reason = f" — {analysis.low_code_reason}" if analysis.low_code_reason else ""
+        sections.append(
+            f"[yellow]⚙ [bold]Low-code project[/bold]{reason} · estimates and tasks scaled lighter.[/yellow]"
+        )
+
     sections.append(f"\n[bold]Goals:[/bold]\n{_bullet_list(analysis.goals)}")
     if not compact:
         sections.append(f"[bold]End Users:[/bold]\n{_bullet_list(analysis.end_users)}")

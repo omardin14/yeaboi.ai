@@ -417,6 +417,14 @@ class ProjectAnalysis:
     # AND goals ≤ 3). Default False so existing projects are unaffected.
     # See README: "Scrum Standards" — feature generation
     skip_features: bool = False
+    # When True, the project is mostly configuration / content / no-code-platform
+    # work rather than engineering. Set by reconciling the deterministic
+    # repo_signals scan with the analyzer LLM's own read; drives lighter estimation
+    # and config-oriented task decomposition downstream. Default False so ordinary
+    # engineering projects are unaffected (and old saved sessions still deserialize).
+    # See README: "Scrum Standards" — estimation
+    is_low_code: bool = False
+    low_code_reason: str = ""  # human-readable why, shown in the analysis panel
     scrum_md_contributions: tuple[str, ...] = ()  # JSON field names enriched by SCRUM.md
     # Deterministic quality rating for the user's intake input. Computed by
     # compute_prompt_quality() in nodes.py from QuestionnaireState tracking sets.
@@ -477,10 +485,25 @@ class QuestionnaireState:
     # See README: "Project Intake Questionnaire" — edit flow
     editing_question: int | None = None
     # Intake mode — controls how many questions are shown interactively.
-    # "standard" (default) preserves backward compat for existing tests.
-    # The REPL explicitly sets "smart" (the new default UX).
+    # The legacy 30-question "standard" flow has been retired as a user-facing
+    # path: project_intake coerces any "standard" value to "smart" at its first
+    # invocation. The dataclass default is left as "standard" only so directly
+    # constructed states (in tests / shared subsequent-call helpers) keep their
+    # historical value; production always sets this from _intake_mode.
     # See README: "Project Intake Questionnaire" — smart intake
-    intake_mode: str = "standard"  # "smart" | "standard" | "quick"
+    intake_mode: str = "standard"  # coerced to "smart" | "quick" | "small_project"
+    # Transient: set when the user switches Small project → Large at the
+    # analysis review. On the next project_intake pass we skip answer-recording
+    # and ask the remaining Large-mode essentials instead (answers are preserved).
+    _reopen_for_epic: bool = False
+    # Transient repository-scan carry-over. project_intake runs repo_signals once
+    # at first invocation (broadened to configured repos) and stashes the raw
+    # scan + deterministic low-code verdict here; project_analyzer reuses them so
+    # the repo isn't scanned twice. Not serialized — a resumed session re-scans.
+    # See README: "Project Intake Questionnaire" — smart intake
+    _repo_context: str = ""
+    _repo_low_code: bool = False
+    _repo_low_code_reason: str = ""
     # Tracks which question numbers had answers auto-applied from the
     # initial description (via LLM extraction). Used for provenance
     # markers in the intake summary ("from your description").
@@ -688,6 +711,21 @@ class ScrumState(_RequiredState, total=False):
     # instead of using enforce_target. 0 = not set (default).
     # See README: "Guardrails" — human-in-the-loop pattern
     _capacity_team_override: int
+
+    # Small-project scope advisory. Set True by project_analyzer when the intake
+    # ran in "small_project" mode but the analyzer judged the project bigger than
+    # 1-2 tickets (needs feature grouping, > 2 sprints, or many goals). The
+    # analysis review surfaces a "Switch to Large" action when this is True.
+    # See README: "Guardrails" — human-in-the-loop (advisory)
+    _small_project_oversized: bool
+
+    # Team ceremony (Standup + Retro) history gathered by project_analyzer and
+    # reused downstream: _ceremony_action_items seeds story_writer's backlog
+    # ([Retro] stories); _ceremony_history is the markdown block reused by
+    # sprint_planner. Transient; serialize harmlessly across --resume.
+    # See README: "Session Management" — SQLite persistence
+    _ceremony_action_items: tuple[str, ...]
+    _ceremony_history: str
 
     # Capacity deductions — all collected during intake (Phase 6: Capacity Planning).
     # Q27 (sprint selection / bank holidays auto-detected), Q28 (planned leave),

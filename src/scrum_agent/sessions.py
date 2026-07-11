@@ -270,6 +270,8 @@ def _dict_to_questionnaire(d: dict) -> QuestionnaireState:
         completed=d.get("completed", False),
         awaiting_confirmation=d.get("awaiting_confirmation", False),
         editing_question=d.get("editing_question"),
+        # Legacy sessions may still store "standard"; project_intake coerces it to
+        # "smart" at its first invocation, so the stored/default value is harmless.
         intake_mode=d.get("intake_mode", "standard"),
         extracted_questions=set(d.get("extracted_questions", [])),
         _pending_merged_questions=d.get("_pending_merged_questions", []),
@@ -298,6 +300,9 @@ def _dict_to_analysis(d: dict) -> ProjectAnalysis:
         risks=tuple(d.get("risks", ())),
         out_of_scope=tuple(d.get("out_of_scope", ())),
         assumptions=tuple(d.get("assumptions", ())),
+        skip_features=d.get("skip_features", False),
+        is_low_code=d.get("is_low_code", False),
+        low_code_reason=d.get("low_code_reason", ""),
         scrum_md_contributions=tuple(d.get("scrum_md_contributions", ())),
     )
 
