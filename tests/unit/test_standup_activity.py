@@ -5,7 +5,7 @@ normalizes into the shared {author, kind, title, timestamp, key} shape.
 """
 
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -106,7 +106,9 @@ class TestGithubRecentActivity:
             merged=True,
             state="closed",
             user=SimpleNamespace(login="carol"),
-            updated_at=datetime(2026, 7, 10, 7, 0, tzinfo=UTC),
+            # Relative to now so the PR always falls inside the days=1 window —
+            # a fixed date made this test fail once the clock passed it.
+            updated_at=datetime.now(UTC) - timedelta(hours=1),
         )
         repo = MagicMock()
         repo.get_pulls.return_value = [pr]
