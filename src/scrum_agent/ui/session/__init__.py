@@ -107,7 +107,7 @@ def run_session(
     Args:
         live: The Rich Live instance from mode_select.py (already active).
         console: The Rich Console for size queries.
-        intake_mode: "smart" or "standard" — which intake flow to use.
+        intake_mode: "smart" / "small_project" / "quick" — which intake flow to use.
         questionnaire: Pre-populated questionnaire (from import flow). Usually None.
         resume_project_id: If resuming, the existing project ID to reuse.
         resume_graph_state: If resuming, the pre-loaded graph state dict.
@@ -313,43 +313,64 @@ def _run_session_body(
             # Save Point A — persist after description processing
             save_project_snapshot(project_id, graph_state)
 
-    # Determine resume point — skip phases that are already complete.
-    # See README: "Memory & State" — when resuming a saved session, we jump
-    # to the earliest incomplete phase rather than replaying from the start.
-    qs = graph_state.get("questionnaire")
-    _intake_done = qs is not None and hasattr(qs, "completed") and qs.completed
-    _pipeline_done = bool(graph_state.get("sprints")) and not graph_state.get("pending_review")
+    # Phases B→D run in a loop so a Small project → Epic wide switch (chosen at
+    # the analysis review) can re-run intake for the extra Epic questions with
+    # the user's answers preserved. Normal runs execute the body exactly once.
+    # See README: "Guardrails" — human-in-the-loop (advisory).
+    while True:
+        # Determine resume point — skip phases that are already complete.
+        # See README: "Memory & State" — when resuming a saved session, we jump
+        # to the earliest incomplete phase rather than replaying from the start.
+        qs = graph_state.get("questionnaire")
+        _intake_done = qs is not None and hasattr(qs, "completed") and qs.completed
+        _pipeline_done = bool(graph_state.get("sprints")) and not graph_state.get("pending_review")
 
-    # ── Phase B: Intake Questions ──────────────────────────────────────
-    # Loop through intake questions until the questionnaire is complete.
-    if not _intake_done:
-        logger.info("Phase transition: intake_questions")
-        graph_state = _phase_intake_questions(live, console, graph, graph_state, _key, export_only)
-        if graph_state is None:
-            return
+        # ── Phase B: Intake Questions ──────────────────────────────────────
+        # Loop through intake questions until the questionnaire is complete.
+        if not _intake_done:
+            logger.info("Phase transition: intake_questions")
+            graph_state = _phase_intake_questions(live, console, graph, graph_state, _key, export_only)
+            if graph_state is None:
+                return
 
-        # Save Point A2 — persist after intake questions so answers survive restarts.
-        # Without this, exiting at the review screen would lose all questionnaire answers.
-        save_project_snapshot(project_id, graph_state)
+            # Save Point A2 — persist after intake questions so answers survive restarts.
+            # Without this, exiting at the review screen would lose all questionnaire answers.
+            save_project_snapshot(project_id, graph_state)
 
-    # ── Phase C: Intake Summary + Review ───────────────────────────────
-    if not _intake_done:
-        logger.info("Phase transition: intake_review")
-        graph_state = _phase_intake_review(live, console, graph, graph_state, _key, export_only)
-        if graph_state is None:
-            return
+        # ── Phase C: Intake Summary + Review ───────────────────────────────
+        if not _intake_done:
+            logger.info("Phase transition: intake_review")
+            graph_state = _phase_intake_review(live, console, graph, graph_state, _key, export_only)
+            if graph_state is None:
+                return
 
-        # Save Point B — persist after intake review acceptance
-        save_project_snapshot(project_id, graph_state)
+            # Save Point B — persist after intake review acceptance
+            save_project_snapshot(project_id, graph_state)
 
-    # ── Phase D: Pipeline Stages ───────────────────────────────────────
-    if not _pipeline_done:
-        logger.info("Phase transition: pipeline")
-        graph_state = _phase_pipeline(
-            live, console, graph, graph_state, _key, export_only, bell, project_id, dry_run=dry_run
-        )
-        if graph_state is None:
-            return
+        # ── Phase D: Pipeline Stages ───────────────────────────────────────
+        if not _pipeline_done:
+            logger.info("Phase transition: pipeline")
+            graph_state = _phase_pipeline(
+                live, console, graph, graph_state, _key, export_only, bell, project_id, dry_run=dry_run
+            )
+            if graph_state is None:
+                return
+
+        # Small → Epic wide switch requested at the analysis review: re-run the
+        # loop. apply_epic_switch() already reset the questionnaire (mode=smart,
+        # completed=False, _reopen_for_epic=True) and cleared artifacts. Invoke
+        # the graph once (no LLM) so project_intake produces the first Epic gap
+        # question before Phase B re-runs.
+        if graph_state is not None and graph_state.pop("_switch_to_epic_pending", False):
+            logger.info("Switching Small project → Epic wide; re-running intake")
+            if graph is not None:
+                try:
+                    graph_state = graph.invoke(graph_state)
+                except Exception:
+                    logger.warning("Epic-switch re-invoke failed", exc_info=True)
+            save_project_snapshot(project_id, graph_state)
+            continue
+        break
 
     # Auto-export when running with --export-only flag
     if export_only and graph_state is not None:

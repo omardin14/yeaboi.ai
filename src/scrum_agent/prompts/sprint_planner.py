@@ -48,6 +48,7 @@ def get_sprint_planner_prompt(
     sprint_capacities: list[dict] | None = None,
     team_override_from: int | None = None,
     team_calibration: str = "",
+    ceremony_history: str = "",
     review_feedback: str | None = None,
     review_mode: str | None = None,
     previous_output: str | None = None,
@@ -163,6 +164,21 @@ def get_sprint_planner_prompt(
         )
         cot_step3 = "3. Fill each sprint up to the velocity cap, respecting priority order.\n"
 
+    # Recent Standup + Retro signals: sequence retro-sourced ([Retro]) stories
+    # early, and stay conservative on load when standup confidence has been low.
+    ceremony_section = (
+        (
+            "## Recent Standup & Retro Signals\n\n"
+            "Use these when ordering and loading sprints — schedule stories that "
+            "address open retro action items (often titled `[Retro] …`) early, and if "
+            "recent standup confidence has been low or declining, keep earlier sprints "
+            "a little under capacity to absorb risk.\n\n"
+            f"{ceremony_history}\n\n"
+        )
+        if ceremony_history
+        else ""
+    )
+
     base = (
         "You are a Senior Scrum Master with expertise in sprint planning and capacity allocation.\n\n"
         "## Project Context\n\n"
@@ -171,7 +187,10 @@ def get_sprint_planner_prompt(
         f"{velocity_section}\n"
         f"**{target_note}**\n\n"
         "## Stories to Allocate\n\n"
-        f"{stories_block}\n\n" + (team_calibration + "\n" if team_calibration else "") + "## Task\n\n"
+        f"{stories_block}\n\n"
+        + ceremony_section
+        + (team_calibration + "\n" if team_calibration else "")
+        + "## Task\n\n"
         "Allocate ALL stories above into sprints. Return a JSON array matching this exact schema:\n\n"
         f"```json\n{_JSON_SCHEMA}\n```\n\n"
         "## Rules\n\n"

@@ -148,6 +148,8 @@ def get_story_writer_prompt(
     out_of_scope: str = "",
     team_calibration: str = "",
     dod_items: tuple[str, ...] | None = None,
+    is_low_code: bool = False,
+    carry_over_items: tuple[str, ...] = (),
     review_feedback: str | None = None,
     review_mode: str | None = None,
     previous_output: str | None = None,
@@ -213,19 +215,53 @@ def get_story_writer_prompt(
         count_rule = f"1. Produce {MIN_STORIES_PER_FEATURE}-{MAX_STORIES_PER_FEATURE} stories per feature.\n"
     id_rule = "2. Use sequential IDs per feature: US-F1-001, US-F1-002, US-F2-001, etc.\n"
 
+    # Low-code projects are mostly configuration / content / no-code-platform
+    # work — the stories should reflect that (setup, configuration, content,
+    # integration wiring) and carry SMALLER point estimates than custom builds.
+    low_code_note = (
+        "\n**This is a LOW-CODE project** — mostly configuration, content, and "
+        "no-code / low-code platform work rather than custom engineering. Prefer "
+        "configuration / setup / content / integration-wiring stories over "
+        "heavy build-from-scratch stories, and bias story points SMALLER "
+        "(a task that would be 5 points as custom code is often 2-3 when it is "
+        "platform configuration).\n"
+        if is_low_code
+        else ""
+    )
+
+    # Unresolved action items carried over from the team's recent retrospectives.
+    # These are real, agreed follow-ups the team hasn't closed — turn each into a
+    # dedicated story (unless a feature above already covers it) so they aren't lost.
+    carry_over_section = ""
+    if carry_over_items:
+        items = "\n".join(f"- {it}" for it in carry_over_items)
+        carry_over_section = (
+            "## Carry-over from Recent Retros\n\n"
+            "These are open action items the team agreed in past retrospectives. "
+            "For each one NOT already covered by a feature above, add ONE dedicated "
+            'user story: prefix its title with "[Retro] ", attach it to the most '
+            "relevant feature (or the first feature if none fits), and estimate it "
+            "like any other story. Skip any that duplicate existing scope.\n\n"
+            f"{items}\n\n"
+        )
+
     base = (
         "You are a Senior Scrum Master with expertise in user story decomposition.\n\n"
         "## Project Context\n\n"
         f"**Project:** {project_name}\n"
         f"**Description:** {project_description}\n"
-        f"**Type:** {project_type}\n\n"
+        f"**Type:** {project_type}\n"
+        f"{low_code_note}\n"
         f"### Goals\n{goals}\n\n"
         f"### End Users\n{end_users}\n\n"
         f"### Tech Stack\n{tech_stack}\n\n"
         f"### Constraints\n{constraints}\n\n"
         f"### Out of Scope\n{out_of_scope}\n\n"
         "## Features to Decompose\n\n"
-        f"{features_block}\n\n" + (team_calibration + "\n" if team_calibration else "") + "## Task\n\n"
+        f"{features_block}\n\n"
+        + carry_over_section
+        + (team_calibration + "\n" if team_calibration else "")
+        + "## Task\n\n"
         f"{task_instruction}"
         "## Rules\n\n"
         f"{count_rule}"

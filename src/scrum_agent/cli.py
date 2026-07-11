@@ -270,7 +270,6 @@ def build_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  scrum-agent                        interactive mode (recommended)\n"
             "  scrum-agent --quick                quick intake (2 questions only)\n"
-            "  scrum-agent --full-intake          full 30-question intake\n"
             "  scrum-agent --questionnaire q.md   import pre-filled questionnaire\n"
             "  scrum-agent --export-only --quick  non-interactive, auto-accept all\n"
             "  scrum-agent --resume               resume last session (interactive picker)\n"
@@ -326,18 +325,14 @@ def build_parser() -> argparse.ArgumentParser:
     # Intake mode flags — mutually exclusive.
     # Smart mode is the default when neither flag is given.
     # See README: "Project Intake Questionnaire" — smart intake
+    # The legacy --full-intake (30-question "standard" mode) has been removed —
+    # smart intake is the single interactive path. --quick remains for power users.
     intake_group = parser.add_mutually_exclusive_group()
     intake_group.add_argument(
         "--quick",
         action="store_true",
         default=False,
         help="Quick intake — only ask team size and tech stack, auto-fill everything else.",
-    )
-    intake_group.add_argument(
-        "--full-intake",
-        action="store_true",
-        default=False,
-        help="Full 30-question intake (standard mode).",
     )
 
     parser.add_argument(
@@ -1094,7 +1089,7 @@ def main(argv: list[str] | None = None) -> None:
     # Determine early whether we'll use the old REPL or the fullscreen TUI.
     # The TUI path keeps alt-screen active from splash → select_mode seamlessly.
     # The old REPL path needs to exit alt-screen and print info to the terminal.
-    use_old_repl = args.mode is not None or args.quick or args.full_intake or args.questionnaire is not None
+    use_old_repl = args.mode is not None or args.quick or args.questionnaire is not None
 
     team_learning_flag = args.learn or args.team_profile or args.retro is not None
     if use_old_repl or args.resume is not None or args.list_sessions or args.clear_sessions or team_learning_flag:
@@ -1191,8 +1186,6 @@ def main(argv: list[str] | None = None) -> None:
     # See README: "Project Intake Questionnaire" — smart intake
     if args.quick:
         intake_mode = "quick"
-    elif args.full_intake:
-        intake_mode = "standard"
     else:
         intake_mode = None
 
@@ -1208,9 +1201,9 @@ def main(argv: list[str] | None = None) -> None:
     #
     # Three paths:
     #   1. --mode flag → bypass UI, use old REPL (backwards compat for scripted runs)
-    #   2. --quick/--full-intake/--questionnaire → bypass UI, use old REPL
+    #   2. --quick/--questionnaire → bypass UI, use old REPL
     #   3. Interactive → full-screen TUI mode selector, which launches the TUI
-    #      session (run_session) for Smart/Full intake inside its Live context
+    #      session (run_session) for smart intake inside its Live context
     #
     # See README: "Architecture" — mode selection is a CLI-layer concern.
     if use_old_repl:

@@ -171,3 +171,42 @@ class RetroStore:
             (session_id, limit),
         ).fetchall()
         return [{"run_at": r[0], "retro_date": r[1], "project_name": r[2], "card_count": r[3]} for r in rows]
+
+    # ── Team-wide (cross-session) reads — used by ceremony_history to feed
+    #    Planning / Analysis with the team's recent retros regardless of which
+    #    session they ran under. See README: "Session Management".
+
+    def get_recent_reports(self, limit: int = 5, project_name: str = "") -> list[RetroReport]:
+        """Return recent RetroReports across ALL sessions, newest first.
+
+        When ``project_name`` is given, rows matching it sort first (project-first),
+        then by recency — so a plan for project X sees X's retros ahead of others'.
+        """
+        if project_name:
+            # (project_name = ?) is 1 for matches, 0 otherwise → matches sort first.
+            rows = self._conn.execute(
+                "SELECT report_json FROM retro_history ORDER BY (project_name = ?) DESC, run_at DESC LIMIT ?",
+                (project_name, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT report_json FROM retro_history ORDER BY run_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        reports: list[RetroReport] = []
+        for row in rows:
+            if not row[0]:
+                continue
+            try:
+                reports.append(_dict_to_retro_report(json.loads(row[0])))
+            except (json.JSONDecodeError, TypeError, KeyError) as exc:
+                logger.warning("Failed to deserialize a retro report: %s", exc)
+        return reports
+
+    def get_all_history(self, limit: int = 100) -> list[dict]:
+        """Return recent retro run metadata across ALL sessions (for cadence)."""
+        rows = self._conn.execute(
+            "SELECT run_at, retro_date, project_name, card_count FROM retro_history ORDER BY run_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [{"run_at": r[0], "retro_date": r[1], "project_name": r[2], "card_count": r[3]} for r in rows]

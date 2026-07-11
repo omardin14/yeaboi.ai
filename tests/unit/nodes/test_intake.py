@@ -65,26 +65,15 @@ class TestProjectIntake:
         monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def test_first_call_initializes_questionnaire(self):
-        """No questionnaire in state → returns a new QuestionnaireState."""
+        """No questionnaire in state → returns a new QuestionnaireState (smart mode)."""
         state = {"messages": []}
         result = project_intake(state)
         assert "questionnaire" in result
         assert isinstance(result["questionnaire"], QuestionnaireState)
-        assert result["questionnaire"].current_question == 1
-
-    def test_first_call_asks_first_question(self):
-        """First invocation should ask Q1 text."""
-        state = {"messages": []}
-        result = project_intake(state)
-        ai_msg = result["messages"][0]
-        assert isinstance(ai_msg, AIMessage)
-        assert INTAKE_QUESTIONS[1] in ai_msg.content
-
-    def test_first_call_includes_phase_label(self):
-        """First invocation should include the Phase 1 header."""
-        state = {"messages": []}
-        result = project_intake(state)
-        assert "Phase 1: Project Context" in result["messages"][0].content
+        # The default (smart) flow asks an essential gap, not Q1-first — that
+        # Q1-first behavior belonged to the retired "standard" mode.
+        assert result["questionnaire"].intake_mode == "smart"
+        assert isinstance(result["messages"][0], AIMessage)
 
     def test_records_answer(self):
         """After answering, the answer should be stored in questionnaire.answers."""
@@ -352,82 +341,12 @@ class TestAdaptiveSkipIntegration:
             lambda desc: extracted,
         )
 
-    def test_first_call_stores_suggestions(self, monkeypatch):
-        """First call with a description should store extracted answers as suggestions."""
-        self._mock_extract(monkeypatch, {1: "A todo app", 6: "3 engineers", 11: "React"})
-        state = {"messages": [HumanMessage(content="Building a todo app with 3 engineers using React")]}
-
-        result = project_intake(state)
-        qs = result["questionnaire"]
-        # Suggestions stored — NOT in answers or skipped_questions
-        assert qs.suggested_answers == {1: "A todo app", 6: "3 engineers", 11: "React"}
-        assert len(qs.answers) == 0
-        assert len(qs.skipped_questions) == 0
-
-    def test_first_call_shows_suggestion_count(self, monkeypatch):
-        """First call should mention how many details were picked up."""
-        self._mock_extract(monkeypatch, {1: "A todo app", 6: "3 engineers"})
-        state = {"messages": [HumanMessage(content="Building a todo app with 3 engineers")]}
-
-        result = project_intake(state)
-        content = result["messages"][0].content
-        assert "2" in content  # picked up 2 details
-        assert "confirm" in content.lower() or "change" in content.lower()
-
-    def test_first_call_always_starts_at_q1(self, monkeypatch):
-        """With extraction, should still start at Q1 (not skip to next unanswered)."""
-        self._mock_extract(monkeypatch, {1: "A todo app"})
-        state = {"messages": [HumanMessage(content="Building a todo app")]}
-
-        result = project_intake(state)
-        qs = result["questionnaire"]
-        assert qs.current_question == 1
-        assert INTAKE_QUESTIONS[1] in result["messages"][0].content
-
-    def test_suggestion_shown_inline(self, monkeypatch):
-        """When Q1 has a suggestion, it should be shown inline with the question."""
-        self._mock_extract(monkeypatch, {1: "A todo app"})
-        state = {"messages": [HumanMessage(content="Building a todo app")]}
-
-        result = project_intake(state)
-        content = result["messages"][0].content
-        assert "Suggested" in content
-        assert "A todo app" in content
-
-    def test_empty_messages_falls_back_to_q1(self, monkeypatch):
-        """Empty messages list → no description → falls back to asking Q1."""
-        self._mock_extract(monkeypatch, {})
-        state = {"messages": []}
-
-        result = project_intake(state)
-        qs = result["questionnaire"]
-        assert qs.current_question == 1
-        assert INTAKE_QUESTIONS[1] in result["messages"][0].content
-
-    def test_llm_failure_falls_back_to_q1(self, monkeypatch):
-        """If extraction returns {} (LLM failure) → falls back to asking Q1."""
-        self._mock_extract(monkeypatch, {})
-        state = {"messages": [HumanMessage(content="Building a todo app with 3 engineers")]}
-
-        result = project_intake(state)
-        qs = result["questionnaire"]
-        assert qs.current_question == 1
-        assert len(qs.skipped_questions) == 0
-        assert len(qs.suggested_answers) == 0
-
-    def test_all_questions_extracted_still_starts_at_q1(self, monkeypatch):
-        """If all 26 questions are extracted → still starts at Q1 with suggestion."""
-        all_answers = {i: f"answer {i}" for i in range(1, TOTAL_QUESTIONS + 1)}
-        self._mock_extract(monkeypatch, all_answers)
-        state = {"messages": [HumanMessage(content="Very detailed description")]}
-
-        result = project_intake(state)
-        qs = result["questionnaire"]
-        # Should NOT auto-complete — starts at Q1 for confirmation
-        assert qs.current_question == 1
-        assert qs.awaiting_confirmation is False
-        assert qs.completed is False
-        assert len(qs.suggested_answers) == TOTAL_QUESTIONS
+    # NOTE: the first-call "adaptive skip" tests that lived here asserted the
+    # retired "standard" mode's behavior (extractions stored as suggested_answers,
+    # always start at Q1, show a "picked up N details" count). That flow has been
+    # removed — smart mode (the default) auto-applies non-essential extractions and
+    # asks the first essential gap instead. Smart first-invocation is covered by
+    # TestSmartIntakeMode and test_smart_mode_first_invocation_* below.
 
     def test_suggestion_shown_on_subsequent_question(self, monkeypatch):
         """When advancing to a question with a suggestion, it should show inline."""
@@ -2067,12 +1986,10 @@ class TestPhaseIntros:
         for phase in PHASE_INTROS:
             assert PHASE_INTROS[phase] != PHASE_LABELS[phase]
 
-    def test_phase_intro_appears_in_first_question(self):
-        """When asking Q1, the phase intro should appear in the message."""
-        state = {"messages": []}
-        result = project_intake(state)
-        msg = result["messages"][0].content
-        assert PHASE_INTROS["project_context"] in msg
+    # NOTE: the former test_phase_intro_appears_in_first_question asserted the
+    # retired "standard" mode's Q1-first phase-intro banner. Smart mode (the
+    # default) asks an essential gap first, so that banner no longer appears on
+    # the first call. Phase intros still render in the shared subsequent-call flow.
 
 
 # ── Defaults command tests ───────────────────────────────────────────
@@ -2697,8 +2614,13 @@ class TestSmartIntakeMode:
         # Q4 should be the next gap asked
         assert qs_out.current_question == 4
 
-    def test_standard_mode_unchanged(self, monkeypatch):
-        """Standard mode (default) still asks Q1 as the first question."""
+    def test_standard_mode_coerced_to_smart(self, monkeypatch):
+        """The retired "standard" mode is coerced to smart at first invocation.
+
+        The legacy 30-question one-at-a-time flow has been removed; any lingering
+        "standard" value (old sessions, stale state) now follows the smart path,
+        which asks only essential gaps rather than starting at Q1.
+        """
         monkeypatch.setattr(
             "scrum_agent.agent.nodes._extract_answers_from_description",
             lambda desc: {},
@@ -2709,11 +2631,9 @@ class TestSmartIntakeMode:
         }
         result = project_intake(state)
         qs = result["questionnaire"]
-        assert qs.intake_mode == "standard"
-        assert qs.current_question == 1
-        # Should show Q1 text
-        ai_msg = result["messages"][0].content
-        assert "Phase 1" in ai_msg
+        assert qs.intake_mode == "smart"
+        # Smart flow does not walk Q1-first; it jumps to essential gaps.
+        assert qs.current_question != 1
 
     def test_vague_answer_triggers_follow_up(self, monkeypatch):
         """Smart mode: a vague answer should trigger a follow-up probe."""

@@ -24,7 +24,9 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.tools import BaseTool
 from langgraph.graph import END
 
+from scrum_agent.agent.ceremony_history import gather_ceremony_context
 from scrum_agent.agent.llm import get_llm
+from scrum_agent.agent.repo_signals import analyze_context, scan_repo_signals
 from scrum_agent.agent.state import (
     DOD_ITEMS,
     PHASE_QUESTION_RANGES,
@@ -67,6 +69,7 @@ from scrum_agent.prompts.intake import (
     QUICK_ESSENTIALS,
     QUICK_FALLBACK_DEFAULTS,
     SCRUM_MD_HINT,
+    SMALL_PROJECT_ESSENTIALS,
     SMART_ESSENTIALS,
     AnswerSource,
     ValidationWarning,
@@ -1053,6 +1056,35 @@ def _fetch_active_sprint_number(preferred: str = "") -> tuple[int | None, str | 
     return None, None, "No tracker configured"
 
 
+# ---------------------------------------------------------------------------
+# Intake-mode helpers — Small project / Epic wide / Offline.
+# See README: "Project Intake Questionnaire" — intake modes.
+#
+# "small_project" is a lightweight mode for 1-2 tickets in one quick sprint.
+# It reuses the smart-intake extraction engine but asks fewer questions
+# (SMALL_PROJECT_ESSENTIALS) and switches OFF the capacity machinery: no bank
+# holidays, no PTO, no per-sprint velocity, no capacity-overflow advisory.
+# "smart" is the Epic-wide engine (full capacity planning), unchanged.
+# ---------------------------------------------------------------------------
+
+
+def _essentials_for_mode(intake_mode: str) -> frozenset[int]:
+    """Return the essential-question set for the given intake mode.
+
+    Smart (Epic wide) is the default; quick and small_project are leaner subsets.
+    """
+    if intake_mode == "quick":
+        return QUICK_ESSENTIALS
+    if intake_mode == "small_project":
+        return SMALL_PROJECT_ESSENTIALS
+    return SMART_ESSENTIALS
+
+
+def _is_small_project_mode(intake_mode: str | None) -> bool:
+    """True when the intake is running in the lightweight Small-project mode."""
+    return intake_mode == "small_project"
+
+
 def _extract_capacity_deductions(questionnaire: QuestionnaireState) -> dict:
     """Parse all capacity questions (Q27-Q30) from intake answers.
 
@@ -1069,6 +1101,18 @@ def _extract_capacity_deductions(questionnaire: QuestionnaireState) -> dict:
     Returns:
         A dict with all capacity fields for ScrumState.
     """
+    # Small-project mode does no capacity planning — return zero deductions so
+    # net velocity equals gross velocity (no bank holidays / PTO / discovery tax).
+    if _is_small_project_mode(questionnaire.intake_mode):
+        return {
+            "capacity_bank_holiday_days": 0,
+            "capacity_planned_leave_days": 0,
+            "capacity_unplanned_leave_pct": 0,
+            "capacity_onboarding_engineer_sprints": 0,
+            "capacity_ktlo_engineers": 0,
+            "capacity_discovery_pct": 0,
+        }
+
     # Q28 — bank holidays (auto-detected, confirmed by user as a choice)
     # The _detected_bank_holiday_days transient field is set during Q28 processing.
     # Fall back to parsing the Q28 answer text for a count.
@@ -2017,6 +2061,40 @@ def _scan_repo_context(questionnaire: QuestionnaireState) -> tuple[str | None, d
     return None, {"name": "Repository", "status": "error", "detail": f"{platform} scan returned no data"}
 
 
+def _apply_repo_signals(qs: QuestionnaireState) -> None:
+    """Scan the repo once at intake and apply repo-informed suggestions.
+
+    Runs `repo_signals.scan_repo_signals` (graceful — never raises, no-ops when
+    no repo is configured/available), stashes the raw scan + low-code verdict on
+    the questionnaire for `project_analyzer` to reuse, and pre-fills:
+
+    - **Q11 (tech stack)** — the detected stack as a *suggestion* (shown when Q11
+      is asked; the user confirms or overrides). Only when the user hasn't
+      already given / been suggested a stack.
+    - **Q12 (integrations)** — manifest-detected SDKs, auto-applied so they
+      surface (editable) in the confirmation summary. Only when Q12 is unanswered.
+
+    # See README: "Project Intake Questionnaire" — smart intake
+    """
+    try:
+        raw_context, signals, _status = scan_repo_signals(qs)
+    except Exception:  # noqa: BLE001 — scan is best-effort; never block intake
+        logger.debug("repo_signals scan failed (non-fatal)", exc_info=True)
+        return
+
+    qs._repo_context = raw_context or ""
+    qs._repo_low_code = signals.low_code
+    qs._repo_low_code_reason = signals.low_code_reasons[0] if signals.low_code_reasons else ""
+
+    if signals.detected_stack and 11 not in qs.answers and 11 not in qs.suggested_answers:
+        qs.suggested_answers[11] = ", ".join(signals.detected_stack)
+        logger.info("repo_signals: suggested tech stack for Q11: %s", signals.detected_stack)
+
+    if signals.integrations and 12 not in qs.answers:
+        _auto_apply_extractions(qs, {12: ", ".join(signals.integrations)})
+        logger.info("repo_signals: applied integrations for Q12: %s", signals.integrations)
+
+
 def _sync_platform_from_url(questionnaire: QuestionnaireState) -> None:
     """Auto-update Q16 (platform) when Q17 (repo URL) is stored.
 
@@ -2306,6 +2384,15 @@ def _prepare_bank_holiday_choices(questionnaire: QuestionnaireState) -> None:
     Args:
         questionnaire: The mutable QuestionnaireState to update.
     """
+    # Small-project mode skips bank-holiday planning entirely. Zero the
+    # transient fields so downstream capacity code sees "no holidays" and the
+    # confirmation summary shows no bank-holiday line. This single guard
+    # neutralizes every _prepare_bank_holiday_choices call site for Small mode.
+    if _is_small_project_mode(questionnaire.intake_mode):
+        questionnaire._detected_bank_holiday_days = 0
+        questionnaire._detected_bank_holidays = []
+        return
+
     from scrum_agent.tools.calendar_tools import detect_bank_holidays
 
     q8 = questionnaire.answers.get(8, "2 weeks")
@@ -2873,20 +2960,26 @@ def _build_intake_summary(questionnaire: QuestionnaireState) -> str:
 
         # Use override if set
         override = questionnaire._velocity_override
-        net_vel, breakdown = _build_velocity_breakdown(
-            velocity_per_sprint=vel,
-            velocity_source=velocity_source,
-            team_size=ts,
-            sprint_length_weeks=sprint_weeks,
-            target_sprints=target,
-            bank_holiday_days=capacity["capacity_bank_holiday_days"],
-            planned_leave_days=capacity["capacity_planned_leave_days"],
-            unplanned_leave_pct=capacity["capacity_unplanned_leave_pct"],
-            onboarding_engineer_sprints=capacity["capacity_onboarding_engineer_sprints"],
-            ktlo_engineers=capacity["capacity_ktlo_engineers"],
-            discovery_pct=capacity["capacity_discovery_pct"],
-            planned_leave_entries=list(questionnaire._planned_leave_entries),
-        )
+        if _is_small_project_mode(questionnaire.intake_mode):
+            # Small-project mode does no capacity planning — net equals gross
+            # velocity and there is no bank-holiday / PTO / discovery breakdown.
+            net_vel = vel
+            breakdown = f"**Small project** — no bank-holiday or capacity deductions (using {vel} pts/sprint)."
+        else:
+            net_vel, breakdown = _build_velocity_breakdown(
+                velocity_per_sprint=vel,
+                velocity_source=velocity_source,
+                team_size=ts,
+                sprint_length_weeks=sprint_weeks,
+                target_sprints=target,
+                bank_holiday_days=capacity["capacity_bank_holiday_days"],
+                planned_leave_days=capacity["capacity_planned_leave_days"],
+                unplanned_leave_pct=capacity["capacity_unplanned_leave_pct"],
+                onboarding_engineer_sprints=capacity["capacity_onboarding_engineer_sprints"],
+                ktlo_engineers=capacity["capacity_ktlo_engineers"],
+                discovery_pct=capacity["capacity_discovery_pct"],
+                planned_leave_entries=list(questionnaire._planned_leave_entries),
+            )
 
         if override is not None:
             display_vel = override
@@ -3102,9 +3195,11 @@ def _show_summary_or_pto(questionnaire: QuestionnaireState, prefix: str = "") ->
     # After PTO is resolved (or skipped), the confirmation summary is shown
     # with the velocity choice menu as usual.
     """
-    # Check if PTO should be asked before the summary
+    # Check if PTO should be asked before the summary. Quick and small_project
+    # modes skip PTO — small_project does no capacity planning at all, quick
+    # auto-defaults to "no planned leave".
     if (
-        questionnaire.intake_mode != "quick"
+        questionnaire.intake_mode not in ("quick", "small_project")
         and not questionnaire._leave_input_stage
         and not questionnaire._awaiting_leave_input
         and not questionnaire._planned_leave_entries
@@ -3134,6 +3229,79 @@ def _show_summary_or_pto(questionnaire: QuestionnaireState, prefix: str = "") ->
         "questionnaire": questionnaire,
         "messages": [AIMessage(content=f"{prefix}{summary}{_CONFIRM_PROMPT}")],
         "pending_review": "project_intake",
+    }
+
+
+def apply_epic_switch(graph_state: dict) -> None:
+    """Reset session state to switch from Small project → Epic wide intake.
+
+    See README: "Guardrails" — human-in-the-loop (advisory)
+
+    Called when the user accepts the "this looks bigger than a small project"
+    advisory. Preserves the questionnaire ANSWERS and project description (so the
+    user re-types nothing), flips the mode to Epic (smart), and clears the
+    analysis + downstream artifacts so the pipeline regenerates them. The
+    _reopen_for_epic flag tells project_intake to ask only the still-missing Epic
+    essentials on the next pass.
+    """
+    qs = graph_state.get("questionnaire")
+    if qs is not None:
+        qs.intake_mode = "smart"
+        qs.completed = False
+        qs.awaiting_confirmation = False
+        qs.editing_question = None
+        qs._reopen_for_epic = True
+    graph_state["_intake_mode"] = "smart"
+    # Drop the analysis + all generated artifacts + review bookkeeping so the
+    # pipeline re-runs cleanly under Epic-wide rules. Answers are untouched.
+    for key in (
+        "project_analysis",
+        "features",
+        "stories",
+        "tasks",
+        "sprints",
+        "pending_review",
+        "_small_project_oversized",
+        "_epic_reviewed",
+        "last_review_decision",
+        "last_review_feedback",
+    ):
+        graph_state.pop(key, None)
+
+
+def _reopen_intake_for_epic(state: ScrumState, questionnaire: QuestionnaireState) -> dict:
+    """Ask the next Epic essential after a Small → Epic switch (no answer to record).
+
+    Reuses the same gap-finding helpers as the smart-mode intake loop. Dynamic
+    Q27 tracker menus are populated on the subsequent normal gap pass, so here we
+    just surface the first missing essential (or the summary if none remain).
+    """
+    questionnaire._reopen_for_epic = False
+    questionnaire.awaiting_confirmation = False
+    essential_set = _essentials_for_mode(questionnaire.intake_mode)
+    gaps = _find_essential_gaps(questionnaire, essential_set)
+    if not gaps:
+        # Every Epic essential is already answered — go straight to the summary
+        # (with bank-holiday detection + PTO, which Small mode had skipped).
+        _prepare_bank_holiday_choices(questionnaire)
+        return _show_summary_or_pto(
+            questionnaire,
+            prefix="Switched to **Epic wide** — using your existing answers.\n\n",
+        )
+    prompt_text, q_nums = _build_gap_prompt(gaps, questionnaire)
+    questionnaire._pending_merged_questions = q_nums
+    questionnaire.current_question = q_nums[0]
+    logger.info("Small→Epic switch: asking remaining Epic essentials %s", sorted(gaps))
+    return {
+        "questionnaire": questionnaire,
+        "messages": [
+            AIMessage(
+                content=(
+                    "Switched to **Epic wide** — I kept all your answers. "
+                    "Just a few more questions for the fuller plan:\n\n" + prompt_text
+                )
+            )
+        ],
     }
 
 
@@ -3190,6 +3358,16 @@ def project_intake(state: ScrumState) -> dict:
     else:
         _pending_tracker_pref = ""
 
+    # ── Small project → Epic wide switch re-entry ────────────────────────
+    # See README: "Guardrails" — human-in-the-loop (advisory)
+    #
+    # When the user switched modes at the analysis review, the questionnaire is
+    # re-opened in Epic (smart) mode with all Small-project answers preserved.
+    # There's no answer to record on this pass — jump straight to asking the
+    # remaining Epic essentials (Q7/Q10/Q27), or the summary if none are missing.
+    if questionnaire is not None and getattr(questionnaire, "_reopen_for_epic", False):
+        return _reopen_intake_for_epic(state, questionnaire)
+
     if questionnaire is None:
         # First call — initialize questionnaire and attempt adaptive skip.
         # See README: "Project Intake Questionnaire" — adaptive skip logic
@@ -3205,9 +3383,13 @@ def project_intake(state: ScrumState) -> dict:
             qs._preferred_tracker = _pending_tracker_pref
 
         # Read intake_mode from the REPL-injected state key.
-        # Default to "standard" for backward compatibility with tests that
-        # don't set _intake_mode.
-        intake_mode = state.get("_intake_mode", "standard")
+        # The legacy 30-question "standard" flow has been retired — smart intake
+        # is the single interactive path. Default to (and coerce any legacy
+        # "standard" / unknown value from old sessions to) "smart" so the
+        # pipeline always follows one code path below.
+        intake_mode = state.get("_intake_mode") or "smart"
+        if intake_mode not in ("smart", "quick", "small_project"):
+            intake_mode = "smart"
         qs.intake_mode = intake_mode
 
         # Extract initial description from the first message (if present).
@@ -3293,7 +3475,7 @@ def project_intake(state: ScrumState) -> dict:
         # In smart/quick mode, extracted answers are auto-accepted (not
         # shown for confirmation). Defaults are auto-applied to all
         # non-essential questions. Only essential gaps are asked.
-        if intake_mode in ("smart", "quick"):
+        if intake_mode in ("smart", "quick", "small_project"):
             logger.debug("BANK_HOLIDAY: entering %s intake mode", intake_mode)
             # Store SCRUM.md provenance so the preamble can report it
             qs._scrum_md_questions = _scrum_md_contributed
@@ -3304,7 +3486,7 @@ def project_intake(state: ScrumState) -> dict:
                 qs.answer_sources[1] = AnswerSource.EXTRACTED
 
             # Pick essential set based on mode (needed before extraction split)
-            essential_set = QUICK_ESSENTIALS if intake_mode == "quick" else SMART_ESSENTIALS
+            essential_set = _essentials_for_mode(intake_mode)
             # If analysis provides velocity, skip Q9 from essentials (auto-accept).
             # Q11 (tech stack) stays essential so it appears as a suggestion
             # the user can confirm or override.
@@ -3329,6 +3511,16 @@ def project_intake(state: ScrumState) -> dict:
 
             # Auto-default all non-essential, non-answered questions
             _auto_default_remaining(qs, essential_set, fallbacks)
+
+            # ── Repository-informed suggestions ──────────────────────────
+            # Scan the project's repo (the Q17 URL, or a configured GitHub repo)
+            # and derive a suggested tech stack + integrations, plus a low-code
+            # verdict. Graceful: no configured/available repo → a no-op that only
+            # applies description-based low-code markers. Runs once here at first
+            # invocation; the raw scan + verdict are stashed on the questionnaire
+            # for project_analyzer to reuse (avoids a second live scan).
+            # See README: "Project Intake Questionnaire" — smart intake
+            _apply_repo_signals(qs)
 
             # Derive Q15 from Q2 if available
             _derive_q15_from_q2(qs)
@@ -3504,35 +3696,9 @@ def project_intake(state: ScrumState) -> dict:
                 "messages": [AIMessage(content=f"{preamble}{remaining_text}\n\n{prompt_text}")],
             }
 
-        # ── Standard mode first-invocation (original 26-Q flow) ─────
-        if extracted:
-            # Store extracted answers as confirmable suggestions — the user
-            # will see each one inline and can press Enter to confirm or
-            # type a different answer. Questions are NOT skipped.
-            qs.suggested_answers.update(extracted)
-
-        # Always start at Q1 — even with suggestions, we walk through
-        # every question so the user can confirm or override.
-        question = INTAKE_QUESTIONS[1]
-        phase_label = PHASE_LABELS[qs.current_phase]
-        phase_intro = PHASE_INTROS.get(qs.current_phase, "")
-        intro_line = f"*{phase_intro}*\n\n" if phase_intro else ""
-
-        # If Q1 has a suggestion from the description, show it inline
-        suggestion = qs.suggested_answers.get(1)
-        suggest_line = f"\n\n> Suggested: **{suggestion}**" if suggestion else ""
-
-        preamble = ""
-        if extracted:
-            preamble = (
-                f"I picked up **{len(extracted)}** detail(s) from your description "
-                "— I'll show each one for you to confirm or change.\n\n"
-            )
-
-        return {
-            "questionnaire": qs,
-            "messages": [AIMessage(content=f"{preamble}**{phase_label}**\n\n{intro_line}{question}{suggest_line}")],
-        }
+        # NOTE: the legacy "standard" (30-question, one-at-a-time) first-invocation
+        # flow used to live here. It has been retired — intake_mode is coerced to
+        # smart/quick/small_project above, so the branch just above always returns.
 
     # Record the user's answer to the current question.
     # The last message in state is always the HumanMessage with the user's reply.
@@ -3579,7 +3745,7 @@ def project_intake(state: ScrumState) -> dict:
     # answer, derive Q15 if Q2 was just answered, then find the next
     # gap or show the summary.
     if (
-        questionnaire.intake_mode in ("smart", "quick")
+        questionnaire.intake_mode in ("smart", "quick", "small_project")
         and not questionnaire.awaiting_confirmation
         and questionnaire.editing_question is None
     ):
@@ -3802,7 +3968,7 @@ def project_intake(state: ScrumState) -> dict:
             questionnaire._follow_up_choices.pop(28, None)
 
         # Find remaining essential gaps
-        essential_set = QUICK_ESSENTIALS if questionnaire.intake_mode == "quick" else SMART_ESSENTIALS
+        essential_set = _essentials_for_mode(questionnaire.intake_mode)
         gaps = _find_essential_gaps(questionnaire, essential_set)
 
         if not gaps:
@@ -4170,8 +4336,6 @@ def project_intake(state: ScrumState) -> dict:
         ts = extracted.get("team_size", 1)
         vel = extracted.get("velocity_per_sprint", ts * _VELOCITY_PER_ENGINEER)
         sprint_weeks = _parse_first_int(questionnaire.answers.get(8, "2 weeks")) or 2
-        q10_nums = re.findall(r"\d+", questionnaire.answers.get(10, ""))
-        target = int(q10_nums[-1]) if q10_nums else 6
 
         # Determine sprint start date — use _resolve_sprint_start_date which
         # computes the offset for future sprints (e.g. Sprint 107 when active is 104).
@@ -4182,50 +4346,61 @@ def project_intake(state: ScrumState) -> dict:
         if sprint_num_match:
             starting_sprint = int(sprint_num_match.group(1))
 
-        # Map detected holidays and PTO to sprint windows for per-sprint velocity
-        holidays_by_sprint = _assign_holidays_to_sprints(
-            questionnaire._detected_bank_holidays,
-            sprint_start,
-            sprint_weeks,
-            target,
-        )
-        leave_by_sprint = _assign_leave_to_sprints(
-            questionnaire._planned_leave_entries,
-            sprint_start,
-            sprint_weeks,
-            target,
-        )
-        sprint_caps = _compute_per_sprint_velocities(
-            team_size=ts,
-            velocity_per_sprint=vel,
-            sprint_length_weeks=sprint_weeks,
-            target_sprints=target,
-            holidays_by_sprint=holidays_by_sprint,
-            planned_leave_days=capacity["capacity_planned_leave_days"],
-            unplanned_leave_pct=capacity["capacity_unplanned_leave_pct"],
-            onboarding_engineer_sprints=capacity["capacity_onboarding_engineer_sprints"],
-            ktlo_engineers=capacity["capacity_ktlo_engineers"],
-            discovery_pct=capacity["capacity_discovery_pct"],
-            leave_by_sprint=leave_by_sprint,
-        )
-
-        # Use minimum per-sprint velocity as the conservative net velocity
-        # (for backward compat and capacity overflow checks)
-        if sprint_caps:
-            net_vel = min(sc["net_velocity"] for sc in sprint_caps)
+        if _is_small_project_mode(questionnaire.intake_mode):
+            # Small-project mode: no capacity planning. Net velocity equals gross,
+            # and there is no per-sprint breakdown (project_analyzer caps the plan
+            # at 1-2 sprints). Leave sprint_caps empty so the sprint_planner uses a
+            # simple velocity × target_sprints allocation.
+            sprint_caps = []
+            net_vel = vel
         else:
-            net_vel = _compute_net_velocity(
+            q10_nums = re.findall(r"\d+", questionnaire.answers.get(10, ""))
+            target = int(q10_nums[-1]) if q10_nums else 6
+
+            # Map detected holidays and PTO to sprint windows for per-sprint velocity
+            holidays_by_sprint = _assign_holidays_to_sprints(
+                questionnaire._detected_bank_holidays,
+                sprint_start,
+                sprint_weeks,
+                target,
+            )
+            leave_by_sprint = _assign_leave_to_sprints(
+                questionnaire._planned_leave_entries,
+                sprint_start,
+                sprint_weeks,
+                target,
+            )
+            sprint_caps = _compute_per_sprint_velocities(
                 team_size=ts,
                 velocity_per_sprint=vel,
                 sprint_length_weeks=sprint_weeks,
                 target_sprints=target,
-                bank_holiday_days=capacity["capacity_bank_holiday_days"],
+                holidays_by_sprint=holidays_by_sprint,
                 planned_leave_days=capacity["capacity_planned_leave_days"],
                 unplanned_leave_pct=capacity["capacity_unplanned_leave_pct"],
                 onboarding_engineer_sprints=capacity["capacity_onboarding_engineer_sprints"],
                 ktlo_engineers=capacity["capacity_ktlo_engineers"],
                 discovery_pct=capacity["capacity_discovery_pct"],
+                leave_by_sprint=leave_by_sprint,
             )
+
+            # Use minimum per-sprint velocity as the conservative net velocity
+            # (for backward compat and capacity overflow checks)
+            if sprint_caps:
+                net_vel = min(sc["net_velocity"] for sc in sprint_caps)
+            else:
+                net_vel = _compute_net_velocity(
+                    team_size=ts,
+                    velocity_per_sprint=vel,
+                    sprint_length_weeks=sprint_weeks,
+                    target_sprints=target,
+                    bank_holiday_days=capacity["capacity_bank_holiday_days"],
+                    planned_leave_days=capacity["capacity_planned_leave_days"],
+                    unplanned_leave_pct=capacity["capacity_unplanned_leave_pct"],
+                    onboarding_engineer_sprints=capacity["capacity_onboarding_engineer_sprints"],
+                    ktlo_engineers=capacity["capacity_ktlo_engineers"],
+                    discovery_pct=capacity["capacity_discovery_pct"],
+                )
 
         # Apply user override if set
         if questionnaire._velocity_override is not None:
@@ -4842,6 +5017,8 @@ def _parse_analysis_response(
             skip_features=bool(parsed.get("skip_features", False))
             and target_sprints <= 2
             and len(to_str_tuple(parsed.get("goals"))) <= 3,
+            is_low_code=bool(parsed.get("is_low_code", False)),
+            low_code_reason=str(parsed.get("low_code_reason", "")),
             scrum_md_contributions=to_str_tuple(parsed.get("scrum_md_contributions")),
         )
 
@@ -4946,10 +5123,16 @@ def _format_analysis(
             return "  - _(none)_"
         return "\n".join(f"  - {item}" for item in items)
 
+    low_code_line = ""
+    if analysis.is_low_code:
+        reason = f" — {analysis.low_code_reason}" if analysis.low_code_reason else ""
+        low_code_line = f"**⚙ Low-code project{reason}** (estimates and tasks scaled lighter)\n\n"
+
     sections = [
         f"# Project Analysis: {analysis.project_name}\n",
         f"**Description:** {analysis.project_description}\n",
         f"**Type:** {analysis.project_type}\n",
+        low_code_line,
         f"## Goals\n{_bullet_list(analysis.goals)}\n",
         f"## End Users\n{_bullet_list(analysis.end_users)}\n",
         f"## Target State\n{analysis.target_state or '_(not specified)_'}\n",
@@ -5194,11 +5377,27 @@ def project_analyzer(state: ScrumState) -> dict:
         review_feedback = parts[0].strip()
         previous_output = parts[1].strip()
 
-    # Scan repo if Q17 has a URL — grounds analysis in real codebase data.
-    # Each function returns (context_str | None, status_dict) so we can track
-    # what sources were used, skipped, or failed for user transparency.
-    # See README: "Tools" — read-only tool pattern
-    repo_context, repo_status = _scan_repo_context(questionnaire)
+    # Repository signals — grounds analysis in real codebase data and drives the
+    # deterministic low-code verdict + the detected-stack hint. To avoid scanning
+    # the repo twice, reuse the raw scan stashed by project_intake if present;
+    # either way analyze_context re-derives the structured signals (cheap, pure)
+    # from the current questionnaire answers.
+    # See README: "Project Intake Questionnaire" — smart intake
+    _stashed_repo_context = getattr(questionnaire, "_repo_context", "")
+    if _stashed_repo_context:
+        repo_context = _stashed_repo_context
+        repo_status = {"name": "Repository", "status": "success", "detail": "reused intake scan"}
+    else:
+        # _scan_repo_context is kept as the analysis-time scan seam (many
+        # integration/golden tests monkeypatch it to skip live scans).
+        repo_context, repo_status = _scan_repo_context(questionnaire)
+    # Re-derive structured signals from the raw scan (pure, no I/O) so the
+    # detected-stack hint and low-code verdict reflect the current answers.
+    repo_signals = analyze_context(
+        repo_context or "",
+        description=questionnaire.answers.get(1, "") or "",
+        tech_stack=questionnaire.answers.get(11, "") or "",
+    )
 
     # Load SCRUM.md first — the user's own project context file. Loaded before
     # Confluence so that any Confluence URLs in SCRUM.md can be fetched directly.
@@ -5228,6 +5427,13 @@ def project_analyzer(state: ScrumState) -> dict:
     )
     team_profile_summary = team_calibration_text.strip()
 
+    # Gather the team's recent Standup + Retro history (team-wide, graceful — an
+    # empty context when nothing has run). Recency-dominant here: pre-analysis we
+    # have no reliable project name to match on, so we pass "" and let the most
+    # recent ceremonies inform the plan. Action items are stashed for story_writer.
+    # See README: "Session Management" — SQLite persistence
+    ceremony = gather_ceremony_context()
+
     # Build the formatted answers block for the prompt
     answers_block = _build_answers_block(questionnaire)
     prompt = get_analyzer_prompt(
@@ -5235,9 +5441,11 @@ def project_analyzer(state: ScrumState) -> dict:
         team_size,
         velocity,
         repo_context=repo_context,
+        detected_stack=repo_signals.detected_stack or None,
         confluence_context=confluence_context,
         user_context=user_context,
         team_profile_summary=team_profile_summary,
+        ceremony_history=ceremony.summary_md,
         review_feedback=review_feedback if review_mode else None,
         review_mode=review_mode,
         previous_output=previous_output,
@@ -5260,6 +5468,41 @@ def project_analyzer(state: ScrumState) -> dict:
     quality = compute_prompt_quality(questionnaire, has_user_context=user_context is not None)
     analysis = dataclasses.replace(analysis, prompt_quality=quality)
 
+    # ── Low-code reconciliation ──────────────────────────────────────────
+    # Three inputs OR together (a strong signal from any one wins): the analyzer
+    # LLM's is_low_code, the deterministic verdict stashed by project_intake's
+    # broadened scan, and a fresh analyze_context pass over the reused raw scan.
+    stashed_low_code = getattr(questionnaire, "_repo_low_code", False)
+    stashed_reason = getattr(questionnaire, "_repo_low_code_reason", "")
+    det_reason = stashed_reason or (repo_signals.low_code_reasons[0] if repo_signals.low_code_reasons else "")
+    final_low_code = analysis.is_low_code or repo_signals.low_code or stashed_low_code
+    if final_low_code != analysis.is_low_code:
+        analysis = dataclasses.replace(analysis, is_low_code=final_low_code)
+    if final_low_code and not analysis.low_code_reason:
+        analysis = dataclasses.replace(analysis, low_code_reason=det_reason)
+    if final_low_code:
+        logger.info("project_analyzer: low-code project detected (reason: %s)", analysis.low_code_reason or det_reason)
+
+    # ── Small-project scope detection & coercion ─────────────────────────
+    # See README: "Guardrails" — human-in-the-loop (advisory)
+    #
+    # In Small-project mode the plan is always kept flat: a single implicit epic
+    # (skip_features) and 1-2 sprints max. We coerce the analysis so the
+    # downstream nodes stay lean — but FIRST read the analyzer's honest size
+    # estimate. If it judged the project bigger (needs feature grouping, >2
+    # sprints, or many goals), we set _small_project_oversized so the analysis
+    # review can advise switching to Epic wide (answers are preserved on switch).
+    small_mode = _is_small_project_mode(state.get("_intake_mode"))
+    oversized = False
+    honest_target = analysis.target_sprints
+    if small_mode:
+        oversized = not analysis.skip_features or analysis.target_sprints > 2 or len(analysis.goals) > 3
+        analysis = dataclasses.replace(
+            analysis,
+            skip_features=True,
+            target_sprints=min(max(analysis.target_sprints or 1, 1), 2),
+        )
+
     # Format the analysis for display — include capacity data so the user
     # sees velocity breakdown and per-sprint bank holiday impact on this screen.
     display = _format_analysis(
@@ -5271,6 +5514,20 @@ def project_analyzer(state: ScrumState) -> dict:
         velocity_source=state.get("velocity_source"),
     )
 
+    # When the Small-project scope looks bigger than 1-2 tickets, append a
+    # non-blocking advisory. The analysis review adds a "Switch to Epic wide"
+    # action (see _phases_review / _review) — switching preserves the user's
+    # answers so they never re-type anything.
+    if oversized:
+        display += (
+            "\n\n---\n\n"
+            "> ⚠ **This looks bigger than a small project.**\n"
+            f"> Your answers point to multiple feature areas (~{honest_target} sprint(s) of work).\n"
+            "> Small-project mode will keep this as a flat 1-2 ticket plan. You can\n"
+            "> **continue** as a small project, or **switch to Epic wide** for full\n"
+            "> epic / story / sprint planning — your answers are kept, nothing is re-typed."
+        )
+
     # Set pending_review so the REPL intercepts the next user input for
     # the [Accept / Edit / Reject] review flow — same pattern as features/stories.
     return_dict: dict = {
@@ -5280,6 +5537,11 @@ def project_analyzer(state: ScrumState) -> dict:
         "sprint_length_weeks": analysis.sprint_length_weeks,
         "target_sprints": analysis.target_sprints,
         "pending_review": "project_analyzer",
+        "_small_project_oversized": oversized,
+        # Unresolved retro action items — story_writer seeds the backlog from these
+        # (badged [Retro]); sprint_planner reuses the ceremony summary for load caution.
+        "_ceremony_action_items": ceremony.action_items,
+        "_ceremony_history": ceremony.summary_md,
         "messages": [AIMessage(content=display)],
         # Context source diagnostics — tells the REPL which external sources
         # were used, skipped, or failed so the user gets transparency.
@@ -6614,6 +6876,8 @@ def story_writer(state: ScrumState) -> dict:
         out_of_scope=_format_epic_list(analysis.out_of_scope),
         team_calibration=team_calibration_text,
         dod_items=_dod,
+        is_low_code=analysis.is_low_code,
+        carry_over_items=tuple(state.get("_ceremony_action_items", ()) or ()),
         review_feedback=review_feedback if review_mode else None,
         review_mode=review_mode,
         previous_output=previous_output,
@@ -6964,6 +7228,7 @@ def _parallel_task_decompose(
     tech_stack: str,
     doc_context: str | None,
     team_calibration: str = "",
+    is_low_code: bool = False,
 ) -> list[Task]:
     """Decompose stories into tasks with parallel LLM calls per feature.
 
@@ -7013,6 +7278,7 @@ def _parallel_task_decompose(
             stories_block=stories_block,
             doc_context=doc_context,
             team_calibration=team_calibration,
+            is_low_code=is_low_code,
         )
 
         try:
@@ -7125,6 +7391,7 @@ def task_decomposer(state: ScrumState) -> dict:
             stories_block=stories_block,
             doc_context=doc_context,
             team_calibration=team_calibration_text,
+            is_low_code=analysis.is_low_code,
             review_feedback=review_feedback,
             review_mode=review_mode,
             previous_output=previous_output,
@@ -7147,6 +7414,7 @@ def task_decomposer(state: ScrumState) -> dict:
             tech_stack=tech_stack_str,
             doc_context=doc_context,
             team_calibration=team_calibration_text,
+            is_low_code=analysis.is_low_code,
         )
 
     # Format the tasks for display
@@ -7834,8 +8102,16 @@ def sprint_planner(state: ScrumState) -> dict:
     elif capacity_override == -1:
         # User rejected — proceed with the original target_sprints but enforce it.
         enforce_target = True
-    elif capacity_override == 0 and target_sprints > 0 and velocity > 0 and not review_mode:
+    elif (
+        capacity_override == 0
+        and target_sprints > 0
+        and velocity > 0
+        and not review_mode
+        and not _is_small_project_mode(state.get("_intake_mode"))
+    ):
         # First time through — check if scope fits in the target.
+        # Small-project mode skips this overflow advisory — it targets 1-2 sprints
+        # of tiny scope, so the "you need more sprints/team" warning is just noise.
         # Use per-sprint velocities for a more accurate capacity check.
         total_points = sum(s.story_points for s in stories)
         if sprint_caps:
@@ -7898,6 +8174,7 @@ def sprint_planner(state: ScrumState) -> dict:
         sprint_capacities=sprint_caps or None,
         team_override_from=original_team_size if state.get("_capacity_team_override", 0) > 0 else None,
         team_calibration=team_calibration_text,
+        ceremony_history=state.get("_ceremony_history", "") or "",
         review_feedback=review_feedback if review_mode else None,
         review_mode=review_mode,
         previous_output=previous_output,

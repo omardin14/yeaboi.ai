@@ -644,6 +644,34 @@ class TestQuestionnaireIntakeMode:
         qs = QuestionnaireState(intake_mode="smart")
         assert qs.intake_mode == "smart"
 
+    def test_small_project_mode_can_be_set(self):
+        qs = QuestionnaireState(intake_mode="small_project")
+        assert qs.intake_mode == "small_project"
+
+    def test_reopen_for_epic_default_false(self):
+        qs = QuestionnaireState()
+        assert qs._reopen_for_epic is False
+
+    def test_intake_mode_survives_round_trip(self):
+        """small_project intake_mode persists across session serialization."""
+        from scrum_agent.sessions import _dict_to_questionnaire, _questionnaire_to_dict
+
+        qs = QuestionnaireState(intake_mode="small_project")
+        restored = _dict_to_questionnaire(_questionnaire_to_dict(qs))
+        assert restored.intake_mode == "small_project"
+
+
+class TestSmallProjectOversizedField:
+    """The _small_project_oversized advisory flag round-trips through session state."""
+
+    def test_round_trip(self):
+        from scrum_agent.sessions import _deserialize_state, _serialize_state
+
+        state = {"messages": [], "_small_project_oversized": True, "_intake_mode": "small_project"}
+        restored = _deserialize_state(_serialize_state(state))
+        assert restored["_small_project_oversized"] is True
+        assert restored["_intake_mode"] == "small_project"
+
 
 class TestStateGraphCompatibility:
     def test_stategraph_accepts_scrum_state(self):

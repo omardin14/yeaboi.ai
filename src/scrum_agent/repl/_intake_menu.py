@@ -15,8 +15,8 @@ def _render_intake_mode_menu(console: Console) -> None:
 
     # See README: "Project Intake Questionnaire" — smart intake
     #
-    # Shown once at startup when no CLI flag (--quick / --full-intake) was given.
-    # The user picks 1/2/3/4 before the conversational opener is displayed.
+    # Shown once at startup when no CLI flag (--quick) was given.
+    # The user picks 1/2 (Smart / Offline) before the conversational opener.
     # Follows the same [N] styling pattern as _render_choice_options().
 
     Args:
@@ -35,7 +35,7 @@ def _render_intake_mode_menu(console: Console) -> None:
 def _resolve_intake_mode(user_input: str) -> str | None:
     """Resolve numeric input to an intake mode key.
 
-    Maps "1" → "smart", "2" → "standard", "3" → "offline".
+    Maps "1" → "smart", "2" → "offline" (indices follow INTAKE_MODE_ORDER).
     Returns None for any other input (invalid selection).
 
     Args:

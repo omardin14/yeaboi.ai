@@ -45,6 +45,7 @@ def get_task_decomposer_prompt(
     *,
     doc_context: str | None = None,
     team_calibration: str = "",
+    is_low_code: bool = False,
     review_feedback: str | None = None,
     review_mode: str | None = None,
     previous_output: str | None = None,
@@ -123,11 +124,23 @@ def get_task_decomposer_prompt(
             "Include Testing and Documentation tasks — not just Code.\n"
         )
 
+    # Low-code projects need configuration / setup / content tasks rather than
+    # build-from-scratch coding — nudge the decomposition accordingly.
+    low_code_note = (
+        "\n**This is a LOW-CODE project** — favour configuration, setup, content, "
+        "and integration-wiring tasks over custom coding. Keep tasks lightweight; "
+        "many will be `Infrastructure` (platform/config) or `Documentation` rather "
+        "than `Code`.\n"
+        if is_low_code
+        else ""
+    )
+
     base = (
         "You are a Senior Technical Lead with expertise in task decomposition.\n\n"
         "## Project Context\n\n"
         f"**Project:** {project_name}\n"
-        f"**Type:** {project_type}\n\n"
+        f"**Type:** {project_type}\n"
+        f"{low_code_note}\n"
         f"### Tech Stack\n{tech_stack}\n"
         f"{doc_context_section}\n"
         + (team_calibration + "\n" if team_calibration else "")

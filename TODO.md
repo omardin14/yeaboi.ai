@@ -1246,3 +1246,30 @@ _Bring Azure DevOps to full feature parity with Jira — read board/velocity, cr
 - [x] Popovers (`.pop`, one-at-a-time, click-outside/Esc close) for Music (play/volume/mood), Timer (segmented presets + custom + start/stop), Theme (colour **swatches**); running timer shows inline `MM:SS` on its button; mini-viz appears only while playing
 - [x] `[data-theme="midnight"]` block added so the default theme's swatch renders correctly; theme applied via `data-theme` attribute
 - [x] Tests updated (compact-toolbar markers, swatch/theme-pop, others-only presence) + no-dangling-id guard; live Chrome smoke (Midnight + Synthwave, popovers, inline timer, mini-viz) — zero console errors
+
+## Phase 28: Planning — three intake modes (Small project / Epic wide / Offline)
+- [x] `prompts/intake.py` — `SMALL_PROJECT_ESSENTIALS` (Q2/Q3/Q4/Q6/Q8/Q11); legacy REPL `INTAKE_MODE_MENU` left unchanged (TUI drives the new modes)
+- [x] TUI cards (`ui/mode_select/screens/_screens.py`) — `_INTAKE_CARDS` is now **Small / Epic wide / Offline** (Epic wide reuses the existing `smart` engine)
+- [x] `agent/nodes.py` — `_essentials_for_mode()` + `_is_small_project_mode()` helpers; `small_project` added to the smart-style extraction + gap-filling paths
+- [x] Capacity gating for Small mode — `_extract_capacity_deductions` returns zeros, `_prepare_bank_holiday_choices` no-ops, PTO skipped, sprint-overflow advisory + per-sprint velocity skipped, velocity breakdown → one-liner
+- [x] Advisory scope detection — `project_analyzer` coerces Small plans flat (skip_features, ≤2 sprints) and sets `_small_project_oversized` when the analyzer judges the project bigger; advisory panel appended to the review display; `ScrumState._small_project_oversized` field
+- [x] Switch to Epic wide — `apply_epic_switch()` + `_reopen_intake_for_epic()` (nodes.py); `QuestionnaireState._reopen_for_epic` flag; **Switch to Epic** action on the analysis review (`_phases.py`) + `_BTN_COLORS` entry; Phases B→D wrapped in a re-run loop in `ui/session/__init__.py`. Answers preserved; only the extra Epic questions are asked
+- [x] Tests: `tests/unit/nodes/test_small_project.py` (essentials, capacity gating, advisory + coercion, apply_epic_switch, reopen), state field + intake_mode round-trip in `test_state.py`; full end-to-end switch verified through the compiled graph (no LLM call)
+
+## Phase 29: Smarter smart-intake (repo signals + low-code) & retire the 30-question mode
+- [x] Remove the legacy 30-question "standard" intake mode: `INTAKE_MODE_MENU`/`INTAKE_MODE_ORDER` → `(smart, offline)`; `--full-intake` CLI flag removed; `project_intake` coerces any lingering `standard` → `smart` at first invocation and the standard first-invocation block is deleted; REPL menu reprompt → "1 or 2"; obsolete assertions updated in `test_repl.py`/`test_cli.py`/`test_intake.py`/`test_graph.py`
+- [x] `agent/repo_signals.py` (new) — graceful multi-source scan (Q17 URL or configured GitHub) → `RepoSignals` (detected_stack, integrations, low_code); pure `analyze_context()` parses the tool summary (`Languages:`/`Key files detected:`); `LOW_CODE_MARKERS` + `INTEGRATION_SDK_MARKERS` + `FRAMEWORK_MARKERS` vocabularies; manifest-content parsing for SDK/framework inference
+- [x] Low-code state — `ProjectAnalysis.is_low_code` / `low_code_reason` (defaulted, back-compat); analyzer `_JSON_SCHEMA` + parsing; `_dict_to_analysis` reconstruction
+- [x] Intake wiring — `_apply_repo_signals()` scans once at first invocation, pre-fills Q11 (suggestion) + Q12 (integrations), stashes raw scan + low-code verdict on `QuestionnaireState` (transient `_repo_context`/`_repo_low_code`/`_repo_low_code_reason`)
+- [x] Analyzer wiring — reuses the stashed scan (no double-scan), passes a deterministic `Detected stack` hint to the prompt, and ORs the LLM/deterministic/stashed low-code verdicts
+- [x] Lighter plan — `is_low_code` threaded into `story_writer` (smaller points) + `task_decomposer` (config/setup tasks) prompts; `⚙ Low-code project` surfaced in the analysis panel + Markdown export
+- [x] Tests — `test_repo_signals.py` (parsers, analyze_context, low-code detection, graceful scan) + `test_low_code.py` (analyzer reconciliation, `_apply_repo_signals`, prompt clauses, render, serialization round-trip); `make test` green except the pre-existing date-dependent standup failure; `make lint` clean
+
+## Phase 30: Feed Standup + Retro history into Planning & Analysis
+- [x] Team-wide store reads: `RetroStore.get_recent_reports(limit, project_name)` (project-first) + `get_all_history`; `StandupStore.get_recent_reports` (recency; success-only) + `get_all_history`
+- [x] `agent/ceremony_history.py` (new) — `CeremonyContext` + `gather_ceremony_context(project_name)` (graceful, team-wide, opens stores on `get_sessions_db`); deterministic `_describe_cadence` (interval-based, no "now"), `_confidence_trend`, `_top_themes`, `_dedup_action_items`; `format_ceremony_history_md`
+- [x] Planning analyzer — `get_analyzer_prompt(ceremony_history=…)` "## Standup & Retro History" section; `project_analyzer` gathers once, injects, stashes `_ceremony_action_items` / `_ceremony_history` (ScrumState transient fields)
+- [x] Seed backlog — `story_writer` `carry_over_items` param → "[Retro]"-badged stories for open retro action items; node passes `_ceremony_action_items`
+- [x] Sprint planner — `get_sprint_planner_prompt(ceremony_history=…)` section (sequence [Retro] stories early; conservative load on low confidence); node passes `_ceremony_history`
+- [x] Analysis mode — `export_team_profile_html/md(ceremony=…)` "Ceremony Cadence & Trends" section (cadence + confidence trend + recurring themes); both TUI export sites gather `gather_ceremony_context(project_key)` (project-first)
+- [x] Tests — `test_ceremony_history.py` (cadence/trend/themes/dedup/gather/store project-first) + `test_ceremony_integration.py` (prompt injection, backlog seeding, exporter section, analyzer wiring); `make test` green except the pre-existing date-dependent standup failure; `make lint` clean

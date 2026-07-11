@@ -292,12 +292,12 @@ QUESTION_METADATA: dict[int, QuestionMeta] = {
 # Intake mode constants — controls how many questions are asked.
 # See README: "Project Intake Questionnaire" — smart intake
 #
-# Three modes:
-#   "smart" (new default in REPL) — auto-apply extracted answers + defaults,
-#       only ask unfilled essential gaps. Typical: 2-4 questions.
+# Intake modes (the legacy 30-question "standard" flow has been retired):
+#   "smart" (default) — auto-apply extracted answers + defaults, only ask
+#       unfilled essential gaps. Typical: 2-4 questions.
 #   "quick" — only Q6 (team size) and Q11 (tech stack) as gaps; everything
 #       else auto-filled with extraction + defaults + fallbacks.
-#   "standard" — the original 30-question one-at-a-time flow.
+#   "small_project" — quick intake for 1-2 tickets, no capacity planning.
 #
 # ESSENTIAL_QUESTIONS is the full set of questions with no sensible default.
 # SMART_ESSENTIALS is the subset asked in smart mode (Q1 comes from the
@@ -314,6 +314,17 @@ ESSENTIAL_QUESTIONS: frozenset[int] = frozenset({1, 2, 3, 4, 6, 11, 15})
 # Q8 (sprint length) excluded — always defaults to "2 weeks" in smart mode.
 SMART_ESSENTIALS: frozenset[int] = frozenset({2, 3, 4, 6, 10, 11, 27})
 QUICK_ESSENTIALS: frozenset[int] = frozenset({6, 11})
+
+# SMALL_PROJECT_ESSENTIALS — the "Small project (1-2 tickets)" mode. A quick
+# intake for tiny scopes: project type (Q2), problem/DoD (Q3, Q4), team size
+# (Q6), sprint length (Q8), and tech stack (Q11). Q1 comes from the description.
+# Deliberately EXCLUDES the capacity questions asked in smart mode:
+#   Q10 (target sprints)  → defaulted to 1 (max 2); small work is one quick sprint
+#   Q27 (sprint selection) / Q28-Q30 (bank holidays, unplanned %, onboarding)
+#       → skipped entirely; small mode does no capacity/bank-holiday planning.
+# The project_analyzer still runs honestly so its size signal can trigger the
+# "this looks bigger than a small project" advisory (offer to switch to Epic wide).
+SMALL_PROJECT_ESSENTIALS: frozenset[int] = frozenset({2, 3, 4, 6, 8, 11})
 
 # Conditional essentials — questions that become essential when their
 # prerequisite has a real (non-defaulted) answer. This keeps smart mode
@@ -402,17 +413,16 @@ QUESTION_SHORT_LABELS: dict[int, str] = {
 # a mode before the first question is asked.
 # ---------------------------------------------------------------------------
 
+#
+# NOTE: This is the *legacy REPL* menu (CLI-flag flows). The full-screen TUI uses
+# a separate three-card menu — Small project / Epic wide / Offline — defined by
+# `_INTAKE_CARDS` in ui/mode_select/screens/_screens.py. The Small-project mode
+# ("small_project" intake_mode) is offered there; this legacy menu is unchanged.
 INTAKE_MODE_MENU: dict[str, tuple[str, str]] = {
     "smart": (
         "Smart intake (recommended)",
         "I'll extract answers from your description and only ask 2-4 essential\n"
         "      follow-ups. Good for most projects.",
-    ),
-    "standard": (
-        "Full intake",
-        "All 30 questions, one at a time. Includes follow-up probes when answers\n"
-        "      are vague. Best for complex projects spanning multiple years or\n"
-        "      requiring multiple teams.",
     ),
     "offline": (
         "Offline questionnaire",
@@ -421,7 +431,10 @@ INTAKE_MODE_MENU: dict[str, tuple[str, str]] = {
     ),
 }
 
-INTAKE_MODE_ORDER: tuple[str, ...] = ("smart", "standard", "offline")
+# The legacy 30-question "standard" flow has been retired — smart intake is the
+# single interactive path. Only smart / offline remain here (and small_project /
+# quick as internal modes via the TUI cards / CLI flags).
+INTAKE_MODE_ORDER: tuple[str, ...] = ("smart", "offline")
 
 # ---------------------------------------------------------------------------
 # Offline questionnaire sub-menu — shown when the user picks [3] Offline.
@@ -450,7 +463,7 @@ STARTUP_MODE_MENU: dict[str, tuple[str, str]] = {
     "project-planning": (
         "Project Planning",
         "Decompose your project into epics, user stories, tasks, and a sprint plan.\n"
-        "      Includes smart / full / offline intake questionnaire.",
+        "      Includes smart / offline intake questionnaire.",
     ),
     "coming-soon-1": (
         "Code Review  [dim](coming soon)[/dim]",

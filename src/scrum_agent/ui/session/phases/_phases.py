@@ -1162,6 +1162,10 @@ def _phase_pipeline(
         is_sprint_stage = pending == "sprint_planner"
         if is_story_stage or is_feature_stage or is_task_stage or is_sprint_stage:
             actions = ["Accept", "Edit", "Regenerate", "Export"]
+        elif is_analysis_stage and graph_state.get("_small_project_oversized"):
+            # Small-project scope advisory — offer a switch to Epic wide (answers
+            # are preserved). See README: "Guardrails" — human-in-the-loop (advisory).
+            actions = ["Accept", "Edit", "Switch to Epic", "Export"]
         else:
             actions = ["Accept", "Edit", "Export"]
 
@@ -1246,10 +1250,23 @@ def _phase_pipeline(
                     graph_state.pop("pending_review", None)
                     graph_state.pop("last_review_decision", None)
                     graph_state.pop("last_review_feedback", None)
+                    graph_state.pop("_small_project_oversized", None)
                     # Save Point C — persist after each pipeline stage acceptance
                     if project_id:
                         save_project_snapshot(project_id, graph_state)
                     break
+                elif action == "Switch to Epic":
+                    # Small → Epic wide switch. Preserve answers, clear artifacts,
+                    # and signal _run_session_body to re-run intake for the extra
+                    # Epic questions. See README: "Guardrails" — human-in-the-loop.
+                    logger.info("Review decision: Switch to Epic wide")
+                    from scrum_agent.agent.nodes import apply_epic_switch
+
+                    apply_epic_switch(graph_state)
+                    graph_state["_switch_to_epic_pending"] = True
+                    if project_id:
+                        save_project_snapshot(project_id, graph_state)
+                    return graph_state
                 elif action == "Edit":
                     logger.info("Review decision: Edit for %s", pending)
                     if is_story_stage and selected_story is not None:

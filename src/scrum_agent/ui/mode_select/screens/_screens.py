@@ -73,9 +73,18 @@ _MODE_CARDS: list[dict[str, Any]] = [
 
 _INTAKE_CARDS: list[dict[str, Any]] = [
     {
+        "key": "small_project",
+        "title": "Small",
+        "description": "1-2 tickets, one quick sprint. Just goal, team, and stack — no capacity planning.",
+        "available": True,
+        "color": "rgb(70,100,180)",
+    },
+    {
+        # Key stays "smart" — Epic wide reuses the existing smart intake engine
+        # (full capacity, bank-holiday, and multi-sprint planning). See intake.py.
         "key": "smart",
-        "title": "Smart",
-        "description": "Recommended — I'll extract answers from your description and only ask 2-4 follow-ups.",
+        "title": "Epic wide",
+        "description": "Multi-ticket epics with full capacity, bank-holiday, and multi-sprint planning.",
         "available": True,
         "color": "rgb(70,100,180)",
     },

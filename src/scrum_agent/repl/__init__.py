@@ -188,10 +188,10 @@ def run_repl(
         questionnaire: Pre-populated questionnaire state (from --questionnaire flag).
             When provided, the intake summary is shown immediately and the user
             can confirm or edit before proceeding.
-        intake_mode: Intake questionnaire mode — "smart", "quick", "standard",
-            or None. When None (default), an interactive mode selection menu is
-            shown before the first prompt. CLI flags (--quick, --full-intake)
-            bypass the menu by passing the mode directly.
+        intake_mode: Intake questionnaire mode — "smart", "quick",
+            "small_project", or None. When None (default), an interactive mode
+            selection menu is shown before the first prompt. The --quick CLI flag
+            bypasses the menu by passing the mode directly.
         export_only: When True, auto-accept all review checkpoints and exit
             after the full plan is generated. Writes scrum-plan.md on completion.
         bell: When True (default), ring the terminal bell after pipeline steps
@@ -371,9 +371,9 @@ def run_repl(
         console.print(f"\n{REVIEW_HINT}")
     else:
         # Interactive mode selection — when no CLI flag was given, show a
-        # numbered menu so the user understands the three intake modes and
-        # picks one before the first question. CLI flags (--quick, --full-intake)
-        # bypass this by passing the mode directly.
+        # numbered menu so the user understands the intake modes and
+        # picks one before the first question. The --quick CLI flag
+        # bypasses this by passing the mode directly.
         if intake_mode is None:
             _render_intake_mode_menu(console)
             while True:
@@ -385,10 +385,10 @@ def run_repl(
                 intake_mode = _resolve_intake_mode(choice.strip())
                 if intake_mode is not None:
                     break
-                console.print("[warning]Please pick 1, 2, or 3.[/warning]")
+                console.print("[warning]Please pick 1 or 2.[/warning]")
 
         # ── Offline questionnaire flow ────────────────────────────────
-        # When the user picks [3] Offline, show a sub-menu to export a
+        # When the user picks [2] Offline, show a sub-menu to export a
         # blank template or import a filled one. Export writes the file
         # and exits; import loads the file and enters the confirm flow.
         if intake_mode == "offline":
