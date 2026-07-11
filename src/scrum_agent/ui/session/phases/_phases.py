@@ -1163,9 +1163,9 @@ def _phase_pipeline(
         if is_story_stage or is_feature_stage or is_task_stage or is_sprint_stage:
             actions = ["Accept", "Edit", "Regenerate", "Export"]
         elif is_analysis_stage and graph_state.get("_small_project_oversized"):
-            # Small-project scope advisory — offer a switch to Epic wide (answers
+            # Small-project scope advisory — offer a switch to Large (answers
             # are preserved). See README: "Guardrails" — human-in-the-loop (advisory).
-            actions = ["Accept", "Edit", "Switch to Epic", "Export"]
+            actions = ["Accept", "Edit", "Switch to Large", "Export"]
         else:
             actions = ["Accept", "Edit", "Export"]
 
@@ -1255,11 +1255,11 @@ def _phase_pipeline(
                     if project_id:
                         save_project_snapshot(project_id, graph_state)
                     break
-                elif action == "Switch to Epic":
-                    # Small → Epic wide switch. Preserve answers, clear artifacts,
+                elif action == "Switch to Large":
+                    # Small → Large switch. Preserve answers, clear artifacts,
                     # and signal _run_session_body to re-run intake for the extra
-                    # Epic questions. See README: "Guardrails" — human-in-the-loop.
-                    logger.info("Review decision: Switch to Epic wide")
+                    # Large-mode questions. See README: "Guardrails" — human-in-the-loop.
+                    logger.info("Review decision: Switch to Large")
                     from scrum_agent.agent.nodes import apply_epic_switch
 
                     apply_epic_switch(graph_state)

@@ -492,9 +492,9 @@ class QuestionnaireState:
     # historical value; production always sets this from _intake_mode.
     # See README: "Project Intake Questionnaire" — smart intake
     intake_mode: str = "standard"  # coerced to "smart" | "quick" | "small_project"
-    # Transient: set when the user switches Small project → Epic wide at the
+    # Transient: set when the user switches Small project → Large at the
     # analysis review. On the next project_intake pass we skip answer-recording
-    # and ask the remaining Epic essentials instead (answers are preserved).
+    # and ask the remaining Large-mode essentials instead (answers are preserved).
     _reopen_for_epic: bool = False
     # Transient repository-scan carry-over. project_intake runs repo_signals once
     # at first invocation (broadened to configured repos) and stashes the raw
@@ -715,7 +715,7 @@ class ScrumState(_RequiredState, total=False):
     # Small-project scope advisory. Set True by project_analyzer when the intake
     # ran in "small_project" mode but the analyzer judged the project bigger than
     # 1-2 tickets (needs feature grouping, > 2 sprints, or many goals). The
-    # analysis review surfaces a "Switch to Epic wide" action when this is True.
+    # analysis review surfaces a "Switch to Large" action when this is True.
     # See README: "Guardrails" — human-in-the-loop (advisory)
     _small_project_oversized: bool
 

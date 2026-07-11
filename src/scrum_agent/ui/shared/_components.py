@@ -71,7 +71,7 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Share Remotely": ("rgb(50,170,170)", "rgb(90,220,220)", "rgb(40,52,52)", "rgb(50,62,62)"),
     "Stop Sharing": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
     # Advisory action on the analysis review when a Small project looks bigger.
-    "Switch to Epic": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
+    "Switch to Large": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
 }
 _BTN_DEFAULT = ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)")
 _BTN_MIN_W = 12

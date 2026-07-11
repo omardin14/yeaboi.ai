@@ -323,7 +323,7 @@ QUICK_ESSENTIALS: frozenset[int] = frozenset({6, 11})
 #   Q27 (sprint selection) / Q28-Q30 (bank holidays, unplanned %, onboarding)
 #       → skipped entirely; small mode does no capacity/bank-holiday planning.
 # The project_analyzer still runs honestly so its size signal can trigger the
-# "this looks bigger than a small project" advisory (offer to switch to Epic wide).
+# "this looks bigger than a small project" advisory (offer to switch to Large).
 SMALL_PROJECT_ESSENTIALS: frozenset[int] = frozenset({2, 3, 4, 6, 8, 11})
 
 # Conditional essentials — questions that become essential when their
@@ -415,7 +415,7 @@ QUESTION_SHORT_LABELS: dict[int, str] = {
 
 #
 # NOTE: This is the *legacy REPL* menu (CLI-flag flows). The full-screen TUI uses
-# a separate three-card menu — Small project / Epic wide / Offline — defined by
+# a separate three-card menu — Small project / Large / Offline — defined by
 # `_INTAKE_CARDS` in ui/mode_select/screens/_screens.py. The Small-project mode
 # ("small_project" intake_mode) is offered there; this legacy menu is unchanged.
 INTAKE_MODE_MENU: dict[str, tuple[str, str]] = {

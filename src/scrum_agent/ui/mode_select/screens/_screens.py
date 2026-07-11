@@ -80,10 +80,10 @@ _INTAKE_CARDS: list[dict[str, Any]] = [
         "color": "rgb(70,100,180)",
     },
     {
-        # Key stays "smart" — Epic wide reuses the existing smart intake engine
+        # Key stays "smart" — Large reuses the existing smart intake engine
         # (full capacity, bank-holiday, and multi-sprint planning). See intake.py.
         "key": "smart",
-        "title": "Epic wide",
+        "title": "Large",
         "description": "Multi-ticket epics with full capacity, bank-holiday, and multi-sprint planning.",
         "available": True,
         "color": "rgb(70,100,180)",

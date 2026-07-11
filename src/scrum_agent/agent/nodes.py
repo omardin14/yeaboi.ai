@@ -1057,7 +1057,7 @@ def _fetch_active_sprint_number(preferred: str = "") -> tuple[int | None, str | 
 
 
 # ---------------------------------------------------------------------------
-# Intake-mode helpers — Small project / Epic wide / Offline.
+# Intake-mode helpers — Small project / Large / Offline.
 # See README: "Project Intake Questionnaire" — intake modes.
 #
 # "small_project" is a lightweight mode for 1-2 tickets in one quick sprint.
@@ -1071,7 +1071,7 @@ def _fetch_active_sprint_number(preferred: str = "") -> tuple[int | None, str | 
 def _essentials_for_mode(intake_mode: str) -> frozenset[int]:
     """Return the essential-question set for the given intake mode.
 
-    Smart (Epic wide) is the default; quick and small_project are leaner subsets.
+    Smart (Large) is the default; quick and small_project are leaner subsets.
     """
     if intake_mode == "quick":
         return QUICK_ESSENTIALS
@@ -3233,7 +3233,7 @@ def _show_summary_or_pto(questionnaire: QuestionnaireState, prefix: str = "") ->
 
 
 def apply_epic_switch(graph_state: dict) -> None:
-    """Reset session state to switch from Small project → Epic wide intake.
+    """Reset session state to switch from Small project → Large intake.
 
     See README: "Guardrails" — human-in-the-loop (advisory)
 
@@ -3270,7 +3270,7 @@ def apply_epic_switch(graph_state: dict) -> None:
 
 
 def _reopen_intake_for_epic(state: ScrumState, questionnaire: QuestionnaireState) -> dict:
-    """Ask the next Epic essential after a Small → Epic switch (no answer to record).
+    """Ask the next Large-mode essential after a Small → Large switch (no answer to record).
 
     Reuses the same gap-finding helpers as the smart-mode intake loop. Dynamic
     Q27 tracker menus are populated on the subsequent normal gap pass, so here we
@@ -3281,23 +3281,23 @@ def _reopen_intake_for_epic(state: ScrumState, questionnaire: QuestionnaireState
     essential_set = _essentials_for_mode(questionnaire.intake_mode)
     gaps = _find_essential_gaps(questionnaire, essential_set)
     if not gaps:
-        # Every Epic essential is already answered — go straight to the summary
+        # Every Large-mode essential is already answered — go straight to the summary
         # (with bank-holiday detection + PTO, which Small mode had skipped).
         _prepare_bank_holiday_choices(questionnaire)
         return _show_summary_or_pto(
             questionnaire,
-            prefix="Switched to **Epic wide** — using your existing answers.\n\n",
+            prefix="Switched to **Large** — using your existing answers.\n\n",
         )
     prompt_text, q_nums = _build_gap_prompt(gaps, questionnaire)
     questionnaire._pending_merged_questions = q_nums
     questionnaire.current_question = q_nums[0]
-    logger.info("Small→Epic switch: asking remaining Epic essentials %s", sorted(gaps))
+    logger.info("Small→Large switch: asking remaining Large-mode essentials %s", sorted(gaps))
     return {
         "questionnaire": questionnaire,
         "messages": [
             AIMessage(
                 content=(
-                    "Switched to **Epic wide** — I kept all your answers. "
+                    "Switched to **Large** — I kept all your answers. "
                     "Just a few more questions for the fuller plan:\n\n" + prompt_text
                 )
             )
@@ -3358,13 +3358,13 @@ def project_intake(state: ScrumState) -> dict:
     else:
         _pending_tracker_pref = ""
 
-    # ── Small project → Epic wide switch re-entry ────────────────────────
+    # ── Small project → Large switch re-entry ────────────────────────
     # See README: "Guardrails" — human-in-the-loop (advisory)
     #
     # When the user switched modes at the analysis review, the questionnaire is
     # re-opened in Epic (smart) mode with all Small-project answers preserved.
     # There's no answer to record on this pass — jump straight to asking the
-    # remaining Epic essentials (Q7/Q10/Q27), or the summary if none are missing.
+    # remaining Large-mode essentials (Q7/Q10/Q27), or the summary if none are missing.
     if questionnaire is not None and getattr(questionnaire, "_reopen_for_epic", False):
         return _reopen_intake_for_epic(state, questionnaire)
 
@@ -5491,7 +5491,7 @@ def project_analyzer(state: ScrumState) -> dict:
     # downstream nodes stay lean — but FIRST read the analyzer's honest size
     # estimate. If it judged the project bigger (needs feature grouping, >2
     # sprints, or many goals), we set _small_project_oversized so the analysis
-    # review can advise switching to Epic wide (answers are preserved on switch).
+    # review can advise switching to Large (answers are preserved on switch).
     small_mode = _is_small_project_mode(state.get("_intake_mode"))
     oversized = False
     honest_target = analysis.target_sprints
@@ -5515,7 +5515,7 @@ def project_analyzer(state: ScrumState) -> dict:
     )
 
     # When the Small-project scope looks bigger than 1-2 tickets, append a
-    # non-blocking advisory. The analysis review adds a "Switch to Epic wide"
+    # non-blocking advisory. The analysis review adds a "Switch to Large"
     # action (see _phases_review / _review) — switching preserves the user's
     # answers so they never re-type anything.
     if oversized:
@@ -5524,7 +5524,7 @@ def project_analyzer(state: ScrumState) -> dict:
             "> ⚠ **This looks bigger than a small project.**\n"
             f"> Your answers point to multiple feature areas (~{honest_target} sprint(s) of work).\n"
             "> Small-project mode will keep this as a flat 1-2 ticket plan. You can\n"
-            "> **continue** as a small project, or **switch to Epic wide** for full\n"
+            "> **continue** as a small project, or **switch to Large** for full\n"
             "> epic / story / sprint planning — your answers are kept, nothing is re-typed."
         )
 

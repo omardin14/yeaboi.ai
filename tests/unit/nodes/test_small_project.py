@@ -1,5 +1,5 @@
 """Tests for Small-project intake mode: essentials, capacity gating, and the
-Small → Epic wide switch (advisory + re-entry).
+Small → Large switch (advisory + re-entry).
 
 See README: "Project Intake Questionnaire" — intake modes and
 "Guardrails" — human-in-the-loop (advisory).
@@ -32,7 +32,7 @@ class TestModeConstants:
 
     def test_tui_cards_are_small_epic_offline(self):
         # The full-screen TUI offers three intake modes; the middle one ("smart"
-        # engine, relabelled "Epic wide") reuses the existing smart pipeline.
+        # engine, relabelled "Large") reuses the existing smart pipeline.
         from scrum_agent.ui.mode_select.screens._screens import _INTAKE_CARDS
 
         keys = [c["key"] for c in _INTAKE_CARDS]
@@ -143,7 +143,7 @@ class TestSmallProjectAdvisory:
         result = project_analyzer(self._small_state())
         text = result["messages"][0].content
         assert "bigger than a small project" in text
-        assert "switch to epic wide" in text.lower()
+        assert "switch to large" in text.lower()
 
     def test_not_flagged_in_smart_mode(self, monkeypatch):
         self._mock_llm(monkeypatch)
@@ -218,7 +218,7 @@ class TestReopenIntakeForEpic:
         result = _reopen_intake_for_epic({"_intake_mode": "smart"}, qs)
         assert qs._reopen_for_epic is False
         assert isinstance(result["messages"][0], AIMessage)
-        assert "Epic wide" in result["messages"][0].content
+        assert "Large" in result["messages"][0].content
         # Not yet at the confirmation summary — a real question was asked.
         assert result.get("pending_review") != "project_intake"
 

@@ -313,8 +313,8 @@ def _run_session_body(
             # Save Point A — persist after description processing
             save_project_snapshot(project_id, graph_state)
 
-    # Phases B→D run in a loop so a Small project → Epic wide switch (chosen at
-    # the analysis review) can re-run intake for the extra Epic questions with
+    # Phases B→D run in a loop so a Small project → Large switch (chosen at
+    # the analysis review) can re-run intake for the extra Large-mode questions with
     # the user's answers preserved. Normal runs execute the body exactly once.
     # See README: "Guardrails" — human-in-the-loop (advisory).
     while True:
@@ -356,13 +356,13 @@ def _run_session_body(
             if graph_state is None:
                 return
 
-        # Small → Epic wide switch requested at the analysis review: re-run the
+        # Small → Large switch requested at the analysis review: re-run the
         # loop. apply_epic_switch() already reset the questionnaire (mode=smart,
         # completed=False, _reopen_for_epic=True) and cleared artifacts. Invoke
-        # the graph once (no LLM) so project_intake produces the first Epic gap
-        # question before Phase B re-runs.
+        # the graph once (no LLM) so project_intake produces the first Large-mode
+        # gap question before Phase B re-runs.
         if graph_state is not None and graph_state.pop("_switch_to_epic_pending", False):
-            logger.info("Switching Small project → Epic wide; re-running intake")
+            logger.info("Switching Small project → Large; re-running intake")
             if graph is not None:
                 try:
                     graph_state = graph.invoke(graph_state)
