@@ -308,6 +308,7 @@ Replacing inline text prompts with full-screen, block-character dashboard screen
 - [x] Create `ui/_logos.py` — block-character ASCII art logos (Claude, Gemini, OpenAI)
 - [x] Create `ui/provider_select.py` — full-screen provider selection (Step 1 of setup wizard)
 - [x] Wire `_collect_provider()` in `setup_wizard.py` to use new full-screen selector
+- [x] Model-selection sub-step after API-key verify — per-provider preset list + `Custom…` typed entry, live-validated via `_verify_model()`, persists `LLM_MODEL` (appears in setup wizard + Settings → Configure)
 - [ ] Polish provider select layout — centering, card sizing, brand colours
 - [ ] Full-screen API key entry screen (Step 2 of setup wizard)
 - [ ] Full-screen integrations screen (Step 3 of setup wizard)
