@@ -12,6 +12,12 @@ from typing import Any
 # Provider definitions (order matters — matches row layout top-to-bottom)
 # ---------------------------------------------------------------------------
 
+# Per-provider model presets shown in the model-selection step. Each card's
+# models["default"] MUST equal agent/llm.py::_PROVIDER_DEFAULTS[provider_val]
+# (a unit test asserts this) so the wizard pre-selects the same model the app
+# falls back to when LLM_MODEL is unset. The on-screen list is always
+# presets + ["Custom\u2026"]; the "Custom\u2026" entry lets users type any newer model
+# id, validated live against their credentials.
 _PROVIDER_CARDS: list[dict[str, Any]] = [
     {
         "name": "Anthropic",
@@ -21,6 +27,16 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "prefix": "sk-ant-",
         "instructions": "Get yours at: https://console.anthropic.com \u2192 API Keys",
         "color": "rgb(70,100,180)",
+        "models": {
+            "default": "claude-sonnet-4-20250514",
+            "presets": [
+                "claude-sonnet-4-20250514",
+                "claude-opus-4-8",
+                "claude-sonnet-5",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5",
+            ],
+        },
     },
     {
         "name": "Gemini",
@@ -30,6 +46,14 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "prefix": "AIza",
         "instructions": "Get yours at: https://aistudio.google.com \u2192 Get API key",
         "color": "rgb(70,100,180)",
+        "models": {
+            "default": "gemini-2.0-flash",
+            "presets": [
+                "gemini-2.0-flash",
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+            ],
+        },
     },
     {
         "name": "OpenAI",
@@ -39,6 +63,15 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "prefix": "sk-",
         "instructions": "Get yours at: https://platform.openai.com \u2192 API keys",
         "color": "rgb(70,100,180)",
+        "models": {
+            "default": "gpt-4o",
+            "presets": [
+                "gpt-4o",
+                "gpt-4o-mini",
+                "gpt-4-turbo",
+                "o1",
+            ],
+        },
     },
     {
         "name": "Bedrock",
@@ -49,6 +82,14 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "instructions": "Uses IAM credentials from instance role, ~/.aws/credentials, or env vars",
         "color": "rgb(70,100,180)",
         "is_region_input": True,
+        # Bedrock's real model id is usually auto-detected from OpenClaw and
+        # prepended at runtime; the default here keeps parity with _PROVIDER_DEFAULTS.
+        "models": {
+            "default": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+            "presets": [
+                "us.anthropic.claude-sonnet-4-20250514-v1:0",
+            ],
+        },
     },
 ]
 

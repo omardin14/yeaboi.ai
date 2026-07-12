@@ -277,6 +277,19 @@ def _build_input_screen(
     else:
         error_text = Text("")
 
+    # Keyboard hint — makes editing/clearing discoverable. Without this, a saved
+    # value pre-filled on a Settings → Configure re-run looks un-editable because
+    # typing just appends to the (masked) existing value. Hidden while verifying,
+    # after success, and during fade animations.
+    if verifying or verified is True or input_fade:
+        hint_text = Text("")
+    else:
+        hint_text = Text(
+            "⌫ backspace  ·  Ctrl+U clear  ·  Enter to verify  ·  Esc back",
+            style="dim",
+            justify="center",
+        )
+
     body = [
         Align.center(provider_text),
         Text(""),
@@ -285,8 +298,9 @@ def _build_input_screen(
         Align.center(input_box),
         Align.center(status_text),
         Align.center(error_text),
+        Align.center(hint_text),
     ]
-    body_h = 10  # provider(2) + blank + instructions(1) + blank + input_box(5) + status + error
+    body_h = 11  # provider(2) + blank + instructions(1) + blank + input_box(5) + status + error + hint
 
     return _build_screen_frame(
         subtitle="Enter your API key",
@@ -295,4 +309,153 @@ def _build_input_screen(
         body_height=body_h,
         width=width,
         height=height,
+    )
+
+
+def _build_model_select_screen(
+    provider: dict[str, Any],
+    entries: list[str],
+    selected: int,
+    *,
+    width: int = 80,
+    height: int = 24,
+    shimmer_tick: float = 0.0,
+    error: str = "",
+) -> Panel:
+    """Build the model-selection screen — an arrow-selectable list of model ids.
+
+    Unlike _build_select_screen (which renders 2-line ASCII art), model ids are
+    long plain strings, so each entry is a single centred line. ``entries`` is the
+    full display list, typically presets + ["Custom…"] (a detected/current model
+    may be prepended by the caller with a "(detected)"/"(current)" label).
+    """
+    rows: list[Text] = []
+    for i, label in enumerate(entries):
+        if i == selected:
+            # Per-character shimmer on the selected entry (matches provider rows).
+            line = Text(justify="center")
+            total = max(len(label), 1)
+            for j, ch in enumerate(label):
+                line.append(ch, style=shimmer_style(provider["color"], j, total, shimmer_tick))
+        else:
+            line = Text(label, style="dim", justify="center")
+        rows.append(line)
+
+    body = [item for row in rows for item in (Align.center(row), Text(""))]
+    if body:
+        body = body[:-1]  # remove trailing blank
+
+    if error:
+        body.append(Text(""))
+        body.append(Align.center(Text(f"✗ {error}", style="bright_red", justify="center")))
+
+    body_h = len(rows) * 2 - 1 if rows else 0
+    if error:
+        body_h += 2
+
+    return _build_screen_frame(
+        subtitle="Choose a model",
+        step=0,
+        body_items=body,
+        body_height=body_h,
+        width=width,
+        height=height,
+        title_text=provider["name"],
+    )
+
+
+def _build_model_input_screen(
+    provider: dict[str, Any],
+    input_value: str,
+    *,
+    width: int = 80,
+    height: int = 24,
+    error: str = "",
+    verified: bool | None = None,
+    verifying: bool = False,
+    border_override: str = "",
+) -> Panel:
+    """Build the custom-model text-input screen.
+
+    A near-clone of _build_input_screen, but model ids are never secrets — the
+    value is always shown in plaintext (no masking).
+    """
+    import rich.box
+
+    style = provider["color"]
+    lines = render_ascii_text(provider["name"])
+    provider_text = Text(justify="center")
+    provider_text.append(lines[0] + "\n", style=style)
+    provider_text.append(lines[1], style=style)
+
+    instructions = Text("Enter any model id supported by your account", style="dim", justify="center")
+
+    box_inner_w = min(70, width - 10) - 2 - 4
+    display_val = input_value
+    cursor = "█" if not verifying else ""
+    full_text = display_val + cursor
+    avail = box_inner_w - 4
+
+    input_content = Text(justify="left", no_wrap=True, overflow="crop")
+    if len(full_text) <= avail:
+        input_content.append("  " + full_text, style="bold white")
+    else:
+        visible = full_text[-(avail - 1) :]
+        input_content.append(" ◂", style="dim")
+        input_content.append(visible, style="bold white")
+
+    if border_override:
+        border_color = border_override
+    elif verified is True:
+        border_color = "bright_green"
+    elif verified is False or error:
+        border_color = "bright_red"
+    else:
+        border_color = "white"
+
+    input_box = Panel(
+        input_content,
+        title=" LLM_MODEL ",
+        title_align="left",
+        border_style=border_color,
+        box=rich.box.ROUNDED,
+        padding=(1, 2),
+        width=min(70, width - 10),
+    )
+
+    if verifying or verified is True:
+        status_text = Text("")
+    elif verified is False or error:
+        status_text = Text(f"✗ {error}", style="bright_red", justify="center")
+    else:
+        status_text = Text("")
+
+    if verifying or verified is True:
+        hint_text = Text("")
+    else:
+        hint_text = Text(
+            "⌫ backspace  ·  Ctrl+U clear  ·  Enter to verify  ·  Esc back",
+            style="dim",
+            justify="center",
+        )
+
+    body = [
+        Align.center(provider_text),
+        Text(""),
+        Align.center(instructions),
+        Text(""),
+        Align.center(input_box),
+        Align.center(status_text),
+        Align.center(hint_text),
+    ]
+    body_h = 10  # provider(2) + blank + instructions(1) + blank + input_box(5) + status + hint
+
+    return _build_screen_frame(
+        subtitle="Type a model id",
+        step=0,
+        body_items=body,
+        body_height=body_h,
+        width=width,
+        height=height,
+        title_text=provider["name"],
     )
