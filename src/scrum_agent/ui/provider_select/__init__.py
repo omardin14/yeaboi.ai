@@ -414,9 +414,7 @@ def select_provider(
                                 break
                             # Back from model phase — re-show the verified key input.
                             w, h = console.size
-                            live.update(
-                                _build_input_screen(provider, input_value, width=w, height=h, verified=True)
-                            )
+                            live.update(_build_input_screen(provider, input_value, width=w, height=h, verified=True))
                             continue
                         else:
                             w, h = console.size
