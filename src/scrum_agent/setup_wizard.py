@@ -225,6 +225,12 @@ def run_setup_wizard(console: Console) -> bool:
             return False
         collected[provider["env_var"]] = key
 
+    # Model choice from the full-screen model-selection step (LLM_MODEL is also
+    # persisted at selection time by _save_progress; this keeps the path explicit).
+    llm_model = result.get("llm_model")
+    if llm_model:
+        collected["LLM_MODEL"] = llm_model
+
     # ── Step 3: Version control (collected in full-screen UI) ─────────────
     vc_env_var = result.get("vc_env_var")
     vc_token = result.get("vc_token")

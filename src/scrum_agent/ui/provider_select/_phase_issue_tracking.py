@@ -35,6 +35,7 @@ def _run_issue_tracking(
     vc_token: str,
     *,
     live: Live | None = None,
+    llm_model: str = "",
 ) -> dict[str, str] | None:
     """Run the issue tracking phase with provider selection.
 
@@ -121,6 +122,7 @@ def _run_issue_tracking(
                 "prefix": provider["prefix"],
                 "instructions": provider["instructions"],
                 "api_key": api_key,
+                "llm_model": llm_model,
                 "vc_env_var": vc["env_var"],
                 "vc_token": vc_token,
                 "issue_tracking": {},
@@ -290,6 +292,7 @@ def _run_issue_tracking(
                         "prefix": provider["prefix"],
                         "instructions": provider["instructions"],
                         "api_key": api_key,
+                        "llm_model": llm_model,
                         "vc_env_var": vc["env_var"],
                         "vc_token": vc_token,
                         "issue_tracking": issue_data,
