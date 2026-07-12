@@ -12,6 +12,7 @@ Transitions between states use a common fade animation pattern.
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 
@@ -21,8 +22,13 @@ from scrum_agent.ui.provider_select._config import _save_progress  # noqa: F401
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIONS
 from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking  # noqa: F401
 from scrum_agent.ui.provider_select._transitions import _transition_to_input  # noqa: F401
-from scrum_agent.ui.provider_select._verification import _verify_api_key, _verify_vc_token
-from scrum_agent.ui.provider_select.screens._screens import _build_input_screen, _build_select_screen
+from scrum_agent.ui.provider_select._verification import _verify_api_key, _verify_model, _verify_vc_token
+from scrum_agent.ui.provider_select.screens._screens import (
+    _build_input_screen,
+    _build_model_input_screen,
+    _build_model_select_screen,
+    _build_select_screen,
+)
 from scrum_agent.ui.provider_select.screens._screens_vc import (
     _build_vc_input_screen,
     _build_vc_select_screen,
@@ -31,6 +37,8 @@ from scrum_agent.ui.shared._animations import COLOR_RGB, FADE_IN_LEVELS, FADE_OU
 from scrum_agent.ui.shared._input import disable_bracketed_paste, enable_bracketed_paste
 from scrum_agent.ui.shared._input import read_key as _read_key  # noqa: F401 — re-export for compat
 from scrum_agent.ui.shared._music_bar import make_live
+
+logger = logging.getLogger(__name__)
 
 
 def _detect_aws_region() -> str | None:
@@ -111,6 +119,7 @@ def select_provider(
     # State preserved across steps (so going back retains previous choices)
     provider = None
     api_key = ""
+    llm_model = ""
     vc = None
     vc_token = ""
     step = 0
@@ -122,6 +131,167 @@ def select_provider(
         refresh_per_second=30,
         screen=True,
     ) as live:
+
+        def _run_model_phase(api_key_val: str) -> str | None:
+            """Model-selection sub-step of Step 0.
+
+            Shows a list of the provider's preset models (plus any detected/current
+            model and a "Custom…" entry). Validates the chosen or typed model with a
+            live call so we never save a model the credentials can't run.
+
+            Returns the validated model id, or None if the user pressed Esc to go back
+            to the API-key input.
+            """
+            models_cfg = provider.get("models") or {}
+            presets = list(models_cfg.get("presets") or [])
+            default_model = models_cfg.get("default", "")
+
+            # A detected Bedrock model (from OpenClaw) or a previously-saved LLM_MODEL
+            # is offered at the top of the list and pre-selected, preserving zero-config.
+            detected = None
+            if provider.get("provider_val") == "bedrock":
+                try:
+                    from scrum_agent.setup_wizard import _detect_openclaw_bedrock_model
+
+                    detected = _detect_openclaw_bedrock_model()
+                except Exception:
+                    detected = None
+            existing_model = (existing_config or {}).get("LLM_MODEL", "")
+
+            model_ids: list[str] = []  # actual model id per entry ("" marks Custom…)
+            labels: list[str] = []  # display label per entry
+
+            def _add(mid: str, tag: str = "") -> None:
+                if mid and mid not in model_ids:
+                    model_ids.append(mid)
+                    labels.append(f"{mid}  {tag}" if tag else mid)
+
+            _add(detected, "(detected)")
+            _add(existing_model, "(current)")
+            for m in presets:
+                _add(m)
+            model_ids.append("")  # Custom… sentinel
+            labels.append("Custom…")
+
+            pre = detected or existing_model or default_model
+            selected = model_ids.index(pre) if pre in model_ids else 0
+
+            def _verify_pulsing(model_id: str, render) -> tuple[bool, str]:
+                """Run _verify_model on a thread while `render(border_style)` pulses."""
+                import threading
+
+                result: list[tuple[bool, str]] = []
+
+                def _do() -> None:
+                    result.append(_verify_model(provider, api_key_val, model_id))
+
+                thread = threading.Thread(target=_do, daemon=True)
+                thread.start()
+                pulse_start = time.monotonic()
+                while thread.is_alive():
+                    elapsed = time.monotonic() - pulse_start
+                    intensity = (math.sin(elapsed * 6) + 1) / 2
+                    v = int(60 + 140 * intensity)
+                    render(f"rgb({v},{v},{v})")
+                    time.sleep(FRAME_TIME_30FPS)
+                thread.join()
+                return result[0]
+
+            def _run_custom_input() -> str | None:
+                """Text-input loop for a typed model id. Returns id or None (back)."""
+                val = existing_model if existing_model not in presets else ""
+                err = ""
+                verified: bool | None = None
+                while True:
+                    w, h = console.size
+                    live.update(
+                        _build_model_input_screen(provider, val, width=w, height=h, error=err, verified=verified)
+                    )
+                    key = read_key()
+                    if key == "enter":
+                        if not val.strip():
+                            err = "Model id is required"
+                            verified = False
+                            continue
+                        model_id = val.strip()
+
+                        def _render(border: str) -> None:
+                            w2, h2 = console.size
+                            live.update(
+                                _build_model_input_screen(
+                                    provider, val, width=w2, height=h2, verifying=True, border_override=border
+                                )
+                            )
+
+                        ok, msg = _verify_pulsing(model_id, _render)
+                        if ok:
+                            logger.info("LLM model verified (custom): %s", model_id)
+                            w, h = console.size
+                            live.update(_build_model_input_screen(provider, val, width=w, height=h, verified=True))
+                            time.sleep(0.5)
+                            return model_id
+                        logger.warning("LLM model verification failed (custom): %s — %s", model_id, msg)
+                        err = msg
+                        verified = False
+                    elif key == "esc":
+                        return None
+                    elif key == "clear":
+                        val = ""
+                        err = ""
+                        verified = None
+                    elif key == "backspace":
+                        val = val[:-1]
+                        err = ""
+                        verified = None
+                    elif key.startswith("paste:"):
+                        val += key[6:]
+                        err = ""
+                        verified = None
+                    elif len(key) == 1 and key.isprintable():
+                        val += key
+                        err = ""
+                        verified = None
+
+            # Preset-list selection loop.
+            err = ""
+            start_time = time.monotonic()
+            while True:
+                w, h = console.size
+                tick = time.monotonic() - start_time
+                live.update(
+                    _build_model_select_screen(
+                        provider, labels, selected, width=w, height=h, shimmer_tick=tick, error=err
+                    )
+                )
+                key = read_key(timeout=FRAME_TIME_30FPS) if _supports_timeout else read_key()
+                if key in ("up", "scroll_up"):
+                    selected = (selected - 1) % len(labels)
+                    err = ""
+                elif key in ("down", "scroll_down"):
+                    selected = (selected + 1) % len(labels)
+                    err = ""
+                elif key == "enter":
+                    chosen_id = model_ids[selected]
+                    if chosen_id == "":  # Custom…
+                        typed = _run_custom_input()
+                        if typed is not None:
+                            return typed
+                        continue  # Esc from custom input → back to preset list
+                    logger.info("LLM model chosen (preset): %s", chosen_id)
+
+                    def _render(_border: str) -> None:
+                        w2, h2 = console.size
+                        live.update(_build_model_select_screen(provider, labels, selected, width=w2, height=h2))
+
+                    ok, msg = _verify_pulsing(chosen_id, _render)
+                    if ok:
+                        logger.info("LLM model verified (preset): %s", chosen_id)
+                        return chosen_id
+                    logger.warning("LLM model verification failed (preset): %s — %s", chosen_id, msg)
+                    err = msg
+                elif key in ("q", "esc"):
+                    return None
+
         while step < 3:
             # ══════════════════════════════════════════════════════════════
             # Step 0: LLM Provider selection + API key input
@@ -233,8 +403,21 @@ def select_provider(
                             time.sleep(0.6)
                             api_key = input_value.strip()
                             _save_progress({"LLM_PROVIDER": provider["provider_val"], provider["env_var"]: api_key})
-                            _step0_done = True
-                            break
+
+                            # Model-selection sub-step. Esc returns None → fall back
+                            # to this API-key input loop (context preserved).
+                            chosen_model = _run_model_phase(api_key)
+                            if chosen_model is not None:
+                                llm_model = chosen_model
+                                _save_progress({"LLM_MODEL": chosen_model})
+                                _step0_done = True
+                                break
+                            # Back from model phase — re-show the verified key input.
+                            w, h = console.size
+                            live.update(
+                                _build_input_screen(provider, input_value, width=w, height=h, verified=True)
+                            )
+                            continue
                         else:
                             w, h = console.size
                             live.update(
@@ -306,6 +489,7 @@ def select_provider(
                     _dummy_vc,
                     "",
                     live=live,
+                    llm_model=llm_model,
                 )
 
                 if result is not None:

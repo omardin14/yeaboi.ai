@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _validate_key(provider: dict[str, Any], value: str) -> tuple[str, str]:
@@ -131,6 +134,128 @@ def _verify_api_key(provider: dict[str, Any], api_key: str) -> tuple[bool, str]:
         return False, f"Connection error: {e}"
 
     return False, "Unknown provider"
+
+
+def _verify_model(provider: dict[str, Any], api_key: str, model: str) -> tuple[bool, str]:
+    """Make a lightweight API call to verify the chosen model is usable by the key.
+
+    Mirrors _verify_api_key's structure but exercises the *specific* model so we
+    can confirm the user's credentials can actually run it (e.g. a newly released
+    model typed via the Custom… entry). For Bedrock, ``api_key`` is the region.
+
+    Returns (success, message).
+    """
+    provider_val = provider["provider_val"]
+
+    try:
+        if provider_val == "anthropic":
+            import httpx
+
+            # Cheapest possible ping against the target model. No thinking/sampling
+            # params so we never hit model-family parameter constraints.
+            resp = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+                timeout=10,
+            )
+            if resp.status_code in (200, 201):
+                return True, "Model verified"
+            if resp.status_code == 404:
+                return False, "Model not found or not available for this key"
+            if resp.status_code == 400:
+                # A 400 often means the model id is unknown/unavailable — surface detail.
+                detail = _extract_error_message(resp)
+                return False, detail or "Model not accepted"
+            if resp.status_code == 401:
+                return False, "Invalid API key"
+            if resp.status_code == 403:
+                return False, "Key lacks access to this model"
+            return False, f"Unexpected response: {resp.status_code}"
+
+        elif provider_val == "openai":
+            import httpx
+
+            resp = httpx.get(
+                f"https://api.openai.com/v1/models/{model}",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return True, "Model verified"
+            if resp.status_code == 404:
+                return False, "Unknown model for this account"
+            if resp.status_code == 401:
+                return False, "Invalid API key"
+            return False, f"Unexpected response: {resp.status_code}"
+
+        elif provider_val == "google":
+            import httpx
+
+            # Google model ids are used bare in the path (e.g. gemini-2.0-flash).
+            resp = httpx.get(
+                f"https://generativelanguage.googleapis.com/v1/models/{model}?key={api_key}",
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return True, "Model verified"
+            if resp.status_code == 404:
+                return False, "Unknown model"
+            if resp.status_code in (400, 401, 403):
+                return False, "Invalid API key"
+            return False, f"Unexpected response: {resp.status_code}"
+
+        elif provider_val == "bedrock":
+            # api_key is the AWS region. Inference-profile ids (leading us./eu./
+            # global.) — which is what OpenClaw auto-detects — are NOT returned by
+            # list_foundation_models, so soft-accept those once the region resolves.
+            if model.split(".", 1)[0] in ("us", "eu", "global", "apac"):
+                return True, "Inference profile accepted (region verified)"
+
+            import boto3
+
+            from scrum_agent.config import get_aws_profile
+
+            profile = get_aws_profile()
+            session = boto3.Session(profile_name=profile, region_name=api_key)
+            client = session.client("bedrock", region_name=api_key)
+            resp = client.list_foundation_models(byOutputModality="TEXT")
+            model_ids = {m.get("modelId", "") for m in resp.get("modelSummaries") or []}
+            if model in model_ids:
+                return True, "Model verified"
+            return False, "Model not available in this region"
+
+    except Exception as e:
+        err_str = str(e)
+        if "NoCredentialsError" in type(e).__name__ or "NoCredentialsError" in err_str:
+            return False, "No AWS credentials found — configure IAM role, ~/.aws/credentials, or env vars"
+        if "InvalidIdentityToken" in err_str or "AccessDenied" in err_str or "403" in err_str:
+            return False, "AWS credentials lack Bedrock permissions"
+        return False, f"Connection error: {e}"
+
+    return False, "Unknown provider"
+
+
+def _extract_error_message(resp: Any) -> str:
+    """Best-effort extraction of a human-readable error message from a JSON response."""
+    try:
+        data = resp.json()
+        err = data.get("error")
+        if isinstance(err, dict):
+            return str(err.get("message", "")).strip()
+        if isinstance(err, str):
+            return err.strip()
+    except Exception:
+        pass
+    return ""
 
 
 def _verify_vc_token(vc: dict[str, Any], token: str) -> tuple[bool, str]:
