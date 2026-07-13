@@ -3029,17 +3029,19 @@ def _build_usage_screen(
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
 ) -> Panel:
     """Build the usage dashboard screen using shared TUI components.
 
     Shows API token usage, session history, provider info, and cost estimates.
     Uses USAGE_THEME (amber) with shared buttons, scrollbar, and viewport.
     """
-    from scrum_agent.ui.shared._components import USAGE_THEME, usage_title
+    from scrum_agent.ui.shared._components import USAGE_THEME, build_reveal_subtitle, usage_title
 
     theme = USAGE_THEME
-    title = usage_title()
-    sub = Text(_PAD + "API usage and session history", style="dim", justify="left")
+    title = usage_title(shimmer_tick)
+    sub = build_reveal_subtitle("API usage and session history", sub_reveal, pad=_PAD)
 
     body_lines: list = []
 
@@ -3193,6 +3195,8 @@ def _build_standup_screen(
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
 ) -> Panel:
     """Build the Daily Standup dashboard screen using shared TUI components.
 
@@ -3205,13 +3209,13 @@ def _build_standup_screen(
 
     # See README: "Daily Standup" — TUI page
     """
-    from scrum_agent.ui.shared._components import STANDUP_THEME, standup_title
+    from scrum_agent.ui.shared._components import STANDUP_THEME, build_reveal_subtitle, standup_title
 
     theme = STANDUP_THEME
-    title = standup_title()
+    title = standup_title(shimmer_tick)
     session_name = standup_data.get("session_name", "")
     sub_text = f"Daily standup for {session_name}" if session_name else "Daily standup"
-    sub = Text(_PAD + sub_text, style="dim", justify="left")
+    sub = build_reveal_subtitle(sub_text, sub_reveal, pad=_PAD)
 
     body_lines: list = []
 
@@ -3376,6 +3380,210 @@ def _build_standup_screen(
     )
 
 
+def _performance_roster_window(selected: int, n: int, budget: int) -> tuple[int, int]:
+    """Return the [start, end) engineer window that fits ``budget`` visual lines.
+
+    Big ASCII rows are ~3 lines each (the selected one ~5 with its description), so
+    only a few engineers show at once. The window always contains ``selected`` and
+    grows outward alternately (below first) so the selection stays comfortably in
+    view; callers mark any hidden engineers with ▲/▼ counters.
+    """
+    if n <= 0:
+        return 0, 0
+    used = 5  # the selected row (2 ASCII lines + blank + description + spacer)
+    start, end = selected, selected + 1
+    grew = True
+    while grew:
+        grew = False
+        if end < n and used + 3 <= budget:
+            used += 3
+            end += 1
+            grew = True
+        if start > 0 and used + 3 <= budget:
+            used += 3
+            start -= 1
+            grew = True
+    return start, end
+
+
+def _build_performance_screen(
+    performance_data: dict,
+    *,
+    scroll_offset: int = 0,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+    shimmer_tick: float = 0.0,
+    desc_reveal: float = 0.0,
+    sub_reveal: float | None = None,
+) -> Panel:
+    """Build the Performance dashboard screen using shared TUI components.
+
+    Two views, both rendered here (the run page owns which is active):
+    - "roster": a selectable list of engineers (from Jira / Azure DevOps) — up/down
+      moves the selection, the action buttons run a workflow for the selected person.
+    - "detail": the artifact produced by an action (1:1 prep / completion / review),
+      scrollable, with Back / Export buttons.
+
+    performance_data keys: session_name, view ("roster"|"detail"), roster (list[str]),
+    selected_idx (int), detail_lines (list[str] plaintext), detail_title (str),
+    actions (list[str]), message (str, transient status line).
+
+    Uses PERFORMANCE_THEME (coral) with shared buttons, scrollbar, and viewport.
+
+    # See README: "Performance Mode" — TUI page
+    """
+    from scrum_agent.ui.mode_select.screens._screens import _build_mode_row
+    from scrum_agent.ui.shared._components import PERFORMANCE_THEME, build_reveal_subtitle, performance_title
+
+    theme = PERFORMANCE_THEME
+    _accent = "rgb(220,110,90)"  # PERFORMANCE_THEME accent — the mode-row colour key
+    title = performance_title(shimmer_tick)
+    view = performance_data.get("view", "roster")
+    session_name = performance_data.get("session_name", "")
+
+    if view == "detail":
+        sub_text = performance_data.get("detail_title", "") or "Performance"
+    else:
+        sub_text = f"Team performance — {session_name}" if session_name else "Team performance"
+    sub = build_reveal_subtitle(sub_text, sub_reveal, pad=PAD)
+
+    message = performance_data.get("message", "")
+
+    def _styled(line: str) -> Text:
+        """Style a plaintext artifact line: headers accent, bullets value, notices warn."""
+        stripped = line.strip()
+        style = theme.value
+        if not stripped:
+            return Text("")
+        if stripped.startswith("⚠"):
+            style = theme.warn
+        elif stripped.startswith(("•", "-", "☐", "↺")) or line.startswith("  "):
+            style = theme.desc
+        elif stripped.endswith(":") or line == line.lstrip():
+            style = f"bold {theme.accent}"
+        return Text(PAD + "  " + line, style=style, justify="left")
+
+    actions = performance_data.get("actions") or ["1:1 Prep", "1:1 Complete", "6mo Review", "Notes", "Export", "Back"]
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions, action_sel)
+
+    # ── Roster view — big ASCII engineer names (mirrors the intake mode picker) ──
+    if view != "detail":
+        roster = performance_data.get("roster", []) or []
+        hints = performance_data.get("roster_hints", []) or []
+        selected_idx = max(0, min(performance_data.get("selected_idx", 0), len(roster) - 1)) if roster else 0
+
+        body: list = []
+        if message:
+            body.append(Text(PAD + message, style=theme.accent_bright, justify="left"))
+            body.append(Text(""))
+
+        if not roster:
+            body.append(Text(PAD + "No engineers found.", style=theme.muted, justify="left"))
+            body.append(Text(""))
+            body.append(Text(PAD + "Connect Jira or Azure DevOps (see Settings) — the roster is", style=theme.muted))
+            body.append(Text(PAD + "built from the people assigned work on your board.", style=theme.muted))
+        else:
+            # Window the engineers that fit vertically, centred on the selection —
+            # big ASCII rows are tall, so only a few show at once (▲/▼ mark the rest).
+            budget = max(6, height - 16 - (2 if message else 0))
+            start, end = _performance_roster_window(selected_idx, len(roster), budget)
+            if start > 0:
+                body.append(Text(PAD + f"▲ {start} more", style=theme.dim, justify="left"))
+                body.append(Text(""))
+            for idx in range(start, end):
+                name = roster[idx]
+                hint = hints[idx] if idx < len(hints) else "1:1 prep · completion · 6-month review"
+                card = {"title": name, "color": _accent, "available": True, "description": hint}
+                is_sel = idx == selected_idx
+                body.extend(
+                    _build_mode_row(
+                        card,
+                        selected=is_sel,
+                        shimmer_tick=shimmer_tick,
+                        desc_reveal=desc_reveal if is_sel else 0,
+                    )
+                )
+                if idx < end - 1:
+                    body.append(Text(""))
+            if end < len(roster):
+                body.append(Text(""))
+                body.append(Text(PAD + f"▼ {len(roster) - end} more", style=theme.dim, justify="left"))
+
+        content = Group(
+            Text(""),
+            title,
+            Text(""),
+            sub,
+            Text(""),
+            *body,
+            Text(""),
+            btn_top,
+            btn_mid,
+            btn_bot,
+        )
+        return Panel(
+            content,
+            border_style="white",
+            box=rich.box.ROUNDED,
+            expand=True,
+            height=height,
+            padding=(1, 2),
+        )
+
+    # ── Detail view — the produced artifact, scrollable ──────────────────────────
+    body_lines: list = []
+    if message:
+        body_lines.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
+    for line in performance_data.get("detail_lines", []) or ["(nothing to show)"]:
+        body_lines.append(_styled(line))
+
+    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    actual_scroll = min(scroll_offset, max_scroll)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(show_header=False, show_edge=False, box=None, padding=0, pad_edge=False, expand=True)
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _build_retro_screen(
     retro_data: dict,
     *,
@@ -3383,6 +3591,8 @@ def _build_retro_screen(
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
 ) -> Panel:
     """Build the Retro board screen using shared TUI components.
 
@@ -3400,13 +3610,13 @@ def _build_retro_screen(
     # See README: "Retro" — TUI page
     """
     from scrum_agent.retro.board import RETRO_GRID_LABELS, RETRO_GRIDS
-    from scrum_agent.ui.shared._components import RETRO_THEME, retro_title
+    from scrum_agent.ui.shared._components import RETRO_THEME, build_reveal_subtitle, retro_title
 
     theme = RETRO_THEME
-    title = retro_title()
+    title = retro_title(shimmer_tick)
     session_name = retro_data.get("session_name", "")
     sub_text = f"Sprint retro for {session_name}" if session_name else "Sprint retro"
-    sub = Text(_PAD + sub_text, style="dim", justify="left")
+    sub = build_reveal_subtitle(sub_text, sub_reveal, pad=_PAD)
 
     body_lines: list = []
 
@@ -3756,17 +3966,19 @@ def _build_settings_screen(
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
 ) -> Panel:
     """Build the settings dashboard showing current configuration.
 
     Displays all config values grouped by category with secrets masked.
     Uses SETTINGS_THEME (silver) with shared components.
     """
-    from scrum_agent.ui.shared._components import SETTINGS_THEME, settings_title
+    from scrum_agent.ui.shared._components import SETTINGS_THEME, build_reveal_subtitle, settings_title
 
     theme = SETTINGS_THEME
-    title = settings_title()
-    sub = Text(_PAD + "Current configuration", style="dim", justify="left")
+    title = settings_title(shimmer_tick)
+    sub = build_reveal_subtitle("Current configuration", sub_reveal, pad=_PAD)
 
     body_lines: list = []
 

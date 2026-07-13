@@ -52,6 +52,13 @@ _MODE_CARDS: list[dict[str, Any]] = [
         "color": "rgb(80,190,190)",
     },
     {
+        "key": "performance",
+        "title": "Performance",
+        "description": "Manage each engineer: 1:1 prep, 1:1 summaries, and 6-month reviews from real delivery data.",
+        "available": True,
+        "color": "rgb(220,110,90)",
+    },
+    {
         "key": "usage",
         "title": "Usage",
         "description": "View API token usage, session history, and cost estimates.",

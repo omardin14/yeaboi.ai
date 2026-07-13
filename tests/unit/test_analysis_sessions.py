@@ -37,8 +37,9 @@ def store(tmp_path: Path) -> SessionStore:
 
 class TestSchemaVersion:
     def test_current_version(self):
-        # v6 added the Daily Standup tables; v7 added the Retro tables (retro_history).
-        assert CURRENT_SCHEMA_VERSION == 7
+        # v6 added the Daily Standup tables; v7 added the Retro tables (retro_history);
+        # v8 added the Performance tables (1:1s, reviews, notes).
+        assert CURRENT_SCHEMA_VERSION == 8
 
     def test_new_db_has_session_mode_column(self, store: SessionStore):
         """A freshly created DB should have the session_mode column."""

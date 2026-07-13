@@ -58,6 +58,7 @@ def get_analyzer_prompt(
     user_context: str | None = None,
     team_profile_summary: str = "",
     ceremony_history: str = "",
+    performance_context: str = "",
     review_feedback: str | None = None,
     review_mode: str | None = None,
     previous_output: str | None = None,
@@ -187,6 +188,23 @@ def get_analyzer_prompt(
         else ""
     )
 
+    # Per-engineer Performance signal — open 1:1 action items and review growth
+    # areas. Makes the analysis person-aware: an engineer's growth area or a stack
+    # of open 1:1 actions is a real staffing / risk consideration.
+    performance_section = (
+        (
+            "\n## Team Performance Signal\n\n"
+            "Per-engineer signal from recent 1:1s and performance reviews. Treat it as "
+            "context for team capability and risk: reflect notable growth areas or a "
+            "backlog of open 1:1 action items in `risks` / `assumptions` where relevant. "
+            "Do NOT surface individuals' names in user-facing scope; use it only to "
+            "calibrate delivery realism.\n\n"
+            f"{performance_context}\n"
+        )
+        if performance_context
+        else ""
+    )
+
     base = (
         "You are a project analyst synthesizing intake questionnaire answers into "
         "a structured project analysis.\n\n"
@@ -197,7 +215,8 @@ def get_analyzer_prompt(
         f"{confluence_section}"
         f"{user_section}"
         f"{team_section}"
-        f"{ceremony_section}\n"
+        f"{ceremony_section}"
+        f"{performance_section}\n"
         f"## Questionnaire Answers ({TOTAL_QUESTIONS} questions)\n\n"
         f"{answers_block}\n\n"
         "## Task\n\n"

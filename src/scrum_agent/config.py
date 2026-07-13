@@ -304,6 +304,17 @@ def get_standup_user_name() -> str:
     return os.getenv("STANDUP_USER_NAME", "").strip() or "Me"
 
 
+def get_performance_framework_path() -> str:
+    """Return an optional path to a custom competency framework / review template.
+
+    Reads PERFORMANCE_FRAMEWORK_PATH. When set, the 6-month review uses this file's
+    contents in place of the bundled default framework (performance/references/
+    competency_framework.md), so a lead can drop in their org's HR template.
+    Returns "" when unset.
+    """
+    return os.getenv("PERFORMANCE_FRAMEWORK_PATH", "").strip()
+
+
 # ---------------------------------------------------------------------------
 # LLM provider configuration
 # ---------------------------------------------------------------------------

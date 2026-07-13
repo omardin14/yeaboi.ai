@@ -361,6 +361,120 @@ class RetroReport:
         return out
 
 
+# See README: "Session Management" — Performance mode artifacts
+#
+# The Performance mode helps a team lead manage each engineer's growth. It has
+# three connected workflows — 1:1 Prep, 1:1 Completion, and a 6-Month Review —
+# each producing a FROZEN dataclass artifact (immutable + asdict()-serializable),
+# exactly like the Standup / Retro reports above. Every field is defaulted so an
+# artifact serialized by an older version still deserializes (see CLAUDE.md
+# "Frozen dataclass backward compatibility"). The roster (EngineerRef) is derived
+# from the real people who did work in Jira / Azure DevOps, and EngineerActivity
+# is the per-engineer slice of their recent-sprint tickets that seeds a 1:1 prep.
+@dataclass(frozen=True)
+class EngineerRef:
+    """A team member the lead can run performance workflows for.
+
+    Sourced from Jira / Azure DevOps assignees (the people who actually did work),
+    not from the plan's team-size number — so the roster reflects reality.
+    """
+
+    name: str = ""  # display name, e.g. "Ada Lovelace"
+    source: str = ""  # "jira" | "azuredevops" | "manual"
+    external_id: str = ""  # accountId / descriptor — best-effort, may be empty
+
+
+@dataclass(frozen=True)
+class EngineerStory:
+    """One ticket an engineer worked on in a recent sprint window."""
+
+    key: str = ""  # e.g. "PROJ-123" or "#456"
+    title: str = ""
+    status: str = ""  # e.g. "In Progress", "Done"
+    kind: str = ""  # "issue" | "work_item"
+    sprint: str = "current"  # "current" | "previous" — which look-back window it came from
+    source: str = ""  # "jira" | "azuredevops"
+
+
+@dataclass(frozen=True)
+class EngineerActivity:
+    """An engineer's worked tickets across the current + prior sprint windows.
+
+    Deterministic (no LLM) — assembled by performance/activity.py from the same
+    recent-activity helpers the standup uses, grouped by author. Feeds the 1:1
+    prep prompt as concrete evidence of what the person actually did.
+    """
+
+    engineer: str = ""
+    current_sprint: str = ""  # active sprint name (best-effort, may be empty)
+    previous_sprint: str = ""
+    stories: tuple[EngineerStory, ...] = ()
+    total_items: int = 0
+    sources: tuple[tuple[str, int], ...] = ()  # (source, count) — frozen/serializable like activity_counts
+
+
+@dataclass(frozen=True)
+class OneOnOnePrep:
+    """Talking points for an upcoming 1:1, derived from recent work + last 1:1.
+
+    Produced by performance/engine.py:run_one_on_one_prep() (one LLM call, with a
+    deterministic fallback). ``carried_action_items`` are the open actions from the
+    engineer's most recent 1:1 completion — this is what closes the Prep↔Completion
+    loop so nothing agreed in a 1:1 is silently dropped.
+    """
+
+    engineer: str = ""
+    date: str = ""  # ISO date the prep was generated
+    talking_points: tuple[str, ...] = ()
+    feedback: tuple[str, ...] = ()  # positive + constructive feedback to give
+    goals: tuple[str, ...] = ()
+    gaps: tuple[str, ...] = ()  # skill / delivery gaps observed
+    improvements: tuple[str, ...] = ()  # concrete things to improve
+    carried_action_items: tuple[str, ...] = ()  # open actions from the previous 1:1
+    activity_summary: str = ""  # short prose summary of the sprint work reviewed
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OneOnOneRecord:
+    """A completed 1:1: the transcript plus the AI-written email summary + actions.
+
+    Produced by performance/engine.py:complete_one_on_one(). The email summary is
+    delivered via SMTP (reusing standup EmailDelivery); ``action_items`` are
+    persisted so the *next* run_one_on_one_prep() picks them up as carried actions.
+    """
+
+    engineer: str = ""
+    date: str = ""
+    transcript: str = ""  # raw meeting notes/transcript the lead provided
+    email_subject: str = ""
+    email_summary: str = ""  # the summary email body (plain text)
+    action_items: tuple[str, ...] = ()  # agreed next steps → carried into next prep
+    highlights: tuple[str, ...] = ()  # key discussion points recorded
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SixMonthReview:
+    """A performance review synthesised from ~6 months of signals.
+
+    Produced by performance/engine.py:run_six_month_review() from past 1:1s,
+    Jira/AzDO delivery history, ceremony history, the lead's notes, and a
+    competency framework (bundled default or lead-imported template).
+    """
+
+    engineer: str = ""
+    period_start: str = ""  # ISO date
+    period_end: str = ""
+    strengths: tuple[str, ...] = ()
+    areas_for_improvement: tuple[str, ...] = ()
+    achievements: tuple[str, ...] = ()
+    goals: tuple[str, ...] = ()  # goals for the next period
+    overall: str = ""  # overall summary paragraph
+    framework_used: str = ""  # "default" | imported template name
+    warnings: tuple[str, ...] = ()
+
+
 # See README: "Scrum Standards" — prompt quality rating
 @dataclass(frozen=True)
 class PromptQualityRating:
@@ -726,6 +840,10 @@ class ScrumState(_RequiredState, total=False):
     # See README: "Session Management" — SQLite persistence
     _ceremony_action_items: tuple[str, ...]
     _ceremony_history: str
+    # Per-engineer Performance signal (open 1:1 actions + review focus areas)
+    # gathered by project_analyzer and reused by sprint_planner. Transient markdown.
+    # See README: "Performance Mode"
+    _performance_context: str
 
     # Capacity deductions — all collected during intake (Phase 6: Capacity Planning).
     # Q27 (sprint selection / bank holidays auto-detected), Q28 (planned leave),

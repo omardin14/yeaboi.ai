@@ -73,6 +73,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DESC_SCROLL_SPEED = 200  # characters per second for typewriter reveal
+_HEADER_SUB_SPEED = 45  # characters per second for the page subtitle typewriter reveal
 _FRAME_TIME = FRAME_TIME_60FPS
 
 
@@ -1409,12 +1410,24 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
     data = _collect_standup_data()
     scroll, sel = 0, 0
     n_buttons = 5  # Generate, My Update, Configure, Export, Back
+    anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
 
     def _render() -> None:
         w, h = console.size
+        elapsed = time.monotonic() - anim_start
         # Leave a one-row safety margin: a Live renderable exactly equal to the
         # terminal height loses its last row (the action buttons) to the cursor.
-        live.update(_build_standup_screen(data, scroll_offset=scroll, width=w, height=max(10, h - 1), action_sel=sel))
+        live.update(
+            _build_standup_screen(
+                data,
+                scroll_offset=scroll,
+                width=w,
+                height=max(10, h - 1),
+                action_sel=sel,
+                shimmer_tick=elapsed,
+                sub_reveal=elapsed * _HEADER_SUB_SPEED,
+            )
+        )
 
     _render()
     while True:
@@ -1463,6 +1476,350 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
         _render()
 
 
+# ---------------------------------------------------------------------------
+# Performance mode page
+# ---------------------------------------------------------------------------
+
+
+def _collect_performance_data(message: str = "") -> dict:
+    """Gather Performance page data: latest session + the Jira/AzDO engineer roster.
+
+    The roster is the real people who did work on the board (assignees) — see
+    performance/roster.py. Session context (sprint length/project) is best-effort;
+    the page still works with no session.
+    """
+    data: dict = {"message": message, "session_id": "", "session_name": "", "roster": [], "roster_hints": []}
+    try:
+        from scrum_agent.sessions import SessionStore, make_display_name
+
+        with SessionStore(_ana_dbp) as store:
+            session_id = store.get_latest_session_id() or ""
+            data["session_id"] = session_id
+            if session_id:
+                meta = store.get_session(session_id) or {}
+                data["session_name"] = make_display_name(meta) if meta else session_id
+    except Exception:
+        logger.warning("performance: failed to resolve latest session", exc_info=True)
+    try:
+        from scrum_agent.performance.roster import fetch_roster
+
+        data["roster"] = [r.name for r in fetch_roster()]
+    except Exception:
+        logger.warning("performance: failed to fetch roster", exc_info=True)
+    # Fallback: no live Jira/AzDO roster → use the planning session's own team
+    # members (also board-derived) so Performance is usable without a live tracker.
+    if not data["roster"] and data["session_id"]:
+        data["roster"] = _performance_session_team(data["session_id"])
+        if data["roster"]:
+            logger.info("performance: roster fell back to session team members")
+    data["roster_hints"] = _performance_roster_hints(data["roster"])
+    logger.info("performance: %d engineer(s) in roster", len(data["roster"]))
+    return data
+
+
+def _performance_session_team(session_id: str) -> list[str]:
+    """Return the session's team-member names (fallback roster when no tracker).
+
+    Reads ``selected_team_members`` from the saved plan state — the same
+    board-derived roster the standup uses. Best-effort: any error → []. Names are
+    de-duplicated preserving order and sorted for a stable page.
+    """
+    try:
+        from scrum_agent.sessions import SessionStore
+
+        with SessionStore(_ana_dbp) as store:
+            state = store.load_state(session_id) or {}
+    except Exception:
+        logger.warning("performance: failed to load session team members", exc_info=True)
+        return []
+    names = [str(n).strip() for n in (state.get("selected_team_members") or ()) if str(n).strip()]
+    return sorted(dict.fromkeys(names), key=str.lower)
+
+
+def _performance_roster_hints(roster: list[str]) -> list[str]:
+    """Build a one-line status hint per engineer (open 1:1 actions + review on file).
+
+    Shown as the description under the selected engineer's big ASCII name. Best-effort
+    — a store error just yields the generic hint so the page always renders.
+    """
+    generic = "1:1 prep · completion · 6-month review"
+    if not roster:
+        return []
+    try:
+        from scrum_agent.performance.store import PerformanceStore
+
+        with PerformanceStore(_ana_dbp) as store:
+            open_actions = store.get_all_open_action_items()
+            hints: list[str] = []
+            for name in roster:
+                n = len(open_actions.get(name, ()))
+                has_review = store.get_latest_review(name) is not None
+                if n:
+                    hint = f"{n} open 1:1 action{'s' if n != 1 else ''}"
+                else:
+                    hint = "no open 1:1 actions"
+                if has_review:
+                    hint += " · review on file"
+                hints.append(hint)
+            return hints
+    except Exception:
+        logger.warning("performance: failed to build roster hints", exc_info=True)
+        return [generic for _ in roster]
+
+
+def _performance_get_transcript(console, live, read_key, frame_time, supports_timeout) -> str | None:
+    """Collect a 1:1 transcript — via a file path, or pasted/typed inline.
+
+    Returns the transcript text, or None if the user cancelled (Esc). Supports both
+    input methods per the design: a file path is read from disk; an empty path drops
+    to an inline paste field.
+    """
+    path = _standup_read_line(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        prompt="Transcript file path (Enter to paste instead)",
+        step="1:1 Complete  —  transcript source",
+        default="",
+    )
+    if path is None:
+        return None
+    path = path.strip()
+    if path:
+        try:
+            from pathlib import Path
+
+            text = Path(path).expanduser().read_text(encoding="utf-8")
+            logger.info("performance: read transcript from %s (%d chars)", path, len(text))
+            return text
+        except Exception as e:  # noqa: BLE001 — fall through to paste on a bad path
+            logger.warning("performance: could not read transcript file %s: %s", path, e)
+    return _standup_read_line(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        prompt="Paste the meeting notes / transcript",
+        step="1:1 Complete  —  paste transcript",
+        default="",
+    )
+
+
+def _performance_export(engineer: str) -> str:
+    """Re-export the engineer's most recent artifact (review > completion > prep)."""
+    from scrum_agent.performance import export
+    from scrum_agent.performance.store import PerformanceStore
+
+    with PerformanceStore(_ana_dbp) as store:
+        review = store.get_latest_review(engineer)
+        completions = store.get_recent_completions(engineer, limit=1)
+        prep = store.get_latest_prep(engineer)
+    artifact, kind = None, ""
+    if review is not None:
+        artifact, kind = review, "review"
+    elif completions:
+        artifact, kind = completions[0], "completion"
+    elif prep is not None:
+        artifact, kind = prep, "prep"
+    if artifact is None:
+        return "Nothing to export yet — generate a 1:1 prep or review first."
+    try:
+        paths = export.export_artifact(artifact, engineer=engineer, kind=kind)
+        return f"Exported {kind} to {paths['markdown'].parent}  (Markdown + HTML)"
+    except Exception as e:  # noqa: BLE001
+        logger.error("performance export failed: %s", e, exc_info=True)
+        return f"Export failed: {e}"
+
+
+def _run_performance_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Event loop for the Performance page.
+
+    Two views. In "roster": Up/Down choose an engineer, Left/Right pick an action
+    (1:1 Prep / 1:1 Complete / 6mo Review / Notes / Export / Back), Enter runs it —
+    an AI action switches to "detail" showing the artifact. In "detail": Up/Down
+    scroll, Export re-writes the artifact, Back returns to the roster.
+
+    # See README: "Performance Mode" — TUI page
+    """
+    from scrum_agent.performance.render import (
+        format_completion_lines,
+        format_prep_lines,
+        format_review_lines,
+    )
+    from scrum_agent.ui.mode_select.screens._screens_secondary import _build_performance_screen
+
+    base = _collect_performance_data()
+    session_id = base["session_id"]
+    session_name = base["session_name"]
+    roster: list[str] = base["roster"]
+    roster_hints: list[str] = base.get("roster_hints", [])
+
+    state = {
+        "view": "roster",
+        "selected": 0,
+        "scroll": 0,
+        "sel": 0,
+        "message": "",
+        "detail_lines": [],
+        "detail_title": "",
+    }
+    roster_actions = ["1:1 Prep", "1:1 Complete", "6mo Review", "Notes", "Export", "Back"]
+    detail_actions = ["Export", "Back"]
+
+    def _data() -> dict:
+        return {
+            "session_name": session_name,
+            "view": state["view"],
+            "roster": roster,
+            "roster_hints": roster_hints,
+            "selected_idx": state["selected"],
+            "detail_lines": state["detail_lines"],
+            "detail_title": state["detail_title"],
+            "actions": roster_actions if state["view"] == "roster" else detail_actions,
+            "message": state["message"],
+        }
+
+    # Animation clocks — mirror the intake mode picker: a shimmer sweeps the
+    # selected engineer's ASCII name (shimmer_tick) and its description reveals
+    # typewriter-style (desc_reveal), reset whenever the selection changes.
+    anim_start = time.monotonic()
+    state["select_time"] = anim_start
+
+    def _render() -> None:
+        w, h = console.size
+        now = time.monotonic()
+        tick = now - anim_start  # title shimmer (+ roster-word shimmer) — runs in both views
+        sub_reveal = tick * _HEADER_SUB_SPEED
+        # The per-engineer description only reveals in the roster view, and restarts
+        # whenever the selection changes (select_time), like the intake picker.
+        reveal = (now - state["select_time"]) * _DESC_SCROLL_SPEED if state["view"] == "roster" else 0.0
+        live.update(
+            _build_performance_screen(
+                _data(),
+                scroll_offset=state["scroll"],
+                width=w,
+                height=max(10, h - 1),
+                action_sel=state["sel"],
+                shimmer_tick=tick,
+                desc_reveal=reveal,
+                sub_reveal=sub_reveal,
+            )
+        )
+
+    def _show_detail(lines: list[str], title: str, message: str) -> None:
+        state["view"] = "detail"
+        state["detail_lines"] = lines
+        state["detail_title"] = title
+        state["message"] = message
+        state["sel"] = 0
+        state["scroll"] = 0
+
+    def _run_action(label: str, engineer: str) -> None:
+        """Run one AI/notes action for the selected engineer (blocks briefly)."""
+        try:
+            if label == "1:1 Prep":
+                from scrum_agent.performance.engine import run_one_on_one_prep
+
+                prep = run_one_on_one_prep(engineer, session_id=session_id, db_path=_ana_dbp)
+                _show_detail(format_prep_lines(prep), f"1:1 Prep — {engineer}", "Prep generated.")
+            elif label == "1:1 Complete":
+                transcript = _performance_get_transcript(console, live, read_key, frame_time, supports_timeout)
+                if transcript is None or not transcript.strip():
+                    state["message"] = "1:1 completion cancelled — no transcript."
+                    return
+                from scrum_agent.performance.engine import complete_one_on_one
+
+                record = complete_one_on_one(engineer, transcript, session_id=session_id, db_path=_ana_dbp)
+                sent = "email sent" if not record.warnings else "see notices"
+                _show_detail(format_completion_lines(record), f"1:1 Summary — {engineer}", f"Completed — {sent}.")
+            elif label == "6mo Review":
+                from scrum_agent.performance.engine import run_six_month_review
+
+                review = run_six_month_review(engineer, session_id=session_id, db_path=_ana_dbp)
+                _show_detail(format_review_lines(review), f"6-Month Review — {engineer}", "Review generated.")
+            elif label == "Notes":
+                note = _standup_read_line(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    prompt=f"Note about {engineer}",
+                    step="Performance  —  add note",
+                    default="",
+                )
+                if note and note.strip():
+                    from scrum_agent.performance.store import PerformanceStore
+
+                    with PerformanceStore(_ana_dbp) as store:
+                        store.add_note(engineer, note.strip())
+                    state["message"] = f"Note saved for {engineer}."
+                else:
+                    state["message"] = "No note entered."
+        except Exception as e:  # never let an action crash the TUI
+            logger.error("performance action %s failed: %s", label, e, exc_info=True)
+            state["message"] = f"{label} failed: {e}"
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if state["view"] == "roster":
+            if k in ("up", "scroll_up"):
+                if roster:
+                    state["selected"] = (state["selected"] - 1) % len(roster)
+                    state["select_time"] = time.monotonic()  # restart the description reveal
+            elif k in ("down", "scroll_down"):
+                if roster:
+                    state["selected"] = (state["selected"] + 1) % len(roster)
+                    state["select_time"] = time.monotonic()
+            elif k == "left":
+                state["sel"] = max(0, state["sel"] - 1)
+            elif k == "right":
+                state["sel"] = min(len(roster_actions) - 1, state["sel"] + 1)
+            elif k in ("enter", " "):
+                label = roster_actions[state["sel"]]
+                if label == "Back":
+                    break
+                if not roster:
+                    state["message"] = "No engineers — connect Jira or Azure DevOps first."
+                else:
+                    engineer = roster[state["selected"]]
+                    if label == "Export":
+                        state["message"] = _performance_export(engineer)
+                    else:
+                        _run_action(label, engineer)
+                        # An action may have changed open-action counts / added a
+                        # review — refresh the per-engineer hints shown in the roster.
+                        roster_hints[:] = _performance_roster_hints(roster)
+            elif k in ("esc", "q"):
+                break
+        else:  # detail view
+            if k in ("up", "scroll_up"):
+                state["scroll"] = max(0, state["scroll"] - 1)
+            elif k in ("down", "scroll_down"):
+                state["scroll"] += 1
+            elif k == "left":
+                state["sel"] = max(0, state["sel"] - 1)
+            elif k == "right":
+                state["sel"] = min(len(detail_actions) - 1, state["sel"] + 1)
+            elif k in ("enter", " "):
+                label = detail_actions[state["sel"]]
+                if label == "Back":
+                    state["view"] = "roster"
+                    state["sel"], state["scroll"], state["message"] = 0, 0, ""
+                    state["select_time"] = time.monotonic()  # replay the reveal on return
+                elif label == "Export" and roster:
+                    state["message"] = _performance_export(roster[state["selected"]])
+            elif k in ("esc", "q"):
+                state["view"] = "roster"
+                state["sel"], state["scroll"], state["message"] = 0, 0, ""
+                state["select_time"] = time.monotonic()
+        _render()
+
+
 def _resolve_retro_session() -> tuple[str, str, str, str]:
     """Resolve the retro's target session → (session_id, session_name, project_name, sprint_name).
 
@@ -1503,10 +1860,23 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
     """
     from scrum_agent.ui.mode_select.screens._screens_secondary import _build_retro_screen
 
+    anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
+
     def _render(data: dict, scroll: int, sel: int) -> None:
         w, h = console.size
+        elapsed = time.monotonic() - anim_start
         # Leave a one-row safety margin (same reason as the standup page).
-        live.update(_build_retro_screen(data, scroll_offset=scroll, width=w, height=max(10, h - 1), action_sel=sel))
+        live.update(
+            _build_retro_screen(
+                data,
+                scroll_offset=scroll,
+                width=w,
+                height=max(10, h - 1),
+                action_sel=sel,
+                shimmer_tick=elapsed,
+                sub_reveal=elapsed * _HEADER_SUB_SPEED,
+            )
+        )
 
     session_id, session_name, project_name, sprint_name = _resolve_retro_session()
     if not session_id:
@@ -2860,6 +3230,14 @@ def select_mode(
                 _skip_fade_in = True
                 continue
 
+            # ── Route: Performance mode → per-engineer dashboard ─────────
+            if chosen["key"] == "performance":
+                logger.info("Performance mode selected")
+                _run_performance_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                _restart_mode_select = True
+                _skip_fade_in = True
+                continue
+
             # ── Route: Usage mode → single-page dashboard ────────────────
             if chosen["key"] == "usage":
                 logger.info("Usage mode selected")
@@ -2867,6 +3245,7 @@ def select_mode(
 
                 _usage_data = _collect_usage_data()
                 _u_scroll, _u_sel = 0, 0
+                _u_anim_start = time.monotonic()  # shimmer title + typewriter subtitle
                 w, h = console.size
                 live.update(
                     _build_usage_screen(
@@ -2875,6 +3254,8 @@ def select_mode(
                         width=w,
                         height=h,
                         action_sel=_u_sel,
+                        shimmer_tick=0.0,
+                        sub_reveal=0.0,
                     )
                 )
                 while True:
@@ -2886,6 +3267,7 @@ def select_mode(
                     elif k in ("enter", " ", "esc", "q"):
                         break
                     w, h = console.size
+                    _u_elapsed = time.monotonic() - _u_anim_start
                     live.update(
                         _build_usage_screen(
                             _usage_data,
@@ -2893,6 +3275,8 @@ def select_mode(
                             width=w,
                             height=h,
                             action_sel=_u_sel,
+                            shimmer_tick=_u_elapsed,
+                            sub_reveal=_u_elapsed * _HEADER_SUB_SPEED,
                         )
                     )
                 _restart_mode_select = True
@@ -2906,6 +3290,7 @@ def select_mode(
 
                 _settings_data = _collect_settings_data()
                 _s_scroll, _s_sel = 0, 0
+                _s_anim_start = time.monotonic()  # shimmer title + typewriter subtitle
                 w, h = console.size
                 live.update(
                     _build_settings_screen(
@@ -2914,6 +3299,8 @@ def select_mode(
                         width=w,
                         height=h,
                         action_sel=_s_sel,
+                        shimmer_tick=0.0,
+                        sub_reveal=0.0,
                     )
                 )
                 while True:
@@ -2948,6 +3335,7 @@ def select_mode(
                         logger.info("Settings: user pressed Esc")
                         break
                     w, h = console.size
+                    _s_elapsed = time.monotonic() - _s_anim_start
                     live.update(
                         _build_settings_screen(
                             _settings_data,
@@ -2955,6 +3343,8 @@ def select_mode(
                             width=w,
                             height=h,
                             action_sel=_s_sel,
+                            shimmer_tick=_s_elapsed,
+                            sub_reveal=_s_elapsed * _HEADER_SUB_SPEED,
                         )
                     )
                 _restart_mode_select = True

@@ -49,6 +49,7 @@ def get_sprint_planner_prompt(
     team_override_from: int | None = None,
     team_calibration: str = "",
     ceremony_history: str = "",
+    performance_context: str = "",
     review_feedback: str | None = None,
     review_mode: str | None = None,
     previous_output: str | None = None,
@@ -179,6 +180,21 @@ def get_sprint_planner_prompt(
         else ""
     )
 
+    # Per-engineer Performance signal — open 1:1 action items + review growth areas.
+    # Nudges assignment/loading: an engineer with a heavy stack of open 1:1 actions
+    # or an active growth focus shouldn't be loaded to the brim.
+    performance_section = (
+        (
+            "## Team Performance Signal\n\n"
+            "Per-engineer open 1:1 action items and review focus areas. Factor this into "
+            "loading realism — don't pack sprints to the limit when engineers carry "
+            "significant open actions or active growth areas.\n\n"
+            f"{performance_context}\n\n"
+        )
+        if performance_context
+        else ""
+    )
+
     base = (
         "You are a Senior Scrum Master with expertise in sprint planning and capacity allocation.\n\n"
         "## Project Context\n\n"
@@ -189,6 +205,7 @@ def get_sprint_planner_prompt(
         "## Stories to Allocate\n\n"
         f"{stories_block}\n\n"
         + ceremony_section
+        + performance_section
         + (team_calibration + "\n" if team_calibration else "")
         + "## Task\n\n"
         "Allocate ALL stories above into sprints. Return a JSON array matching this exact schema:\n\n"

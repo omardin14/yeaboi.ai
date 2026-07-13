@@ -1,0 +1,113 @@
+"""Unit tests for Performance rendering, export, and delivery."""
+
+import pytest
+from rich.console import Group
+
+from scrum_agent.agent.state import OneOnOnePrep, OneOnOneRecord, SixMonthReview
+from scrum_agent.performance import delivery, export, render
+
+
+class TestRender:
+    def test_prep_lines_and_rich(self):
+        prep = OneOnOnePrep(
+            engineer="Ada",
+            date="2026-07-12",
+            talking_points=("tp",),
+            feedback=("fb",),
+            carried_action_items=("carry",),
+            warnings=("w",),
+        )
+        lines = render.format_prep_lines(prep)
+        text = "\n".join(lines)
+        assert "Ada" in text and "tp" in text and "carry" in text and "w" in text
+        assert isinstance(render.format_prep_rich(prep), Group)
+
+    def test_completion_lines_and_rich(self):
+        rec = OneOnOneRecord(engineer="Ada", date="2026-07-12", email_summary="Hi Ada", action_items=("do x",))
+        text = "\n".join(render.format_completion_lines(rec))
+        assert "Hi Ada" in text and "do x" in text
+        assert isinstance(render.format_completion_rich(rec), Group)
+
+    def test_review_lines_and_rich(self):
+        rev = SixMonthReview(engineer="Ada", strengths=("s",), overall="great", period_start="a", period_end="b")
+        text = "\n".join(render.format_review_lines(rev))
+        assert "great" in text and "s" in text
+        assert isinstance(render.format_review_rich(rev), Group)
+
+
+class TestExport:
+    @pytest.fixture(autouse=True)
+    def _tmp_export(self, monkeypatch, tmp_path):
+        def _dir(engineer_key):
+            d = tmp_path / engineer_key
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+        monkeypatch.setattr("scrum_agent.paths.get_performance_export_dir", _dir)
+
+    def test_export_prep_writes_md_and_html(self, tmp_path):
+        prep = OneOnOnePrep(engineer="Ada", date="2026-07-12", talking_points=("point",))
+        paths = export.export_artifact(prep, engineer="Ada", kind="prep")
+        assert paths["markdown"].exists() and paths["html"].exists()
+        assert "point" in paths["markdown"].read_text()
+        assert "<html" in paths["html"].read_text().lower()
+
+    def test_export_review_writes(self, tmp_path):
+        rev = SixMonthReview(engineer="Ada", period_end="2026-07-12", strengths=("deep",))
+        paths = export.export_artifact(rev, engineer="Ada", kind="review")
+        assert "deep" in paths["markdown"].read_text()
+
+    def test_unknown_kind_raises(self):
+        with pytest.raises(ValueError):
+            export.export_artifact(object(), engineer="Ada", kind="bogus")
+
+    def test_html_escapes_engineer_name(self):
+        rec = OneOnOneRecord(engineer="<script>", date="2026-07-12", email_summary="hi")
+        html = export.build_completion_html(rec)
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+
+class TestDelivery:
+    def test_skips_when_smtp_unconfigured(self, monkeypatch):
+        monkeypatch.setattr("scrum_agent.config.get_smtp_host", lambda: "")
+        monkeypatch.setattr("scrum_agent.config.get_standup_email_recipients", lambda: [])
+        rec = OneOnOneRecord(engineer="Ada", date="2026-07-12", email_summary="hi")
+        assert delivery.send_completion_email(rec) is False
+
+    def test_sends_via_smtp(self, monkeypatch):
+        sent = {}
+
+        class _FakeSMTP:
+            def __init__(self, host, port, timeout=20):
+                sent["host"] = host
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def ehlo(self):
+                pass
+
+            def has_extn(self, x):
+                return False
+
+            def login(self, u, p):
+                sent["login"] = u
+
+            def send_message(self, msg):
+                sent["to"] = msg["To"]
+
+        monkeypatch.setattr("scrum_agent.config.get_smtp_host", lambda: "smtp.example.com")
+        monkeypatch.setattr("scrum_agent.config.get_smtp_port", lambda: 587)
+        monkeypatch.setattr("scrum_agent.config.get_smtp_user", lambda: "me@example.com")
+        monkeypatch.setattr("scrum_agent.config.get_smtp_password", lambda: "pw")
+        monkeypatch.setattr("scrum_agent.config.get_smtp_sender", lambda: "me@example.com")
+        monkeypatch.setattr("scrum_agent.config.get_standup_email_recipients", lambda: ["boss@example.com"])
+        monkeypatch.setattr("smtplib.SMTP", _FakeSMTP)
+
+        rec = OneOnOneRecord(engineer="Ada", date="2026-07-12", email_subject="1:1", email_summary="hi")
+        assert delivery.send_completion_email(rec) is True
+        assert sent["to"] == "boss@example.com"

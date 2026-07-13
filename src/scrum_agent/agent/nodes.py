@@ -5331,6 +5331,22 @@ def compute_prompt_quality(qs: QuestionnaireState, *, has_user_context: bool = F
     )
 
 
+def _gather_performance_summary() -> str:
+    """Return the team's Performance signal as a markdown block (empty if unused).
+
+    Thin, graceful wrapper around performance.gather_performance_context so the
+    analyzer / planner stay decoupled from the Performance package internals and a
+    missing DB or unused mode never affects a plan. See README: "Performance Mode".
+    """
+    try:
+        from scrum_agent.performance.context import gather_performance_context
+
+        return gather_performance_context().summary_md
+    except Exception:  # noqa: BLE001 — performance context is best-effort
+        logger.debug("_gather_performance_summary failed (non-fatal)", exc_info=True)
+        return ""
+
+
 def project_analyzer(state: ScrumState) -> dict:
     """LangGraph node: synthesize intake answers into a structured ProjectAnalysis.
 
@@ -5434,6 +5450,12 @@ def project_analyzer(state: ScrumState) -> dict:
     # See README: "Session Management" — SQLite persistence
     ceremony = gather_ceremony_context()
 
+    # Gather per-engineer Performance signal (open 1:1 action items + review focus
+    # areas) so the analysis is *person-aware* — e.g. flags an engineer's growth
+    # area as a staffing consideration. Graceful: empty when Performance mode is
+    # unused. See README: "Performance Mode".
+    performance = _gather_performance_summary()
+
     # Build the formatted answers block for the prompt
     answers_block = _build_answers_block(questionnaire)
     prompt = get_analyzer_prompt(
@@ -5446,6 +5468,7 @@ def project_analyzer(state: ScrumState) -> dict:
         user_context=user_context,
         team_profile_summary=team_profile_summary,
         ceremony_history=ceremony.summary_md,
+        performance_context=performance,
         review_feedback=review_feedback if review_mode else None,
         review_mode=review_mode,
         previous_output=previous_output,
@@ -5542,6 +5565,8 @@ def project_analyzer(state: ScrumState) -> dict:
         # (badged [Retro]); sprint_planner reuses the ceremony summary for load caution.
         "_ceremony_action_items": ceremony.action_items,
         "_ceremony_history": ceremony.summary_md,
+        # Per-engineer Performance signal reused by sprint_planner (capacity/assignment).
+        "_performance_context": performance,
         "messages": [AIMessage(content=display)],
         # Context source diagnostics — tells the REPL which external sources
         # were used, skipped, or failed so the user gets transparency.
@@ -8175,6 +8200,7 @@ def sprint_planner(state: ScrumState) -> dict:
         team_override_from=original_team_size if state.get("_capacity_team_override", 0) > 0 else None,
         team_calibration=team_calibration_text,
         ceremony_history=state.get("_ceremony_history", "") or "",
+        performance_context=state.get("_performance_context", "") or _gather_performance_summary(),
         review_feedback=review_feedback if review_mode else None,
         review_mode=review_mode,
         previous_output=previous_output,
