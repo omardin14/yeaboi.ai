@@ -872,6 +872,28 @@ Standup runs are logged to `~/.scrum-agent/logs/standup/`, exported to `~/.scrum
 
 ---
 
+## 📊 Reporting Mode
+
+Reporting turns the work your team actually **delivered** into a business-friendly update you can hand straight to stakeholders — no ticket jargon, just outcomes. Open the **Reporting** card, pick a period, and press **Generate Report**.
+
+**Three periods:**
+
+- **Last sprint** — the most recent sprint's completed work.
+- **Last month (~2 sprints)** — the last ~4 weeks across roughly two sprints.
+- **Whole quarter** — a full calendar quarter (Q1 starts January). The app **auto-detects the current quarter** (e.g. `Q3 2026`) and, when you generate, shows a **sprint checklist**: the sprints that fall in the quarter are pre-ticked, and you can ↑/↓ + **Space** to add or remove others (it lists a wider range than the ~6 sprints of a quarter so you can shape it exactly). Press **Enter** to report over the date span of the sprints you kept.
+
+**What it does:** it pulls the tickets marked **Done / Closed** in that window from Jira or Azure DevOps (the same board connection the Standup uses), computes headline metrics (items delivered, contributors, per-source counts), then makes a single LLM **design pass** that writes an executive summary, groups the work into outcome **themes**, calls out **highlights**, and picks a tasteful **emoji** for each section. If the LLM is unavailable it falls back to a plain, deterministic summary — it never fails.
+
+**Three outputs**, auto-saved to `~/.scrum-agent/exports/reporting/<project>/` on every run (and re-writable with the **Export** button):
+
+- **Markdown** (`.md`) — drop into a wiki or PR.
+- **HTML** (`.html`) — a self-contained styled report.
+- **Slide deck** (`-slides.html`) — a self-contained, offline **presentation**: open it in any browser and use ← / → / Space to present. Press **T** to cycle 4 built-in themes (midnight / aurora / sunset / mono); the **Theme** button in the TUI sets which palette is baked into the exported deck. Everything is inline (no CDN, no network) and every piece of ticket text is rendered inertly, so it's safe to share.
+
+Reporting runs are logged to `~/.scrum-agent/logs/reporting/` and persisted to the `reporting_history` table.
+
+---
+
 ## 🔬 Team Analysis Mode
 
 Team Analysis connects to your Jira or Azure DevOps board and produces a comprehensive analysis of your team's real delivery patterns. The analysis becomes a reusable **profile** that calibrates future planning sessions.

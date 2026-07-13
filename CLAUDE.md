@@ -211,6 +211,15 @@ src/scrum_agent/
     delivery.py         — 1:1 summary email via SMTP (reuses standup config.get_smtp_*)
     store.py            — PerformanceStore (one_on_ones/reviews/notes tables, schema v8)
     references/         — bundled default competency_framework.md (overridable via env)
+  reporting/            — Reporting mode (business-friendly delivery report: last sprint / last month)
+    __init__.py         — public API (run_delivery_report, ReportingStore, export_report, build_presentation_html)
+    activity.py         — gather_delivered_work(): team-wide completed (Done/Closed) tickets over the period
+    sprints.py          — quarter_bounds() + list_sprints() (tracker→plan fallback) for the quarter multi-select
+    engine.py           — run_delivery_report() pipeline (gather → one LLM "design" call → parse → fallback)
+    render.py           — DeliveryReport → Rich + plaintext (TUI detail view)
+    export.py           — DeliveryReport → Markdown + HTML + slide deck (paths.get_reporting_export_dir)
+    presentation.py     — build_presentation_html(): self-contained keyboard-nav slide deck (E501-exempt asset)
+    store.py            — ReportingStore (reporting_history table, schema v9)
   tools/
     __init__.py         — get_tools() factory (lazy imports all tool modules)
     github.py           — GitHub repo/file/issues/readme (4 tools) + recent-activity helpers
@@ -389,7 +398,7 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 
 ### Schema versioning
 
-- `CURRENT_SCHEMA_VERSION = 8` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup config/history/updates, v7=retro history, v8=performance 1:1s/reviews/notes)
+- `CURRENT_SCHEMA_VERSION = 9` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup config/history/updates, v7=retro history, v8=performance 1:1s/reviews/notes, v9=reporting history)
 - On startup: if stored version > current → `schema_mismatch = True` (warn user); if stored version < current → run migrations
 - Session IDs: internal `new-<8hex>-<YYYY-MM-DD>`, display `<project-slug>-<YYYY-MM-DD>`
 
@@ -554,6 +563,22 @@ The `src/scrum_agent/performance/` package helps a team lead manage each enginee
 **Persistence**: `store.py` defines `_PERFORMANCE_SCHEMA` (schema **v8** in `sessions.py`) with `performance_one_on_ones` / `performance_reviews` / `performance_notes`. `EngineerRef`/`EngineerActivity`/`OneOnOnePrep`/`OneOnOneRecord`/`SixMonthReview` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat). Readable output (Markdown + HTML) auto-saves to `~/.scrum-agent/exports/performance/<engineer>/` every run and via the Export button.
 
 **TUI**: the coral **Performance** card → `_build_performance_screen` + `_run_performance_page` in `ui/mode_select/`. Two views: a **roster** (↑/↓ select an engineer) with **1:1 Prep / 1:1 Complete / 6mo Review / Notes / Export / Back** actions, and a **detail** view showing the produced artifact (scroll + Export/Back). Logs go to `~/.scrum-agent/logs/performance/`.
+
+## Reporting Mode
+
+The `src/scrum_agent/reporting/` package produces a **business-friendly summary of delivered work** to relay back to stakeholders — for either **the last sprint** or **the last ~month (~2 sprints)**. It follows the **standup/retro/performance blueprint** exactly: a self-contained package (`engine` + `store` + `render`/`export` + `presentation`), a frozen-dataclass artifact in `agent/state.py`, a SQLite schema bumped in `sessions.py`, and a TUI page via the shared component system.
+
+**Design choice — standalone pipeline, not a LangGraph node.** `engine.run_delivery_report(period)` is one deterministic gather step + a single `get_llm()`/`track_usage()` "design" call following the node **parse → fallback → format** convention. An LLM auth/billing error is *never* re-raised — it folds into `warnings` + a deterministic fallback report (counts + item list + generic emojis), so the page always renders.
+
+**Data source — trackers.** `activity.gather_delivered_work(period)` pulls team-wide recent activity via the same helpers the standup uses (`jira_recent_activity` / `azdevops_recent_activity`) + `standup/sprint_context.gather` for sprint dates, then keeps only tickets whose status means *done* (`_COMPLETED_STATUSES`: done/closed/resolved/released/completed/…). Look-back = one sprint length for "last sprint", `max(28, 2×sprint_weeks×7)` days for "last month". Graceful `[]` + a warning when no tracker is configured.
+
+**Whole-quarter period.** A third period reports on a **calendar quarter** (Q1 starts January). `sprints.quarter_bounds(today)` detects the current quarter (`Q3 2026`); `sprints.list_sprints()` returns real sprints with date ranges — **live tracker first** (new `jira_list_sprints` / `azdevops_list_sprints` helpers reusing the board/iteration discovery) then **plan-derived** dates (`sprint_start_date` + `sprint_length_weeks`×idx) as a fallback. The TUI shows a **sprint multi-select** (`sprint_select` view): ~12 sprints, the quarter's overlapping ones pre-checked (`mark_in_quarter`), Space toggles, Enter generates. The checked sprints' date span becomes the window: `run_delivery_report(PERIOD_QUARTER, window_start=min start, window_end=min(max end, today), sprint_names=…, period_label_override="Q3 2026")` (`(custom)` suffix when the selection differs from the detected set); `gather_delivered_work(days_override=…)` reports over that span. No tracker/plan sprints → the multi-select is skipped and it reports over the calendar-quarter dates. A truncation notice is added since the activity helpers cap at ~100 rows/source.
+
+**Hybrid presentation** (the user's chosen approach): the LLM design call supplies the *content* — the executive narrative, the outcome **themes**, the **highlights**, and one **emoji per section slot** (parsed by `engine._parse_themes` / `_parse_emoji`, with a deterministic `_DEFAULT_EMOJI` fallback). `presentation.build_presentation_html()` only *renders* it into a **self-contained, offline HTML slide deck** (inline `_CSS`/`_JS` module strings filled by `str.replace`, same embedded-asset pattern as `retro/page.py`, E501-exempt in pyproject): Title → Executive summary → Metrics → per-Theme → Highlights → Thank-you, with keyboard nav (←/→/Space), a progress bar, and 4 `[data-theme]` palettes cycled with **T**. Slide data is injected as a JSON blob and rendered via `textContent`; `_json_for_script()` escapes `<`/`>`/`&` to `\uXXXX` so an untrusted ticket title can't break out of the `<script>` (defense in depth).
+
+**Persistence & export**: `store.py` defines `_REPORTING_SCHEMA` (schema **v9** in `sessions.py`) with one `reporting_history` table. `DeliveryReport`/`DeliveredItem` are frozen dataclasses in `agent/state.py` (all fields defaulted; `themes`/`metrics`/`emoji_theme` are tuple-of-pairs so the whole artifact stays serializable). `export.export_report()` auto-saves **Markdown + HTML + slide deck** to `~/.scrum-agent/exports/reporting/<project>/` every run and via the Export button; the HTML report reuses `html_exporter._CSS`, all tracker text `html.escape`-d.
+
+**TUI**: the indigo **Reporting** card → `_build_reporting_screen` + `_run_reporting_page` in `ui/mode_select/`. Three views: a **picker** (↑/↓ choose Last sprint / Last month / Whole quarter) with **Generate Report / Theme / Back**; a **sprint_select** checkbox list (↑/↓ move, Space toggle, Enter generate) shown when generating a quarter; and a **detail** view of the generated report (scroll + **Export / Theme / Back**; Theme cycles the slide-deck palette). Targets the most recent session for sprint length / project name. Logs go to `~/.scrum-agent/logs/reporting/`.
 
 ## Deployment (AWS Lightsail)
 

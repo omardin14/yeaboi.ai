@@ -954,3 +954,62 @@ def azdevops_active_sprint_progress(project: str = "") -> dict:
     except Exception as e:
         logger.warning("azdevops_active_sprint_progress unexpected error: %s", e)
         return {}
+
+
+def azdevops_list_sprints(project: str = "", limit: int = 30) -> list[dict]:
+    """Return the team's iterations (sprints) with date ranges.
+
+    Each item: {name, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), state}. Reuses
+    the same team-iteration read as azdevops_active_sprint_progress. Returns [] when
+    unconfigured or on failure. Used by Reporting mode's quarter view to let the user
+    pick which sprints make up the quarter.
+    """
+    project = project or get_azure_devops_project() or ""
+    logger.info("azdevops_list_sprints: project=%r limit=%d", project, limit)
+    if not project:
+        return []
+    try:
+        from datetime import datetime as _dt
+
+        from azure.devops.v7_1.work.models import TeamContext
+
+        _wit_client, work_client = _make_azdo_clients()
+        team = get_azure_devops_team() or f"{project} Team"
+        team_context = TeamContext(project=project, team=team)
+
+        all_iterations = work_client.get_team_iterations(team_context) or []
+        now = _dt.now(UTC)
+        out: list[dict] = []
+        for it in all_iterations:
+            attrs = getattr(it, "attributes", None)
+            start = getattr(attrs, "start_date", None)
+            finish = getattr(attrs, "finish_date", None)
+            if not (start and finish):
+                continue
+            if start <= now <= finish:
+                state = "active"
+            elif finish < now:
+                state = "closed"
+            else:
+                state = "future"
+            out.append(
+                {
+                    "name": getattr(it, "name", "") or "",
+                    "start_date": start.strftime("%Y-%m-%d"),
+                    "end_date": finish.strftime("%Y-%m-%d"),
+                    "state": state,
+                }
+            )
+        out.sort(key=lambda s: s["start_date"] or "0000-00-00")
+        logger.info("azdevops_list_sprints: %d iteration(s)", len(out))
+        return out[-limit:] if limit and len(out) > limit else out
+    except ValueError as e:
+        logger.warning("azdevops_list_sprints skipped: %s", e)
+        return []
+    except AzureDevOpsServiceError as e:
+        _raise_if_azdo_auth(e)
+        logger.warning("azdevops_list_sprints failed: %s", _azdo_error_msg(e))
+        return []
+    except Exception as e:
+        logger.warning("azdevops_list_sprints unexpected error: %s", e)
+        return []

@@ -785,3 +785,51 @@ def jira_active_sprint_progress(project_key: str = "") -> dict:
     except Exception as e:
         logger.warning("jira_active_sprint_progress unexpected error: %s", e)
         return {}
+
+
+def jira_list_sprints(project_key: str = "", limit: int = 30) -> list[dict]:
+    """Return the board's sprints (closed + active + future) with date ranges.
+
+    Each item: {name, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), state}. Reuses
+    the same board discovery as jira_active_sprint_progress. Returns [] when Jira is
+    unconfigured or the query fails (logged). Used by Reporting mode's quarter view
+    to let the user pick which sprints make up the quarter.
+    """
+    logger.info("jira_list_sprints: project_key=%r limit=%d", project_key, limit)
+    jira = _make_jira_client()
+    if jira is None:
+        return []
+    key = project_key.strip() or (get_jira_project_key() or "")
+    if not key:
+        return []
+    try:
+        boards = jira.boards(projectKeyOrID=key)
+        if not boards:
+            return []
+        board_id = boards[0].id
+        seen: dict[str, dict] = {}
+        for state in ("closed", "active", "future"):
+            try:
+                board_sprints = jira.sprints(board_id, state=state)
+            except JIRAError as e:
+                _raise_if_auth_error(e, "jira")
+                logger.warning("jira_list_sprints: %s sprints failed: %s", state, _jira_error_msg(e))
+                continue
+            for sp in board_sprints or []:
+                name = getattr(sp, "name", "") or ""
+                if not name or name in seen:
+                    continue
+                start = (getattr(sp, "startDate", None) or "")[:10]
+                end = (getattr(sp, "endDate", None) or getattr(sp, "completeDate", None) or "")[:10]
+                seen[name] = {"name": name, "start_date": start, "end_date": end, "state": state}
+        # Sort by start date (undated last), newest last so the caller can window the tail.
+        sprints = sorted(seen.values(), key=lambda s: s["start_date"] or "0000-00-00")
+        logger.info("jira_list_sprints: %d sprint(s)", len(sprints))
+        return sprints[-limit:] if limit and len(sprints) > limit else sprints
+    except JIRAError as e:
+        _raise_if_auth_error(e, "jira")
+        logger.warning("jira_list_sprints failed: %s", _jira_error_msg(e))
+        return []
+    except Exception as e:
+        logger.warning("jira_list_sprints unexpected error: %s", e)
+        return []

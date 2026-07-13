@@ -898,3 +898,53 @@ class TestStandupReport:
         assert restored.date == "2026-07-10"
         assert restored.confidence_pct == 0
         assert restored.member_updates == ()
+
+
+class TestDeliveryReport:
+    """The Reporting mode's DeliveryReport frozen dataclass + serialization."""
+
+    def test_frozen(self):
+        from scrum_agent.agent.state import DeliveryReport
+
+        r = DeliveryReport(period_label="Last sprint")
+        with pytest.raises(FrozenInstanceError):
+            r.period_label = "Last month"  # type: ignore[misc]
+
+    def test_round_trip_via_store_helpers(self):
+        """DeliveryReport survives serialize -> JSON -> reconstruct with types intact."""
+        from scrum_agent.agent.state import DeliveredItem, DeliveryReport
+        from scrum_agent.reporting.store import _dict_to_report, _report_to_json
+
+        original = DeliveryReport(
+            period_label="Last month (~2 sprints)",
+            period_start="2026-06-15",
+            period_end="2026-07-13",
+            project_name="Acme",
+            sprint_names=("Sprint 11", "Sprint 12"),
+            headline="Strong delivery.",
+            executive_summary="We shipped a lot.",
+            themes=(("Security", ("SSO", "MFA")), ("Performance", ("Faster checkout",))),
+            highlights=("SSO live",),
+            metrics=(("Items delivered", "12"), ("Contributors", "4")),
+            delivered_items=(DeliveredItem(key="A-1", title="t", status="Done", source="jira", assignee="Ada"),),
+            emoji_theme=(("headline", "🚀"), ("themes", "🧩")),
+            warnings=("w1",),
+            generated_at="2026-07-13",
+        )
+        restored = _dict_to_report(json.loads(_report_to_json(original)))
+        assert restored == original
+        # nested tuples must be reconstructed as tuples, not lists
+        assert isinstance(restored.themes, tuple)
+        assert isinstance(restored.themes[0], tuple)
+        assert isinstance(restored.themes[0][1], tuple)
+        assert isinstance(restored.metrics[0], tuple)
+        assert isinstance(restored.delivered_items[0], DeliveredItem)
+
+    def test_reconstruct_backfills_missing_fields(self):
+        from scrum_agent.reporting.store import _dict_to_report
+
+        restored = _dict_to_report({"period_label": "Last sprint"})
+        assert restored.period_label == "Last sprint"
+        assert restored.themes == ()
+        assert restored.delivered_items == ()
+        assert restored.metrics == ()

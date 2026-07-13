@@ -63,6 +63,7 @@ PLANNING_EXPORTS_DIR = EXPORTS_DIR / "planning"
 STANDUP_EXPORTS_DIR = EXPORTS_DIR / "standup"
 RETRO_EXPORTS_DIR = EXPORTS_DIR / "retro"
 PERFORMANCE_EXPORTS_DIR = EXPORTS_DIR / "performance"
+REPORTING_EXPORTS_DIR = EXPORTS_DIR / "reporting"
 
 # ---------------------------------------------------------------------------
 # Logs
@@ -73,6 +74,7 @@ TUI_LOGS_DIR = LOGS_DIR / "tui"
 STANDUP_LOGS_DIR = LOGS_DIR / "standup"
 RETRO_LOGS_DIR = LOGS_DIR / "retro"
 PERFORMANCE_LOGS_DIR = LOGS_DIR / "performance"
+REPORTING_LOGS_DIR = LOGS_DIR / "reporting"
 ANALYSIS_LOGS_DIR = LOGS_DIR / "analysis"
 PLANNING_LOGS_DIR = LOGS_DIR / "planning"
 
@@ -182,6 +184,13 @@ def get_performance_export_dir(engineer_key: str) -> Path:
     return d
 
 
+def get_reporting_export_dir(project_key: str) -> Path:
+    """Return the Reporting export directory for a project, creating it if needed."""
+    d = REPORTING_EXPORTS_DIR / (project_key.lower() or "report")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_tui_log_path() -> Path:
     """Return the main TUI log path."""
     TUI_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -216,6 +225,12 @@ def get_performance_log_dir() -> Path:
     """Return the Performance logs directory, creating it if needed."""
     PERFORMANCE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return PERFORMANCE_LOGS_DIR
+
+
+def get_reporting_log_dir() -> Path:
+    """Return the Reporting logs directory, creating it if needed."""
+    REPORTING_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return REPORTING_LOGS_DIR
 
 
 def get_bin_dir() -> Path:

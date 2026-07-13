@@ -18,6 +18,8 @@ from scrum_agent.agent.nodes import (
     task_decomposer,
 )
 from scrum_agent.agent.state import (
+    DeliveredItem,
+    DeliveryReport,
     Discipline,
     EngineerActivity,
     EngineerRef,
@@ -37,6 +39,8 @@ from scrum_agent.prompts.intake import AnswerSource
 
 __all__ = [
     "AnswerSource",
+    "DeliveredItem",
+    "DeliveryReport",
     "Discipline",
     "EngineerActivity",
     "EngineerRef",
