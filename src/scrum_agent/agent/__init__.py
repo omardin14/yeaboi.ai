@@ -19,12 +19,18 @@ from scrum_agent.agent.nodes import (
 )
 from scrum_agent.agent.state import (
     Discipline,
+    EngineerActivity,
+    EngineerRef,
+    EngineerStory,
     MemberUpdate,
+    OneOnOnePrep,
+    OneOnOneRecord,
     ProjectAnalysis,
     PromptQualityRating,
     RetroCard,
     RetroReport,
     ScrumState,
+    SixMonthReview,
     StandupReport,
 )
 from scrum_agent.prompts.intake import AnswerSource
@@ -32,12 +38,18 @@ from scrum_agent.prompts.intake import AnswerSource
 __all__ = [
     "AnswerSource",
     "Discipline",
+    "EngineerActivity",
+    "EngineerRef",
+    "EngineerStory",
     "MemberUpdate",
+    "OneOnOnePrep",
+    "OneOnOneRecord",
     "ProjectAnalysis",
     "PromptQualityRating",
     "RetroCard",
     "RetroReport",
     "ScrumState",
+    "SixMonthReview",
     "StandupReport",
     "call_model",
     "create_graph",

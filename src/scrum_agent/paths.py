@@ -62,6 +62,7 @@ ANALYSIS_EXPORTS_DIR = EXPORTS_DIR / "analysis"
 PLANNING_EXPORTS_DIR = EXPORTS_DIR / "planning"
 STANDUP_EXPORTS_DIR = EXPORTS_DIR / "standup"
 RETRO_EXPORTS_DIR = EXPORTS_DIR / "retro"
+PERFORMANCE_EXPORTS_DIR = EXPORTS_DIR / "performance"
 
 # ---------------------------------------------------------------------------
 # Logs
@@ -71,6 +72,7 @@ LOGS_DIR = ROOT_DIR / "logs"
 TUI_LOGS_DIR = LOGS_DIR / "tui"
 STANDUP_LOGS_DIR = LOGS_DIR / "standup"
 RETRO_LOGS_DIR = LOGS_DIR / "retro"
+PERFORMANCE_LOGS_DIR = LOGS_DIR / "performance"
 ANALYSIS_LOGS_DIR = LOGS_DIR / "analysis"
 PLANNING_LOGS_DIR = LOGS_DIR / "planning"
 
@@ -168,6 +170,18 @@ def get_retro_export_dir(project_key: str) -> Path:
     return d
 
 
+def get_performance_export_dir(engineer_key: str) -> Path:
+    """Return the Performance export directory for an engineer, creating it if needed.
+
+    Exports are per-engineer (1:1 prep/completion summaries, 6-month reviews) so a
+    lead can find one person's documents together — mirrors the per-project layout
+    the other modes use.
+    """
+    d = PERFORMANCE_EXPORTS_DIR / (engineer_key.lower() or "engineer")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_tui_log_path() -> Path:
     """Return the main TUI log path."""
     TUI_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -196,6 +210,12 @@ def get_retro_log_dir() -> Path:
     """Return the Retro logs directory, creating it if needed."""
     RETRO_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return RETRO_LOGS_DIR
+
+
+def get_performance_log_dir() -> Path:
+    """Return the Performance logs directory, creating it if needed."""
+    PERFORMANCE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return PERFORMANCE_LOGS_DIR
 
 
 def get_bin_dir() -> Path:

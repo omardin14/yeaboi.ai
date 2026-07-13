@@ -200,6 +200,17 @@ src/scrum_agent/
     tunnel.py           — optional Cloudflare quick tunnel (off-network joining); auto-downloads cloudflared, zero-setup
     export.py           — RetroReport → Markdown + self-contained HTML (Export button)
     store.py            — RetroStore (retro_history table, schema v7)
+  performance/          — Performance mode (per-engineer 1:1 prep/completion + 6-month review)
+    __init__.py         — public API (run_one_on_one_prep, complete_one_on_one, run_six_month_review, PerformanceStore, fetch_roster)
+    roster.py           — fetch_roster(): engineer list from Jira/AzDO assignees (graceful [])
+    activity.py         — gather_engineer_activity(): current+prior-sprint tickets for one engineer
+    engine.py           — the 3 workflow pipelines (parse → fallback → format; one LLM call each)
+    context.py          — gather_performance_context(): per-engineer signal → Planning/Analysis
+    render.py           — Prep/Completion/Review → Rich + plaintext
+    export.py           — Prep/Completion/Review → Markdown + HTML (paths.get_performance_export_dir)
+    delivery.py         — 1:1 summary email via SMTP (reuses standup config.get_smtp_*)
+    store.py            — PerformanceStore (one_on_ones/reviews/notes tables, schema v8)
+    references/         — bundled default competency_framework.md (overridable via env)
   tools/
     __init__.py         — get_tools() factory (lazy imports all tool modules)
     github.py           — GitHub repo/file/issues/readme (4 tools) + recent-activity helpers
@@ -378,7 +389,7 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 
 ### Schema versioning
 
-- `CURRENT_SCHEMA_VERSION = 6` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup config/history/updates)
+- `CURRENT_SCHEMA_VERSION = 8` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup config/history/updates, v7=retro history, v8=performance 1:1s/reviews/notes)
 - On startup: if stored version > current → `schema_mismatch = True` (warn user); if stored version < current → run migrations
 - Session IDs: internal `new-<8hex>-<YYYY-MM-DD>`, display `<project-slug>-<YYYY-MM-DD>`
 
@@ -423,6 +434,7 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - `STANDUP_SMTP_HOST` / `STANDUP_SMTP_PORT` / `STANDUP_SMTP_USER` / `STANDUP_SMTP_PASSWORD` / `STANDUP_SMTP_SENDER` / `STANDUP_EMAIL_RECIPIENTS` — optional, SMTP email delivery for Daily Standup
 - `RETRO_PORT` — optional, base port for the Retro LAN collaboration server (default 5173; walks upward if busy)
 - `CLOUDFLARED_PATH` — optional, path to an existing `cloudflared` binary for Retro remote tunnels (else the app auto-downloads one to `~/.scrum-agent/bin/`)
+- `PERFORMANCE_FRAMEWORK_PATH` — optional, path to a custom competency framework / review template for Performance mode's 6-month review (else the bundled `performance/references/competency_framework.md` default is used). 1:1 summary emails reuse the standup `STANDUP_SMTP_*` / `STANDUP_EMAIL_RECIPIENTS` settings.
 - `SESSION_PRUNE_DAYS` — auto-prune sessions older than N days (default: 30, 0 = disabled)
 - `LOG_LEVEL` — file logger level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
 - `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` — optional, enables LangSmith tracing
@@ -523,6 +535,25 @@ The `src/scrum_agent/retro/` package implements a **collaborative** sprint retro
 **Remote joining — Cloudflare tunnel** (`tunnel.py`): the LAN server only reaches same-network teammates. The **Share Remotely** button starts a **Cloudflare quick tunnel** (`cloudflared tunnel --url http://localhost:<port>`) exposing a public `https://…trycloudflare.com` URL that forwards to the token-gated server. It's genuinely **zero-setup**: no Cloudflare account/token (unlike ngrok, which forces a per-user authtoken), so the app owns the whole flow — `ensure_cloudflared()` downloads the platform binary on first use to `~/.scrum-agent/bin/` (cached; honours a `cloudflared` already on PATH or `CLOUDFLARED_PATH`). Setup runs on a **worker thread** (download + handshake are slow) while the frame-timed loop shows progress; the button toggles **Stop Sharing**. The tunnel is torn down in the page's `finally`. Everything is best-effort — a failed download/tunnel never raises, the retro stays LAN-only. The public URL is internet-reachable while up (token-gated, HTTPS); the browser page uses relative fetch URLs so it works identically over LAN or tunnel.
 
 **TUI**: the teal **Retro** card → `_build_retro_screen` + `_run_retro_page` in `ui/mode_select/`, with **Generate Action Items / Share Remotely / Export / Close** actions. Targets the most recent session; logs go to `~/.scrum-agent/logs/retro/`. Configure the server port with `RETRO_PORT` (default 5173, walks upward if busy).
+
+## Performance Mode
+
+The `src/scrum_agent/performance/` package helps a team lead manage each engineer with three connected, LLM-backed workflows. It follows the **standup/retro blueprint** exactly: a self-contained package (`engine` + `store` + `render`/`export`), frozen-dataclass artifacts in `agent/state.py`, a SQLite schema bumped in `sessions.py`, a TUI page via the shared component system, and a `gather_performance_context()` reader that feeds Planning & Analysis.
+
+**Design choice — standalone pipelines, not LangGraph nodes.** Each workflow (`engine.run_one_on_one_prep`, `complete_one_on_one`, `run_six_month_review`) is one deterministic gather step + a single `get_llm()`/`track_usage()` call following the node **parse → fallback → format** convention. An LLM auth/billing error is *never* re-raised — it becomes a `warnings` entry + a deterministic fallback artifact, so the page always renders.
+
+**Roster from Jira/AzDO** (`roster.py`): `fetch_roster()` derives the engineer list from the *assignees who actually did work* (reuses `jira_recent_activity`/`azdevops_recent_activity`), not the plan's team-size number. Graceful `[]` when no tracker is configured. `activity.py:gather_engineer_activity()` filters recent activity to one engineer and splits it into current/previous sprint by the live sprint start date (reuses standup `sprint_context`).
+
+**Three workflows:**
+- **1:1 Prep** — from the engineer's current+prior-sprint tickets and the open action items of their last 1:1, produces `OneOnOnePrep` (talking points, feedback, goals, gaps, improvements).
+- **1:1 Completion** — the lead provides a transcript (file import *or* inline paste); produces `OneOnOneRecord` (email summary + tracked `action_items`), emails it via SMTP (reuses standup `config.get_smtp_*`), and persists the actions so the **next** prep carries them (the Prep↔Completion loop closes via `PerformanceStore.get_open_action_items`).
+- **6-Month Review** — synthesises past 1:1s + Jira/AzDO delivery history + ceremony history + lead notes + a competency framework into `SixMonthReview`. The framework is the bundled `performance/references/competency_framework.md` by default, overridable with a lead's own template via `PERFORMANCE_FRAMEWORK_PATH`.
+
+**Feeds Planning & Analysis** (`context.py`): `gather_performance_context()` mirrors `agent/ceremony_history.py` — team-wide, graceful, distils per-engineer open 1:1 actions + review growth areas into a markdown block injected into the analyzer (`performance_context` param) and sprint planner (via `ScrumState._performance_context`). Only already-summarised signals cross the boundary — never raw transcripts.
+
+**Persistence**: `store.py` defines `_PERFORMANCE_SCHEMA` (schema **v8** in `sessions.py`) with `performance_one_on_ones` / `performance_reviews` / `performance_notes`. `EngineerRef`/`EngineerActivity`/`OneOnOnePrep`/`OneOnOneRecord`/`SixMonthReview` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat). Readable output (Markdown + HTML) auto-saves to `~/.scrum-agent/exports/performance/<engineer>/` every run and via the Export button.
+
+**TUI**: the coral **Performance** card → `_build_performance_screen` + `_run_performance_page` in `ui/mode_select/`. Two views: a **roster** (↑/↓ select an engineer) with **1:1 Prep / 1:1 Complete / 6mo Review / Notes / Export / Back** actions, and a **detail** view showing the produced artifact (scroll + Export/Back). Logs go to `~/.scrum-agent/logs/performance/`.
 
 ## Deployment (AWS Lightsail)
 

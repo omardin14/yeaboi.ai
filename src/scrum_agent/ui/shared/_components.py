@@ -52,6 +52,7 @@ USAGE_THEME = Theme(accent="rgb(220,160,60)", accent_bright="rgb(255,200,80)")
 SETTINGS_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
 STANDUP_THEME = Theme(accent="rgb(200,100,180)", accent_bright="rgb(255,150,220)")
 RETRO_THEME = Theme(accent="rgb(80,190,190)", accent_bright="rgb(120,230,230)")
+PERFORMANCE_THEME = Theme(accent="rgb(220,110,90)", accent_bright="rgb(255,150,120)")
 
 # Button color scheme: (accent_border, accent_label, grey_border, grey_label)
 _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
@@ -70,6 +71,11 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Close": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Share Remotely": ("rgb(50,170,170)", "rgb(90,220,220)", "rgb(40,52,52)", "rgb(50,62,62)"),
     "Stop Sharing": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
+    # Performance mode actions (coral accent).
+    "1:1 Prep": ("rgb(200,90,70)", "rgb(240,130,110)", "rgb(52,42,40)", "rgb(62,52,50)"),
+    "1:1 Complete": ("rgb(200,90,70)", "rgb(240,130,110)", "rgb(52,42,40)", "rgb(62,52,50)"),
+    "6mo Review": ("rgb(200,90,70)", "rgb(240,130,110)", "rgb(52,42,40)", "rgb(62,52,50)"),
+    "Notes": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
     # Advisory action on the analysis review when a Small project looks bigger.
     "Switch to Large": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
 }
@@ -92,75 +98,89 @@ def center_label(label: str, width: int) -> str:
     return " " * pad_l + label + " " * pad_r
 
 
-def planning_title() -> Text:
-    """Return the Planning ASCII title styled with the brand colour.
+def build_ascii_title(word: str, color: str, *, shimmer_tick: float | None = None) -> Text:
+    """Return a two-line ASCII-art title for ``word`` in ``color``.
+
+    When ``shimmer_tick`` is None the title is a solid bold colour (the static
+    look every page has used). When a float is passed, a travelling white
+    highlight sweeps across the glyphs (same effect as the intake mode picker),
+    so a page's header can animate by feeding it a monotonic clock each frame.
+
+    ``color`` is an ``"rgb(r,g,b)"`` key present in COLOR_RGB (the shimmer needs
+    it registered). This is the single implementation the per-page ``*_title()``
+    helpers below delegate to — keeping every header visually identical.
+    """
+    lines = render_ascii_text(word)
+    title = Text(justify="left")
+    if shimmer_tick is None:
+        base_r, base_g, base_b = COLOR_RGB.get(color, (180, 180, 180))
+        style = f"bold rgb({base_r},{base_g},{base_b})"
+        title.append(PAD + lines[0] + "\n", style=style)
+        title.append(PAD + lines[1], style=style)
+        return title
+    from scrum_agent.ui.shared._animations import shimmer_style
+
+    total = max(len(lines[0]), len(lines[1]))
+    title.append(PAD)
+    for i, ch in enumerate(lines[0]):
+        title.append(ch, style=shimmer_style(color, i, total, shimmer_tick))
+    title.append("\n" + PAD)
+    for i, ch in enumerate(lines[1]):
+        title.append(ch, style=shimmer_style(color, i, total, shimmer_tick))
+    return title
+
+
+def build_reveal_subtitle(
+    text: str, reveal: float | None = None, *, style: str = "dim", pad: str = PAD, justify: str = "left"
+) -> Text:
+    """Return a subtitle line, optionally revealed typewriter-style.
+
+    ``reveal`` None (default) shows the whole string — byte-identical to the
+    previous ``Text(PAD + text, style="dim")`` every page used. A float reveals
+    only the first ``int(reveal)`` characters, so a page can type its subtitle in
+    by feeding an increasing value each frame (paired with an animated title).
+    """
+    shown = text if reveal is None else text[: max(0, int(reveal))]
+    return Text(pad + shown, style=style, justify=justify)
+
+
+def planning_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Planning ASCII title (brand blue). Optionally shimmering.
 
     # See README: "Architecture" — the "Planning" header is pinned at the
-    # top of every screen in the planning flow. This was previously defined
-    # inline in 4+ functions and as _planning_title() in session/_screens.py.
+    # top of every screen in the planning flow.
     """
-    ascii_lines = render_ascii_text("Planning")
-    base_r, base_g, base_b = COLOR_RGB.get("rgb(110,140,220)", (110, 140, 220))
-    title_style = f"bold rgb({base_r},{base_g},{base_b})"
-    title = Text(justify="left")
-    title.append(PAD + ascii_lines[0] + "\n", style=title_style)
-    title.append(PAD + ascii_lines[1], style=title_style)
-    return title
+    return build_ascii_title("Planning", "rgb(110,140,220)", shimmer_tick=shimmer_tick)
 
 
-def analysis_title() -> Text:
-    """Return the Analysis ASCII title styled with the green accent colour."""
-    ascii_lines = render_ascii_text("Analysis")
-    base_r, base_g, base_b = COLOR_RGB.get("rgb(100,180,100)", (100, 180, 100))
-    title_style = f"bold rgb({base_r},{base_g},{base_b})"
-    title = Text(justify="left")
-    title.append(PAD + ascii_lines[0] + "\n", style=title_style)
-    title.append(PAD + ascii_lines[1], style=title_style)
-    return title
+def analysis_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Analysis ASCII title (green accent). Optionally shimmering."""
+    return build_ascii_title("Analysis", "rgb(100,180,100)", shimmer_tick=shimmer_tick)
 
 
-def usage_title() -> Text:
-    """Return the Usage ASCII title styled with the amber accent colour."""
-    ascii_lines = render_ascii_text("Usage")
-    base_r, base_g, base_b = COLOR_RGB.get("rgb(220,160,60)", (220, 160, 60))
-    title_style = f"bold rgb({base_r},{base_g},{base_b})"
-    title = Text(justify="left")
-    title.append(PAD + ascii_lines[0] + "\n", style=title_style)
-    title.append(PAD + ascii_lines[1], style=title_style)
-    return title
+def usage_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Usage ASCII title (amber accent). Optionally shimmering."""
+    return build_ascii_title("Usage", "rgb(220,160,60)", shimmer_tick=shimmer_tick)
 
 
-def settings_title() -> Text:
-    """Return the Settings ASCII title styled with the silver accent colour."""
-    ascii_lines = render_ascii_text("Settings")
-    base_r, base_g, base_b = COLOR_RGB.get("rgb(160,160,180)", (160, 160, 180))
-    title_style = f"bold rgb({base_r},{base_g},{base_b})"
-    title = Text(justify="left")
-    title.append(PAD + ascii_lines[0] + "\n", style=title_style)
-    title.append(PAD + ascii_lines[1], style=title_style)
-    return title
+def settings_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Settings ASCII title (silver accent). Optionally shimmering."""
+    return build_ascii_title("Settings", "rgb(160,160,180)", shimmer_tick=shimmer_tick)
 
 
-def standup_title() -> Text:
-    """Return the Daily Standup ASCII title styled with the magenta accent colour."""
-    ascii_lines = render_ascii_text("Standup")
-    base_r, base_g, base_b = COLOR_RGB.get("rgb(200,100,180)", (200, 100, 180))
-    title_style = f"bold rgb({base_r},{base_g},{base_b})"
-    title = Text(justify="left")
-    title.append(PAD + ascii_lines[0] + "\n", style=title_style)
-    title.append(PAD + ascii_lines[1], style=title_style)
-    return title
+def standup_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Daily Standup ASCII title (magenta accent). Optionally shimmering."""
+    return build_ascii_title("Standup", "rgb(200,100,180)", shimmer_tick=shimmer_tick)
 
 
-def retro_title() -> Text:
-    """Return the Retro ASCII title styled with the teal accent colour."""
-    ascii_lines = render_ascii_text("Retro")
-    base_r, base_g, base_b = COLOR_RGB.get("rgb(80,190,190)", (80, 190, 190))
-    title_style = f"bold rgb({base_r},{base_g},{base_b})"
-    title = Text(justify="left")
-    title.append(PAD + ascii_lines[0] + "\n", style=title_style)
-    title.append(PAD + ascii_lines[1], style=title_style)
-    return title
+def retro_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Retro ASCII title (teal accent). Optionally shimmering."""
+    return build_ascii_title("Retro", "rgb(80,190,190)", shimmer_tick=shimmer_tick)
+
+
+def performance_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Performance ASCII title (coral accent). Optionally shimmering."""
+    return build_ascii_title("Performance", "rgb(220,110,90)", shimmer_tick=shimmer_tick)
 
 
 def build_popup(
