@@ -1820,6 +1820,311 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
         _render()
 
 
+def _collect_reporting_data(message: str = "") -> dict:
+    """Gather Reporting page data: the latest session id + display name.
+
+    The report itself is generated on demand (Generate button); this just resolves
+    which session's sprint length / project name the report should use. Best-effort —
+    the page still works with no session (it reports from the live tracker config).
+    """
+    data: dict = {"message": message, "session_id": "", "session_name": ""}
+    try:
+        from scrum_agent.sessions import SessionStore, make_display_name
+
+        with SessionStore(_ana_dbp) as store:
+            session_id = store.get_latest_session_id() or ""
+            data["session_id"] = session_id
+            if session_id:
+                meta = store.get_session(session_id) or {}
+                data["session_name"] = make_display_name(meta) if meta else session_id
+    except Exception:
+        logger.warning("reporting: failed to resolve latest session", exc_info=True)
+    logger.info("reporting: session=%s", data["session_id"])
+    return data
+
+
+def _run_reporting_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Event loop for the Reporting page.
+
+    Three views. In "picker": Up/Down choose a period (Last sprint / Last month /
+    Whole quarter), Left/Right pick an action (Generate Report / Theme / Back). For a
+    quarter, Generate opens "sprint_select": Up/Down move, Space toggles which sprints
+    make up the quarter (the current quarter's sprints pre-checked), Enter generates.
+    "detail" shows the report: Up/Down scroll, Export re-writes files, Theme cycles the
+    slide-deck palette, Back returns to the picker.
+
+    # See README: "Reporting Mode" — TUI page
+    """
+    from datetime import date as _date
+
+    from scrum_agent.reporting.activity import (
+        PERIOD_LABELS,
+        PERIOD_LAST_MONTH,
+        PERIOD_LAST_SPRINT,
+        PERIOD_QUARTER,
+    )
+    from scrum_agent.reporting.presentation import THEMES
+    from scrum_agent.reporting.render import format_report_lines
+    from scrum_agent.reporting.sprints import list_sprints, mark_in_quarter, quarter_bounds
+    from scrum_agent.ui.mode_select.screens._screens_secondary import _build_reporting_screen
+
+    base = _collect_reporting_data()
+    session_id = base["session_id"]
+    session_name = base["session_name"]
+
+    q_label, q_start, q_end = quarter_bounds()
+    periods = [
+        (PERIOD_LAST_SPRINT, PERIOD_LABELS[PERIOD_LAST_SPRINT], "The most recent sprint's completed work"),
+        (PERIOD_LAST_MONTH, PERIOD_LABELS[PERIOD_LAST_MONTH], "The last ~4 weeks across ~2 sprints"),
+        (PERIOD_QUARTER, f"Whole quarter ({q_label})", "Pick the sprints that make up the quarter"),
+    ]
+
+    state = {
+        "view": "picker",
+        "selected": 0,  # period index
+        "scroll": 0,
+        "sel": 0,  # action button index
+        "message": "",
+        "theme": "midnight",
+        "detail_lines": [],
+        "detail_title": "",
+        "report": None,
+        # sprint_select view state
+        "sprints": [],  # list[SprintRef]
+        "sprint_cursor": 0,
+        "sprint_checked": set(),
+    }
+    picker_actions = ["Generate Report", "Theme", "Back"]
+    detail_actions = ["Export", "Theme", "Back"]
+    sprint_actions = ["Generate Report", "Back"]
+
+    def _actions() -> list[str]:
+        if state["view"] == "detail":
+            return detail_actions
+        if state["view"] == "sprint_select":
+            return sprint_actions
+        return picker_actions
+
+    def _data() -> dict:
+        return {
+            "session_name": session_name,
+            "view": state["view"],
+            "periods": periods,
+            "selected_idx": state["selected"],
+            "theme": state["theme"],
+            "detail_lines": state["detail_lines"],
+            "detail_title": state["detail_title"],
+            "actions": _actions(),
+            "message": state["message"],
+            # sprint_select rendering
+            "quarter_label": q_label,
+            "sprints": state["sprints"],
+            "sprint_cursor": state["sprint_cursor"],
+            "sprint_checked": state["sprint_checked"],
+        }
+
+    anim_start = time.monotonic()
+
+    def _render() -> None:
+        w, h = console.size
+        tick = time.monotonic() - anim_start
+        live.update(
+            _build_reporting_screen(
+                _data(),
+                scroll_offset=state["scroll"],
+                width=w,
+                height=max(10, h - 1),
+                action_sel=state["sel"],
+                shimmer_tick=tick,
+                sub_reveal=tick * _HEADER_SUB_SPEED,
+            )
+        )
+
+    def _show_report(report, msg: str) -> None:
+        state["report"] = report
+        state["detail_lines"] = format_report_lines(report)
+        state["detail_title"] = f"Delivery Report — {report.period_label}"
+        state["view"] = "detail"
+        state["sel"], state["scroll"] = 0, 0
+        state["message"] = msg
+
+    def _delivered_msg(report) -> str:
+        n = len(report.delivered_items)
+        plural = "s" if n != 1 else ""
+        return f"Report generated — {n} item{plural} delivered. Auto-saved (md/html/slides)."
+
+    def _generate() -> None:
+        """Generate the delivery report for the selected non-quarter period."""
+        period_key = periods[state["selected"]][0]
+        try:
+            from scrum_agent.reporting.engine import run_delivery_report
+
+            report = run_delivery_report(period_key, session_id=session_id, db_path=_ana_dbp)
+            _show_report(report, _delivered_msg(report))
+        except Exception as e:  # never let an action crash the TUI
+            logger.error("reporting generate failed: %s", e, exc_info=True)
+            state["message"] = f"Generate failed: {e}"
+
+    def _run_quarter(window_start: str, window_end: str, names: tuple, label: str) -> None:
+        """Generate a quarter report over an explicit sprint-derived window."""
+        try:
+            from scrum_agent.reporting.engine import run_delivery_report
+
+            report = run_delivery_report(
+                PERIOD_QUARTER,
+                session_id=session_id,
+                db_path=_ana_dbp,
+                window_start=window_start,
+                window_end=window_end,
+                sprint_names=names,
+                period_label_override=label,
+            )
+            _show_report(report, _delivered_msg(report))
+        except Exception as e:  # never let an action crash the TUI
+            logger.error("reporting quarter generate failed: %s", e, exc_info=True)
+            state["message"] = f"Generate failed: {e}"
+
+    def _open_sprint_select() -> None:
+        """Load the sprint list for the quarter and switch to the multi-select view.
+
+        When no sprint list is available (no tracker, no plan sprints), skip the
+        picker and report straight over the calendar-quarter dates.
+        """
+        plan_state = {}
+        try:
+            from scrum_agent.sessions import SessionStore
+
+            with SessionStore(_ana_dbp) as store:
+                plan_state = store.load_state(session_id) or {}
+        except Exception:  # noqa: BLE001 — plan state is only the fallback source
+            logger.warning("reporting: could not load plan state for sprint list", exc_info=True)
+        refs = mark_in_quarter(list_sprints(plan_state), q_start, q_end)
+        if not refs:
+            today_iso = _date.today().isoformat()
+            _run_quarter(q_start, min(q_end, today_iso), (), q_label)
+            state["message"] = "No sprint list available — reported over the calendar quarter. " + state["message"]
+            return
+        state["sprints"] = refs
+        state["sprint_checked"] = {i for i, s in enumerate(refs) if s.in_quarter}
+        inq = [i for i, s in enumerate(refs) if s.in_quarter]
+        state["sprint_cursor"] = inq[0] if inq else 0
+        state["view"] = "sprint_select"
+        state["sel"], state["scroll"], state["message"] = 0, 0, ""
+
+    def _generate_from_selection() -> None:
+        """Compute the window from the checked sprints and generate the quarter report."""
+        refs = state["sprints"]
+        checked = sorted(i for i in state["sprint_checked"] if 0 <= i < len(refs))
+        if not checked:
+            state["message"] = "Select at least one sprint (Space to toggle)."
+            return
+        sel = [refs[i] for i in checked]
+        starts = [s.start_date for s in sel if s.start_date]
+        ends = [s.end_date for s in sel if s.end_date]
+        today_iso = _date.today().isoformat()
+        window_start = min(starts) if starts else q_start
+        window_end = min(max(ends) if ends else q_end, today_iso)
+        names = tuple(s.name for s in sel)
+        detected = {i for i, s in enumerate(refs) if s.in_quarter}
+        label = q_label if set(checked) == detected else f"{q_label} (custom)"
+        _run_quarter(window_start, window_end, names, label)
+
+    def _export() -> None:
+        report = state.get("report")
+        if report is None:
+            state["message"] = "Nothing to export yet — generate a report first."
+            return
+        try:
+            from scrum_agent.reporting.export import export_report
+
+            paths = export_report(report, theme=state["theme"])
+            state["message"] = f"Exported to {paths['markdown'].parent}  (Markdown + HTML + slides)"
+        except Exception as e:  # noqa: BLE001
+            logger.error("reporting export failed: %s", e, exc_info=True)
+            state["message"] = f"Export failed: {e}"
+
+    def _cycle_theme() -> None:
+        idx = (list(THEMES).index(state["theme"]) + 1) % len(THEMES) if state["theme"] in THEMES else 0
+        state["theme"] = THEMES[idx]
+        state["message"] = f"Presentation theme: {state['theme']}"
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if state["view"] == "picker":
+            if k in ("up", "scroll_up"):
+                state["selected"] = (state["selected"] - 1) % len(periods)
+            elif k in ("down", "scroll_down"):
+                state["selected"] = (state["selected"] + 1) % len(periods)
+            elif k == "left":
+                state["sel"] = max(0, state["sel"] - 1)
+            elif k == "right":
+                state["sel"] = min(len(picker_actions) - 1, state["sel"] + 1)
+            elif k in ("enter", " "):
+                label = picker_actions[state["sel"]]
+                if label == "Back":
+                    break
+                elif label == "Generate Report":
+                    if periods[state["selected"]][0] == PERIOD_QUARTER:
+                        _open_sprint_select()
+                    else:
+                        _generate()
+                elif label == "Theme":
+                    _cycle_theme()
+            elif k in ("esc", "q"):
+                break
+        elif state["view"] == "sprint_select":
+            n_sprints = len(state["sprints"])
+            if k in ("up", "scroll_up"):
+                if n_sprints:
+                    state["sprint_cursor"] = (state["sprint_cursor"] - 1) % n_sprints
+            elif k in ("down", "scroll_down"):
+                if n_sprints:
+                    state["sprint_cursor"] = (state["sprint_cursor"] + 1) % n_sprints
+            elif k == " ":  # toggle the sprint under the cursor
+                cur = state["sprint_cursor"]
+                if cur in state["sprint_checked"]:
+                    state["sprint_checked"].discard(cur)
+                else:
+                    state["sprint_checked"].add(cur)
+            elif k == "left":
+                state["sel"] = max(0, state["sel"] - 1)
+            elif k == "right":
+                state["sel"] = min(len(sprint_actions) - 1, state["sel"] + 1)
+            elif k == "enter":
+                label = sprint_actions[state["sel"]]
+                if label == "Back":
+                    state["view"] = "picker"
+                    state["sel"], state["scroll"], state["message"] = 0, 0, ""
+                else:  # Generate Report
+                    _generate_from_selection()
+            elif k in ("esc", "q"):
+                state["view"] = "picker"
+                state["sel"], state["scroll"], state["message"] = 0, 0, ""
+        else:  # detail view
+            if k in ("up", "scroll_up"):
+                state["scroll"] = max(0, state["scroll"] - 1)
+            elif k in ("down", "scroll_down"):
+                state["scroll"] += 1
+            elif k == "left":
+                state["sel"] = max(0, state["sel"] - 1)
+            elif k == "right":
+                state["sel"] = min(len(detail_actions) - 1, state["sel"] + 1)
+            elif k in ("enter", " "):
+                label = detail_actions[state["sel"]]
+                if label == "Back":
+                    state["view"] = "picker"
+                    state["sel"], state["scroll"], state["message"] = 0, 0, ""
+                elif label == "Export":
+                    _export()
+                elif label == "Theme":
+                    _cycle_theme()
+            elif k in ("esc", "q"):
+                state["view"] = "picker"
+                state["sel"], state["scroll"], state["message"] = 0, 0, ""
+        _render()
+
+
 def _resolve_retro_session() -> tuple[str, str, str, str]:
     """Resolve the retro's target session → (session_id, session_name, project_name, sprint_name).
 
@@ -3234,6 +3539,14 @@ def select_mode(
             if chosen["key"] == "performance":
                 logger.info("Performance mode selected")
                 _run_performance_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                _restart_mode_select = True
+                _skip_fade_in = True
+                continue
+
+            # ── Route: Reporting mode → delivery-report page ─────────────
+            if chosen["key"] == "reporting":
+                logger.info("Reporting mode selected")
+                _run_reporting_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue

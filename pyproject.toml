@@ -100,6 +100,8 @@ select = ["E", "F", "I", "N", "W", "UP"]
 # page.py is an embedded front-end asset (inline HTML/CSS/JS in string constants);
 # line length carries no meaning there, so exempt it from E501 only.
 "src/scrum_agent/retro/page.py" = ["E501"]
+# presentation.py is an embedded slide-deck asset (inline HTML/CSS/JS string constants).
+"src/scrum_agent/reporting/presentation.py" = ["E501"]
 
 [dependency-groups]
 dev = [

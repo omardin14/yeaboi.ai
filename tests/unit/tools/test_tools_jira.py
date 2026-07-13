@@ -859,6 +859,42 @@ class TestJiraFetchVelocityZeroVelocity:
         assert "velocity_error" not in data
 
 
+class TestJiraListSprints:
+    def test_lists_and_normalizes_sprints(self, monkeypatch):
+        from scrum_agent.tools.jira import jira_list_sprints
+
+        board = _make_board(7, "Board")
+        closed = _make_sprint(1, "Sprint 1", "2026-06-01T00:00:00.000Z", "2026-06-14T00:00:00.000Z")
+        active = _make_sprint(2, "Sprint 2", "2026-06-15T00:00:00.000Z", "2026-06-28T00:00:00.000Z")
+        mock_client = MagicMock()
+        mock_client.boards.return_value = [board]
+        mock_client.sprints.side_effect = lambda bid, state: {
+            "closed": [closed],
+            "active": [active],
+            "future": [],
+        }[state]
+        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+
+        out = jira_list_sprints("PROJ")
+        assert [s["name"] for s in out] == ["Sprint 1", "Sprint 2"]  # sorted by start, newest last
+        assert out[0] == {"name": "Sprint 1", "start_date": "2026-06-01", "end_date": "2026-06-14", "state": "closed"}
+        assert out[1]["state"] == "active"
+
+    def test_empty_when_unconfigured(self, monkeypatch):
+        from scrum_agent.tools.jira import jira_list_sprints
+
+        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: None)
+        assert jira_list_sprints("PROJ") == []
+
+    def test_empty_when_no_boards(self, monkeypatch):
+        from scrum_agent.tools.jira import jira_list_sprints
+
+        mock_client = MagicMock()
+        mock_client.boards.return_value = []
+        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        assert jira_list_sprints("PROJ") == []
+
+
 class TestJiraToolsRegistered:
     def test_all_four_jira_tools_in_get_tools(self):
         tools = get_tools()

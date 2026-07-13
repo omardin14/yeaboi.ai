@@ -492,6 +492,41 @@ class TestAzdevopsReadBoard:
         assert "Error" in result
 
 
+class TestAzdevopsListSprints:
+    @patch("scrum_agent.tools.azure_devops.get_azure_devops_team", return_value="MyTeam")
+    @patch("scrum_agent.tools.azure_devops.get_azure_devops_project", return_value="MyProject")
+    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
+    def test_lists_and_classifies_iterations(self, mock_clients, *_):
+        from datetime import datetime, timedelta
+
+        mock_work = MagicMock()
+        mock_clients.return_value = (MagicMock(), mock_work)
+        now = datetime.now(UTC)
+        past = MagicMock()
+        past.name = "Sprint 1"
+        past.attributes.start_date = now - timedelta(days=28)
+        past.attributes.finish_date = now - timedelta(days=14)
+        cur = MagicMock()
+        cur.name = "Sprint 2"
+        cur.attributes.start_date = now - timedelta(days=7)
+        cur.attributes.finish_date = now + timedelta(days=7)
+        mock_work.get_team_iterations.return_value = [cur, past]  # unsorted input
+
+        from scrum_agent.tools.azure_devops import azdevops_list_sprints
+
+        out = azdevops_list_sprints("MyProject")
+        assert [s["name"] for s in out] == ["Sprint 1", "Sprint 2"]  # sorted by start, newest last
+        assert out[0]["state"] == "closed"
+        assert out[1]["state"] == "active"
+        assert out[0]["start_date"] == (now - timedelta(days=28)).strftime("%Y-%m-%d")
+
+    @patch("scrum_agent.tools.azure_devops.get_azure_devops_project", return_value="")
+    def test_missing_project_returns_empty(self, _):
+        from scrum_agent.tools.azure_devops import azdevops_list_sprints
+
+        assert azdevops_list_sprints() == []
+
+
 class TestAzdevopsFetchActiveIteration:
     @patch("scrum_agent.tools.azure_devops.get_azure_devops_team", return_value="MyTeam")
     @patch("scrum_agent.tools.azure_devops.get_azure_devops_project", return_value="MyProject")

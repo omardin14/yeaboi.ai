@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See README: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 8  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance  # noqa: E501
+CURRENT_SCHEMA_VERSION = 9  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -521,6 +521,14 @@ class SessionStore:
 
             self._conn.executescript(_PERFORMANCE_SCHEMA)
             logger.info("Migration v8: created performance tables")
+
+        if from_version < 9:
+            # v9: Reporting mode — business-friendly delivery reports per run.
+            # Schema lives in reporting/store.py (executescript handles the CREATE).
+            from scrum_agent.reporting.store import _REPORTING_SCHEMA
+
+            self._conn.executescript(_REPORTING_SCHEMA)
+            logger.info("Migration v9: created reporting tables")
 
     # ── Token usage persistence ──────────────────────────────────────────
 

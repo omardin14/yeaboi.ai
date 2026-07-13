@@ -475,6 +475,54 @@ class SixMonthReview:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class DeliveredItem:
+    """One completed ticket that shipped in the reporting period.
+
+    Deterministic evidence (no LLM) — assembled by reporting/activity.py from the
+    same recent-activity helpers the standup / performance modes use, filtered to
+    the tickets whose status means *done*. The business-friendly narrative in a
+    DeliveryReport is grounded in these items.
+    """
+
+    key: str = ""  # e.g. "PROJ-123" or "#456"
+    title: str = ""
+    status: str = ""  # completed status as reported: Done / Closed / Released / ...
+    source: str = ""  # "jira" | "azuredevops"
+    assignee: str = ""  # who delivered it (best-effort; may be empty)
+
+
+@dataclass(frozen=True)
+class DeliveryReport:
+    """A business-friendly summary of delivered work over a reporting period.
+
+    Produced by reporting/engine.py:run_delivery_report() — one deterministic gather
+    of completed tickets + a single LLM "design" call that writes the executive
+    narrative, groups outcomes into themes, and picks section emojis. Follows the
+    parse → fallback convention: an LLM failure yields a deterministic report (counts
+    + item list + generic emojis), never a crash. Rendered to Markdown, HTML, and a
+    self-contained HTML slide deck (reporting/presentation.py).
+
+    ``themes`` is a tuple of (theme title, bullet outcomes) pairs; ``metrics`` and
+    ``emoji_theme`` are tuple-of-pairs so the whole artifact stays frozen/serializable.
+    """
+
+    period_label: str = ""  # "Last sprint" | "Last month (~2 sprints)"
+    period_start: str = ""  # ISO date
+    period_end: str = ""
+    project_name: str = ""
+    sprint_names: tuple[str, ...] = ()
+    headline: str = ""  # one-line business headline (LLM)
+    executive_summary: str = ""  # 1-2 paragraph business narrative (LLM)
+    themes: tuple[tuple[str, tuple[str, ...]], ...] = ()  # (theme title, outcome bullets) — LLM grouping
+    highlights: tuple[str, ...] = ()  # top business-impact wins (LLM)
+    metrics: tuple[tuple[str, str], ...] = ()  # (label, value), e.g. ("Items delivered", "23")
+    delivered_items: tuple[DeliveredItem, ...] = ()  # raw completed-ticket evidence (deterministic)
+    emoji_theme: tuple[tuple[str, str], ...] = ()  # (slot, emoji) chosen by the LLM, e.g. ("highlights", "🚀")
+    warnings: tuple[str, ...] = ()
+    generated_at: str = ""
+
+
 # See README: "Scrum Standards" — prompt quality rating
 @dataclass(frozen=True)
 class PromptQualityRating:

@@ -53,6 +53,7 @@ SETTINGS_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220
 STANDUP_THEME = Theme(accent="rgb(200,100,180)", accent_bright="rgb(255,150,220)")
 RETRO_THEME = Theme(accent="rgb(80,190,190)", accent_bright="rgb(120,230,230)")
 PERFORMANCE_THEME = Theme(accent="rgb(220,110,90)", accent_bright="rgb(255,150,120)")
+REPORTING_THEME = Theme(accent="rgb(140,120,230)", accent_bright="rgb(180,160,255)")
 
 # Button color scheme: (accent_border, accent_label, grey_border, grey_label)
 _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
@@ -76,6 +77,11 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "1:1 Complete": ("rgb(200,90,70)", "rgb(240,130,110)", "rgb(52,42,40)", "rgb(62,52,50)"),
     "6mo Review": ("rgb(200,90,70)", "rgb(240,130,110)", "rgb(52,42,40)", "rgb(62,52,50)"),
     "Notes": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Reporting mode actions (indigo accent).
+    "Generate Report": ("rgb(120,100,220)", "rgb(170,150,255)", "rgb(44,40,58)", "rgb(54,50,68)"),
+    "Period": ("rgb(120,100,220)", "rgb(170,150,255)", "rgb(44,40,58)", "rgb(54,50,68)"),
+    "Theme": ("rgb(120,100,220)", "rgb(170,150,255)", "rgb(44,40,58)", "rgb(54,50,68)"),
+    "Back": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     # Advisory action on the analysis review when a Small project looks bigger.
     "Switch to Large": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
 }
@@ -181,6 +187,11 @@ def retro_title(shimmer_tick: float | None = None) -> Text:
 def performance_title(shimmer_tick: float | None = None) -> Text:
     """Return the Performance ASCII title (coral accent). Optionally shimmering."""
     return build_ascii_title("Performance", "rgb(220,110,90)", shimmer_tick=shimmer_tick)
+
+
+def reporting_title(shimmer_tick: float | None = None) -> Text:
+    """Return the Reporting ASCII title (indigo accent). Optionally shimmering."""
+    return build_ascii_title("Reporting", "rgb(140,120,230)", shimmer_tick=shimmer_tick)
 
 
 def build_popup(

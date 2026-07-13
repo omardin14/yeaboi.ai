@@ -3584,6 +3584,240 @@ def _build_performance_screen(
     )
 
 
+def _build_reporting_screen(
+    reporting_data: dict,
+    *,
+    scroll_offset: int = 0,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
+) -> Panel:
+    """Build the Reporting screen using shared TUI components.
+
+    Three views, all rendered here (the run page owns which is active):
+    - "picker": choose a reporting period (Last sprint / Last month / Whole quarter)
+      with ▲/▼, then Generate a business-friendly delivery report.
+    - "sprint_select": for a quarter, a checkbox list of sprints (▸ cursor, ■/□
+      toggle) with the quarter's sprints pre-checked — Space toggles, Enter generates.
+    - "detail": the generated report (headline, metrics, themes, highlights),
+      scrollable, with Export / Theme / Back buttons.
+
+    reporting_data keys: session_name, view ("picker"|"sprint_select"|"detail"),
+    periods (list[(key, label, hint)]), selected_idx (int), theme (str), detail_lines
+    (list[str] plaintext), detail_title (str), actions (list[str]), message (str),
+    quarter_label (str), sprints (list[SprintRef]), sprint_cursor (int),
+    sprint_checked (set[int]).
+
+    Uses REPORTING_THEME (indigo) with shared buttons, scrollbar, and viewport.
+
+    # See README: "Reporting Mode" — TUI page
+    """
+    from scrum_agent.ui.shared._components import REPORTING_THEME, build_reveal_subtitle, reporting_title
+
+    theme = REPORTING_THEME
+    title = reporting_title(shimmer_tick)
+    view = reporting_data.get("view", "picker")
+    session_name = reporting_data.get("session_name", "")
+    deck_theme = reporting_data.get("theme", "midnight")
+    message = reporting_data.get("message", "")
+
+    if view == "detail":
+        sub_text = reporting_data.get("detail_title", "") or "Delivery Report"
+    elif view == "sprint_select":
+        sub_text = f"Select sprints for {reporting_data.get('quarter_label', 'the quarter')}"
+    else:
+        sub_text = f"Report delivered work — {session_name}" if session_name else "Report delivered work"
+    sub = build_reveal_subtitle(sub_text, sub_reveal, pad=PAD)
+
+    actions = reporting_data.get("actions") or ["Generate Report", "Theme", "Back"]
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions, action_sel)
+
+    # ── Sprint-select view — checkbox list of the quarter's sprints ──────────────
+    if view == "sprint_select":
+        sprints = reporting_data.get("sprints", []) or []
+        cursor = max(0, min(reporting_data.get("sprint_cursor", 0), len(sprints) - 1)) if sprints else 0
+        checked = reporting_data.get("sprint_checked", set()) or set()
+
+        rows: list = []
+        if message:
+            rows.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+            rows.append(Text(""))
+        n_checked = len(checked)
+        rows.append(Text(PAD + f"  Space to toggle · {n_checked} selected · Enter to generate", style=theme.muted))
+        rows.append(Text(""))
+        for idx, sp in enumerate(sprints):
+            is_cursor = idx == cursor
+            is_checked = idx in checked
+            box = "■" if is_checked else "□"
+            cur_mark = "▸ " if is_cursor else "  "
+            rng = f"({sp.start_date} → {sp.end_date})" if sp.start_date else "(no dates)"
+            row = Text(justify="left")
+            row.append(PAD + "  " + cur_mark, style=theme.accent_bright if is_cursor else theme.dim)
+            row.append(box + " ", style=theme.accent if is_checked else theme.dim)
+            name_style = "bold white" if is_cursor else (theme.value if is_checked else theme.desc)
+            row.append(f"{sp.name}  ", style=name_style)
+            row.append(rng, style=theme.muted)
+            if getattr(sp, "in_quarter", False):
+                row.append("  · in quarter", style=theme.dim)
+            rows.append(row)
+        if not sprints:
+            rows.append(Text(PAD + "  No sprints found.", style=theme.muted, justify="left"))
+
+        viewport_h = calc_viewport(height, header_h=6, action_h=4)
+        total_lines = len(rows)
+        # Window around the cursor row so it stays visible as you move.
+        cursor_line = min(total_lines - 1, cursor + (3 if message else 1) + 1) if sprints else 0
+        max_scroll = max(0, total_lines - viewport_h)
+        start = 0 if total_lines <= viewport_h else max(0, min(cursor_line - viewport_h // 2, max_scroll))
+        visible = rows[start : start + viewport_h]
+
+        _sb_text = build_scrollbar(viewport_h, total_lines, start, max_scroll, always_show=True)
+        padded_lines = list(visible)
+        for _ in range(max(0, viewport_h - len(visible))):
+            padded_lines.append(Text(""))
+        if _sb_text is not None:
+            from rich.table import Table as _SbTable
+
+            _vp = _SbTable(show_header=False, show_edge=False, box=None, padding=0, pad_edge=False, expand=True)
+            _vp.add_column(ratio=1)
+            _vp.add_column(width=1)
+            _vp.add_row(Group(*padded_lines), _sb_text)
+            viewport_renderable = _vp
+        else:
+            viewport_renderable = Group(*padded_lines)
+
+        content = Group(
+            Text(""),
+            title,
+            Text(""),
+            sub,
+            Text(""),
+            viewport_renderable,
+            Text(""),
+            btn_top,
+            btn_mid,
+            btn_bot,
+        )
+        return Panel(
+            content,
+            border_style="white",
+            box=rich.box.ROUNDED,
+            expand=True,
+            height=height,
+            padding=(1, 2),
+        )
+
+    # ── Picker view — choose the reporting period ────────────────────────────────
+    if view != "detail":
+        periods = reporting_data.get("periods", []) or []
+        selected_idx = max(0, min(reporting_data.get("selected_idx", 0), len(periods) - 1)) if periods else 0
+
+        body: list = []
+        if message:
+            body.append(Text(PAD + message, style=theme.accent_bright, justify="left"))
+            body.append(Text(""))
+        body.append(Text(PAD + "Choose a reporting period:", style=f"bold {theme.accent}", justify="left"))
+        body.append(Text(""))
+        for idx, (_key, label, hint) in enumerate(periods):
+            is_sel = idx == selected_idx
+            marker = "▸ " if is_sel else "  "
+            row = Text(justify="left")
+            row.append(PAD + marker, style=theme.accent_bright if is_sel else theme.dim)
+            row.append(label, style=theme.value if is_sel else theme.desc)
+            body.append(row)
+            if hint:
+                body.append(Text(PAD + "    " + hint, style=theme.muted, justify="left"))
+            body.append(Text(""))
+        body.append(Text(PAD + f"Presentation theme: {deck_theme}", style=theme.muted, justify="left"))
+
+        content = Group(
+            Text(""),
+            title,
+            Text(""),
+            sub,
+            Text(""),
+            *body,
+            Text(""),
+            btn_top,
+            btn_mid,
+            btn_bot,
+        )
+        return Panel(
+            content,
+            border_style="white",
+            box=rich.box.ROUNDED,
+            expand=True,
+            height=height,
+            padding=(1, 2),
+        )
+
+    # ── Detail view — the generated report, scrollable ───────────────────────────
+    def _styled(line: str) -> Text:
+        stripped = line.strip()
+        if not stripped:
+            return Text("")
+        style = theme.value
+        if stripped.startswith("⚠"):
+            style = theme.warn
+        elif stripped.startswith(("•", "-")) or line.startswith("  "):
+            style = theme.desc
+        elif stripped.endswith(":") or line == line.lstrip():
+            style = f"bold {theme.accent}"
+        return Text(PAD + "  " + line, style=style, justify="left")
+
+    body_lines: list = []
+    if message:
+        body_lines.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
+    for line in reporting_data.get("detail_lines", []) or ["(nothing to show)"]:
+        body_lines.append(_styled(line))
+
+    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    actual_scroll = min(scroll_offset, max_scroll)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(show_header=False, show_edge=False, box=None, padding=0, pad_edge=False, expand=True)
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _build_retro_screen(
     retro_data: dict,
     *,
