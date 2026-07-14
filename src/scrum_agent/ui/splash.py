@@ -31,6 +31,20 @@ _FRAME_TIME = 1.0 / 60  # ~60fps target
 # Brand blue — same as mode_select._COLOR_RGB
 _BRAND_RGB = (70, 100, 180)
 
+# Brand wordmark — "YEABOI" in the ANSI Shadow figlet style (6 rows, all padded
+# to the same width so Rich's per-line centre-justify keeps them aligned). This
+# is a fixed hand-baked asset (no figlet/pyfiglet runtime dependency); the
+# compact two-line render_ascii_text() font is still used for mode titles.
+_WORDMARK: list[str] = [
+    "██╗   ██╗███████╗ █████╗ ██████╗  ██████╗ ██╗",
+    "╚██╗ ██╔╝██╔════╝██╔══██╗██╔══██╗██╔═══██╗██║",
+    " ╚████╔╝ █████╗  ███████║██████╔╝██║   ██║██║",
+    "  ╚██╔╝  ██╔══╝  ██╔══██║██╔══██╗██║   ██║██║",
+    "   ██║   ███████╗██║  ██║██████╔╝╚██████╔╝██║",
+    "   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═╝",
+]
+_WORDMARK_WIDTH = 45  # cell width of every row above
+
 
 # ---------------------------------------------------------------------------
 # Easing
@@ -56,7 +70,9 @@ def _build_splash_frame(
 ) -> Panel:
     """Build a single splash animation frame.
 
-    text_lines: two-line ASCII art (from render_ascii_text).
+    text_lines: ASCII-art rows (the tall _WORDMARK, or the compact two-line
+        render_ascii_text fallback). All rows must be equal width so per-line
+        centre-justify keeps them aligned.
     opacity: 0.0–1.0 controls visibility. At 0 the text is invisible
         (spaces only) so it blends with any terminal background. At 1 the
         text is full brand-blue.
@@ -123,8 +139,14 @@ def show_splash(console: Console) -> None:
     avoids the visible flicker that would occur if the splash exited
     alt-screen and the next UI immediately re-entered it.
     """
-    text_lines = render_ascii_text("YEABOI")
     w, h = console.size
+    # Use the tall ANSI-Shadow wordmark when the terminal is wide enough;
+    # fall back to the compact two-line font on narrow terminals so it never
+    # wraps into an unreadable mess.
+    if w >= _WORDMARK_WIDTH + 6:  # +6 for panel border + padding
+        text_lines = _WORDMARK
+    else:
+        text_lines = render_ascii_text("YEABOI")
 
     # Phase durations (in frames at ~60fps)
     fade_in_frames = 48  # ~0.8s
