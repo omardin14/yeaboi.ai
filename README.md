@@ -1,11 +1,11 @@
 <div align="center">
 
 
-<img src="docs/banner.jpg" alt="Scrum AI Agent" width="800"/>
+<img src="docs/banner.jpg" alt="yeaboi.ai" width="800"/>
 
-# 📋 Scrum AI Agent
+# 🤙 yeaboi.ai
 
-**AI-powered Scrum Master that decomposes projects into epics, stories, tasks, and sprint plans — right from your terminal.**
+**A team lead's best friend — plans, standups, retros, performance & reporting, right from your terminal. It decomposes projects into epics, stories, tasks, and sprint plans, then helps you run the team around them.**
 
 [![PyPI](https://img.shields.io/pypi/v/scrum-agent?style=for-the-badge&logo=pypi&logoColor=white&color=blue)](https://pypi.org/project/scrum-agent/)
 [![Python](https://img.shields.io/badge/Python-3.11+-green?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
@@ -21,7 +21,7 @@
 ---
 
 <div align="center">
-<img src="docs/demo.gif" alt="Scrum AI Agent demo — from project description to sprint plan" width="800"/>
+<img src="docs/demo.gif" alt="yeaboi.ai demo — from project description to sprint plan" width="800"/>
 
 *From project description to sprint plan in under a minute.*
 </div>
@@ -35,10 +35,12 @@
 The most reliable way to install — pulls the full dependency tree from PyPI and isolates it in its own environment:
 
 ```bash
-uv tool install scrum-agent     # or: pipx install scrum-agent
-scrum-agent --setup             # configure your API key
-scrum-agent                     # launch the interactive TUI
+uv tool install scrum-agent     # or: pipx install scrum-agent  (PyPI package name)
+yeaboi --setup                  # configure your API key
+yeaboi                          # launch the interactive TUI
 ```
+
+> **Note on names:** the PyPI package is still published as **`scrum-agent`**, but the command it installs is now **`yeaboi`**. The legacy `scrum-agent` command still works as an alias for this release.
 
 Optional extras (voice input, extra LLM providers) can be requested at install time:
 
@@ -73,8 +75,8 @@ make run            # launch the CLI
 ### Headless / CI mode
 
 ```bash
-scrum-agent --non-interactive --description "Build a todo app" --output json
-scrum-agent --non-interactive --description @project-brief.txt --output html --team-size 5
+yeaboi --non-interactive --description "Build a todo app" --output json
+yeaboi --non-interactive --description @project-brief.txt --output html --team-size 5
 ```
 
 ---
@@ -176,10 +178,10 @@ On first launch (or with `--setup`), an interactive wizard walks you through:
 2. **API key entry** — with format validation hints (e.g., Anthropic keys start with `sk-ant-`)
 3. **Issue tracking** — Jira or Azure DevOps Boards (with org URL, project, and PAT verification)
 4. **Version control** — GitHub PAT token (or skip)
-5. **Credential storage** — saved to `~/.scrum-agent/.env`
+5. **Credential storage** — saved to `~/.yeaboi/.env`
 
 ```bash
-scrum-agent --setup   # re-run anytime to update credentials
+yeaboi --setup   # re-run anytime to update credentials
 ```
 
 ### API keys
@@ -287,13 +289,13 @@ pipx install "scrum-agent[bedrock]"
 ### 6. Run the setup wizard
 
 ```bash
-scrum-agent --setup
+yeaboi --setup
 ```
 
 1. Select **Bedrock** as your LLM provider
 2. The AWS region is auto-detected from `~/.aws/config` (e.g., `eu-west-2`) — press Enter to confirm
 3. The wizard verifies Bedrock access using the IAM role attached by the Bedrock setup script — no API key needed
-4. If OpenClaw is installed, the Bedrock model ID (e.g., `global.anthropic.claude-sonnet-4-6`) is auto-detected and saved to `~/.scrum-agent/.env`
+4. If OpenClaw is installed, the Bedrock model ID (e.g., `global.anthropic.claude-sonnet-4-6`) is auto-detected and saved to `~/.yeaboi/.env`
 
 ![Setup wizard — Bedrock provider](docs/lightsail-setup/07-setup-bedrock.png)
 
@@ -302,7 +304,7 @@ scrum-agent --setup
 Verify scrum-agent works end-to-end before installing the skill:
 
 ```bash
-scrum-agent --non-interactive --description "Build a todo app" --output json
+yeaboi --non-interactive --description "Build a todo app" --output json
 ```
 
 You should see JSON output with features, stories, tasks, and sprints.
@@ -311,21 +313,21 @@ You should see JSON output with features, stories, tasks, and sprints.
 
 ### 8. Install the OpenClaw skill
 
-The `scrum-planner` skill lets OpenClaw conduct conversational scrum planning — it asks intake questions (or skips them in quick mode), generates a temp SCRUM.md, invokes `scrum-agent --non-interactive --output json`, and presents results phase-by-phase with accept/edit/regenerate options.
+The `scrum-planner` skill lets OpenClaw conduct conversational scrum planning — it asks intake questions (or skips them in quick mode), generates a temp SCRUM.md, invokes `yeaboi --non-interactive --output json`, and presents results phase-by-phase with accept/edit/regenerate options.
 
-> **Tip:** After every `pipx install --force` (e.g., updating to a new version), re-run `scrum-agent --install-skill` to update the skill files and refresh the configuration.
+> **Tip:** After every `pipx install --force` (e.g., updating to a new version), re-run `yeaboi --install-skill` to update the skill files and refresh the configuration.
 
 A single command handles the full setup:
 
 ```bash
-scrum-agent --install-skill
+yeaboi --install-skill
 ```
 
 This will:
 1. Copy the skill files to the skills registry at `/usr/lib/node_modules/openclaw/skills/scrum-planner/` (may prompt for sudo)
 2. Copy the skill files into the sandbox workspace at `~/.openclaw/workspace/skills/scrum-planner/`
-3. Sync the Bedrock model ID and region from OpenClaw's config into `~/.scrum-agent/.env`
-4. Disable the Docker sandbox so `scrum-agent` runs directly on the host
+3. Sync the Bedrock model ID and region from OpenClaw's config into `~/.yeaboi/.env`
+4. Disable the Docker sandbox so `yeaboi` runs directly on the host
 5. Restart the OpenClaw gateway to load the new skill
 
 ```
@@ -341,7 +343,7 @@ This will:
 To install to a custom skills directory:
 
 ```bash
-scrum-agent --install-skill /path/to/openclaw/skills
+yeaboi --install-skill /path/to/openclaw/skills
 ```
 
 ![Install the OpenClaw skill](docs/lightsail-setup/09-install-skill.png)
@@ -380,21 +382,21 @@ If the skill doesn't appear in the dashboard:
 
 ```bash
 # Re-install and restart
-scrum-agent --install-skill
+yeaboi --install-skill
 ```
 
-If `scrum-agent` fails inside the skill:
+If `yeaboi` fails inside the skill:
 
 ```bash
 # Test headless mode directly
-scrum-agent --non-interactive --description "Build a todo app" --team-size 3 --sprint-length 2 --output json
+yeaboi --non-interactive --description "Build a todo app" --team-size 3 --sprint-length 2 --output json
 
 # Check logs
-ls -lt ~/.scrum-agent/logs/ | head -5
-tail -50 ~/.scrum-agent/logs/*.log
+ls -lt ~/.yeaboi/logs/ | head -5
+tail -50 ~/.yeaboi/logs/*.log
 
 # Check credentials
-grep LLM_PROVIDER ~/.scrum-agent/.env
+grep LLM_PROVIDER ~/.yeaboi/.env
 ```
 
 ### 12. Connect Slack (optional)
@@ -528,7 +530,7 @@ The skill runs the same conversational intake as the dashboard, directly in a Sl
 3. **Adaptive probes** — "You said 6 engineers — what are their roles?"
 4. **Confirmation** — summary list with answer sources and defaults before generating
 
-After confirmation, the bot runs `scrum-agent` in the background (~3-5 minutes), then presents results phase-by-phase with accept/edit/regenerate options.
+After confirmation, the bot runs `yeaboi` in the background (~3-5 minutes), then presents results phase-by-phase with accept/edit/regenerate options.
 
 ![Slack conversation — intake](docs/lightsail-setup/16-slack-intake.png)
 ![Slack conversation — output message](docs/lightsail-setup/17-slack-output-message.png)
@@ -537,9 +539,9 @@ After confirmation, the bot runs `scrum-agent` in the background (~3-5 minutes),
 
 ### 14. Next steps
 
-- **Push to Jira** — Configure Jira credentials in `scrum-agent --setup`, then the skill offers "Push to Jira" after plan finalization.
+- **Push to Jira** — Configure Jira credentials in `yeaboi --setup`, then the skill offers "Push to Jira" after plan finalization.
 - **Customize the skill** — Edit `~/.openclaw/workspace/skills/scrum-planner/SKILL.md` to adjust question flow, add domain-specific defaults, or change the output format.
-- **Review diagnostics** — Check `~/.scrum-agent/logs/` for detailed run logs if anything looks off.
+- **Review diagnostics** — Check `~/.yeaboi/logs/` for detailed run logs if anything looks off.
 - **Secure with Teleport** — For production use, add Teleport for identity-aware access to the Lightsail instance and OpenClaw dashboard.
 
 See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full skill documentation, question-to-CLI mapping, and troubleshooting.
@@ -551,7 +553,7 @@ See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full 
 ## ⌨️ CLI Reference
 
 ```
-scrum-agent [OPTIONS]
+yeaboi [OPTIONS]
 ```
 
 ### Interactive modes
@@ -657,18 +659,18 @@ The **status bar** at the bottom of the terminal shows project name, current pha
 <summary>📝 Examples</summary>
 
 ```bash
-scrum-agent                                            # interactive TUI (recommended)
-scrum-agent --quick                                    # quick intake (2 questions only)
-scrum-agent --full-intake                              # full 30-question intake
-scrum-agent --questionnaire intake.md                  # import pre-filled questionnaire
-scrum-agent --export-only --quick                      # non-interactive, auto-accept all
-scrum-agent --resume                                   # resume last session (picker)
-scrum-agent --resume latest                            # resume most recent session
-scrum-agent --list-sessions                            # list all saved sessions
-scrum-agent --clear-sessions                           # delete saved sessions
-scrum-agent --non-interactive --description "Build X"  # headless mode
-scrum-agent --non-interactive --description @brief.txt --output json  # JSON to stdout
-scrum-agent --dry-run                                  # TUI with mock data
+yeaboi                                                 # interactive TUI (recommended)
+yeaboi --quick                                    # quick intake (2 questions only)
+yeaboi --full-intake                              # full 30-question intake
+yeaboi --questionnaire intake.md                  # import pre-filled questionnaire
+yeaboi --export-only --quick                      # non-interactive, auto-accept all
+yeaboi --resume                                   # resume last session (picker)
+yeaboi --resume latest                            # resume most recent session
+yeaboi --list-sessions                            # list all saved sessions
+yeaboi --clear-sessions                           # delete saved sessions
+yeaboi --non-interactive --description "Build X"  # headless mode
+yeaboi --non-interactive --description @brief.txt --output json  # JSON to stdout
+yeaboi --dry-run                                  # TUI with mock data
 ```
 
 </details>
@@ -728,9 +730,9 @@ All 30 questions asked one-at-a-time in a conversational flow. Seven phases:
 
 ### Offline import (`--questionnaire`)
 
-1. Export a blank template: `scrum-agent --export-questionnaire`
+1. Export a blank template: `yeaboi --export-questionnaire`
 2. Fill it in at your own pace in any editor
-3. Import: `scrum-agent --questionnaire intake.md`
+3. Import: `yeaboi --questionnaire intake.md`
 4. Review the summary and confirm before proceeding
 
 The format is round-trippable (export → edit → import preserves answers exactly).
@@ -841,14 +843,14 @@ Press **Configure** on the Standup page to set the **standup time** (e.g. `10:00
 Enabling a schedule installs an **OS-native job** — a `launchd` agent on macOS (`~/Library/LaunchAgents/`) or a `crontab` entry on Linux. On macOS it **opens a Terminal** at run time and gives you a short, timed window to type your update and confirm (auto-proceeds if you don't respond); on a headless Linux run it just generates and delivers. Under the hood the job runs:
 
 ```bash
-scrum-agent --standup-run --standup-interactive --standup-session <id>
+yeaboi --standup-run --standup-interactive --standup-session <id>
 ```
 
 No background daemon is kept alive; the operating system fires the job, so it works even with scrum-agent fully quit and survives reboots.
 
 ### Delivery configuration
 
-Non-secret settings (time, channels) live per-session in SQLite. Secrets/creds go in `~/.scrum-agent/.env` (see `.env.example`):
+Non-secret settings (time, channels) live per-session in SQLite. Secrets/creds go in `~/.yeaboi/.env` (see `.env.example`):
 
 - **Slack** — `SLACK_WEBHOOK_URL` (an [incoming webhook](https://api.slack.com/messaging/webhooks))
 - **Email** — `STANDUP_SMTP_HOST/PORT/USER/PASSWORD`, `STANDUP_SMTP_SENDER`, `STANDUP_EMAIL_RECIPIENTS`
@@ -859,16 +861,16 @@ Everything uses the Python standard library (Slack via `urllib`, email via `smtp
 
 ### Exports
 
-Every standup — generated in the TUI, run headlessly, or fired on a schedule — is auto-saved as **Markdown and self-contained HTML** under `~/.scrum-agent/exports/standup/<project>/` (dated `standup-YYYY-MM-DD.md` / `.html`), so the output is a shareable document rather than something you reconstruct from logs. The **Export** button on the page re-writes the latest report on demand, just like the Analysis and Planning pages.
+Every standup — generated in the TUI, run headlessly, or fired on a schedule — is auto-saved as **Markdown and self-contained HTML** under `~/.yeaboi/exports/standup/<project>/` (dated `standup-YYYY-MM-DD.md` / `.html`), so the output is a shareable document rather than something you reconstruct from logs. The **Export** button on the page re-writes the latest report on demand, just like the Analysis and Planning pages.
 
 ### Try it
 
 ```bash
-scrum-agent                                                   # open the Standup card, press Generate
-scrum-agent --standup-run --standup-session latest --standup-output terminal
+yeaboi                                                        # open the Standup card, press Generate
+yeaboi --standup-run --standup-session latest --standup-output terminal
 ```
 
-Standup runs are logged to `~/.scrum-agent/logs/standup/`, exported to `~/.scrum-agent/exports/standup/`, and persisted to the `standup_history` table.
+Standup runs are logged to `~/.yeaboi/logs/standup/`, exported to `~/.yeaboi/exports/standup/`, and persisted to the `standup_history` table.
 
 ---
 
@@ -884,13 +886,13 @@ Reporting turns the work your team actually **delivered** into a business-friend
 
 **What it does:** it pulls the tickets marked **Done / Closed** in that window from Jira or Azure DevOps (the same board connection the Standup uses), computes headline metrics (items delivered, contributors, per-source counts), then makes a single LLM **design pass** that writes an executive summary, groups the work into outcome **themes**, calls out **highlights**, and picks a tasteful **emoji** for each section. If the LLM is unavailable it falls back to a plain, deterministic summary — it never fails.
 
-**Three outputs**, auto-saved to `~/.scrum-agent/exports/reporting/<project>/` on every run (and re-writable with the **Export** button):
+**Three outputs**, auto-saved to `~/.yeaboi/exports/reporting/<project>/` on every run (and re-writable with the **Export** button):
 
 - **Markdown** (`.md`) — drop into a wiki or PR.
 - **HTML** (`.html`) — a self-contained styled report.
 - **Slide deck** (`-slides.html`) — a self-contained, offline **presentation**: open it in any browser and use ← / → / Space to present. Press **T** to cycle 4 built-in themes (midnight / aurora / sunset / mono); the **Theme** button in the TUI sets which palette is baked into the exported deck. Everything is inline (no CDN, no network) and every piece of ticket text is rendered inertly, so it's safe to share.
 
-Reporting runs are logged to `~/.scrum-agent/logs/reporting/` and persisted to the `reporting_history` table.
+Reporting runs are logged to `~/.yeaboi/logs/reporting/` and persisted to the `reporting_history` table.
 
 ---
 
@@ -1035,7 +1037,7 @@ Before the feature generator runs, an **epic review page** lets you review and e
 Writes `scrum-plan.md` with all artifacts structured as headings, tables, and lists.
 
 ```bash
-scrum-agent --export-only --quick
+yeaboi --export-only --quick
 ```
 
 ### HTML
@@ -1043,7 +1045,7 @@ scrum-agent --export-only --quick
 Self-contained single-file HTML report with embedded CSS, collapsible sections, and a table of contents. No external dependencies.
 
 ```bash
-scrum-agent --non-interactive --description "Build a todo app" --output html
+yeaboi --non-interactive --description "Build a todo app" --output html
 ```
 
 ### JSON
@@ -1062,7 +1064,7 @@ Clean, pipeable JSON schema for CI/CD integration. No internal state fields — 
 ```
 
 ```bash
-scrum-agent --non-interactive --description "Build a todo app" --output json | jq '.stories | length'
+yeaboi --non-interactive --description "Build a todo app" --output json | jq '.stories | length'
 ```
 
 When using `--output json`, Rich console output goes to stderr so stdout is clean JSON.
@@ -1140,12 +1142,12 @@ AZURE_DEVOPS_TEAM=MyProject Team    # optional — defaults to "{project} Team"
 
 ## 💾 Session Management
 
-Sessions are persisted to SQLite at `~/.scrum-agent/data/sessions.db`. Every terminal session gets a unique ID (`new-<8hex>-<YYYY-MM-DD>`) and a human-readable display name derived from the project slug (`todoapp-2026-03-19`). Team analysis profiles are stored in the same database.
+Sessions are persisted to SQLite at `~/.yeaboi/data/sessions.db`. Every terminal session gets a unique ID (`new-<8hex>-<YYYY-MM-DD>`) and a human-readable display name derived from the project slug (`todoapp-2026-03-19`). Team analysis profiles are stored in the same database.
 
 ### Directory structure
 
 ```
-~/.scrum-agent/
+~/.yeaboi/
   data/
     sessions.db         # SQLite — planning sessions, analysis profiles, token usage
   exports/
@@ -1161,9 +1163,9 @@ Sessions are persisted to SQLite at `~/.scrum-agent/data/sessions.db`. Every ter
 ### Resume a session
 
 ```bash
-scrum-agent --resume            # interactive picker
-scrum-agent --resume latest     # most recent session
-scrum-agent --resume <id>       # specific session ID
+yeaboi --resume            # interactive picker
+yeaboi --resume latest     # most recent session
+yeaboi --resume <id>       # specific session ID
 ```
 
 Resumed sessions pick up exactly where you left off — mid-questionnaire, mid-review, or between pipeline stages.
@@ -1171,7 +1173,7 @@ Resumed sessions pick up exactly where you left off — mid-questionnaire, mid-r
 ### List sessions
 
 ```bash
-scrum-agent --list-sessions
+yeaboi --list-sessions
 ```
 
 Shows a table with project name, date, last completed step, and session ID.
@@ -1179,7 +1181,7 @@ Shows a table with project name, date, last completed step, and session ID.
 ### Delete sessions
 
 ```bash
-scrum-agent --clear-sessions
+yeaboi --clear-sessions
 ```
 
 Interactive picker to delete one session or clear all.
@@ -1339,7 +1341,7 @@ The agent has access to 30 tools, organized by integration:
 | **Interface** | Full-screen TUI with animated splash, mode selection, session editor, pipeline progress, streaming output, and dark/light themes |
 | **Prompt Construction** | Scrum Master persona, ARC-structured prompts per node, few-shot examples, adaptive question templates |
 | **Model** | Anthropic Claude (primary), OpenAI GPT, Google Gemini — swappable via `LLM_PROVIDER` env var |
-| **Data & Storage** | SQLite session store (`~/.scrum-agent/data/sessions.db`) with team analysis profiles, token usage tracking, optional Jira/Confluence/Azure DevOps integration |
+| **Data & Storage** | SQLite session store (`~/.yeaboi/data/sessions.db`) with team analysis profiles, token usage tracking, optional Jira/Confluence/Azure DevOps integration |
 
 ### Three Design Principles
 

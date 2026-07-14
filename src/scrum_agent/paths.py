@@ -1,10 +1,12 @@
-"""Centralised path definitions for ~/.scrum-agent directory structure.
+"""Centralised path definitions for the ~/.yeaboi directory structure.
 
-All file and directory paths for the scrum-agent application should be
+All file and directory paths for the yeaboi.ai application should be
 accessed through this module to ensure consistency across the codebase.
+(The config dir was ``~/.scrum-agent`` before the yeaboi.ai rebrand; an
+existing tree is migrated automatically — see ``migrate_root_dir``.)
 
 Directory structure:
-    ~/.scrum-agent/
+    ~/.yeaboi/
     ├── data/
     │   ├── sessions.db           # SQLite: sessions, team profiles, token usage
     │   ├── states/               # Legacy checkpoint JSON files
@@ -19,7 +21,7 @@ Directory structure:
     │   └── retro/                # Retro exports (HTML + MD)
     │       └── {project_key}/
     ├── logs/
-    │   ├── tui/                  # Main TUI log (scrum-agent.log + rotations)
+    │   ├── tui/                  # Main TUI log (yeaboi.log + rotations)
     │   ├── analysis/             # Per-analysis-run logs
     │   ├── planning/             # Per-planning-session logs
     │   ├── standup/              # Daily Standup logs
@@ -37,7 +39,11 @@ from pathlib import Path
 # Root
 # ---------------------------------------------------------------------------
 
-ROOT_DIR = Path.home() / ".scrum-agent"
+ROOT_DIR = Path.home() / ".yeaboi"
+
+# Pre-rebrand config dir (yeaboi.ai was "Scrum AI Agent"). If present and the
+# new ROOT_DIR isn't, the whole tree is migrated once at startup.
+LEGACY_ROOT_DIR = Path.home() / ".scrum-agent"
 
 # ---------------------------------------------------------------------------
 # Data (DB, states, project metadata)
@@ -194,7 +200,7 @@ def get_reporting_export_dir(project_key: str) -> Path:
 def get_tui_log_path() -> Path:
     """Return the main TUI log path."""
     TUI_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    return TUI_LOGS_DIR / "scrum-agent.log"
+    return TUI_LOGS_DIR / "yeaboi.log"
 
 
 def get_analysis_log_dir() -> Path:
@@ -239,12 +245,36 @@ def get_bin_dir() -> Path:
     return BIN_DIR
 
 
+def migrate_root_dir() -> None:
+    """Migrate the whole config tree from the pre-rebrand ~/.scrum-agent dir.
+
+    yeaboi.ai used to store everything under ``~/.scrum-agent``. On the first
+    run after the rebrand, move the entire tree to ``~/.yeaboi`` so existing
+    users keep their sessions, credentials, and exports seamlessly. Best-effort
+    and idempotent: does nothing once ``~/.yeaboi`` exists, and never raises.
+    """
+    import logging
+    import shutil
+
+    if ROOT_DIR.exists() or not LEGACY_ROOT_DIR.exists():
+        return
+    try:
+        shutil.move(str(LEGACY_ROOT_DIR), str(ROOT_DIR))
+    except Exception as exc:  # pragma: no cover - defensive; migration is best-effort
+        logging.getLogger(__name__).warning(
+            "Could not migrate %s -> %s: %s", LEGACY_ROOT_DIR, ROOT_DIR, exc
+        )
+
+
 def migrate_legacy_paths() -> None:
     """Migrate files from legacy flat structure to new organised structure.
 
     Called once at startup. Safe to call multiple times — skips if already migrated.
     """
     import shutil
+
+    # First, move the whole tree over from the pre-rebrand ~/.scrum-agent dir.
+    migrate_root_dir()
 
     # Migrate sessions.db
     if LEGACY_DB_PATH.exists() and not DB_PATH.exists():
@@ -261,13 +291,21 @@ def migrate_legacy_paths() -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         LEGACY_PROJECTS_FILE.rename(PROJECTS_FILE)
 
-    # Migrate main log
-    if LEGACY_TUI_LOG.exists() and not (TUI_LOGS_DIR / "scrum-agent.log").exists():
+    # Migrate main log (flat ROOT_DIR/scrum-agent.log → logs/tui/yeaboi.log)
+    new_tui_log = TUI_LOGS_DIR / "yeaboi.log"
+    if LEGACY_TUI_LOG.exists() and not new_tui_log.exists():
         TUI_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        LEGACY_TUI_LOG.rename(TUI_LOGS_DIR / "scrum-agent.log")
+        LEGACY_TUI_LOG.rename(new_tui_log)
         # Also move rotated logs
         for rot in ROOT_DIR.glob("scrum-agent.log.*"):
-            rot.rename(TUI_LOGS_DIR / rot.name)
+            rot.rename(TUI_LOGS_DIR / rot.name.replace("scrum-agent.log", "yeaboi.log"))
+
+    # Migrate a previously-organised pre-rebrand log (logs/tui/scrum-agent.log → yeaboi.log)
+    old_organised_log = TUI_LOGS_DIR / "scrum-agent.log"
+    if old_organised_log.exists() and not new_tui_log.exists():
+        old_organised_log.rename(new_tui_log)
+        for rot in TUI_LOGS_DIR.glob("scrum-agent.log.*"):
+            rot.rename(TUI_LOGS_DIR / rot.name.replace("scrum-agent.log", "yeaboi.log"))
 
     # Migrate analysis logs (team-analysis-*.log → logs/analysis/)
     if LOGS_DIR.exists():

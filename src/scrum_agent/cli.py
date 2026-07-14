@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from scrum_agent import __version__
+from scrum_agent import __version__, paths
 from scrum_agent.config import (
     detect_proxy,
     disable_langsmith_tracing,
@@ -39,8 +39,9 @@ from scrum_agent.ui.splash import show_splash
 DEFAULT_QUESTIONNAIRE_FILENAME = "scrum-questionnaire.md"
 
 # Default DB path — inside the user config directory alongside history/config.
-# Matches the path used by SessionStore in run_repl().
-_SESSIONS_DB_DIR = Path.home() / ".scrum-agent"
+# Matches the path used by SessionStore in run_repl(). Single-sourced via
+# paths.ROOT_DIR so the config-dir location (~/.yeaboi) lives in one place.
+_SESSIONS_DB_DIR = paths.ROOT_DIR
 
 
 def _summarise_scrum_md(console: Console, path: Path) -> None:
@@ -71,8 +72,8 @@ def _build_welcome_panel() -> Panel:
     # responsible for user-facing chrome like the welcome screen.
     """
     body = Text.from_markup(
-        f"[bold cyan]Scrum AI Agent[/bold cyan]  [dim]v{__version__}[/dim]\n"
-        "[white]Your AI-powered Scrum Master[/white]\n\n"
+        f"[bold cyan]yeaboi.ai[/bold cyan]  [dim]v{__version__}[/dim]\n"
+        "[white]A team lead's best friend[/white]\n\n"
         "[dim]Describe your project to get started, or type [cyan]help[/cyan] for commands.[/dim]"
     )
     return Panel(body, border_style="cyan", padding=(1, 2))
@@ -264,20 +265,20 @@ def _resolve_resume(console: Console, resume_arg: str) -> tuple[dict | None, str
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
-        prog="scrum-agent",
-        description="AI-powered Scrum Master — decomposes projects into epics, stories, tasks, and sprint plans.",
+        prog="yeaboi",
+        description="yeaboi.ai — a team lead's best friend. Decomposes projects into epics, stories, and sprints.",
         epilog=(
             "examples:\n"
-            "  scrum-agent                        interactive mode (recommended)\n"
-            "  scrum-agent --quick                quick intake (2 questions only)\n"
-            "  scrum-agent --questionnaire q.md   import pre-filled questionnaire\n"
-            "  scrum-agent --export-only --quick  non-interactive, auto-accept all\n"
-            "  scrum-agent --resume               resume last session (interactive picker)\n"
-            "  scrum-agent --resume latest         resume most recent session\n"
-            "  scrum-agent --list-sessions         list all saved sessions\n"
-            "  scrum-agent --clear-sessions        delete saved sessions\n"
-            '  scrum-agent --non-interactive --description "Build a todo app"  headless mode\n'
-            '  scrum-agent --non-interactive --description "..." --output json  JSON to stdout'
+            "  yeaboi                        interactive mode (recommended)\n"
+            "  yeaboi --quick                quick intake (2 questions only)\n"
+            "  yeaboi --questionnaire q.md   import pre-filled questionnaire\n"
+            "  yeaboi --export-only --quick  non-interactive, auto-accept all\n"
+            "  yeaboi --resume               resume last session (interactive picker)\n"
+            "  yeaboi --resume latest         resume most recent session\n"
+            "  yeaboi --list-sessions         list all saved sessions\n"
+            "  yeaboi --clear-sessions        delete saved sessions\n"
+            '  yeaboi --non-interactive --description "Build a todo app"  headless mode\n'
+            '  yeaboi --non-interactive --description "..." --output json  JSON to stdout'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1004,7 +1005,13 @@ def main(argv: list[str] | None = None) -> None:
         _install_skill(args.install_skill)
         return
 
-    # Load ~/.scrum-agent/.env before any credential reads.
+    # Migrate the config tree from the pre-rebrand ~/.scrum-agent dir BEFORE any
+    # read/mkdir of ~/.yeaboi. Must run ahead of load_user_config() (which mkdirs
+    # the config dir) and ahead of the headless/standup flows that return early,
+    # otherwise those paths would create an empty ~/.yeaboi and skip migration.
+    paths.migrate_root_dir()
+
+    # Load ~/.yeaboi/.env before any credential reads.
     # override=False means shell env vars and project .env always take precedence.
     load_user_config()
 

@@ -74,7 +74,7 @@ class TestLaunchd:
         monkeypatch.setattr(scheduler.subprocess, "run", run)
 
         msg = scheduler.install_schedule("sess-1", "10:00", "1-5")
-        plist_file = tmp_path / "com.scrum-agent.standup.sess-1.plist"
+        plist_file = tmp_path / "com.yeaboi.standup.sess-1.plist"
         assert plist_file.exists()
         with plist_file.open("rb") as fh:
             data = plistlib.load(fh)
@@ -96,7 +96,7 @@ class TestLaunchd:
         monkeypatch.setattr(scheduler, "_launcher_dir", lambda: tmp_path / "launchers")
         monkeypatch.setattr(scheduler.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0, stderr="")))
         scheduler.install_schedule("s", "10:00", "7")
-        with (tmp_path / "com.scrum-agent.standup.s.plist").open("rb") as fh:
+        with (tmp_path / "com.yeaboi.standup.s.plist").open("rb") as fh:
             data = plistlib.load(fh)
         assert data["StartCalendarInterval"][0]["Weekday"] == 0
 
@@ -127,7 +127,7 @@ class TestCron:
         entry = written["lines"][-1]
         assert entry.startswith("50 9 * * 1,2,3,4,5 ")
         assert "--standup-run" in entry
-        assert "# scrum-agent-standup sess-1" in entry
+        assert "# yeaboi-standup sess-1" in entry
         assert "crontab" in msg
 
     def test_install_replaces_existing_for_session(self, monkeypatch):
@@ -137,7 +137,7 @@ class TestCron:
         monkeypatch.setattr(
             scheduler,
             "_read_crontab",
-            lambda: ["0 8 * * 1 old # scrum-agent-standup sess-1", "# unrelated"],
+            lambda: ["0 8 * * 1 old # yeaboi-standup sess-1", "# unrelated"],
         )
         written = {}
         monkeypatch.setattr(scheduler, "_write_crontab", lambda lines: written.setdefault("lines", lines))
@@ -154,7 +154,7 @@ class TestCron:
         monkeypatch.setattr(
             scheduler,
             "_read_crontab",
-            lambda: ["50 9 * * 1 cmd # scrum-agent-standup sess-1", "# keep"],
+            lambda: ["50 9 * * 1 cmd # yeaboi-standup sess-1", "# keep"],
         )
         written = {}
         monkeypatch.setattr(scheduler, "_write_crontab", lambda lines: written.setdefault("lines", lines))

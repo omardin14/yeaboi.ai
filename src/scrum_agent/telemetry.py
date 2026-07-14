@@ -5,7 +5,7 @@ to S3 for later analysis. NO code, NO project names, NO PII — only
 patterns (tech stacks, story counts, point distributions, accept/edit rates).
 
 Disabled by default. Enable via:
-  SCRUM_AGENT_TELEMETRY=true
+  YEABOI_TELEMETRY=true   (legacy SCRUM_AGENT_TELEMETRY still honoured)
 
 # See README: "Architecture" — telemetry layer (opt-in)
 """
@@ -27,10 +27,18 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 
-TELEMETRY_ENABLED = os.getenv("SCRUM_AGENT_TELEMETRY", "").lower() in ("true", "1", "yes")
+# Prefer the yeaboi-branded var; fall back to the pre-rebrand SCRUM_AGENT_* name.
+TELEMETRY_ENABLED = os.getenv("YEABOI_TELEMETRY", os.getenv("SCRUM_AGENT_TELEMETRY", "")).lower() in (
+    "true",
+    "1",
+    "yes",
+)
 TELEMETRY_ENDPOINT = os.getenv(
-    "SCRUM_AGENT_TELEMETRY_URL",
-    "https://ykauzind6vf3vtlvwz5kru7ajq0cpgyd.lambda-url.eu-west-1.on.aws/",
+    "YEABOI_TELEMETRY_URL",
+    os.getenv(
+        "SCRUM_AGENT_TELEMETRY_URL",
+        "https://ykauzind6vf3vtlvwz5kru7ajq0cpgyd.lambda-url.eu-west-1.on.aws/",
+    ),
 )
 
 

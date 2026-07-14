@@ -19,13 +19,13 @@ class TestBuildSplashFrame:
 
     def test_returns_panel(self):
         """Frame builder returns a Rich Panel."""
-        lines = render_ascii_text("SCRUM AGENT")
+        lines = render_ascii_text("YEABOI")
         frame = _build_splash_frame(lines, width=80, height=24)
         assert isinstance(frame, Panel)
 
     def test_full_opacity_brand_blue(self):
         """At opacity=1.0, the brand blue colour appears in the rendered output."""
-        lines = render_ascii_text("SCRUM AGENT")
+        lines = render_ascii_text("YEABOI")
         frame = _build_splash_frame(lines, width=80, height=24, opacity=1.0)
         assert isinstance(frame, Panel)
         from io import StringIO

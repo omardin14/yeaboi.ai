@@ -1,4 +1,4 @@
-"""Startup splash animation — "SCRUM AGENT" fades in then out.
+"""Startup splash animation — "YEABOI" fades in then out.
 
 # See README: "Architecture" — the splash is a CLI-layer component shown
 # before the setup wizard or mode selection screen. It replaces the static
@@ -113,7 +113,7 @@ def show_splash(console: Console) -> None:
     """Show the startup splash animation (~2s). Non-interactive, timed.
 
     # See README: "Architecture" — this replaces _build_welcome_panel() as
-    # the first thing users see. "SCRUM AGENT" fades in from nothing, holds
+    # the first thing users see. "YEABOI" fades in from nothing, holds
     # briefly, then fades back out to nothing.
 
     Alt-screen management: we enter the alternate screen buffer manually
@@ -123,7 +123,7 @@ def show_splash(console: Console) -> None:
     avoids the visible flicker that would occur if the splash exited
     alt-screen and the next UI immediately re-entered it.
     """
-    text_lines = render_ascii_text("SCRUM AGENT")
+    text_lines = render_ascii_text("YEABOI")
     w, h = console.size
 
     # Phase durations (in frames at ~60fps)

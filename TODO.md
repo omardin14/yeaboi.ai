@@ -1,6 +1,21 @@
-# Scrum AI Agent — TODO
+# yeaboi.ai — TODO
 
 Comprehensive task list for building the project. Check items off as they're completed.
+
+---
+
+## Rebrand: Scrum AI Agent → yeaboi.ai ("a team lead's best friend")
+
+- [x] Splash wordmark `SCRUM AGENT` → `YEABOI`; welcome panel + tagline → `yeaboi.ai` / "A team lead's best friend"
+- [x] CLI command renamed `scrum-agent` → `yeaboi` (legacy `scrum-agent` kept as a one-release alias); argparse prog/description/epilog rebranded
+- [x] Config dir `~/.scrum-agent/` → `~/.yeaboi/` with best-effort auto-migration (`paths.migrate_root_dir`, run at the top of `cli.main`); TUI log `scrum-agent.log` → `yeaboi.log`
+- [x] Setup wizard, export footers (HTML/MD/slides), questionnaire header, package docstring → yeaboi.ai
+- [x] Standup scheduler labels/markers/support-dir → `com.yeaboi.*` / `yeaboi`; binary lookup prefers `yeaboi`, falls back to `scrum-agent`
+- [x] Telemetry env vars accept `YEABOI_TELEMETRY(_URL)` (legacy `SCRUM_AGENT_*` still honoured)
+- [x] README title/hero/tagline/install + run-command examples + config-path references rebranded (PyPI package name stays `scrum-agent`)
+- [x] Tests updated for new strings/paths/labels; `make test` + `make lint` green
+- [ ] (Deferred) Regenerate `docs/banner.jpg` hero image; rebrand legacy REPL toolbar (`repl/`) — left as `Scrum AI Agent` to avoid touching the protected `test_repl.py`
+- [ ] (Not done — intentional) Deep rename of the `scrum_agent` Python package / PyPI distribution name and the `scrum-planner` skill dir
 
 ---
 

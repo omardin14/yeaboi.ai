@@ -155,7 +155,7 @@ class TestUsageScreen:
             "version": "1.2.0",
             "python_version": "3.14.3",
             "langsmith": "disabled",
-            "db_path": "~/.scrum-agent/sessions.db",
+            "db_path": "~/.yeaboi/sessions.db",
             "profiles": [
                 {"name": "azdevops-PROJ", "source": "azdevops", "sprints": 8},
             ],
@@ -413,7 +413,7 @@ class TestCollectSettingsData:
 
         data = _collect_settings_data()
         assert "_config_path" in data
-        assert ".scrum-agent" in data["_config_path"]
+        assert ".yeaboi" in data["_config_path"]
 
     def test_empty_env_vars(self, monkeypatch):
         from scrum_agent.ui.mode_select import _collect_settings_data

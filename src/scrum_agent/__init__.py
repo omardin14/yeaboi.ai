@@ -1,4 +1,4 @@
-"""Scrum AI Agent — AI-powered Scrum Master for project planning."""
+"""yeaboi.ai — a team lead's best friend for project planning and delivery."""
 
 import logging
 import warnings
