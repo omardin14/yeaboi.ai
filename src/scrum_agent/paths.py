@@ -261,9 +261,7 @@ def migrate_root_dir() -> None:
     try:
         shutil.move(str(LEGACY_ROOT_DIR), str(ROOT_DIR))
     except Exception as exc:  # pragma: no cover - defensive; migration is best-effort
-        logging.getLogger(__name__).warning(
-            "Could not migrate %s -> %s: %s", LEGACY_ROOT_DIR, ROOT_DIR, exc
-        )
+        logging.getLogger(__name__).warning("Could not migrate %s -> %s: %s", LEGACY_ROOT_DIR, ROOT_DIR, exc)
 
 
 def migrate_legacy_paths() -> None:

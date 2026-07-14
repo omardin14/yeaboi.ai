@@ -131,9 +131,7 @@ def _title_rows(word: str, available_width: int) -> list[str]:
     return [" " * block_w] * top + lines + [" " * block_w] * (pad_total - top)
 
 
-def build_ascii_title(
-    word: str, color: str, *, shimmer_tick: float | None = None, width: int | None = None
-) -> Text:
+def build_ascii_title(word: str, color: str, *, shimmer_tick: float | None = None, width: int | None = None) -> Text:
     """Return an ANSI-Shadow ASCII-art title for ``word`` in ``color``.
 
     Always ``TITLE_ROWS`` rows tall (see ``_title_rows``) so every screen's
