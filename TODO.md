@@ -14,6 +14,8 @@ Comprehensive task list for building the project. Check items off as they're com
 - [x] Telemetry env vars accept `YEABOI_TELEMETRY(_URL)` (legacy `SCRUM_AGENT_*` still honoured)
 - [x] README title/hero/tagline/install + run-command examples + config-path references rebranded (PyPI package name stays `scrum-agent`)
 - [x] Tests updated for new strings/paths/labels; `make test` + `make lint` green
+- [x] Splash wordmark upgraded to a 6-row ANSI Shadow "YEABOI" with a diagonal shine sweep (`ui/splash.py`)
+- [x] Cinematic per-mode intros: entering any mode (Planning/Analysis/Standup/Retro/Performance/Reporting/Usage/Settings) plays a fade-in + shine ANSI Shadow wordmark tinted with the mode's accent, reusing the splash engine (`play_wordmark_intro`); baked art in `ui/shared/_wordmarks.py`, compact-font fallback on narrow terminals (e.g. Performance)
 - [ ] (Deferred) Regenerate `docs/banner.jpg` hero image; rebrand legacy REPL toolbar (`repl/`) — left as `Scrum AI Agent` to avoid touching the protected `test_repl.py`
 - [ ] (Not done — intentional) Deep rename of the `scrum_agent` Python package / PyPI distribution name and the `scrum-planner` skill dir
 

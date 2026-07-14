@@ -13,6 +13,7 @@ Animation sequence (~2.7s total):
 from __future__ import annotations
 
 import math
+import re
 import time
 
 import rich.box
@@ -22,6 +23,7 @@ from rich.text import Text
 
 from scrum_agent.ui.shared._ascii_font import render_ascii_text
 from scrum_agent.ui.shared._music_bar import make_live
+from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
 # Animation constants
@@ -94,15 +96,17 @@ def _build_splash_frame(
     width: int,
     height: int,
     opacity: float = 1.0,
+    rgb: tuple[int, int, int] = _BRAND_RGB,
 ) -> Panel:
-    """Build a fade frame: the whole wordmark in one brand-blue at ``opacity``.
+    """Build a fade frame: the whole wordmark in one ``rgb`` colour at ``opacity``.
 
-    text_lines: ASCII-art rows (the tall _WORDMARK, or the compact two-line
-        render_ascii_text fallback). All rows must be equal width so per-line
-        centre-justify keeps them aligned.
+    text_lines: ASCII-art rows (a tall ANSI-Shadow wordmark, or the compact
+        two-line render_ascii_text fallback). All rows must be equal width so
+        per-line centre-justify keeps them aligned.
     opacity: 0.0–1.0 controls visibility. At 0 the text is invisible
         (spaces only) so it blends with any terminal background. At 1 the
-        text is full brand-blue.
+        text is full ``rgb``.
+    rgb: base colour (defaults to the brand blue used by the splash).
     """
     rendered = Text(justify="center")
     if opacity < 0.01:
@@ -114,9 +118,9 @@ def _build_splash_frame(
             if line_idx < len(text_lines) - 1:
                 rendered.append("\n")
     else:
-        r = int(_BRAND_RGB[0] * opacity)
-        g = int(_BRAND_RGB[1] * opacity)
-        b = int(_BRAND_RGB[2] * opacity)
+        r = int(rgb[0] * opacity)
+        g = int(rgb[1] * opacity)
+        b = int(rgb[2] * opacity)
         style = f"bold rgb({r},{g},{b})"
         for line_idx, line in enumerate(text_lines):
             rendered.append(line, style=style)
@@ -126,15 +130,15 @@ def _build_splash_frame(
     return _center_in_panel(rendered, width=width, height=height, block_h=len(text_lines))
 
 
-def _shine_style(pos: float, hotspot: float) -> str:
-    """Per-character style: full brand-blue, blended towards white near the glint.
+def _shine_style(pos: float, hotspot: float, rgb: tuple[int, int, int] = _BRAND_RGB) -> str:
+    """Per-character style: full ``rgb``, blended towards white near the glint.
 
     A tight Gaussian ``hotspot`` (0–1 across the wordmark) sweeps past each
     character at normalised column ``pos``; characters near it flare white.
     """
     dist = abs(pos - hotspot)
     intensity = math.exp(-(dist * dist) / 0.012)
-    r, g, b = _BRAND_RGB
+    r, g, b = rgb
     r2 = int(r + (255 - r) * intensity)
     g2 = int(g + (255 - g) * intensity)
     b2 = int(b + (255 - b) * intensity)
@@ -147,6 +151,7 @@ def _build_shine_frame(
     width: int,
     height: int,
     hotspot: float,
+    rgb: tuple[int, int, int] = _BRAND_RGB,
 ) -> Panel:
     """Build a shine frame: the fully-lit wordmark with a diagonal glint sweeping.
 
@@ -162,11 +167,76 @@ def _build_shine_frame(
                 rendered.append(" ")
                 continue
             pos = col / span + line_idx * _SHINE_ROW_SKEW
-            rendered.append(ch, style=_shine_style(pos, hotspot))
+            rendered.append(ch, style=_shine_style(pos, hotspot, rgb))
         if line_idx < len(text_lines) - 1:
             rendered.append("\n")
 
     return _center_in_panel(rendered, width=width, height=height, block_h=len(text_lines))
+
+
+def _as_rgb(color: tuple[int, int, int] | str) -> tuple[int, int, int]:
+    """Coerce an ``(r,g,b)`` tuple or an ``"rgb(r,g,b)"`` string to a tuple."""
+    if isinstance(color, tuple):
+        return color
+    nums = re.findall(r"\d+", color)
+    if len(nums) >= 3:
+        return (int(nums[0]), int(nums[1]), int(nums[2]))
+    return _BRAND_RGB
+
+
+def _resolve_wordmark(word: str, available_width: int) -> list[str]:
+    """Return the tall ANSI-Shadow rows for *word* if they fit, else compact art.
+
+    Falls back to the two-line render_ascii_text font when the terminal is too
+    narrow for the baked wordmark (e.g. "Performance" on an 80-col terminal), so
+    the intro never wraps into an unreadable mess.
+    """
+    art = get_shadow_wordmark(word)
+    if art and len(art[0]) + 6 <= available_width:  # +6 for panel border + padding
+        return art
+    return render_ascii_text(word)
+
+
+def _run_wordmark_animation(
+    console: Console,
+    live: object,
+    text_lines: list[str],
+    rgb: tuple[int, int, int],
+    *,
+    fade_in_frames: int,
+    shine_frames: int,
+    fade_out_frames: int,
+    frame_time: float,
+) -> None:
+    """Drive ``live`` through fade-in → diagonal shine → fade-out for a wordmark.
+
+    Shared by the brand splash and the per-mode intros. ``live`` is any object
+    with an ``update(renderable)`` method (a Rich Live). Glint travels from just
+    off the left edge to past the right edge so it enters and fully exits cleanly.
+    """
+    shine_start, shine_end = -0.25, 1.4
+
+    # Phase 1 — Fade in: nothing → colour
+    for frame in range(fade_in_frames):
+        t = _ease_out_cubic(frame / max(fade_in_frames - 1, 1))
+        w, h = console.size
+        live.update(_build_splash_frame(text_lines, width=w, height=h, opacity=t, rgb=rgb))
+        time.sleep(frame_time)
+
+    # Phase 2 — Shine: a diagonal glint sweeps across the fully-lit wordmark
+    for frame in range(shine_frames):
+        t = frame / max(shine_frames - 1, 1)
+        hotspot = shine_start + (shine_end - shine_start) * t
+        w, h = console.size
+        live.update(_build_shine_frame(text_lines, width=w, height=h, hotspot=hotspot, rgb=rgb))
+        time.sleep(frame_time)
+
+    # Phase 3 — Fade out: colour → nothing
+    for frame in range(fade_out_frames):
+        t = 1.0 - _ease_out_cubic(frame / max(fade_out_frames - 1, 1))
+        w, h = console.size
+        live.update(_build_splash_frame(text_lines, width=w, height=h, opacity=t, rgb=rgb))
+        time.sleep(frame_time)
 
 
 # ---------------------------------------------------------------------------
@@ -197,16 +267,6 @@ def show_splash(console: Console) -> None:
     else:
         text_lines = render_ascii_text("YEABOI")
 
-    # Phase durations (in frames at ~60fps)
-    fade_in_frames = 48  # ~0.8s
-    shine_frames = 66  # ~1.1s — one diagonal glint sweep
-    fade_out_frames = 48  # ~0.8s
-
-    # Glint travels from just off the left edge to past the right edge (plus the
-    # per-row skew) so it enters and fully exits the wordmark cleanly.
-    shine_start = -0.25
-    shine_end = 1.4
-
     # Enter alt-screen once — stays active through to the next fullscreen UI.
     # Live is created without screen=True so it doesn't toggle alt-screen
     # on enter/exit, eliminating the flicker between screens.
@@ -219,27 +279,53 @@ def show_splash(console: Console) -> None:
         refresh_per_second=60,
         screen=False,
     ) as live:
-        # Phase 1 — Fade in: nothing → brand blue
-        for frame in range(fade_in_frames):
-            t = _ease_out_cubic(frame / max(fade_in_frames - 1, 1))
-            w, h = console.size
-            live.update(_build_splash_frame(text_lines, width=w, height=h, opacity=t))
-            time.sleep(_FRAME_TIME)
-
-        # Phase 2 — Shine: a diagonal glint sweeps across the fully-lit wordmark
-        for frame in range(shine_frames):
-            t = frame / max(shine_frames - 1, 1)
-            hotspot = shine_start + (shine_end - shine_start) * t
-            w, h = console.size
-            live.update(_build_shine_frame(text_lines, width=w, height=h, hotspot=hotspot))
-            time.sleep(_FRAME_TIME)
-
-        # Phase 3 — Fade out: brand blue → nothing
-        for frame in range(fade_out_frames):
-            t = 1.0 - _ease_out_cubic(frame / max(fade_out_frames - 1, 1))
-            w, h = console.size
-            live.update(_build_splash_frame(text_lines, width=w, height=h, opacity=t))
-            time.sleep(_FRAME_TIME)
+        _run_wordmark_animation(
+            console,
+            live,
+            text_lines,
+            _BRAND_RGB,
+            fade_in_frames=48,  # ~0.8s
+            shine_frames=66,  # ~1.1s
+            fade_out_frames=48,  # ~0.8s
+            frame_time=_FRAME_TIME,
+        )
 
     # Alt-screen is intentionally left active — the next Live(screen=True)
     # in wizard or mode-select will take over without a visible gap.
+
+
+def play_wordmark_intro(
+    console: Console,
+    live: object,
+    word: str,
+    color: tuple[int, int, int] | str,
+    *,
+    frame_time: float = _FRAME_TIME,
+) -> None:
+    """Play a snappy fade-in + shine intro for *word* on an existing ``live``.
+
+    Used for the cinematic per-mode entrances (Planning, Retro, …): reuses the
+    caller's Rich Live so there is no nested-Live flicker, renders the mode name
+    as an ANSI-Shadow wordmark (falling back to the compact font when the
+    terminal is too narrow), and tints it with the mode's accent ``color`` (an
+    ``(r,g,b)`` tuple or ``"rgb(r,g,b)"`` string). Timing is derived from
+    ``frame_time`` so it looks the same regardless of the caller's frame rate.
+    """
+    rgb = _as_rgb(color)
+    text_lines = _resolve_wordmark(word, console.size[0])
+
+    def _frames(seconds: float) -> int:
+        if frame_time <= 0:
+            return 1
+        return max(1, round(seconds / frame_time))
+
+    _run_wordmark_animation(
+        console,
+        live,
+        text_lines,
+        rgb,
+        fade_in_frames=_frames(0.32),
+        shine_frames=_frames(0.75),
+        fade_out_frames=_frames(0.24),
+        frame_time=frame_time,
+    )
