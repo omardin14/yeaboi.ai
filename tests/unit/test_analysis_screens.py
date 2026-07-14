@@ -415,13 +415,14 @@ class TestBuildSampleStoriesScreen:
         assert isinstance(result, Panel)
 
     def test_story_ids_rendered(self):
-        result = _build_sample_stories_screen(_SAMPLE_STORIES, width=100, height=40)
+        # Tall height so both stories fit the viewport below the 6-row ANSI-Shadow header.
+        result = _build_sample_stories_screen(_SAMPLE_STORIES, width=100, height=70)
         output = _render(result, width=100)
         assert "S1" in output
         assert "S2" in output
 
     def test_story_points_rendered(self):
-        result = _build_sample_stories_screen(_SAMPLE_STORIES, width=100, height=40)
+        result = _build_sample_stories_screen(_SAMPLE_STORIES, width=100, height=70)
         output = _render(result, width=100)
         assert "5" in output  # S1 points
         assert "3" in output  # S2 points

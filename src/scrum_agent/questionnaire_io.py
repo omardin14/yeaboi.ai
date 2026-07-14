@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TEMPLATE_HEADER = """\
-# Scrum Agent — Project Intake Questionnaire
+# yeaboi.ai — Project Intake Questionnaire
 
 Fill in your answers after the `> ` on each question.
 Multi-line answers are supported — start each line with `> `.

@@ -68,7 +68,7 @@ def test_tips_disabled_case_insensitive(monkeypatch):
 
 
 def test_set_tips_enabled_round_trips(monkeypatch, tmp_path):
-    # Point config at a temp file so we don't touch the real ~/.scrum-agent/.env.
+    # Point config at a temp file so we don't touch the real ~/.yeaboi/.env.
     config_file = tmp_path / ".env"
     monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
     monkeypatch.delenv("TIPS_ENABLED", raising=False)
@@ -129,41 +129,41 @@ class TestProxyDetection:
 
 
 class TestGetConfigDir:
-    """Tests for get_config_dir() — returns ~/.scrum-agent/, creating it if absent."""
+    """Tests for get_config_dir() — returns ~/.yeaboi/, creating it if absent."""
 
-    def test_returns_scrum_agent_dir(self, monkeypatch, tmp_path):
+    def test_returns_yeaboi_dir(self, monkeypatch, tmp_path):
         monkeypatch.setattr("scrum_agent.config.Path.home", lambda: tmp_path)
         result = get_config_dir()
-        assert result == tmp_path / ".scrum-agent"
+        assert result == tmp_path / ".yeaboi"
 
     def test_creates_directory_if_absent(self, monkeypatch, tmp_path):
         monkeypatch.setattr("scrum_agent.config.Path.home", lambda: tmp_path)
-        target = tmp_path / ".scrum-agent"
+        target = tmp_path / ".yeaboi"
         assert not target.exists()
         get_config_dir()
         assert target.is_dir()
 
     def test_no_error_if_directory_already_exists(self, monkeypatch, tmp_path):
         monkeypatch.setattr("scrum_agent.config.Path.home", lambda: tmp_path)
-        (tmp_path / ".scrum-agent").mkdir()
+        (tmp_path / ".yeaboi").mkdir()
         # Should not raise
         get_config_dir()
 
 
 class TestGetConfigFile:
-    """Tests for get_config_file() — returns ~/.scrum-agent/.env path."""
+    """Tests for get_config_file() — returns ~/.yeaboi/.env path."""
 
     def test_returns_dot_env_inside_config_dir(self, monkeypatch, tmp_path):
         monkeypatch.setattr("scrum_agent.config.Path.home", lambda: tmp_path)
         result = get_config_file()
-        assert result == tmp_path / ".scrum-agent" / ".env"
+        assert result == tmp_path / ".yeaboi" / ".env"
 
 
 class TestLoadUserConfig:
-    """Tests for load_user_config() — loads ~/.scrum-agent/.env without overriding existing vars."""
+    """Tests for load_user_config() — loads ~/.yeaboi/.env without overriding existing vars."""
 
     def test_loads_vars_from_file(self, monkeypatch, tmp_path):
-        config_file = tmp_path / ".scrum-agent" / ".env"
+        config_file = tmp_path / ".yeaboi" / ".env"
         config_file.parent.mkdir()
         config_file.write_text("TEST_LOAD_VAR=hello-from-file\n")
         monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
@@ -172,7 +172,7 @@ class TestLoadUserConfig:
         assert os.environ.get("TEST_LOAD_VAR") == "hello-from-file"
 
     def test_does_not_override_existing_env_vars(self, monkeypatch, tmp_path):
-        config_file = tmp_path / ".scrum-agent" / ".env"
+        config_file = tmp_path / ".yeaboi" / ".env"
         config_file.parent.mkdir()
         config_file.write_text("TEST_OVERRIDE_VAR=from-file\n")
         monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
@@ -182,7 +182,7 @@ class TestLoadUserConfig:
         assert os.environ.get("TEST_OVERRIDE_VAR") == "from-shell"
 
     def test_noop_when_file_absent(self, monkeypatch, tmp_path):
-        config_file = tmp_path / ".scrum-agent" / ".env"
+        config_file = tmp_path / ".yeaboi" / ".env"
         monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
         # Should not raise even though the file doesn't exist
         load_user_config()

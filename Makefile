@@ -37,11 +37,11 @@ format: ## Format with ruff
 pre-commit: ## Install pre-commit hooks
 	$(UV) run pre-commit install
 
-run: ## Run the scrum-agent CLI (use ARGS="--flag" to pass arguments)
-	$(UV) run scrum-agent $(ARGS)
+run: ## Run the yeaboi CLI (use ARGS="--flag" to pass arguments)
+	$(UV) run yeaboi $(ARGS)
 
 run-dry: ## Run the TUI with fake delays — no LLM calls
-	$(UV) run scrum-agent --dry-run $(ARGS)
+	$(UV) run yeaboi --dry-run $(ARGS)
 
 eval: ## Run golden dataset evaluators
 	$(UV) run pytest tests/golden/ -v

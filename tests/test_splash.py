@@ -19,13 +19,13 @@ class TestBuildSplashFrame:
 
     def test_returns_panel(self):
         """Frame builder returns a Rich Panel."""
-        lines = render_ascii_text("SCRUM AGENT")
+        lines = render_ascii_text("YEABOI")
         frame = _build_splash_frame(lines, width=80, height=24)
         assert isinstance(frame, Panel)
 
     def test_full_opacity_brand_blue(self):
         """At opacity=1.0, the brand blue colour appears in the rendered output."""
-        lines = render_ascii_text("SCRUM AGENT")
+        lines = render_ascii_text("YEABOI")
         frame = _build_splash_frame(lines, width=80, height=24, opacity=1.0)
         assert isinstance(frame, Panel)
         from io import StringIO
@@ -83,13 +83,13 @@ class TestShowSplash:
     """Tests for the full show_splash() animation."""
 
     @patch("scrum_agent.ui.splash.time.sleep")
-    @patch("scrum_agent.ui.splash.Live")
-    def test_completes_without_error(self, mock_live_cls, mock_sleep):
+    @patch("scrum_agent.ui.splash.make_live")
+    def test_completes_without_error(self, mock_make_live, mock_sleep):
         """show_splash runs the full animation loop and exits cleanly."""
         mock_live = MagicMock()
         mock_live.__enter__ = MagicMock(return_value=mock_live)
         mock_live.__exit__ = MagicMock(return_value=False)
-        mock_live_cls.return_value = mock_live
+        mock_make_live.return_value = mock_live
 
         console = MagicMock()
         console.size = (80, 24)

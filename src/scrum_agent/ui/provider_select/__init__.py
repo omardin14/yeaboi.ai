@@ -131,6 +131,11 @@ def select_provider(
         refresh_per_second=30,
         screen=True,
     ) as live:
+        # Cinematic entrance — a fade-in + shine "SETUP" wordmark, matching the
+        # per-mode intros, so first-run / --setup / Settings→Configure feel branded.
+        from scrum_agent.ui.splash import play_wordmark_intro
+
+        play_wordmark_intro(console, live, "Setup", (70, 100, 180), frame_time=1.0 / 30)
 
         def _run_model_phase(api_key_val: str) -> str | None:
             """Model-selection sub-step of Step 0.

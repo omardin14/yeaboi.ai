@@ -56,7 +56,7 @@ def _build_analysis_review_screen(
     sub = Text(_PAD + subtitle, style="dim", justify="left")
 
     # ── Viewport (height-aware for line wrapping)
-    viewport_h = calc_viewport(height, header_h=7, action_h=4)
+    viewport_h = calc_viewport(height, header_h=11, action_h=4)
 
     # Estimate rendered height per line
     _content_w = max(20, width - 7)
@@ -1844,7 +1844,7 @@ def _build_team_analysis_screen(
         _actions = ["Back", "Export", "Continue"]
     btn_top, btn_mid, btn_bot = build_action_buttons(_actions, export_sel)
     progress_dots = build_progress_dots(_page_labels, page - 1, theme=ANALYSIS_THEME)
-    body_h = calc_viewport(height, header_h=7, action_h=4)
+    body_h = calc_viewport(height, header_h=11, action_h=4)
 
     max_scroll = max(0, _rendered_lines - body_h)
     actual_scroll = min(scroll_offset, max_scroll)
@@ -2643,9 +2643,9 @@ def _build_intake_screen(
             body.append(Text(""))
             body_h += 1
 
-    # Layout: blank + title(2) + blank + subtitle + blank + [body]
+    # Layout: blank + title(6) + blank + subtitle + blank + [body]
     inner_h = height - 4
-    header_h = 6  # blank + title(2) + blank + subtitle + blank
+    header_h = 10  # blank + title(6) + blank + subtitle + blank
     remaining = max(0, inner_h - header_h - body_h)
 
     content = Group(
@@ -2708,9 +2708,9 @@ def _build_offline_screen(
             body.append(Text(""))
             body_h += 1
 
-    # Layout: blank + title(2) + blank + subtitle + blank + [body]
+    # Layout: blank + title(6) + blank + subtitle + blank + [body]
     inner_h = height - 4
-    header_h = 6  # blank + title(2) + blank + subtitle + blank
+    header_h = 10  # blank + title(6) + blank + subtitle + blank
     remaining = max(0, inner_h - header_h - body_h)
 
     content = Group(
@@ -2764,9 +2764,9 @@ def _build_export_success_screen(
     body.append(Text(_PAD + "Press any key to exit.", style="dim", justify="left"))
     body_h = 7
 
-    # Layout: blank + title(2) + blank + [body]
+    # Layout: blank + title(6) + blank + [body]
     inner_h = height - 4
-    header_h = 4  # blank + title(2) + blank
+    header_h = 8  # blank + title(6) + blank
     remaining = max(0, inner_h - header_h - body_h)
 
     content = Group(
@@ -2858,9 +2858,9 @@ def _build_import_screen(
     ]
     body_h = 8  # input_box(5) + error(1) + blank + hint(1)
 
-    # Layout: blank + title(2) + blank + subtitle + blank + [body]
+    # Layout: blank + title(6) + blank + subtitle + blank + [body]
     inner_h = height - 4
-    header_h = 6  # blank + title(2) + blank + subtitle + blank
+    header_h = 10  # blank + title(6) + blank + subtitle + blank
     remaining = max(0, inner_h - header_h - body_h)
 
     content = Group(
@@ -2996,7 +2996,7 @@ def _build_project_export_success_screen(
     body_h = 3 + len(file_path.splitlines()) + 2
 
     inner_h = height - 4
-    header_h = 4
+    header_h = 8
     remaining = max(0, inner_h - header_h - body_h)
 
     content = Group(
@@ -3134,7 +3134,7 @@ def _build_usage_screen(
             body_lines.append(r)
 
     # ── Layout using shared components ────────────────────────────
-    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
@@ -3324,7 +3324,7 @@ def _build_standup_screen(
         _line("No standup generated yet. Press Generate to create one.", theme.muted)
 
     # ── Layout using shared components ────────────────────────────
-    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
@@ -3438,7 +3438,7 @@ def _build_performance_screen(
 
     theme = PERFORMANCE_THEME
     _accent = "rgb(220,110,90)"  # PERFORMANCE_THEME accent — the mode-row colour key
-    title = performance_title(shimmer_tick)
+    title = performance_title(shimmer_tick, width=width)
     view = performance_data.get("view", "roster")
     session_name = performance_data.get("session_name", "")
 
@@ -3539,7 +3539,7 @@ def _build_performance_screen(
     for line in performance_data.get("detail_lines", []) or ["(nothing to show)"]:
         body_lines.append(_styled(line))
 
-    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
@@ -3617,7 +3617,7 @@ def _build_reporting_screen(
     from scrum_agent.ui.shared._components import REPORTING_THEME, build_reveal_subtitle, reporting_title
 
     theme = REPORTING_THEME
-    title = reporting_title(shimmer_tick)
+    title = reporting_title(shimmer_tick, width=width)
     view = reporting_data.get("view", "picker")
     session_name = reporting_data.get("session_name", "")
     deck_theme = reporting_data.get("theme", "midnight")
@@ -3665,7 +3665,7 @@ def _build_reporting_screen(
         if not sprints:
             rows.append(Text(PAD + "  No sprints found.", style=theme.muted, justify="left"))
 
-        viewport_h = calc_viewport(height, header_h=6, action_h=4)
+        viewport_h = calc_viewport(height, header_h=10, action_h=4)
         total_lines = len(rows)
         # Window around the cursor row so it stays visible as you move.
         cursor_line = min(total_lines - 1, cursor + (3 if message else 1) + 1) if sprints else 0
@@ -3774,7 +3774,7 @@ def _build_reporting_screen(
     for line in reporting_data.get("detail_lines", []) or ["(nothing to show)"]:
         body_lines.append(_styled(line))
 
-    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
@@ -3913,7 +3913,7 @@ def _build_retro_screen(
             _line("No cards yet.", theme.muted)
 
     # ── Layout using shared components ────────────────────────────
-    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
@@ -4018,7 +4018,7 @@ def _build_standup_input_screen(
 
     # Vertically pad the middle so the field sits in the upper-third like the dashboard.
     body: list = [label, Text(""), box_top, box_mid, box_bot, Text(""), hint_line]
-    pad_rows = max(0, calc_viewport(height, header_h=6, action_h=1) - len(body))
+    pad_rows = max(0, calc_viewport(height, header_h=10, action_h=1) - len(body))
     body.extend(Text("") for _ in range(pad_rows))
 
     content = Group(Text(""), title, Text(""), sub, Text(""), *body)
@@ -4156,7 +4156,7 @@ def _build_profile_picker_screen(
     body_lines.append(Text(_PAD + "  \u2570" + "\u2500" * card_w + "\u256f", style=skip_border, justify="left"))
 
     # Layout
-    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
     visible = body_lines[:viewport_h]
 
     padded_lines: list = list(visible)
@@ -4305,7 +4305,7 @@ def _build_settings_screen(
     _row("Config File", config_data.get("_config_path", ""))
 
     # ── Layout ────────────────────────────────────────────────────
-    viewport_h = calc_viewport(height, header_h=6, action_h=4)
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)

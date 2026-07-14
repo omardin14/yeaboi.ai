@@ -362,7 +362,7 @@ def _build_slide_frame(
     rendered.append(_PAD + lines[1], style=title_style)
 
     inner_h = height - 4
-    block_h = 2  # title(2) only — description is not shown during slide
+    block_h = 2  # title(6) only — description is not shown during slide
     below = max(0, inner_h - top_offset - block_h)
 
     content = Group(

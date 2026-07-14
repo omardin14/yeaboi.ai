@@ -64,6 +64,7 @@ from scrum_agent.ui.shared._animations import (
 )
 from scrum_agent.ui.shared._input import read_key as _read_key
 from scrum_agent.ui.shared._music_bar import make_live
+from scrum_agent.ui.splash import play_wordmark_intro
 
 logger = logging.getLogger(__name__)
 
@@ -2525,7 +2526,7 @@ def select_mode(
             # Description fades out as the title slides up.
             w, h = console.size
             inner_h = h - 4
-            block_h = 2  # title(2) only — description disappears on selection
+            block_h = 2  # title(6) only — description disappears on selection
             start_offset = max(0, (inner_h - block_h) // 2)
             end_offset = 1  # one blank line above title to match project list layout
 
@@ -2549,6 +2550,7 @@ def select_mode(
             # ── Route: Team Analysis mode → dedicated analysis flow ──────
             if chosen["key"] == "team-analysis":
                 logger.info("Analysis mode selected")
+                play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 from scrum_agent.azdevops_sync import is_azdevops_board_configured as _azdevops_check
                 from scrum_agent.jira_sync import is_jira_configured as _jira_check
 
@@ -3522,6 +3524,7 @@ def select_mode(
             # ── Route: Daily Standup mode → dashboard + actions ──────────
             if chosen["key"] == "daily-standup":
                 logger.info("Daily Standup mode selected")
+                play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 _run_standup_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
@@ -3530,6 +3533,7 @@ def select_mode(
             # ── Route: Retro mode → collaborative board page ─────────────
             if chosen["key"] == "retro":
                 logger.info("Retro mode selected")
+                play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 _run_retro_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
@@ -3538,6 +3542,7 @@ def select_mode(
             # ── Route: Performance mode → per-engineer dashboard ─────────
             if chosen["key"] == "performance":
                 logger.info("Performance mode selected")
+                play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 _run_performance_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
@@ -3546,6 +3551,7 @@ def select_mode(
             # ── Route: Reporting mode → delivery-report page ─────────────
             if chosen["key"] == "reporting":
                 logger.info("Reporting mode selected")
+                play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 _run_reporting_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
@@ -3554,6 +3560,7 @@ def select_mode(
             # ── Route: Usage mode → single-page dashboard ────────────────
             if chosen["key"] == "usage":
                 logger.info("Usage mode selected")
+                play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 from scrum_agent.ui.mode_select.screens._screens_secondary import _build_usage_screen
 
                 _usage_data = _collect_usage_data()
@@ -3599,6 +3606,7 @@ def select_mode(
             # ── Route: Settings mode → config viewer + setup wizard ────────
             if chosen["key"] == "settings":
                 logger.info("Settings mode selected")
+                play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 from scrum_agent.ui.mode_select.screens._screens_secondary import _build_settings_screen
 
                 _settings_data = _collect_settings_data()
@@ -3663,6 +3671,12 @@ def select_mode(
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
+
+            # ── Route: Planning mode → project list + session ────────────
+            # Reached only when none of the mode branches above matched, i.e.
+            # chosen["key"] == "project-planning". Runs once, before the project
+            # list loop, so the intro plays a single time per Planning entry.
+            play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
 
             # Staggered vertical reveal — cards pop in one by one, fast.
             _reveal_target = float(proj_n)

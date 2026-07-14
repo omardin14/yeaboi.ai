@@ -1,8 +1,8 @@
-"""First-run setup wizard for scrum-agent credentials.
+"""First-run setup wizard for yeaboi.ai credentials.
 
 # See README: "Architecture" — the CLI layer is responsible for user-facing
 # chrome. The wizard runs once before any REPL loop starts, collecting
-# credentials and storing them in ~/.scrum-agent/.env for future sessions.
+# credentials and storing them in ~/.yeaboi/.env for future sessions.
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def _detect_openclaw_bedrock_model() -> str | None:
 
 
 def is_first_run() -> bool:
-    """Return True if ~/.scrum-agent/.env is missing or has no key=value entries.
+    """Return True if ~/.yeaboi/.env is missing or has no key=value entries.
 
     A file with only whitespace or blank lines is treated as empty — this
     handles the case where save_config() writes a trailing newline but no
@@ -112,7 +112,7 @@ def is_first_run() -> bool:
 
 
 def save_config(data: dict[str, str]) -> Path:
-    """Write key=value pairs to ~/.scrum-agent/.env.
+    """Write key=value pairs to ~/.yeaboi/.env.
 
     Overwrites the file — safe because we read existing values first
     and merge them in run_setup_wizard() before calling save_config().
@@ -188,7 +188,7 @@ def run_setup_wizard(console: Console) -> bool:
     """Interactive credential setup wizard.
 
     Returns True if setup completed successfully, False if user cancelled.
-    Collected values are written to ~/.scrum-agent/.env and then loaded
+    Collected values are written to ~/.yeaboi/.env and then loaded
     into the current process via os.environ so they're immediately active.
     """
     logger.info("Setup wizard started")
@@ -196,9 +196,9 @@ def run_setup_wizard(console: Console) -> bool:
 
     # Welcome panel
     body = Text.from_markup(
-        "[bold cyan]Welcome to Scrum AI Agent — First-Time Setup[/bold cyan]\n\n"
+        "[bold cyan]Welcome to yeaboi.ai — First-Time Setup[/bold cyan]\n\n"
         "We'll collect your API credentials now. Everything is stored locally\n"
-        "in [cyan]~/.scrum-agent/.env[/cyan] — never sent anywhere else."
+        "in [cyan]~/.yeaboi/.env[/cyan] — never sent anywhere else."
     )
     console.print(Panel(body, border_style="cyan", padding=(1, 2)))
 
@@ -243,7 +243,7 @@ def run_setup_wizard(console: Console) -> bool:
 
     # ── Bedrock: auto-detect model from OpenClaw if available ───────────────
     # OpenClaw's models.json has the exact Bedrock model ID (e.g.
-    # global.anthropic.claude-sonnet-4-6). Without this, scrum-agent falls
+    # global.anthropic.claude-sonnet-4-6). Without this, yeaboi falls
     # back to a hardcoded default that may not exist in the user's region.
     if collected.get("LLM_PROVIDER") == "bedrock" and "LLM_MODEL" not in collected:
         detected_model = _detect_openclaw_bedrock_model()

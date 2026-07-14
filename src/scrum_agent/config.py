@@ -12,29 +12,36 @@ load_dotenv()
 
 
 # ---------------------------------------------------------------------------
-# User config directory (~/.scrum-agent/)
+# User config directory (~/.yeaboi/)
 # ---------------------------------------------------------------------------
 
 
 def get_config_dir() -> Path:
-    """Return ~/.scrum-agent/, creating it if necessary."""
-    d = Path.home() / ".scrum-agent"
+    """Return ~/.yeaboi/, creating it if necessary.
+
+    Kept as a live ``Path.home()`` computation (rather than importing
+    ``paths.ROOT_DIR``) so it stays test-monkeypatchable and matches
+    ``paths.ROOT_DIR``. Callers must ensure ``paths.migrate_root_dir()`` has run
+    first (done at the top of ``cli.main``) so a pre-rebrand ~/.scrum-agent tree
+    is moved over before this mkdir creates an empty ~/.yeaboi.
+    """
+    d = Path.home() / ".yeaboi"
     d.mkdir(exist_ok=True)
     return d
 
 
 def get_config_file() -> Path:
-    """Return path to ~/.scrum-agent/.env."""
+    """Return path to ~/.yeaboi/.env."""
     return get_config_dir() / ".env"
 
 
 def get_sessions_db() -> Path:
-    """Return path to ~/.scrum-agent/sessions.db (SQLite session store)."""
+    """Return path to ~/.yeaboi/sessions.db (SQLite session store)."""
     return get_config_dir() / "sessions.db"
 
 
 def load_user_config() -> None:
-    """Load ~/.scrum-agent/.env without overriding existing env vars.
+    """Load ~/.yeaboi/.env without overriding existing env vars.
 
     Called once at CLI startup before any credential reads.
     dotenv's override=False means shell env vars and project .env always win

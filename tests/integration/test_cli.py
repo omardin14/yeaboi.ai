@@ -76,7 +76,7 @@ class TestArgParsing:
             parser.parse_args(["--help"])
         assert exc_info.value.code == 0
         output = capsys.readouterr().out
-        assert "scrum-agent" in output
+        assert "yeaboi" in output
         assert "--resume" in output
         assert "--version" in output
 
@@ -256,7 +256,7 @@ class TestHelpOutput:
     def test_help_preserves_formatting(self, capsys):
         """Usage examples should preserve whitespace (RawDescriptionHelpFormatter)."""
         output = self._get_help_output(capsys)
-        assert "scrum-agent --quick" in output
+        assert "yeaboi --quick" in output
 
     def test_help_mentions_export_only(self, capsys):
         output = self._get_help_output(capsys)
@@ -275,8 +275,8 @@ class TestWelcomePanel:
     def test_panel_contains_tagline(self):
         panel = _build_welcome_panel()
         plain = panel.renderable.plain
-        assert "Scrum AI Agent" in plain
-        assert "AI-powered Scrum Master" in plain
+        assert "yeaboi.ai" in plain
+        assert "A team lead's best friend" in plain
 
     def test_panel_contains_quick_start_hint(self):
         panel = _build_welcome_panel()

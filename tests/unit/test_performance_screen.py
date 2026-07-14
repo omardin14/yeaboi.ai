@@ -38,7 +38,9 @@ class TestBuildPerformanceScreen:
         # A long roster must not crash; ▼ marker shows there are more below.
         roster = [f"Person {i}" for i in range(20)]
         data = {"view": "roster", "roster": roster, "selected_idx": 0}
-        panel = _build_performance_screen(data, width=120, height=30)
+        # Build at the same width _render() uses (100) so the header's width-aware
+        # shadow/compact choice matches how it's rendered.
+        panel = _build_performance_screen(data, width=100, height=30)
         assert isinstance(panel, Panel)
         out = _render(panel)
         assert "more" in out  # ▲/▼ overflow indicator
