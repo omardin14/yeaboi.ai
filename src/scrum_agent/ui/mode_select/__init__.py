@@ -2526,7 +2526,7 @@ def select_mode(
             # Description fades out as the title slides up.
             w, h = console.size
             inner_h = h - 4
-            block_h = 2  # title(2) only — description disappears on selection
+            block_h = 2  # title(6) only — description disappears on selection
             start_offset = max(0, (inner_h - block_h) // 2)
             end_offset = 1  # one blank line above title to match project list layout
 

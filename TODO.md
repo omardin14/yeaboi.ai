@@ -16,6 +16,8 @@ Comprehensive task list for building the project. Check items off as they're com
 - [x] Tests updated for new strings/paths/labels; `make test` + `make lint` green
 - [x] Splash wordmark upgraded to a 6-row ANSI Shadow "YEABOI" with a diagonal shine sweep (`ui/splash.py`)
 - [x] Cinematic per-mode intros: entering any mode (Planning/Analysis/Standup/Retro/Performance/Reporting/Usage/Settings) plays a fade-in + shine ANSI Shadow wordmark tinted with the mode's accent, reusing the splash engine (`play_wordmark_intro`); baked art in `ui/shared/_wordmarks.py`, compact-font fallback on narrow terminals (e.g. Performance)
+- [x] Setup-wizard intro: `select_provider` plays a "SETUP" ANSI Shadow + shine on entry (first-run / --setup / Settings→Configure)
+- [x] Pinned screen headers converted to 6-row ANSI Shadow with shimmer via the single `build_ascii_title` chokepoint (fixed `TITLE_ROWS`=6 block, width-aware compact fallback); bumped every `header_h` budget (+4) across mode-select/session/editor screens; provider-select cards intentionally stay compact (long, stacked names)
 - [ ] (Deferred) Regenerate `docs/banner.jpg` hero image; rebrand legacy REPL toolbar (`repl/`) — left as `Scrum AI Agent` to avoid touching the protected `test_repl.py`
 - [ ] (Not done — intentional) Deep rename of the `scrum_agent` Python package / PyPI distribution name and the `scrum-planner` skill dir
 

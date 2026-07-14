@@ -16,6 +16,12 @@ from rich.text import Text
 
 from scrum_agent.ui.shared._animations import COLOR_RGB
 from scrum_agent.ui.shared._ascii_font import render_ascii_text
+from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
+
+# Every pinned header reserves this many rows so the viewport math stays stable
+# regardless of whether the tall ANSI-Shadow wordmark or the compact fallback is
+# used. ANSI-Shadow art is exactly this tall; the compact font is padded to it.
+TITLE_ROWS = 6
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -104,35 +110,65 @@ def center_label(label: str, width: int) -> str:
     return " " * pad_l + label + " " * pad_r
 
 
-def build_ascii_title(word: str, color: str, *, shimmer_tick: float | None = None) -> Text:
-    """Return a two-line ASCII-art title for ``word`` in ``color``.
+def _title_rows(word: str, available_width: int) -> list[str]:
+    """Return exactly ``TITLE_ROWS`` equal-width rows for *word*'s header art.
 
-    When ``shimmer_tick`` is None the title is a solid bold colour (the static
-    look every page has used). When a float is passed, a travelling white
-    highlight sweeps across the glyphs (same effect as the intake mode picker),
-    so a page's header can animate by feeding it a monotonic clock each frame.
+    Uses the tall ANSI-Shadow wordmark when it fits ``available_width`` (all the
+    mode names except the very wide "Performance" fit a standard terminal); else
+    falls back to the compact two-line font, padded with blank rows so the header
+    block is always ``TITLE_ROWS`` tall and the viewport math stays stable.
+    """
+    shadow = get_shadow_wordmark(word)
+    if shadow is not None and len(shadow[0]) + len(PAD) <= available_width:
+        return shadow
+
+    lines = render_ascii_text(word)
+    block_w = max((len(line) for line in lines), default=0)
+    lines = [line.ljust(block_w) for line in lines]
+    # Centre the short compact art within the taller reserved block.
+    pad_total = TITLE_ROWS - len(lines)
+    top = pad_total // 2
+    return [" " * block_w] * top + lines + [" " * block_w] * (pad_total - top)
+
+
+def build_ascii_title(
+    word: str, color: str, *, shimmer_tick: float | None = None, width: int | None = None
+) -> Text:
+    """Return an ANSI-Shadow ASCII-art title for ``word`` in ``color``.
+
+    Always ``TITLE_ROWS`` rows tall (see ``_title_rows``) so every screen's
+    header occupies a fixed height. When ``shimmer_tick`` is None the title is a
+    solid bold colour (the static look); when a float is passed, a travelling
+    white highlight sweeps across the glyphs, so a page's header can animate by
+    feeding it a monotonic clock each frame.
 
     ``color`` is an ``"rgb(r,g,b)"`` key present in COLOR_RGB (the shimmer needs
-    it registered). This is the single implementation the per-page ``*_title()``
-    helpers below delegate to — keeping every header visually identical.
+    it registered). ``width`` is the usable panel width — used to decide whether
+    the tall wordmark fits; defaults to a standard 80-col terminal's inner width.
+    This is the single implementation the per-page ``*_title()`` helpers delegate
+    to — keeping every header visually identical.
     """
-    lines = render_ascii_text(word)
+    lines = _title_rows(word, (width - 6) if width else 74)
+    total = max(len(line) for line in lines)
     title = Text(justify="left")
+
     if shimmer_tick is None:
         base_r, base_g, base_b = COLOR_RGB.get(color, (180, 180, 180))
         style = f"bold rgb({base_r},{base_g},{base_b})"
-        title.append(PAD + lines[0] + "\n", style=style)
-        title.append(PAD + lines[1], style=style)
+        for idx, line in enumerate(lines):
+            title.append(PAD + line, style=style)
+            if idx < len(lines) - 1:
+                title.append("\n")
         return title
+
     from scrum_agent.ui.shared._animations import shimmer_style
 
-    total = max(len(lines[0]), len(lines[1]))
-    title.append(PAD)
-    for i, ch in enumerate(lines[0]):
-        title.append(ch, style=shimmer_style(color, i, total, shimmer_tick))
-    title.append("\n" + PAD)
-    for i, ch in enumerate(lines[1]):
-        title.append(ch, style=shimmer_style(color, i, total, shimmer_tick))
+    for idx, line in enumerate(lines):
+        title.append(PAD)
+        for i, ch in enumerate(line):
+            title.append(ch, style=shimmer_style(color, i, total, shimmer_tick))
+        if idx < len(lines) - 1:
+            title.append("\n")
     return title
 
 
@@ -150,48 +186,51 @@ def build_reveal_subtitle(
     return Text(pad + shown, style=style, justify=justify)
 
 
-def planning_title(shimmer_tick: float | None = None) -> Text:
+def planning_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Planning ASCII title (brand blue). Optionally shimmering.
 
     # See README: "Architecture" — the "Planning" header is pinned at the
     # top of every screen in the planning flow.
+
+    Pass ``width`` (the panel width) so wide wordmarks can use the tall ANSI
+    Shadow art where they fit and gracefully fall back on narrow terminals.
     """
-    return build_ascii_title("Planning", "rgb(110,140,220)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Planning", "rgb(110,140,220)", shimmer_tick=shimmer_tick, width=width)
 
 
-def analysis_title(shimmer_tick: float | None = None) -> Text:
+def analysis_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Analysis ASCII title (green accent). Optionally shimmering."""
-    return build_ascii_title("Analysis", "rgb(100,180,100)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Analysis", "rgb(100,180,100)", shimmer_tick=shimmer_tick, width=width)
 
 
-def usage_title(shimmer_tick: float | None = None) -> Text:
+def usage_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Usage ASCII title (amber accent). Optionally shimmering."""
-    return build_ascii_title("Usage", "rgb(220,160,60)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Usage", "rgb(220,160,60)", shimmer_tick=shimmer_tick, width=width)
 
 
-def settings_title(shimmer_tick: float | None = None) -> Text:
+def settings_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Settings ASCII title (silver accent). Optionally shimmering."""
-    return build_ascii_title("Settings", "rgb(160,160,180)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Settings", "rgb(160,160,180)", shimmer_tick=shimmer_tick, width=width)
 
 
-def standup_title(shimmer_tick: float | None = None) -> Text:
+def standup_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Daily Standup ASCII title (magenta accent). Optionally shimmering."""
-    return build_ascii_title("Standup", "rgb(200,100,180)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Standup", "rgb(200,100,180)", shimmer_tick=shimmer_tick, width=width)
 
 
-def retro_title(shimmer_tick: float | None = None) -> Text:
+def retro_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Retro ASCII title (teal accent). Optionally shimmering."""
-    return build_ascii_title("Retro", "rgb(80,190,190)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Retro", "rgb(80,190,190)", shimmer_tick=shimmer_tick, width=width)
 
 
-def performance_title(shimmer_tick: float | None = None) -> Text:
+def performance_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Performance ASCII title (coral accent). Optionally shimmering."""
-    return build_ascii_title("Performance", "rgb(220,110,90)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Performance", "rgb(220,110,90)", shimmer_tick=shimmer_tick, width=width)
 
 
-def reporting_title(shimmer_tick: float | None = None) -> Text:
+def reporting_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Reporting ASCII title (indigo accent). Optionally shimmering."""
-    return build_ascii_title("Reporting", "rgb(140,120,230)", shimmer_tick=shimmer_tick)
+    return build_ascii_title("Reporting", "rgb(140,120,230)", shimmer_tick=shimmer_tick, width=width)
 
 
 def build_popup(
@@ -325,7 +364,7 @@ def build_progress_dots(
     return progress
 
 
-def calc_viewport(height: int, *, header_h: int = 7, action_h: int = 4) -> int:
+def calc_viewport(height: int, *, header_h: int = 11, action_h: int = 4) -> int:
     """Calculate viewport height from terminal height.
 
     Accounts for panel border (2) + padding (2) = 4 rows overhead,

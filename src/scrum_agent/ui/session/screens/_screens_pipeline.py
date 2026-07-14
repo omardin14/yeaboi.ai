@@ -83,7 +83,7 @@ def _build_pipeline_screen(
         sub.append(f"  {step}/{total}", style="dim")
 
     inner_h = height - 4
-    header_h = 6
+    header_h = 10
     action_h = 4  # blank + 3 button lines
 
     # Warning banner (e.g. capacity warning) — rendered between subtitle and content.
@@ -391,7 +391,7 @@ def _build_chat_screen(
     sub = Text(_PAD + "Plan complete \u2014 ask questions or type 'export' to save", style="dim", justify="left")
 
     inner_h = height - 4
-    header_h = 6
+    header_h = 10
     input_h = 5  # input box area
     viewport_h = max(3, inner_h - header_h - input_h)
 
@@ -515,7 +515,7 @@ def _build_edit_prompt_screen(
     body.append(Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel", style="dim", justify="left"))
 
     inner_h = height - 4
-    header_h = 6
+    header_h = 10
     body_h = len(body)
     remaining_h = max(0, inner_h - header_h - body_h)
 
