@@ -4,14 +4,15 @@
 # before the setup wizard or mode selection screen. It replaces the static
 # welcome panel as the first branded intro users see.
 
-Animation sequence (~2s total):
+Animation sequence (~2.7s total):
   Phase 1 — Fade in:  text appears from nothing → brand blue (~0.8s).
-  Phase 2 — Hold:     full brightness (~0.4s).
+  Phase 2 — Shine:    a diagonal white glint sweeps across the wordmark (~1.1s).
   Phase 3 — Fade out: brand blue → nothing (~0.8s).
 """
 
 from __future__ import annotations
 
+import math
 import time
 
 import rich.box
@@ -45,6 +46,10 @@ _WORDMARK: list[str] = [
 ]
 _WORDMARK_WIDTH = 45  # cell width of every row above
 
+# How far each successive wordmark row is nudged ahead of the one above it,
+# so the shine reads as a slanted streak of light rather than a vertical bar.
+_SHINE_ROW_SKEW = 0.03
+
 
 # ---------------------------------------------------------------------------
 # Easing
@@ -61,46 +66,9 @@ def _ease_out_cubic(t: float) -> float:
 # ---------------------------------------------------------------------------
 
 
-def _build_splash_frame(
-    text_lines: list[str],
-    *,
-    width: int,
-    height: int,
-    opacity: float = 1.0,
-) -> Panel:
-    """Build a single splash animation frame.
-
-    text_lines: ASCII-art rows (the tall _WORDMARK, or the compact two-line
-        render_ascii_text fallback). All rows must be equal width so per-line
-        centre-justify keeps them aligned.
-    opacity: 0.0–1.0 controls visibility. At 0 the text is invisible
-        (spaces only) so it blends with any terminal background. At 1 the
-        text is full brand-blue.
-    """
-    # At very low opacity, replace characters with spaces so nothing is
-    # visible — avoids a near-black colour standing out against the
-    # terminal background regardless of its colour scheme.
-    if opacity < 0.01:
-        rendered = Text(justify="center")
-        for line_idx, line in enumerate(text_lines):
-            rendered.append(" " * len(line))
-            if line_idx < len(text_lines) - 1:
-                rendered.append("\n")
-    else:
-        r = int(_BRAND_RGB[0] * opacity)
-        g = int(_BRAND_RGB[1] * opacity)
-        b = int(_BRAND_RGB[2] * opacity)
-        style = f"bold rgb({r},{g},{b})"
-
-        rendered = Text(justify="center")
-        for line_idx, line in enumerate(text_lines):
-            rendered.append(line, style=style)
-            if line_idx < len(text_lines) - 1:
-                rendered.append("\n")
-
-    # Centre vertically inside the panel
+def _center_in_panel(rendered: Text, *, width: int, height: int, block_h: int) -> Panel:
+    """Vertically centre a pre-built ``rendered`` Text block inside the panel."""
     inner_h = height - 4  # panel border + padding
-    block_h = len(text_lines)
     top_pad = max(0, (inner_h - block_h) // 2)
     bot_pad = max(0, inner_h - block_h - top_pad)
 
@@ -120,6 +88,87 @@ def _build_splash_frame(
     )
 
 
+def _build_splash_frame(
+    text_lines: list[str],
+    *,
+    width: int,
+    height: int,
+    opacity: float = 1.0,
+) -> Panel:
+    """Build a fade frame: the whole wordmark in one brand-blue at ``opacity``.
+
+    text_lines: ASCII-art rows (the tall _WORDMARK, or the compact two-line
+        render_ascii_text fallback). All rows must be equal width so per-line
+        centre-justify keeps them aligned.
+    opacity: 0.0–1.0 controls visibility. At 0 the text is invisible
+        (spaces only) so it blends with any terminal background. At 1 the
+        text is full brand-blue.
+    """
+    rendered = Text(justify="center")
+    if opacity < 0.01:
+        # At very low opacity, replace characters with spaces so nothing is
+        # visible — avoids a near-black colour standing out against the
+        # terminal background regardless of its colour scheme.
+        for line_idx, line in enumerate(text_lines):
+            rendered.append(" " * len(line))
+            if line_idx < len(text_lines) - 1:
+                rendered.append("\n")
+    else:
+        r = int(_BRAND_RGB[0] * opacity)
+        g = int(_BRAND_RGB[1] * opacity)
+        b = int(_BRAND_RGB[2] * opacity)
+        style = f"bold rgb({r},{g},{b})"
+        for line_idx, line in enumerate(text_lines):
+            rendered.append(line, style=style)
+            if line_idx < len(text_lines) - 1:
+                rendered.append("\n")
+
+    return _center_in_panel(rendered, width=width, height=height, block_h=len(text_lines))
+
+
+def _shine_style(pos: float, hotspot: float) -> str:
+    """Per-character style: full brand-blue, blended towards white near the glint.
+
+    A tight Gaussian ``hotspot`` (0–1 across the wordmark) sweeps past each
+    character at normalised column ``pos``; characters near it flare white.
+    """
+    dist = abs(pos - hotspot)
+    intensity = math.exp(-(dist * dist) / 0.012)
+    r, g, b = _BRAND_RGB
+    r2 = int(r + (255 - r) * intensity)
+    g2 = int(g + (255 - g) * intensity)
+    b2 = int(b + (255 - b) * intensity)
+    return f"bold rgb({r2},{g2},{b2})"
+
+
+def _build_shine_frame(
+    text_lines: list[str],
+    *,
+    width: int,
+    height: int,
+    hotspot: float,
+) -> Panel:
+    """Build a shine frame: the fully-lit wordmark with a diagonal glint sweeping.
+
+    ``hotspot`` travels roughly -0.2 → 1.2 so the highlight enters from the left,
+    crosses the letters, and exits right. Each lower row is nudged slightly ahead
+    (``_SHINE_ROW_SKEW``) so the highlight reads as a slanted streak of light.
+    """
+    span = max(len(line) for line in text_lines) - 1 or 1
+    rendered = Text(justify="center")
+    for line_idx, line in enumerate(text_lines):
+        for col, ch in enumerate(line):
+            if ch == " ":
+                rendered.append(" ")
+                continue
+            pos = col / span + line_idx * _SHINE_ROW_SKEW
+            rendered.append(ch, style=_shine_style(pos, hotspot))
+        if line_idx < len(text_lines) - 1:
+            rendered.append("\n")
+
+    return _center_in_panel(rendered, width=width, height=height, block_h=len(text_lines))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -129,8 +178,8 @@ def show_splash(console: Console) -> None:
     """Show the startup splash animation (~2s). Non-interactive, timed.
 
     # See README: "Architecture" — this replaces _build_welcome_panel() as
-    # the first thing users see. "YEABOI" fades in from nothing, holds
-    # briefly, then fades back out to nothing.
+    # the first thing users see. "YEABOI" fades in from nothing, a diagonal
+    # glint sweeps across it, then it fades back out to nothing.
 
     Alt-screen management: we enter the alternate screen buffer manually
     before starting the animation and intentionally leave it active when
@@ -150,8 +199,13 @@ def show_splash(console: Console) -> None:
 
     # Phase durations (in frames at ~60fps)
     fade_in_frames = 48  # ~0.8s
-    hold_frames = 24  # ~0.4s
+    shine_frames = 66  # ~1.1s — one diagonal glint sweep
     fade_out_frames = 48  # ~0.8s
+
+    # Glint travels from just off the left edge to past the right edge (plus the
+    # per-row skew) so it enters and fully exits the wordmark cleanly.
+    shine_start = -0.25
+    shine_end = 1.4
 
     # Enter alt-screen once — stays active through to the next fullscreen UI.
     # Live is created without screen=True so it doesn't toggle alt-screen
@@ -172,10 +226,13 @@ def show_splash(console: Console) -> None:
             live.update(_build_splash_frame(text_lines, width=w, height=h, opacity=t))
             time.sleep(_FRAME_TIME)
 
-        # Phase 2 — Hold at full brightness
-        w, h = console.size
-        live.update(_build_splash_frame(text_lines, width=w, height=h, opacity=1.0))
-        time.sleep(_FRAME_TIME * hold_frames)
+        # Phase 2 — Shine: a diagonal glint sweeps across the fully-lit wordmark
+        for frame in range(shine_frames):
+            t = frame / max(shine_frames - 1, 1)
+            hotspot = shine_start + (shine_end - shine_start) * t
+            w, h = console.size
+            live.update(_build_shine_frame(text_lines, width=w, height=h, hotspot=hotspot))
+            time.sleep(_FRAME_TIME)
 
         # Phase 3 — Fade out: brand blue → nothing
         for frame in range(fade_out_frames):
