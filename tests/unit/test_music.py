@@ -16,13 +16,15 @@ class _FakePopen:
         self._alive = True
         self.terminated = False
         self.killed = False
+        self.returncode = None
 
     def poll(self):
-        return None if self._alive else 0
+        return None if self._alive else self.returncode
 
     def terminate(self):
         self.terminated = True
         self._alive = False
+        self.returncode = 0
 
     def wait(self, timeout=None):
         return 0
@@ -30,6 +32,12 @@ class _FakePopen:
     def kill(self):
         self.killed = True
         self._alive = False
+        self.returncode = 0
+
+    def die(self, code=1):
+        """Simulate cliamp exiting on its own (e.g. a missing shared library)."""
+        self._alive = False
+        self.returncode = code
 
 
 @pytest.fixture
@@ -183,3 +191,47 @@ def test_shutdown_terminates_daemon(mock_music):
     assert daemon.terminated
     assert music._state.daemon is None
     assert music.status() == "stopped"
+
+
+# ── Daemon liveness reconciliation (crash detection) ──────────────────────────
+
+
+def test_crashed_daemon_reverts_to_stopped(mock_music):
+    music.toggle()  # playing
+    music._state.daemon.die()  # cliamp exits on its own (e.g. missing dylib)
+    # status() reconciles: the phantom "playing" collapses to a truthful "stopped".
+    assert music.status() == "stopped"
+    assert music.is_playing() is False
+    assert music._state.daemon is None
+
+
+def test_crashed_daemon_sets_last_error(mock_music):
+    assert music.last_error() == ""  # clean to start
+    music.toggle()  # playing
+    music._state.daemon.die()
+    music.status()  # triggers reconciliation
+    assert "cliamp" in music.last_error()
+
+
+def test_last_error_cleared_on_successful_restart(mock_music):
+    music.toggle()
+    music._state.daemon.die()
+    music.status()  # records the crash notice
+    assert music.last_error()
+    music.toggle()  # stopped -> playing again (daemon respawns cleanly)
+    assert music.status() == "playing"
+    assert music.last_error() == ""
+
+
+def test_live_daemon_is_not_reconciled(mock_music):
+    music.toggle()  # playing, daemon alive
+    assert music.status() == "playing"  # a healthy daemon stays playing
+    assert music.last_error() == ""
+
+
+def test_crashed_daemon_while_paused_reverts(mock_music):
+    music.toggle()  # playing
+    music.toggle()  # paused (daemon still alive)
+    music._state.daemon.die()
+    assert music.status() == "stopped"
+    assert music.last_error()

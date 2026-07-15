@@ -65,6 +65,9 @@ class _State:
         # resume music that *we* paused (not music the user paused themselves).
         self._paused_for_voice: bool = False
         self._initialised: bool = False
+        # Last user-relevant failure (e.g. cliamp crashed at startup), surfaced by
+        # the status bar so a silent daemon death doesn't masquerade as playback.
+        self.last_error: str = ""
 
 
 _state = _State()
@@ -100,14 +103,46 @@ def is_music_available() -> tuple[bool, str]:
 # ── Introspection (read by the status bar) ────────────────────────────────────
 
 
+def _reconcile_status() -> None:
+    """Fall back to a truthful "stopped" state when the daemon has died on its own.
+
+    ``subprocess.Popen`` only reports that the *spawn* succeeded — not that cliamp
+    keeps running. cliamp can exit immediately (a missing shared library, an
+    unreachable stream URL, no audio device) while :func:`_start_channel` has
+    already optimistically set the status to "playing". Because we discard stderr,
+    that death is otherwise invisible and the status bar animates a phantom
+    equalizer with no audio. This is called from every read below, so a crash is
+    reflected within roughly one render frame — the "verify shortly after launch"
+    check, done lazily instead of blocking the toggle.
+    """
+    if _state.status in ("playing", "paused") and _state.daemon is not None and _state.daemon.poll() is not None:
+        rc = _state.daemon.returncode
+        _state.daemon = None
+        _state.status = "stopped"
+        _state._paused_for_voice = False
+        _state.last_error = "cliamp exited — run `cliamp` to check it works"
+        logger.warning("Music daemon exited on its own (rc=%s); reverting to stopped", rc)
+
+
 def status() -> str:
     """Return the current player status: "stopped", "playing", or "paused"."""
+    _reconcile_status()
     return _state.status
 
 
 def is_playing() -> bool:
     """Return True when audio is actively playing (not paused/stopped)."""
-    return _state.status == "playing"
+    return status() == "playing"
+
+
+def last_error() -> str:
+    """Return the last user-relevant music failure message, or "" if none.
+
+    Set when a spawned cliamp daemon dies unexpectedly (see :func:`_reconcile_status`)
+    and cleared on the next successful start. Read by the status bar to explain why
+    music isn't playing despite cliamp being installed.
+    """
+    return _state.last_error
 
 
 def current_channel_name() -> str:
@@ -180,6 +215,7 @@ def _start_channel() -> bool:
             stdin=subprocess.DEVNULL,
         )
         _state.status = "playing"
+        _state.last_error = ""  # a fresh start clears any prior crash notice
         logger.info("Music playing channel %s", channel["name"])
         return True
     except Exception:  # noqa: BLE001 - music is best-effort

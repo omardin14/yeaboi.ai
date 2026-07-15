@@ -631,6 +631,14 @@ recording ends, so it never bleeds into your dictation. The on/off state and sel
 remembered between runs. Under the hood, playback runs as a headless `cliamp --daemon` process that
 is stopped automatically when you exit.
 
+> **Troubleshooting — the equalizer animates but there's no sound.** The `cliamp` binary is on your
+> `PATH` but crashes on launch. The usual cause on macOS is a Homebrew bottle that links against
+> shared libraries which aren't installed, e.g. `dyld: Library not loaded: …/libFLAC.14.dylib` or
+> `…/libvorbisenc.2.dylib`. Run `cliamp --version` in a terminal to see the exact missing library,
+> then install it (`brew install flac libvorbis`) or `brew reinstall cliamp` to pull all of cliamp's
+> dependencies. The status bar detects a daemon that exits on its own and reverts to
+> `♪ cliamp exited — run \`cliamp\` to check it works` instead of showing a phantom "playing" state.
+
 <details>
 <summary>💻 In-session commands</summary>
 

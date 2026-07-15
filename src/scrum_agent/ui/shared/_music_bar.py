@@ -61,7 +61,9 @@ def build_music_subtitle(theme: Theme = PLANNING_THEME) -> Text:
 
     Shows the player state plus the two control-chord hints, e.g.
     ``♪ Lofi · playing   ^P pause · ^O channel``. When cliamp isn't installed it
-    shows a dim, one-line install hint instead so the feature stays discoverable.
+    shows a dim, one-line install hint instead so the feature stays discoverable;
+    when a spawned cliamp died on its own it shows a dim crash notice in place of
+    ``off`` (see :func:`scrum_agent.music.last_error`).
     Styled with the shared Theme palette (no hardcoded RGB), matching the rest of
     the TUI.
     """
@@ -71,7 +73,10 @@ def build_music_subtitle(theme: Theme = PLANNING_THEME) -> Text:
     status = music.status()
     line = Text(justify="right")
     if status == "stopped":
-        line.append("♪ off ", style=theme.muted)
+        # A crashed daemon reverts to "stopped" (see music._reconcile_status); show
+        # why rather than a bare "off" so a silently-broken cliamp is diagnosable.
+        err = music.last_error()
+        line.append(f"♪ {err} " if err else "♪ off ", style=theme.dim if err else theme.muted)
         toggle_hint = "^P play"
     else:
         line.append("♪ ", style=theme.accent)

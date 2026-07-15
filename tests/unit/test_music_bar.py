@@ -53,6 +53,17 @@ def test_subtitle_when_paused():
     assert "^P play" in text
 
 
+def test_subtitle_shows_crash_notice_when_stopped_with_error():
+    # A daemon that died on its own reverts to "stopped" but leaves a last_error;
+    # the bar shows it instead of a bare "off" so a broken cliamp is diagnosable.
+    music._state.status = "stopped"
+    music._state.last_error = "cliamp exited — run `cliamp` to check it works"
+    text = build_music_subtitle().plain
+    assert "cliamp exited" in text
+    assert "off" not in text
+    assert "^P play" in text
+
+
 def test_eq_bars_shape():
     bars = _eq_bars(4)
     assert len(bars) == 4
