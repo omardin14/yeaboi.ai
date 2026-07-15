@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from rich.console import Console
 from rich.live import Live
@@ -97,8 +98,19 @@ def edit_task(
     cursor_row, cursor_col = _find_first_editable(buffer, _task_editable_start)
     display_id = story_id or (task_list[0].story_id if task_list else "")
 
+    _ed_anim0 = time.monotonic()  # shimmer title clock
+
     def _render(buf, cr, cc, so, w, h):
-        return render_editor_panel(buf, cr, cc, so, width=w, height=h, editor_label=f"tasks for {display_id}")
+        return render_editor_panel(
+            buf,
+            cr,
+            cc,
+            so,
+            width=w,
+            height=h,
+            editor_label=f"tasks for {display_id}",
+            shimmer_tick=time.monotonic() - _ed_anim0,
+        )
 
     result = edit_buffer_loop(
         live,
@@ -180,8 +192,19 @@ def edit_sprint(
     buffer = text.split("\n")
     cursor_row, cursor_col = _find_first_editable(buffer, _sprint_editable_start)
 
+    _ed_anim0 = time.monotonic()  # shimmer title clock
+
     def _render(buf, cr, cc, so, w, h):
-        return render_editor_panel(buf, cr, cc, so, width=w, height=h, editor_label=sprint.name)
+        return render_editor_panel(
+            buf,
+            cr,
+            cc,
+            so,
+            width=w,
+            height=h,
+            editor_label=sprint.name,
+            shimmer_tick=time.monotonic() - _ed_anim0,
+        )
 
     result = edit_buffer_loop(
         live,
@@ -332,8 +355,19 @@ def edit_analysis(
     buffer = text.split("\n")
     cursor_row, cursor_col = _find_first_editable(buffer, _analysis_editable_start)
 
+    _ed_anim0 = time.monotonic()  # shimmer title clock
+
     def _render(buf, cr, cc, so, w, h):
-        return render_editor_panel(buf, cr, cc, so, width=w, height=h, editor_label=analysis.project_name)
+        return render_editor_panel(
+            buf,
+            cr,
+            cc,
+            so,
+            width=w,
+            height=h,
+            editor_label=analysis.project_name,
+            shimmer_tick=time.monotonic() - _ed_anim0,
+        )
 
     result = edit_buffer_loop(
         live,
@@ -424,8 +458,19 @@ def edit_feature(
     buffer = text.split("\n")
     cursor_row, cursor_col = _find_first_editable(buffer, _feature_editable_start)
 
+    _ed_anim0 = time.monotonic()  # shimmer title clock
+
     def _render(buf, cr, cc, so, w, h):
-        return render_editor_panel(buf, cr, cc, so, width=w, height=h, editor_label="Features")
+        return render_editor_panel(
+            buf,
+            cr,
+            cc,
+            so,
+            width=w,
+            height=h,
+            editor_label="Features",
+            shimmer_tick=time.monotonic() - _ed_anim0,
+        )
 
     result = edit_buffer_loop(
         live,

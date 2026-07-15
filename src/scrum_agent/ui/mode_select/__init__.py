@@ -2862,6 +2862,7 @@ def select_mode(
                                     _scr = 0
                                     _esel = 1  # default to "Next" on page 1
                                     _vp = 1  # current page
+                                    _ta_anim0 = time.monotonic()  # shimmer title clock
                                     while True:
                                         # Page-specific actions
                                         if _vp == 1:
@@ -2881,6 +2882,7 @@ def select_mode(
                                                 export_sel=_esel,
                                                 examples=_stored_ex,
                                                 page=_vp,
+                                                shimmer_tick=time.monotonic() - _ta_anim0,
                                             )
                                         )
                                         kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -3291,6 +3293,7 @@ def select_mode(
                             _ta_export_sel = 1  # default to "Next"
                             _ta_examples = _ta_examples_box[0] or {}
                             _ta_sprint_names = _ta_sprint_names_box[0]
+                            _ta_anim0 = time.monotonic()  # shimmer title clock
                             while True:
                                 if _ta_page == 1:
                                     _ta_actions = ["Export", "Next"]
@@ -3311,6 +3314,7 @@ def select_mode(
                                         sprint_names=_ta_sprint_names,
                                         team_name=_ta_team_name,
                                         page=_ta_page,
+                                        shimmer_tick=time.monotonic() - _ta_anim0,
                                     )
                                 )
                                 kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -4581,6 +4585,7 @@ def select_mode(
                                 if time.monotonic() - _exp_t0 > 1.5 and k:
                                     break
 
+                        _ta_anim0 = time.monotonic()  # shimmer title clock
                         while True:
                             # Page-specific actions
                             if _ta_page == 1:
@@ -4603,6 +4608,7 @@ def select_mode(
                                     sprint_names=_ta_sprint_names,
                                     team_name=_ta_team_name,
                                     page=_ta_page,
+                                    shimmer_tick=time.monotonic() - _ta_anim0,
                                 )
                             )
 

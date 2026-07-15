@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from rich.console import Console
 from rich.live import Live
@@ -302,16 +303,18 @@ def _render_editor(
     height: int = 24,
     story_id: str = "",
     fades: dict[int, float] | None = None,
+    shimmer_tick: float | None = None,
 ) -> tuple:
     """Render the story editor screen as a Rich Panel.
 
     Complex renderer with DoD button grid and AC markers — story-specific.
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
     import rich.box
     from rich.console import Group
     from rich.panel import Panel
 
-    title = planning_title()
+    title = planning_title(shimmer_tick)
     sub = Text(justify="left")
     sub.append(PAD + (f"Editing {story_id}" if story_id else "Editing story"), style="dim")
     sub.append("  |  ", style="dim")
@@ -546,6 +549,7 @@ def edit_story(
         target_idx = idx + (direction * bpr)
         return all_dod[target_idx] if 0 <= target_idx < len(all_dod) else None
 
+    _ed_anim0 = time.monotonic()  # shimmer title clock
     while True:
         try:
             key = _key(timeout=0.05)
@@ -700,6 +704,14 @@ def edit_story(
         _step_fades()
         w, h = console.size
         panel, scroll_offset = _render_editor(
-            buffer, cursor_row, cursor_col, scroll_offset, width=w, height=h, story_id=story.id, fades=btn_fades
+            buffer,
+            cursor_row,
+            cursor_col,
+            scroll_offset,
+            width=w,
+            height=h,
+            story_id=story.id,
+            fades=btn_fades,
+            shimmer_tick=time.monotonic() - _ed_anim0,
         )
         live.update(panel)

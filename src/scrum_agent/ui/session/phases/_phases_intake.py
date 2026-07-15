@@ -98,6 +98,7 @@ def _phase_description_input(
             cursor_col = len(vl)
         input_lines[cursor_row] += tail
 
+    _anim0 = time.monotonic()  # shimmer title clock
     while True:
         key = _key()
 
@@ -202,7 +203,16 @@ def _phase_description_input(
             continue
 
         w, h = console.size
-        live.update(_build_description_screen(input_lines, cursor_row, cursor_col, width=w, height=h))
+        live.update(
+            _build_description_screen(
+                input_lines,
+                cursor_row,
+                cursor_col,
+                width=w,
+                height=h,
+                shimmer_tick=time.monotonic() - _anim0,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +494,7 @@ def _question_input_loop(
     selected_choices: set[int] = set()  # for multi-select mode
     scroll_offset = 0
     use_accordion = questionnaire is not None
+    _anim0 = time.monotonic()  # shimmer title clock
 
     def _render():
         w, h = console.size
@@ -502,6 +513,7 @@ def _question_input_loop(
                 width=w,
                 height=h,
                 cursor_pos=cursor_pos,
+                shimmer_tick=time.monotonic() - _anim0,
                 edit_hint=(
                     "Space toggle \u00b7 Enter submit"
                     if multi_select
@@ -519,6 +531,7 @@ def _question_input_loop(
             selected_choice=selected_choice,
             width=w,
             height=h,
+            shimmer_tick=time.monotonic() - _anim0,
         )
 
     live.update(_render())
@@ -597,6 +610,8 @@ def _question_input_loop(
             selected_choice = (selected_choice - 1) % len(choices)
         elif key in ("down", "scroll_down") and choices:
             selected_choice = (selected_choice + 1) % len(choices)
+        elif key == "":
+            pass  # idle timeout — fall through to re-render so the title shimmer stays live
         elif choices:
             # Choice questions are arrow-key only — no typing
             continue

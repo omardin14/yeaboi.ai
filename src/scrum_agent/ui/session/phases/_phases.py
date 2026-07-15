@@ -141,6 +141,7 @@ def _pipeline_choice_screen(
     _amber = "\033[38;2;200;160;60m"
     _white = "\033[97m"
     _accent = "\033[38;2;70;100;180m"
+    _ch_anim0 = time.monotonic()  # shimmer title clock
 
     def _render_choices():
         w, _ = console.size
@@ -183,6 +184,7 @@ def _pipeline_choice_screen(
             step=step,
             total=total,
             actions=["Select"],
+            shimmer_tick=time.monotonic() - _ch_anim0,
         )
 
     live.update(_render_choices())
@@ -434,6 +436,7 @@ def _handle_tracker_sync(
                     tick=tick,
                     step=step,
                     total=total,
+                    shimmer_tick=tick,
                 )
             )
             time.sleep(FRAME_TIME_30FPS)
@@ -790,6 +793,7 @@ def _phase_pipeline(
                                         tick=_tick,
                                         step=1,
                                         total=6,
+                                        shimmer_tick=_tick,
                                     )
                                 )
                                 time.sleep(1 / 30)
@@ -853,6 +857,7 @@ def _phase_pipeline(
 
                 logger.info("Epic review: showing project-level epic")
 
+                _epv_anim0 = time.monotonic()  # shimmer title clock
                 while True:
                     w, h = console.size
                     live.update(
@@ -868,6 +873,7 @@ def _phase_pipeline(
                             actions=_ep_actions,
                             step=1,
                             total=6,
+                            shimmer_tick=time.monotonic() - _epv_anim0,
                         )
                     )
                     key = _key()
@@ -911,6 +917,7 @@ def _phase_pipeline(
                             )
                             _ep_buf = _features_to_text([_ep_feat]).split("\n")
                             _ep_cr, _ep_cc = _find_first_editable(_ep_buf, _feature_editable_start)
+                            _ep_anim0 = time.monotonic()  # shimmer title clock
 
                             def _ep_render(buf, cr, cc, so, rw, rh):
                                 return render_editor_panel(
@@ -921,6 +928,7 @@ def _phase_pipeline(
                                     width=rw,
                                     height=rh,
                                     editor_label="epic",
+                                    shimmer_tick=time.monotonic() - _ep_anim0,
                                 )
 
                             _ep_edited = edit_buffer_loop(
@@ -1031,6 +1039,7 @@ def _phase_pipeline(
                             tick=tick,
                             step=step,
                             total=total,
+                            shimmer_tick=tick,
                         )
                     )
                     time.sleep(FRAME_TIME_30FPS)
@@ -1215,6 +1224,7 @@ def _phase_pipeline(
             )
         )
 
+        _pl_anim0 = time.monotonic()  # shimmer title clock
         while True:
             key = _key()
 
@@ -1536,6 +1546,7 @@ def _phase_pipeline(
                     sticky_headers=sticky_headers,
                     actions=actions,
                     warning_text=cap_warning_text if is_sprint_stage else "",
+                    shimmer_tick=time.monotonic() - _pl_anim0,
                 )
             )
 
@@ -1573,6 +1584,7 @@ def _phase_chat(
     w, h = console.size
     live.update(_build_chat_screen(messages, input_value, scroll_offset, width=w, height=h))
 
+    _chat_anim0 = time.monotonic()  # shimmer title clock
     while True:
         key = _key()
 
@@ -1627,6 +1639,7 @@ def _phase_chat(
                         height=h,
                         processing=True,
                         tick=tick,
+                        shimmer_tick=tick,
                     )
                 )
                 time.sleep(FRAME_TIME_30FPS)
@@ -1660,4 +1673,13 @@ def _phase_chat(
             continue
 
         w, h = console.size
-        live.update(_build_chat_screen(messages, input_value, scroll_offset, width=w, height=h))
+        live.update(
+            _build_chat_screen(
+                messages,
+                input_value,
+                scroll_offset,
+                width=w,
+                height=h,
+                shimmer_tick=time.monotonic() - _chat_anim0,
+            )
+        )

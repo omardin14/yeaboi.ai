@@ -156,6 +156,7 @@ def _build_team_analysis_screen(
     sprint_names: list[str] | None = None,
     team_name: str = "",
     page: int = 1,
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the team analysis results screen.
 
@@ -1832,7 +1833,7 @@ def _build_team_analysis_screen(
     # ── Layout matching planning mode ──────────────────────────────────
     from scrum_agent.ui.shared._components import analysis_title
 
-    title = analysis_title()
+    title = analysis_title(shimmer_tick)
 
     # Page-specific action buttons
     _page_labels = ["Velocity", "Patterns", "Insights"]

@@ -169,13 +169,15 @@ def render_editor_panel(
     height: int = 24,
     editor_label: str = "",
     title_override=None,
+    shimmer_tick: float | None = None,
 ) -> tuple[Panel, int]:
     """Render a generic editor screen as a Rich Panel.
 
     Shows buffer lines with field-label highlighting, cursor, and scroll.
     Used by all non-story editors (task, sprint, analysis, feature).
+    shimmer_tick: if set (and no title_override), animates the title highlight.
     """
-    title = title_override if title_override is not None else planning_title()
+    title = title_override if title_override is not None else planning_title(shimmer_tick)
 
     sub = Text(justify="left")
     sub.append(PAD + (f"Editing {editor_label}" if editor_label else "Editing"), style="dim")

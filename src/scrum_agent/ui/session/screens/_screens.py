@@ -105,12 +105,14 @@ def _build_action_bar(
 # ---------------------------------------------------------------------------
 
 
-def _planning_title() -> Text:
+def _planning_title(shimmer_tick: float | None = None) -> Text:
     """Return the Planning ASCII title styled with the brand colour.
 
     Delegates to shared planning_title() — previously a local duplicate.
+    Pass ``shimmer_tick`` (a monotonic elapsed clock) to animate the travelling
+    highlight; ``None`` (default) renders the solid static title.
     """
-    return planning_title()
+    return planning_title(shimmer_tick)
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +129,7 @@ def _build_summary_screen(
     height: int = 24,
     status_msg: str = "",
     btn_fades: list[float] | None = None,
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the scrollable intake summary screen with Accept/Edit/Export action bar.
 
@@ -134,8 +137,9 @@ def _build_summary_screen(
     scroll_offset: first visible line index.
     menu_selected: 0=Accept, 1=Edit, 2=Export.
     status_msg: optional status message below the action bar.
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
-    title = _planning_title()
+    title = _planning_title(shimmer_tick)
     sub = Text(_PAD + "Review your answers", style="dim", justify="left")
 
     inner_h = height - 4
