@@ -2571,6 +2571,7 @@ def select_mode(
                             height=h,
                             subtitle="Board required",
                             hint="Press any key to go back.",
+                            mode="analysis",
                         )
                     )
                     while True:
@@ -2755,6 +2756,7 @@ def select_mode(
                                             width=w,
                                             height=h,
                                             subtitle="Team profile exported",
+                                            mode="analysis",
                                         )
                                     )
                                     _et = time.monotonic()
@@ -2917,6 +2919,7 @@ def select_mode(
                                                         width=w,
                                                         height=h,
                                                         subtitle="Team profile exported",
+                                                        mode="analysis",
                                                     )
                                                 )
                                                 _et = time.monotonic()
@@ -3355,6 +3358,7 @@ def select_mode(
                                                 width=w,
                                                 height=h,
                                                 subtitle="Team profile exported",
+                                                mode="analysis",
                                             )
                                         )
                                         _et = time.monotonic()
@@ -3408,6 +3412,7 @@ def select_mode(
                                     height=h,
                                     subtitle="Analysis failed",
                                     hint="Press any key to continue.",
+                                    mode="analysis",
                                 )
                             )
                             while True:
