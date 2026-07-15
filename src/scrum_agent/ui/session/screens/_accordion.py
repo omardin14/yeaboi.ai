@@ -404,6 +404,7 @@ def _build_accordion_question_screen(
     border_override: str = "",
     edit_hint: str = "",
     cursor_pos: int = -1,
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the accordion-style intake question screen.
 
@@ -414,8 +415,10 @@ def _build_accordion_question_screen(
     The viewport auto-scrolls to keep the active question roughly centered.
     Items at the bottom edge of the viewport recess left and truncate for
     a depth/fade-away effect.
+
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
-    title = _planning_title()
+    title = _planning_title(shimmer_tick)
 
     # Subtitle: phase label + progress + edit hint (inline)
     sub = Text(_PAD, justify="left")

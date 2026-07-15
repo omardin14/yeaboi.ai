@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from langchain_core.messages import HumanMessage
 from rich.console import Console
@@ -91,6 +92,7 @@ def _phase_intake_review(
             )
         )
 
+        _anim0 = time.monotonic()  # shimmer title clock
         while True:
             key = _key()
 
@@ -157,6 +159,7 @@ def _phase_intake_review(
                     height=h,
                     status_msg=status_msg,
                     btn_fades=btn_fades,
+                    shimmer_tick=time.monotonic() - _anim0,
                 )
             )
 
@@ -288,6 +291,7 @@ def _get_edit_input(live: Live, console: Console, _key, prompt: str) -> str | No
     w, h = console.size
     live.update(_build_edit_prompt_screen(prompt, input_value, width=w, height=h))
 
+    _anim0 = time.monotonic()  # shimmer title clock
     while True:
         key = _key()
         if key == "esc":
@@ -314,4 +318,6 @@ def _get_edit_input(live: Live, console: Console, _key, prompt: str) -> str | No
             continue
 
         w, h = console.size
-        live.update(_build_edit_prompt_screen(prompt, input_value, width=w, height=h))
+        live.update(
+            _build_edit_prompt_screen(prompt, input_value, width=w, height=h, shimmer_tick=time.monotonic() - _anim0)
+        )

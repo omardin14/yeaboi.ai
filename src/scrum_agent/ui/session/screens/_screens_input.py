@@ -48,12 +48,14 @@ def _voice_hint() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _planning_title() -> Text:
+def _planning_title(shimmer_tick: float | None = None) -> Text:
     """Return the Planning ASCII title styled with the brand colour.
 
     Delegates to shared planning_title() — previously a local duplicate.
+    Pass ``shimmer_tick`` (a monotonic elapsed clock) to animate the travelling
+    highlight; ``None`` (default) renders the solid static title.
     """
-    return planning_title()
+    return planning_title(shimmer_tick)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +72,7 @@ def _build_description_screen(
     height: int = 24,
     border_override: str = "",
     status_line: str = "",
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the multi-line project description input screen.
 
@@ -78,8 +81,9 @@ def _build_description_screen(
     border_override: if set, overrides the input box border colour (for green pulse).
     status_line: if set, replaces the submit hint with this text (e.g. the
         inline voice-recording indicator) so the user stays on this screen.
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
-    title = _planning_title()
+    title = _planning_title(shimmer_tick)
     sub = Text(_PAD + "Tell me about your project", style="dim", justify="left")
 
     # Hint + example — mirrors the REPL opener so users know what to type
@@ -236,6 +240,7 @@ def _build_question_screen(
     height: int = 24,
     border_override: str = "",
     status_line: str = "",
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build a single intake question screen.
 
@@ -245,8 +250,9 @@ def _build_question_screen(
     progress: e.g. "Q3 of 26" or "2 remaining" — shown in subtitle.
     phase_label: e.g. "Phase 1: Project Context" — shown above question.
     preamble_lines: dim context lines (extraction summary, remaining count).
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
-    title = _planning_title()
+    title = _planning_title(shimmer_tick)
 
     # Phase title in bright white, progress counter in dim
     sub = Text(_PAD, justify="left")

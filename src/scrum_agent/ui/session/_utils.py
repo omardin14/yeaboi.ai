@@ -332,6 +332,7 @@ def _invoke_with_animation(
                         width=w,
                         height=h,
                         border_override=loading_border_color(tick),
+                        shimmer_tick=tick,
                     )
                 )
             else:
@@ -341,6 +342,7 @@ def _invoke_with_animation(
                         width=w,
                         height=h,
                         border_override=loading_border_color(tick),
+                        shimmer_tick=tick,
                     )
                 )
         else:
@@ -357,6 +359,7 @@ def _invoke_with_animation(
                     tick=tick,
                     step=step,
                     total=total,
+                    shimmer_tick=tick,
                 )
             )
         time.sleep(FRAME_TIME_30FPS)

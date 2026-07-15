@@ -53,6 +53,7 @@ def _build_pipeline_screen(
     popup_selected: int = 0,
     popup_t: float = 0.0,
     popup_pulse: float = 0.0,
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the pipeline stage screen (processing + result).
 
@@ -68,7 +69,7 @@ def _build_pipeline_screen(
     """
     if actions is None:
         actions = ["Accept", "Edit", "Export"]
-    title = _planning_title()
+    title = _planning_title(shimmer_tick)
 
     # Subtitle: stage label + inline progress bar
     sub = Text(_PAD, justify="left")
@@ -380,14 +381,16 @@ def _build_chat_screen(
     height: int = 24,
     processing: bool = False,
     tick: float = 0.0,
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the post-pipeline chat screen.
 
     messages: list of (role, text) tuples — role is "user" or "ai".
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
     from scrum_agent.ui.shared._animations import loading_border_color
 
-    title = _planning_title()
+    title = _planning_title(shimmer_tick)
     sub = Text(_PAD + "Plan complete \u2014 ask questions or type 'export' to save", style="dim", justify="left")
 
     inner_h = height - 4
@@ -486,9 +489,10 @@ def _build_edit_prompt_screen(
     *,
     width: int = 80,
     height: int = 24,
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build a screen prompting for edit feedback (used by both intake and pipeline edits)."""
-    title = _planning_title()
+    title = _planning_title(shimmer_tick)
     sub = Text(_PAD + "What changes would you like?", style="dim", justify="left")
 
     body: list = []

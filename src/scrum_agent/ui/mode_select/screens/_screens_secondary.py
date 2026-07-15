@@ -156,6 +156,7 @@ def _build_team_analysis_screen(
     sprint_names: list[str] | None = None,
     team_name: str = "",
     page: int = 1,
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the team analysis results screen.
 
@@ -1832,7 +1833,7 @@ def _build_team_analysis_screen(
     # ── Layout matching planning mode ──────────────────────────────────
     from scrum_agent.ui.shared._components import analysis_title
 
-    title = analysis_title()
+    title = analysis_title(shimmer_tick)
 
     # Page-specific action buttons
     _page_labels = ["Velocity", "Patterns", "Insights"]
@@ -2966,19 +2967,21 @@ def _build_project_export_success_screen(
     subtitle: str = "Plan exported",
     hint: str = "Press any key to continue.",
     mode: str = "planning",
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the project export success/status screen.
 
     Shown after exporting a project's plan as Markdown and HTML,
     or during/after Jira sync operations. subtitle and hint can
     be customised for different contexts (e.g. loading states).
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
     if mode == "analysis":
         from scrum_agent.ui.shared._components import analysis_title
 
-        title = analysis_title()
+        title = analysis_title(shimmer_tick)
     else:
-        title = planning_title()
+        title = planning_title(shimmer_tick)
 
     body: list = [
         Text(_PAD + subtitle, style="bold bright_green", justify="left"),

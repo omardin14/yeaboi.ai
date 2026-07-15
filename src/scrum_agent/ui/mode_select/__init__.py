@@ -2559,21 +2559,25 @@ def select_mode(
                 _board_configured = _jira_ok or _azdevops_ok
 
                 if not _board_configured:
-                    # No board configured — show message and return to mode select
-                    w, h = console.size
-                    live.update(
-                        _build_project_export_success_screen(
-                            "No board configured.\n\n"
-                            "Set JIRA_BASE_URL + JIRA_API_TOKEN\n"
-                            "or AZURE_DEVOPS_ORG_URL + AZURE_DEVOPS_TOKEN\n"
-                            "in your .env file.",
-                            width=w,
-                            height=h,
-                            subtitle="Board required",
-                            hint="Press any key to go back.",
-                        )
-                    )
+                    # No board configured — show message and return to mode select.
+                    # Re-render each frame so the ANALYSIS title keeps shimmering.
+                    _br_anim0 = time.monotonic()  # shimmer title clock
                     while True:
+                        w, h = console.size
+                        live.update(
+                            _build_project_export_success_screen(
+                                "No board configured.\n\n"
+                                "Set JIRA_BASE_URL + JIRA_API_TOKEN\n"
+                                "or AZURE_DEVOPS_ORG_URL + AZURE_DEVOPS_TOKEN\n"
+                                "in your .env file.",
+                                width=w,
+                                height=h,
+                                subtitle="Board required",
+                                hint="Press any key to go back.",
+                                mode="analysis",
+                                shimmer_tick=time.monotonic() - _br_anim0,
+                            )
+                        )
                         k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
                         if k:
                             break
@@ -2679,6 +2683,7 @@ def select_mode(
                             profiles=_profiles_for_analysis,
                             new_analysis_labels=_ana_labels,
                             mode="analysis",
+                            shimmer_tick=dt_r,
                         )
                     )
                     time.sleep(_FRAME_TIME)
@@ -2710,6 +2715,7 @@ def select_mode(
                     _ana_del_popup_flash = 0.0
                     _ana_del_pending = False
                     _ana_prev = time.monotonic()
+                    _ana_anim0 = _ana_prev  # shimmer title clock
 
                     while True:
                         key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -2755,6 +2761,7 @@ def select_mode(
                                             width=w,
                                             height=h,
                                             subtitle="Team profile exported",
+                                            mode="analysis",
                                         )
                                     )
                                     _et = time.monotonic()
@@ -2862,6 +2869,7 @@ def select_mode(
                                     _scr = 0
                                     _esel = 1  # default to "Next" on page 1
                                     _vp = 1  # current page
+                                    _ta_anim0 = time.monotonic()  # shimmer title clock
                                     while True:
                                         # Page-specific actions
                                         if _vp == 1:
@@ -2881,6 +2889,7 @@ def select_mode(
                                                 export_sel=_esel,
                                                 examples=_stored_ex,
                                                 page=_vp,
+                                                shimmer_tick=time.monotonic() - _ta_anim0,
                                             )
                                         )
                                         kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -2917,6 +2926,7 @@ def select_mode(
                                                         width=w,
                                                         height=h,
                                                         subtitle="Team profile exported",
+                                                        mode="analysis",
                                                     )
                                                 )
                                                 _et = time.monotonic()
@@ -3139,6 +3149,7 @@ def select_mode(
                                 delete_popup_pulse=_ana_del_popup_pulse,
                                 delete_popup_flash=_ana_del_popup_flash,
                                 mode="analysis",
+                                shimmer_tick=_now - _ana_anim0,
                             )
                         )
 
@@ -3291,6 +3302,7 @@ def select_mode(
                             _ta_export_sel = 1  # default to "Next"
                             _ta_examples = _ta_examples_box[0] or {}
                             _ta_sprint_names = _ta_sprint_names_box[0]
+                            _ta_anim0 = time.monotonic()  # shimmer title clock
                             while True:
                                 if _ta_page == 1:
                                     _ta_actions = ["Export", "Next"]
@@ -3311,6 +3323,7 @@ def select_mode(
                                         sprint_names=_ta_sprint_names,
                                         team_name=_ta_team_name,
                                         page=_ta_page,
+                                        shimmer_tick=time.monotonic() - _ta_anim0,
                                     )
                                 )
                                 kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -3355,6 +3368,7 @@ def select_mode(
                                                 width=w,
                                                 height=h,
                                                 subtitle="Team profile exported",
+                                                mode="analysis",
                                             )
                                         )
                                         _et = time.monotonic()
@@ -3408,6 +3422,7 @@ def select_mode(
                                     height=h,
                                     subtitle="Analysis failed",
                                     hint="Press any key to continue.",
+                                    mode="analysis",
                                 )
                             )
                             while True:
@@ -3697,6 +3712,7 @@ def select_mode(
                         card_fade=1.0,
                         jira_enabled=_jira_ok,
                         azdevops_enabled=_azdevops_ok,
+                        shimmer_tick=dt_r,
                     )
                 )
                 time.sleep(_FRAME_TIME)
@@ -3771,6 +3787,7 @@ def select_mode(
                 _team_popup_msg = ""  # dynamic staleness message
 
                 prev_tick = time.monotonic()
+                _list_anim0 = prev_tick  # shimmer title clock
 
                 while True:
                     key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -4396,6 +4413,7 @@ def select_mode(
                             team_popup_message=_team_popup_msg,
                             jira_enabled=_jira_ok,
                             azdevops_enabled=_azdevops_ok,
+                            shimmer_tick=now - _list_anim0,
                         )
                     )
 
@@ -4581,6 +4599,7 @@ def select_mode(
                                 if time.monotonic() - _exp_t0 > 1.5 and k:
                                     break
 
+                        _ta_anim0 = time.monotonic()  # shimmer title clock
                         while True:
                             # Page-specific actions
                             if _ta_page == 1:
@@ -4603,6 +4622,7 @@ def select_mode(
                                     sprint_names=_ta_sprint_names,
                                     team_name=_ta_team_name,
                                     page=_ta_page,
+                                    shimmer_tick=time.monotonic() - _ta_anim0,
                                 )
                             )
 
