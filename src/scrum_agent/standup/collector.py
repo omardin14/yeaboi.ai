@@ -27,8 +27,9 @@ SOURCE_AZDO = "azure_devops"
 SOURCE_GITHUB = "github"
 SOURCE_LOCAL_GIT = "local_git"
 SOURCE_CONFLUENCE = "confluence"
+SOURCE_NOTION = "notion"
 
-ALL_SOURCES = (SOURCE_JIRA, SOURCE_AZDO, SOURCE_GITHUB, SOURCE_LOCAL_GIT, SOURCE_CONFLUENCE)
+ALL_SOURCES = (SOURCE_JIRA, SOURCE_AZDO, SOURCE_GITHUB, SOURCE_LOCAL_GIT, SOURCE_CONFLUENCE, SOURCE_NOTION)
 
 
 @dataclass
@@ -66,6 +67,7 @@ def _resolve_sources(
     github_repo: str,
     local_repo_path: str,
     confluence_space: str,
+    notion_root: str = "",
 ) -> set[str]:
     """Decide which sources to attempt.
 
@@ -85,6 +87,8 @@ def _resolve_sources(
         auto.add(SOURCE_LOCAL_GIT)
     if confluence_space:
         auto.add(SOURCE_CONFLUENCE)
+    if notion_root:
+        auto.add(SOURCE_NOTION)
     return auto
 
 
@@ -97,6 +101,7 @@ def collect_recent_activity(
     github_repo: str = "",
     local_repo_path: str = "",
     confluence_space: str = "",
+    notion_root: str = "",
 ) -> ActivityBundle:
     """Gather and normalize recent activity from all enabled sources.
 
@@ -111,6 +116,7 @@ def collect_recent_activity(
         github_repo=github_repo,
         local_repo_path=local_repo_path,
         confluence_space=confluence_space,
+        notion_root=notion_root,
     )
     logger.info("collect_recent_activity: days=%d enabled sources=%s", days, sorted(enabled))
 
@@ -183,6 +189,15 @@ def collect_recent_activity(
             return confluence_recent_pages(confluence_space, days=days)
 
         _run(SOURCE_CONFLUENCE, _conf)
+
+    if SOURCE_NOTION in enabled:
+
+        def _notion() -> list[dict]:
+            from scrum_agent.tools.notion import notion_recent_pages
+
+            return notion_recent_pages(notion_root, days=days)
+
+        _run(SOURCE_NOTION, _notion)
 
     logger.info("collect_recent_activity: %d total item(s) across %d source(s)", bundle.total(), len(bundle.counts))
     return bundle

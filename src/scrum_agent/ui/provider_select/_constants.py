@@ -189,3 +189,24 @@ _ISSUE_TRACKING_OPTIONS: list[dict[str, Any]] = [
     {"name": "Azure DevOps Boards", "fields": _AZDEVOPS_TRACKING_FIELDS},
     {"name": "Skip", "fields": []},
 ]
+
+# Notion doc-tool fields — a standalone wizard step (step 3). Unlike Confluence
+# (which rides on Jira's Atlassian auth), Notion has its own integration token and
+# no "space key"; the optional root page/database ID scopes page creation and the
+# standup activity feed. Both fields are optional so users without Notion skip past.
+_NOTION_FIELDS: list[dict[str, Any]] = [
+    {
+        "env_var": "NOTION_TOKEN",
+        "label": "Notion Integration Token",
+        "placeholder": "ntn_… / secret_…",
+        "masked": True,
+        "required": False,
+    },
+    {
+        "env_var": "NOTION_ROOT_PAGE_ID",
+        "label": "Root Page/Database ID (optional)",
+        "placeholder": "",
+        "masked": False,
+        "required": False,
+    },
+]

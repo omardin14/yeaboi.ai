@@ -227,6 +227,7 @@ src/scrum_agent/
     azure_devops.py     — Azure DevOps repo/file/work items/board/velocity/create (9 tools)
     jira.py             — Jira board/velocity/sprint/epic/story (6 tools)
     confluence.py       — Confluence search/read/write (5 tools)
+    notion.py           — Notion search/read/write (5 tools) + recent-pages helper (own token, not Atlassian auth)
     codebase.py         — Local repo scanning (3 tools)
     calendar_tools.py   — Bank holiday detection (1 tool)
     llm_tools.py        — LLM-powered estimation and AC generation (2 tools)
@@ -437,6 +438,8 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - `AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TEAM` — optional, for Azure DevOps board sync
 - `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` — optional, for Jira integration
 - `CONFLUENCE_SPACE_KEY` — optional, shares Atlassian auth with Jira
+- `NOTION_TOKEN` — optional, Notion integration token (independent doc tool; its own auth, not shared with Jira/Confluence). Enables the 5 `notion_*` tools + analysis/standup context.
+- `NOTION_ROOT_PAGE_ID` — optional, default parent for created Notion pages; also gates the Notion source in the Daily Standup activity feed (the Confluence-space-key analog)
 - `STANDUP_USER_NAME` — optional, your display name for your own standup update (default: "Me")
 - `STANDUP_GITHUB_REPO` — optional, GitHub repo (owner/repo) scanned for Daily Standup code activity
 - `SLACK_WEBHOOK_URL` — optional, Slack incoming-webhook URL for Daily Standup delivery

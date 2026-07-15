@@ -21,6 +21,7 @@ from rich.console import Console
 from scrum_agent.ui.provider_select._config import _save_progress  # noqa: F401
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIONS
 from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking  # noqa: F401
+from scrum_agent.ui.provider_select._phase_notion import _run_notion  # noqa: F401
 from scrum_agent.ui.provider_select._transitions import _transition_to_input  # noqa: F401
 from scrum_agent.ui.provider_select._verification import _verify_api_key, _verify_model, _verify_vc_token
 from scrum_agent.ui.provider_select.screens._screens import (
@@ -99,7 +100,8 @@ def select_provider(
     Organized as a step-based loop so Esc navigates back between steps:
     Step 0: LLM Provider selection + API key verification
     Step 1: Issue Tracking (Jira / Azure DevOps Boards / Skip)
-    Step 2: Version Control (GitHub PAT)
+    Step 2: Docs / Notion (optional integration token)
+    Step 3: Version Control (GitHub PAT)
 
     Returns a dict compatible with setup_wizard._PROVIDERS values (with an
     added 'api_key' field), or None if the user cancelled.
@@ -297,7 +299,7 @@ def select_provider(
                 elif key in ("q", "esc"):
                     return None
 
-        while step < 3:
+        while step < 4:
             # ══════════════════════════════════════════════════════════════
             # Step 0: LLM Provider selection + API key input
             # ══════════════════════════════════════════════════════════════
@@ -503,9 +505,28 @@ def select_provider(
                 continue
 
             # ══════════════════════════════════════════════════════════════
-            # Step 2: Version Control (GitHub PAT)
+            # Step 2: Docs / Notion (optional integration token)
             # ══════════════════════════════════════════════════════════════
             elif step == 2:
+                # Fade out the previous screen into the Notion form.
+                for grey in FADE_OUT_LEVELS:
+                    w, h = console.size
+                    live.update(_build_input_screen(provider, api_key, width=w, height=h, input_fade=grey))
+                    time.sleep(FRAME_TIME_30FPS)
+
+                notion_result = _run_notion(console, read_key, existing_config, live)
+                if notion_result is not None:
+                    # Empty dict = user skipped (optional). Either way, record and advance.
+                    _issue_tracking_result["notion"] = notion_result
+                    step = 3
+                else:
+                    step = 1  # Esc → go back to issue tracking
+                continue
+
+            # ══════════════════════════════════════════════════════════════
+            # Step 3: Version Control (GitHub PAT)
+            # ══════════════════════════════════════════════════════════════
+            elif step == 3:
                 vc_selected = 0
                 vc_n = len(_VC_OPTIONS)
                 vc_start = time.monotonic()
@@ -728,7 +749,7 @@ def select_provider(
                     disable_bracketed_paste()
                     return _issue_tracking_result
                 else:
-                    step = 1  # Esc → go back to issue tracking
+                    step = 2  # Esc → go back to Notion
                     continue
 
     disable_bracketed_paste()

@@ -241,6 +241,10 @@ def run_setup_wizard(console: Console) -> bool:
     issue_tracking = result.get("issue_tracking", {})
     collected.update(issue_tracking)
 
+    # ── Notion (optional doc tool, collected in full-screen UI) ─────────
+    notion = result.get("notion", {})
+    collected.update(notion)
+
     # ── Bedrock: auto-detect model from OpenClaw if available ───────────────
     # OpenClaw's models.json has the exact Bedrock model ID (e.g.
     # global.anthropic.claude-sonnet-4-6). Without this, yeaboi falls

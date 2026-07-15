@@ -567,7 +567,7 @@ class TestAzdevopsFetchActiveIteration:
 class TestGetTools:
     def test_returns_thirty_tools(self):
         tools = get_tools()
-        assert len(tools) == 32
+        assert len(tools) == 37
 
     def test_all_are_base_tools(self):
         from langchain_core.tools import BaseTool
@@ -607,6 +607,11 @@ class TestGetTools:
             "confluence_read_space",
             "confluence_create_page",
             "confluence_update_page",
+            "notion_search_pages",
+            "notion_read_page",
+            "notion_read_database",
+            "notion_create_page",
+            "notion_update_page",
             "jira_fetch_velocity",
             "jira_fetch_active_sprint",
             "load_project_context",

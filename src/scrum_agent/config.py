@@ -218,6 +218,25 @@ def get_confluence_space_key() -> str | None:
     return os.getenv("CONFLUENCE_SPACE_KEY") or None
 
 
+def get_notion_token() -> str | None:
+    """Return the Notion integration token, or None if not set.
+
+    Unlike Confluence (which reuses Jira's Atlassian auth), Notion has its own
+    OAuth2 integration token — the only credential its SDK needs.
+    """
+    return os.getenv("NOTION_TOKEN") or None
+
+
+def get_notion_root_page_id() -> str | None:
+    """Return the optional Notion root page/database ID, or None if not set.
+
+    Notion has no "space key" — search spans whatever pages the integration is
+    granted. This optional ID scopes the default parent for page creation and the
+    standup recent-pages feed (analogous to CONFLUENCE_SPACE_KEY).
+    """
+    return os.getenv("NOTION_ROOT_PAGE_ID") or None
+
+
 # ---------------------------------------------------------------------------
 # Daily Standup configuration
 # ---------------------------------------------------------------------------

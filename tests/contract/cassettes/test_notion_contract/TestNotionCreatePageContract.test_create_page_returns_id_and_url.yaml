@@ -1,0 +1,18 @@
+interactions:
+- request:
+    body: '{"parent": {"page_id": "root-page-id"}, "properties": {"title": [{"type": "text", "text": {"content": "Sprint 1 Plan"}}]}, "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "Sprint goal: ship auth"}}]}}]}'
+    headers:
+      Content-Type:
+      - application/json
+    method: POST
+    uri: https://api.notion.com/v1/pages
+  response:
+    body:
+      string: '{"object":"page","id":"99999999999999999999999999999999","url":"https://www.notion.so/Sprint-1-Plan-99999999999999999999999999999999","properties":{"title":{"type":"title","title":[{"plain_text":"Sprint 1 Plan"}]}}}'
+    headers:
+      Content-Type:
+      - application/json; charset=utf-8
+    status:
+      code: 200
+      message: OK
+version: 1

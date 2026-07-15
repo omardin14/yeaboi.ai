@@ -932,6 +932,13 @@ class ScrumState(_RequiredState, total=False):
     # See README: "Tools" — tool types, read-only tool pattern
     confluence_context: str
 
+    # Notion context — concatenated plain-text content from notion_search_pages and
+    # notion_read_page tool calls during the intake phase. Notion is an independent
+    # doc source (its own integration token); surfaced in the project_analyzer prompt
+    # alongside repo and Confluence context. Empty string if no Notion tools were called.
+    # See README: "Tools" — tool types, read-only tool pattern
+    notion_context: str
+
     # User-provided context from SCRUM.md — free-form markdown the user places in
     # their project root (URLs, design notes, screenshots as links, tech decisions,
     # team conventions). Read once by project_analyzer; injected into the prompt so

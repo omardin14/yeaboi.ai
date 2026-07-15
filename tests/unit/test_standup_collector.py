@@ -5,6 +5,7 @@ from scrum_agent.standup.collector import (
     SOURCE_GITHUB,
     SOURCE_JIRA,
     SOURCE_LOCAL_GIT,
+    SOURCE_NOTION,
     ActivityBundle,
     collect_recent_activity,
 )
@@ -50,6 +51,18 @@ class TestResolveSources:
             confluence_space="",
         )
         assert got == {SOURCE_JIRA, SOURCE_GITHUB, SOURCE_LOCAL_GIT}
+
+    def test_auto_enables_notion_from_root(self):
+        got = collector._resolve_sources(
+            None,
+            jira_project="",
+            azdo_project="",
+            github_repo="",
+            local_repo_path="",
+            confluence_space="",
+            notion_root="root123",
+        )
+        assert got == {SOURCE_NOTION}
 
 
 class TestCollect:
@@ -102,6 +115,15 @@ class TestCollect:
         bundle = collect_recent_activity(sources={SOURCE_GITHUB}, github_repo="owner/repo")
         assert dict(bundle.counts) == {SOURCE_GITHUB: 2}
         assert {i["kind"] for i in bundle.items} == {"commit", "pr"}
+
+    def test_notion_source_collected(self, monkeypatch):
+        monkeypatch.setattr(
+            "scrum_agent.tools.notion.notion_recent_pages",
+            lambda root_id, days=1: [{"author": "Alice", "kind": "page", "title": "Doc", "timestamp": "", "key": "1"}],
+        )
+        bundle = collect_recent_activity(sources={SOURCE_NOTION}, notion_root="root123")
+        assert dict(bundle.counts) == {SOURCE_NOTION: 1}
+        assert bundle.items[0]["source"] == SOURCE_NOTION
 
     def test_no_sources_enabled_is_empty(self):
         bundle = collect_recent_activity(sources=set())
