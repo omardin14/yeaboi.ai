@@ -45,7 +45,7 @@ class TestGetLlmAnthropic:
         monkeypatch.delenv("LLM_MODEL", raising=False)
         llm = get_llm()
         assert llm.model == DEFAULT_MODEL
-        assert llm.model == "claude-sonnet-4-20250514"
+        assert llm.model == "claude-sonnet-4-6"
 
     def test_default_temperature(self, monkeypatch):
         """Default temperature must be 0.0 for deterministic output."""
@@ -213,13 +213,13 @@ class TestProviderDefaults:
     """Tests for the _PROVIDER_DEFAULTS constant."""
 
     def test_anthropic_default_is_sonnet(self):
-        assert _PROVIDER_DEFAULTS["anthropic"] == "claude-sonnet-4-20250514"
+        assert _PROVIDER_DEFAULTS["anthropic"] == "claude-sonnet-4-6"
 
     def test_openai_default_is_gpt4o(self):
         assert _PROVIDER_DEFAULTS["openai"] == "gpt-4o"
 
     def test_google_default_is_gemini_flash(self):
-        assert _PROVIDER_DEFAULTS["google"] == "gemini-2.0-flash"
+        assert _PROVIDER_DEFAULTS["google"] == "gemini-2.5-flash"
 
     def test_default_model_constant_matches_anthropic(self):
         """DEFAULT_MODEL backward-compat constant must equal the Anthropic default."""

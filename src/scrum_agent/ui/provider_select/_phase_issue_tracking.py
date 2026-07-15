@@ -76,7 +76,7 @@ def _run_issue_tracking(
             body_h = len(rows) * 3 - 1 if rows else 0
             w, h = console.size
             return _build_screen_frame(
-                subtitle="Issue Tracking",
+                subtitle="Issue tracking  ·  ↑↓ choose  ·  Enter select",
                 step=2,
                 body_items=body,
                 body_height=body_h,
@@ -161,7 +161,8 @@ def _run_issue_tracking(
                 width=w,
                 height=h,
                 fields=fields,
-                subtitle=tracker_name,
+                subtitle="Issue tracking",
+                title_text=tracker_name,
             )
         )
 
@@ -191,7 +192,8 @@ def _run_issue_tracking(
                             height=h,
                             errors=it_errors,
                             fields=fields,
-                            subtitle=tracker_name,
+                            subtitle="Issue tracking",
+                            title_text=tracker_name,
                         )
                     )
                     continue
@@ -232,7 +234,8 @@ def _run_issue_tracking(
                             height=h,
                             border_overrides=bo,
                             fields=fields,
-                            subtitle=tracker_name,
+                            subtitle="Issue tracking",
+                            title_text=tracker_name,
                         )
                     )
                     time.sleep(FRAME_TIME_30FPS)
@@ -259,7 +262,8 @@ def _run_issue_tracking(
                                 verified={i: True for i in range(it_n)},
                                 border_overrides=bo,
                                 fields=fields,
-                                subtitle=tracker_name,
+                                subtitle="Issue tracking",
+                                title_text=tracker_name,
                             )
                         )
                         time.sleep(FRAME_TIME_30FPS)
@@ -273,7 +277,8 @@ def _run_issue_tracking(
                             height=h,
                             verified={i: True for i in range(it_n)},
                             fields=fields,
-                            subtitle=tracker_name,
+                            subtitle="Issue tracking",
+                            title_text=tracker_name,
                         )
                     )
                     time.sleep(0.6)
@@ -310,7 +315,8 @@ def _run_issue_tracking(
                             height=h,
                             errors=it_errors,
                             fields=fields,
-                            subtitle=tracker_name,
+                            subtitle="Issue tracking",
+                            title_text=tracker_name,
                         )
                     )
                     continue
@@ -346,7 +352,8 @@ def _run_issue_tracking(
                     errors=it_errors,
                     verified=it_verified,
                     fields=fields,
-                    subtitle=tracker_name,
+                    subtitle="Issue tracking",
+                    title_text=tracker_name,
                 )
             )
 

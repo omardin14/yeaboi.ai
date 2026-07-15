@@ -59,6 +59,10 @@ def _verify_api_key(provider: dict[str, Any], api_key: str) -> tuple[bool, str]:
         if provider_val == "anthropic":
             import httpx
 
+            # Ping the provider's own default model so this can't drift onto a
+            # retired model id (a retired/unknown model returns 404, not 401 —
+            # the API checks the key first, then the model).
+            verify_model = (provider.get("models") or {}).get("default") or "claude-sonnet-4-6"
             resp = httpx.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -67,7 +71,7 @@ def _verify_api_key(provider: dict[str, Any], api_key: str) -> tuple[bool, str]:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-20250514",
+                    "model": verify_model,
                     "max_tokens": 1,
                     "messages": [{"role": "user", "content": "hi"}],
                 },
@@ -256,6 +260,101 @@ def _extract_error_message(resp: Any) -> str:
     except Exception:
         pass
     return ""
+
+
+# OpenAI's /v1/models list is noisy (embeddings, TTS, image, moderation, …).
+# Keep only chat/reasoning families; substring match on the id is enough.
+_OPENAI_NON_CHAT = (
+    "embedding",
+    "whisper",
+    "tts",
+    "audio",
+    "realtime",
+    "transcribe",
+    "image",
+    "dall-e",
+    "moderation",
+    "search",
+    "codex",
+    "computer-use",
+)
+
+
+def _filter_openai_chat_models(entries: list[tuple[str, int]]) -> list[str]:
+    """Newest-first chat/reasoning model ids from OpenAI's raw (id, created) list."""
+    entries = sorted(entries, key=lambda t: t[1], reverse=True)
+    keep: list[str] = []
+    seen: set[str] = set()
+    for mid, _created in entries:
+        low = mid.lower()
+        if any(x in low for x in _OPENAI_NON_CHAT):
+            continue
+        if low.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-")) and mid not in seen:
+            seen.add(mid)
+            keep.append(mid)
+    return keep
+
+
+def fetch_available_models(provider: dict[str, Any], api_key: str) -> list[str]:
+    """Ask the provider which models this key can actually use (newest-first).
+
+    This is the authoritative, always-current source — a hardcoded list is only
+    a snapshot that goes stale when the provider retires a model. Returns [] on
+    any failure (offline, timeout, unexpected shape, non-200) so callers fall
+    back to the seed presets. Never raises. Bedrock is intentionally excluded —
+    it resolves its model via OpenClaw auto-detection, not an API key.
+    """
+    provider_val = provider.get("provider_val")
+    try:
+        import httpx
+
+        if provider_val == "anthropic":
+            resp = httpx.get(
+                "https://api.anthropic.com/v1/models?limit=100",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                return []
+            # Models API returns newest-first; every id is messages-capable.
+            data = resp.json().get("data") or []
+            return [m["id"] for m in data if isinstance(m, dict) and m.get("id")]
+
+        if provider_val == "openai":
+            resp = httpx.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json().get("data") or []
+            entries = [(m["id"], int(m.get("created", 0))) for m in data if isinstance(m, dict) and m.get("id")]
+            return _filter_openai_chat_models(entries)
+
+        if provider_val == "google":
+            resp = httpx.get(
+                f"https://generativelanguage.googleapis.com/v1/models?key={api_key}&pageSize=200",
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                return []
+            # supportedGenerationMethods is the provider's own capability flag —
+            # keep only models that can actually generate chat content.
+            out: list[str] = []
+            for m in resp.json().get("models") or []:
+                if not isinstance(m, dict):
+                    continue
+                name = m.get("name", "")
+                methods = m.get("supportedGenerationMethods") or []
+                if "generateContent" in methods and name.startswith("models/"):
+                    mid = name[len("models/") :]
+                    if "embedding" not in mid and "aqa" not in mid:
+                        out.append(mid)
+            return out
+    except Exception:
+        return []
+    return []
 
 
 def _verify_vc_token(vc: dict[str, Any], token: str) -> tuple[bool, str]:

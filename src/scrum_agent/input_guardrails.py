@@ -223,7 +223,7 @@ _ALLOWLIST_PATTERNS: list[re.Pattern[str]] = [
 _CLASSIFIER_MODELS: dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
-    "google": "gemini-2.0-flash",
+    "google": "gemini-2.5-flash",
 }
 
 _CLASSIFIER_PROMPT = """\

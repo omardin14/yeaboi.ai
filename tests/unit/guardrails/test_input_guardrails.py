@@ -352,7 +352,7 @@ class TestCheckOffTopic:
     def test_uses_cheap_model_google(self, _mock_provider, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response("RELEVANT")
         check_off_topic("do you love me")
-        mock_get_llm.assert_called_once_with(model="gemini-2.0-flash", temperature=0.0)
+        mock_get_llm.assert_called_once_with(model="gemini-2.5-flash", temperature=0.0)
 
 
 # ---------------------------------------------------------------------------

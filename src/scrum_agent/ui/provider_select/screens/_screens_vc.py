@@ -14,8 +14,13 @@ from rich.panel import Panel
 from rich.text import Text
 
 from scrum_agent.ui.provider_select._constants import _ISSUE_TRACKING_FIELDS, _VC_OPTIONS
-from scrum_agent.ui.provider_select.screens._screens import _build_provider_row, _build_screen_frame
-from scrum_agent.ui.shared._ascii_font import render_ascii_text
+from scrum_agent.ui.provider_select.screens._screens import (
+    _ACCENT,
+    _FRAME_FOOTER_H,
+    _FRAME_HEADER_H,
+    _build_provider_row,
+    _build_screen_frame,
+)
 
 
 def _build_vc_select_screen(
@@ -81,12 +86,7 @@ def _build_vc_input_screen(
     """Build the PAT token input screen for version control."""
     import rich.box
 
-    style = vc["color"]
-    lines = render_ascii_text(vc["name"])
-    vc_text = Text(justify="center")
-    vc_text.append(lines[0] + "\n", style=style)
-    vc_text.append(lines[1], style=style)
-
+    # Provider identity is carried by the tall ANSI-Shadow frame title.
     instr_style = input_fade if input_fade else "dim"
     instructions = Text(vc["instructions"], style=instr_style, justify="center")
 
@@ -115,7 +115,7 @@ def _build_vc_input_screen(
     elif verified is False or error:
         border_color = "bright_red"
     else:
-        border_color = "white"
+        border_color = _ACCENT
 
     input_box = Panel(
         input_content,
@@ -135,14 +135,12 @@ def _build_vc_input_screen(
         status_text = Text("")
 
     body = [
-        Align.center(vc_text),
-        Text(""),
         Align.center(instructions),
         Text(""),
         Align.center(input_box),
         Align.center(status_text),
     ]
-    body_h = 10
+    body_h = 8
 
     return _build_screen_frame(
         subtitle="Enter your PAT token",
@@ -151,6 +149,7 @@ def _build_vc_input_screen(
         body_height=body_h,
         width=width,
         height=height,
+        title_text=vc["name"],
     )
 
 
@@ -205,7 +204,7 @@ def _build_field_box(
     elif error:
         border_color = "bright_red"
     elif is_active:
-        border_color = "white"
+        border_color = _ACCENT
     else:
         border_color = "rgb(60,60,60)"
 
@@ -236,7 +235,8 @@ def _build_issue_tracking_screen(
     border_overrides: dict[int, str] | None = None,
     fade_style: str = "",
     fields: list[dict[str, Any]] | None = None,
-    subtitle: str = "Issue Tracking",
+    subtitle: str = "Issue tracking",
+    title_text: str = "",
 ) -> Panel:
     """Build the issue tracking multi-field form screen with viewport scrolling.
 
@@ -244,7 +244,8 @@ def _build_issue_tracking_screen(
     Fields that don't fit in the available height are clipped; scroll indicators
     (^/v) show when there's content above or below.
     fields: optional field definitions to use instead of the default Jira fields.
-    subtitle: label shown in the screen header (e.g. "Jira", "Azure DevOps Boards").
+    subtitle: context line shown under the title (e.g. "Issue tracking", "Docs").
+    title_text: tall ANSI-Shadow title (e.g. "Jira", "Notion"). Defaults to "Setup".
     """
     errors = errors or {}
     verified = verified or {}
@@ -254,12 +255,12 @@ def _build_issue_tracking_screen(
     box_w = min(70, width - 10)
     field_h = 5  # each field box is 5 lines tall (padding 1 + content 1 + padding 1 + 2 border)
 
-    # Calculate available height for fields:
-    # inner_h = height - 4 (panel border+padding)
-    # header = 3 (ASCII title + blank), footer = 4 (subtitle + blank + progress + blank)
-    # scroll indicators = 2 (top + bottom, reserved always for consistency)
+    # Calculate available height for fields. The frame reserves _FRAME_HEADER_H
+    # (6-row ANSI-Shadow title + subtitle) and _FRAME_FOOTER_H (progress); we also
+    # reserve 1 row for the keyboard-hint footer + 1 safety margin so the (non-
+    # scrolling) field stack never overflows the frame.
     inner_h = height - 4
-    chrome_h = 3 + 4 + 2  # header + footer + scroll indicator lines
+    chrome_h = _FRAME_HEADER_H + _FRAME_FOOTER_H + 2
     fields_available_h = max(field_h, inner_h - chrome_h)
     max_visible = fields_available_h // field_h
 
@@ -303,6 +304,20 @@ def _build_issue_tracking_screen(
             body.append(Text(f"  {err}", style="bright_red", justify="center"))
             body_h += 1
 
+    # Keyboard hint — makes editing/clearing/skipping discoverable, matching the
+    # LLM API-key screen. Hidden while verifying (border_overrides drives the
+    # pulse + success flash) so the animation reads cleanly.
+    if not border_overrides:
+        body.append(Text(""))
+        body.append(
+            Text(
+                "⌫ backspace  ·  Ctrl+U clear  ·  Enter to verify  ·  Esc back",
+                style="dim",
+                justify="center",
+            )
+        )
+        body_h += 2
+
     return _build_screen_frame(
         subtitle=subtitle,
         step=2,
@@ -310,4 +325,5 @@ def _build_issue_tracking_screen(
         body_height=body_h,
         width=width,
         height=height,
+        title_text=title_text,
     )

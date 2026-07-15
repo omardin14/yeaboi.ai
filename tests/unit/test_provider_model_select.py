@@ -16,11 +16,15 @@ from rich.panel import Panel
 from scrum_agent.agent.llm import _PROVIDER_DEFAULTS
 from scrum_agent.setup_wizard import _PROVIDERS, run_setup_wizard
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS
-from scrum_agent.ui.provider_select._verification import _verify_model
+from scrum_agent.ui.provider_select._verification import _verify_model, fetch_available_models
 from scrum_agent.ui.provider_select.screens._screens import (
     _build_model_input_screen,
+    _build_model_loading_screen,
     _build_model_select_screen,
+    _build_screen_frame,
 )
+from scrum_agent.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
+from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,6 +48,28 @@ def _render(panel: Panel) -> str:
     console = Console(file=StringIO(), width=80, highlight=False)
     console.print(panel)
     return console.file.getvalue()
+
+
+def _console() -> Console:
+    return Console(file=StringIO(), width=80)
+
+
+class _FakeLive:
+    """Collects the renderables passed to live.update() (no real terminal)."""
+
+    def __init__(self):
+        self.frames = []
+
+    def update(self, renderable):
+        self.frames.append(renderable)
+
+
+class _KeySequence:
+    def __init__(self, keys):
+        self._keys = list(keys)
+
+    def __call__(self, timeout=None):
+        return self._keys.pop(0) if self._keys else ""
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +149,7 @@ class TestVerifyModelGoogle:
         import httpx
 
         monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200))
-        ok, _ = _verify_model(_card("google"), "AIzaKey", "gemini-2.0-flash")
+        ok, _ = _verify_model(_card("google"), "AIzaKey", "gemini-2.5-flash")
         assert ok is True
 
     def test_unknown_model(self, monkeypatch):
@@ -211,6 +237,22 @@ class TestModelSelectScreen:
         out = _render(_build_model_select_screen(_card("openai"), ["gpt-4o", "Custom…"], 0, error="Unknown model"))
         assert "Unknown model" in out
 
+    def test_renders_as_rounded_cards(self):
+        # Each model is a rounded box-drawing card (matches app cards/buttons),
+        # not plain text — the corner glyphs must be present.
+        out = _render(_build_model_select_screen(_card("anthropic"), ["claude-opus-4-8", "Custom…"], 0))
+        assert "╭" in out and "╰" in out
+        assert "claude-opus-4-8" in out
+
+    def test_long_list_windows_with_more_hint(self):
+        # More models than fit a short screen → window + a "N more" affordance,
+        # and the render must not exceed the frame height.
+        entries = [f"model-{i}" for i in range(12)] + ["Custom…"]
+        panel = _build_model_select_screen(_card("openai"), entries, 6, width=80, height=24)
+        out = _render(panel)
+        assert "more" in out
+        assert out.count("\n") <= 24
+
 
 class TestModelInputScreen:
     def test_returns_panel(self):
@@ -231,9 +273,128 @@ class TestModelInputScreen:
 
     def test_verifying_state(self):
         panel = _build_model_input_screen(
-            _card("google"), "gemini-2.0-flash", verifying=True, border_override="rgb(1,1,1)"
+            _card("google"), "gemini-2.5-flash", verifying=True, border_override="rgb(1,1,1)"
         )
         assert isinstance(panel, Panel)
+
+
+class TestModelLoadingScreen:
+    def test_returns_panel_with_discovery_text(self):
+        # Shown (animated) while live discovery runs on a background thread so the
+        # Live loop never freezes on a blocking HTTP call.
+        out = _render(_build_model_loading_screen(_card("anthropic"), 0.3, width=80, height=24))
+        assert "Discovering available models" in out
+
+    def test_title_is_provider_name(self):
+        # The per-screen title carries the provider identity (tall ANSI-Shadow).
+        out = _render(_build_model_loading_screen(_card("anthropic"), 0.0))
+        assert "█" in out
+
+
+class TestFrameTitleFont:
+    """The frame title renders in the tall ANSI-Shadow font, with a compact fallback."""
+
+    def _frame(self, title, width):
+        from rich.text import Text
+
+        return _build_screen_frame(
+            subtitle="x",
+            step=0,
+            body_items=[Text("body")],
+            body_height=1,
+            width=width,
+            height=30,
+            title_text=title,
+        )
+
+    def test_tall_wordmark_at_wide_width(self):
+        # A baked word (provider name) renders as the tall blocky wordmark.
+        out = _render(self._frame("Anthropic", 100))
+        assert "█" in out
+
+    def test_compact_fallback_at_narrow_width(self):
+        # Too narrow for the ~70-col wordmark → falls back to the compact 2-line
+        # block font (still block chars, but the wide wordmark row can't fit).
+        panel = self._frame("Anthropic", 40)
+        console = Console(file=StringIO(), width=40, highlight=False)
+        console.print(panel)
+        out = console.file.getvalue()
+        # Compact font uses ▀/▄ half-blocks the tall wordmark never emits.
+        assert "▀" in out or "▄" in out
+
+    def test_default_title_is_setup_not_setup_wizard(self):
+        out = _render(self._frame("", 100))
+        # "SETUP" wordmark present; the old "Setup Wizard" compact string is gone.
+        assert "█" in out
+
+
+class TestIssueTrackingHint:
+    """The multi-field form (Jira/AzDO/Notion) shows a keyboard hint, hidden on verify."""
+
+    def test_hint_shown_by_default(self):
+        out = _render(
+            _build_issue_tracking_screen(0, {0: "", 1: ""}, width=100, height=30, title_text="Notion", subtitle="Docs")
+        )
+        assert "Enter to verify" in out
+        assert "Esc back" in out
+
+    def test_hint_hidden_while_verifying(self):
+        # border_overrides drives the verify pulse / success flash — hide the hint.
+        out = _render(
+            _build_issue_tracking_screen(
+                0, {0: "tok"}, width=100, height=30, title_text="Notion", border_overrides={0: "rgb(1,1,1)"}
+            )
+        )
+        assert "Enter to verify" not in out
+
+
+class TestNotionPicker:
+    """The Notion step offers an explicit Notion / Skip picker (like Issue Tracking)."""
+
+    def _patch_tty(self, monkeypatch):
+        import select as _select
+
+        from scrum_agent.ui.provider_select import _phase_notion as pn
+
+        class _FakeStdin:
+            def fileno(self):
+                return 0
+
+            def read(self, n):
+                return ""
+
+        monkeypatch.setattr(pn.sys, "stdin", _FakeStdin())
+        monkeypatch.setattr(pn.termios, "tcgetattr", lambda fd: None)
+        monkeypatch.setattr(pn.termios, "tcsetattr", lambda fd, when, attrs: None)
+        monkeypatch.setattr(pn.tty, "setcbreak", lambda fd: None)
+        monkeypatch.setattr(_select, "select", lambda r, w, x, t: ([], [], []))
+
+    def test_skip_returns_empty_dict(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+
+        live = _FakeLive()
+        # ↓ moves to "Skip", Enter selects it.
+        result = _run_notion(_console(), _KeySequence(["down", "enter"]), None, live)
+        assert result == {}
+        # The picker screen rendered (tall Notion title + a "choose" affordance).
+        rendered = "".join(_render(f) for f in live.frames)
+        assert "█" in rendered and "choose" in rendered
+
+    def test_esc_on_picker_returns_none(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+
+        assert _run_notion(_console(), _KeySequence(["esc"]), None, _FakeLive()) is None
+
+
+class TestShadowWordmarks:
+    @pytest.mark.parametrize("word", ["ANTHROPIC", "OPENAI", "GEMINI", "BEDROCK", "GITHUB", "NOTION", "JIRA", "SETUP"])
+    def test_baked_wordmark_rows_equal_width(self, word):
+        rows = get_shadow_wordmark(word)
+        assert rows is not None and len(rows) == 6
+        assert len({len(r) for r in rows}) == 1  # all rows same width
+        assert any("█" in r for r in rows)
 
 
 # ---------------------------------------------------------------------------
@@ -282,3 +443,71 @@ class TestWizardModelPropagation:
         run_setup_wizard(console)
         content = config_file.read_text()
         assert "LLM_MODEL" not in content
+
+
+# ---------------------------------------------------------------------------
+# fetch_available_models — live discovery (the anti-staleness mechanism)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAvailableModels:
+    def test_anthropic_returns_ids_in_order(self, monkeypatch):
+        import httpx
+
+        payload = {"data": [{"id": "claude-opus-4-8"}, {"id": "claude-sonnet-4-6"}]}
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, payload))
+        assert fetch_available_models(_card("anthropic"), "sk-ant-key") == [
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+        ]
+
+    def test_openai_filters_noise_newest_first(self, monkeypatch):
+        import httpx
+
+        payload = {
+            "data": [
+                {"id": "gpt-4o", "created": 100},
+                {"id": "text-embedding-3-large", "created": 90},
+                {"id": "whisper-1", "created": 80},
+                {"id": "gpt-5.6", "created": 200},
+                {"id": "dall-e-3", "created": 70},
+                {"id": "o1", "created": 150},
+            ]
+        }
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, payload))
+        result = fetch_available_models(_card("openai"), "sk-key")
+        # embeddings/whisper/dall-e dropped; chat models newest-first by `created`.
+        assert result == ["gpt-5.6", "o1", "gpt-4o"]
+
+    def test_google_keeps_only_generate_content(self, monkeypatch):
+        import httpx
+
+        payload = {
+            "models": [
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"]},
+                {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]},
+            ]
+        }
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, payload))
+        result = fetch_available_models(_card("google"), "AIzaKey")
+        assert result == ["gemini-2.5-flash", "gemini-2.5-pro"]
+
+    def test_non_200_returns_empty(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(401))
+        assert fetch_available_models(_card("anthropic"), "sk-ant-key") == []
+
+    def test_network_error_returns_empty(self, monkeypatch):
+        import httpx
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("offline")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        assert fetch_available_models(_card("openai"), "sk-key") == []
+
+    def test_bedrock_excluded(self):
+        # No API key model listing for Bedrock — returns [] without any call.
+        assert fetch_available_models(_card("bedrock"), "us-east-1") == []

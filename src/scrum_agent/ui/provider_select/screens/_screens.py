@@ -17,6 +17,7 @@ from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS
 from scrum_agent.ui.provider_select._verification import _validate_key
 from scrum_agent.ui.shared._animations import shimmer_style
 from scrum_agent.ui.shared._ascii_font import render_ascii_text
+from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
 # Rendering helpers
@@ -24,10 +25,23 @@ from scrum_agent.ui.shared._ascii_font import render_ascii_text
 
 _STEPS = ["LLM Provider", "Issue Tracking", "Version Control"]
 
+# Brand blue accent — the same rgb the app's project cards / action buttons and
+# the setup intro wordmark use. Applied to the frame border, title, idle input
+# borders and the active progress step so the whole wizard reads blue, not grey.
+_ACCENT = "rgb(70,100,180)"
+
+# The frame title always reserves this many rows (the tall ANSI-Shadow wordmark
+# height) so the layout is stable whether a screen's title renders as the tall
+# wordmark or falls back to the compact 2-line font on a narrow terminal. Kept in
+# sync with the per-screen vertical budgets below (model list / issue-tracking).
+_FRAME_TITLE_ROWS = 6
+_FRAME_HEADER_H = _FRAME_TITLE_ROWS + 3  # title + blank + subtitle + blank
+_FRAME_FOOTER_H = 2  # blank + progress bar
+
 
 def _build_progress(current_step: int) -> Text:
     """Build a progress bar of space-separated filled/empty parallelogram blocks."""
-    active_bg = "rgb(60,60,80)"
+    active_bg = _ACCENT
     done_bg = "rgb(30,80,50)"
     bar = Text(justify="center")
     for i, label in enumerate(_STEPS):
@@ -74,6 +88,27 @@ def _build_provider_row(
     return rendered
 
 
+def _frame_title_rows(word: str, inner_w: int) -> list[str]:
+    """Return exactly ``_FRAME_TITLE_ROWS`` equal-width rows for *word*'s title art.
+
+    Uses the tall ANSI-Shadow wordmark when one is baked for *word* and it fits
+    ``inner_w`` (provider/integration names + "Setup" all have bakes); otherwise
+    falls back to the compact two-line font, vertically centred in the reserved
+    block so the header height stays constant. Mirrors ``_components._title_rows``
+    but stays centre-justifiable (the setup frame centres its whole header).
+    """
+    shadow = get_shadow_wordmark(word)
+    if shadow is not None and len(shadow[0]) <= inner_w:
+        return shadow
+
+    lines = render_ascii_text(word)
+    block_w = max((len(line) for line in lines), default=0)
+    lines = [line.ljust(block_w) for line in lines]
+    pad_total = _FRAME_TITLE_ROWS - len(lines)
+    top = pad_total // 2
+    return [" " * block_w] * top + lines + [" " * block_w] * (pad_total - top)
+
+
 def _build_screen_frame(
     *,
     subtitle: str,
@@ -88,24 +123,28 @@ def _build_screen_frame(
 
     body_items: list of Rich renderables to vertically centre in the middle.
     body_height: estimated line count of body_items (for centering math).
-    title_text: text to render as ASCII art title. Defaults to current step name.
+    title_text: text to render as ASCII art title. Defaults to "Setup". Rendered
+    in the tall ANSI-Shadow font (brand blue) to match the app's mode screens.
     """
     import rich.box
     from rich.console import Group
 
-    display_title = title_text or "Setup Wizard"
-    ascii_lines = render_ascii_text(display_title)
-    title = Text(justify="center")
-    title.append(ascii_lines[0] + "\n", style="bold white")
-    title.append(ascii_lines[1], style="bold white")
+    display_title = title_text or "Setup"
+    title_rows = _frame_title_rows(display_title, max(10, width - 6))
+    # Left-justify the equal-width block and let Align.center (below) centre it as a
+    # unit — per-line justify="center" drifts because rows have different trailing
+    # whitespace. (Same approach as shared._components.build_ascii_title.)
+    title = Text(justify="left")
+    for idx, row in enumerate(title_rows):
+        title.append(row, style=f"bold {_ACCENT}")
+        if idx < len(title_rows) - 1:
+            title.append("\n")
 
     sub = Text(subtitle, style="dim", justify="center")
     progress = _build_progress(current_step=step)
 
     inner_h = height - 4  # panel border + padding
-    header_h = 5  # 2-line ASCII title + blank + subtitle + blank
-    footer_h = 2  # blank + progress
-    middle_h = max(0, inner_h - header_h - footer_h)
+    middle_h = max(0, inner_h - _FRAME_HEADER_H - _FRAME_FOOTER_H)
     mid_top = max(0, (middle_h - body_height) // 2)
     mid_bot = max(0, middle_h - body_height - mid_top)
 
@@ -123,7 +162,7 @@ def _build_screen_frame(
 
     return Panel(
         content,
-        border_style="white",
+        border_style=_ACCENT,
         box=rich.box.ROUNDED,
         expand=True,
         height=height,
@@ -201,14 +240,8 @@ def _build_input_screen(
     """
     import rich.box
 
-    # Selected provider in ASCII art
-    style = provider["color"]
-    lines = render_ascii_text(provider["name"])
-    provider_text = Text(justify="center")
-    provider_text.append(lines[0] + "\n", style=style)
-    provider_text.append(lines[1], style=style)
-
-    # Instructions
+    # The provider identity is carried by the tall ANSI-Shadow frame title now, so
+    # the body starts at the instructions (no duplicate compact provider art).
     instr_style = input_fade if input_fade else "dim"
     instructions = Text(provider["instructions"], style=instr_style, justify="center")
 
@@ -246,7 +279,7 @@ def _build_input_screen(
     elif verified is False or error:
         border_color = "bright_red"
     else:
-        border_color = "white"
+        border_color = _ACCENT
 
     input_box = Panel(
         input_content,
@@ -291,8 +324,6 @@ def _build_input_screen(
         )
 
     body = [
-        Align.center(provider_text),
-        Text(""),
         Align.center(instructions),
         Text(""),
         Align.center(input_box),
@@ -300,7 +331,7 @@ def _build_input_screen(
         Align.center(error_text),
         Align.center(hint_text),
     ]
-    body_h = 11  # provider(2) + blank + instructions(1) + blank + input_box(5) + status + error + hint
+    body_h = 9  # instructions(1) + blank + input_box(5) + status + error + hint
 
     return _build_screen_frame(
         subtitle="Enter your API key",
@@ -309,7 +340,46 @@ def _build_input_screen(
         body_height=body_h,
         width=width,
         height=height,
+        title_text=provider["name"],
     )
+
+
+# Model-card colours — kept in sync with the app's project cards / action
+# buttons (rgb(70,100,180) accent, rgb(35,35,45) dim) so the setup wizard's
+# model list reads as the same "card" component used elsewhere in the TUI.
+_MODEL_CARD_SEL_BORDER = "rgb(70,100,180)"
+_MODEL_CARD_DIM_BORDER = "rgb(35,35,45)"
+_MODEL_CARD_DIM_TEXT = "rgb(140,140,140)"
+_MODEL_CARD_H = 3  # rows per card: top border + label + bottom border
+
+
+def _build_model_card(label: str, *, selected: bool, inner_w: int) -> list[Align]:
+    """Build one rounded model card as three centred rows (top/label/bottom).
+
+    Matches ``build_action_buttons`` / ``_build_project_card``: accent border +
+    bold white label when selected, dim border + grey label otherwise.
+    """
+    border = _MODEL_CARD_SEL_BORDER if selected else _MODEL_CARD_DIM_BORDER
+    text_style = "bold white" if selected else _MODEL_CARD_DIM_TEXT
+
+    # Truncate over-long ids (e.g. bedrock inference profiles) so the box stays
+    # aligned; middle-ellipsis keeps both the family and the version visible.
+    if len(label) > inner_w:
+        keep = inner_w - 1
+        head = keep // 2
+        label = label[:head] + "…" + label[len(label) - (keep - head) :]
+
+    pad_l = (inner_w - len(label)) // 2
+    pad_r = inner_w - len(label) - pad_l
+    centered = " " * pad_l + label + " " * pad_r
+
+    top = Text("╭" + "─" * inner_w + "╮", style=border)
+    mid = Text()
+    mid.append("│", style=border)
+    mid.append(centered, style=text_style)
+    mid.append("│", style=border)
+    bot = Text("╰" + "─" * inner_w + "╯", style=border)
+    return [Align.center(top), Align.center(mid), Align.center(bot)]
 
 
 def _build_model_select_screen(
@@ -319,38 +389,50 @@ def _build_model_select_screen(
     *,
     width: int = 80,
     height: int = 24,
-    shimmer_tick: float = 0.0,
+    shimmer_tick: float = 0.0,  # accepted for caller compatibility; cards are static
     error: str = "",
 ) -> Panel:
-    """Build the model-selection screen — an arrow-selectable list of model ids.
+    """Build the model-selection screen — a stack of rounded, arrow-selectable cards.
 
-    Unlike _build_select_screen (which renders 2-line ASCII art), model ids are
-    long plain strings, so each entry is a single centred line. ``entries`` is the
-    full display list, typically presets + ["Custom…"] (a detected/current model
-    may be prepended by the caller with a "(detected)"/"(current)" label).
+    Each ``entries`` item (presets/live models + a trailing "Custom…") renders as
+    a rounded card matching the app's project cards / action buttons. The list is
+    windowed to the available height so it never overflows the (non-scrolling)
+    frame — the window follows the selection and shows a "N more" hint when the
+    list is longer than fits.
     """
-    rows: list[Text] = []
-    for i, label in enumerate(entries):
-        if i == selected:
-            # Per-character shimmer on the selected entry (matches provider rows).
-            line = Text(justify="center")
-            total = max(len(label), 1)
-            for j, ch in enumerate(label):
-                line.append(ch, style=shimmer_style(provider["color"], j, total, shimmer_tick))
-        else:
-            line = Text(label, style="dim", justify="center")
-        rows.append(line)
+    # Card inner width: fit the longest label, clamped to the screen.
+    longest = max((len(e) for e in entries), default=8)
+    max_inner = max(16, width - 16)
+    inner_w = min(max(longest, 16), max_inner)
 
-    body = [item for row in rows for item in (Align.center(row), Text(""))]
-    if body:
-        body = body[:-1]  # remove trailing blank
+    # Vertical budget: the frame's header + footer inside its inner height.
+    middle_h = max(_MODEL_CARD_H, (height - 4) - _FRAME_HEADER_H - _FRAME_FOOTER_H)
+    reserve = 2 if error else 0
+    avail = max(_MODEL_CARD_H, middle_h - reserve)
+    max_cards = max(1, avail // _MODEL_CARD_H)
+
+    truncated = len(entries) > max_cards
+    if truncated:
+        max_cards = max(1, (avail - 1) // _MODEL_CARD_H)  # reserve a row for the hint
+        # Window follows the selection, keeping it roughly centred.
+        start = min(max(0, selected - max_cards // 2), len(entries) - max_cards)
+    else:
+        start = 0
+    window = range(start, min(start + max_cards, len(entries)))
+
+    body: list = []
+    for i in window:
+        body.extend(_build_model_card(entries[i], selected=(i == selected), inner_w=inner_w))
+    body_h = len(list(window)) * _MODEL_CARD_H
+
+    if truncated:
+        hidden = len(entries) - len(list(window))
+        body.append(Align.center(Text(f"↑↓  {hidden} more", style="dim")))
+        body_h += 1
 
     if error:
         body.append(Text(""))
-        body.append(Align.center(Text(f"✗ {error}", style="bright_red", justify="center")))
-
-    body_h = len(rows) * 2 - 1 if rows else 0
-    if error:
+        body.append(Align.center(Text(f"✗ {error}", style="bright_red")))
         body_h += 2
 
     return _build_screen_frame(
@@ -358,6 +440,35 @@ def _build_model_select_screen(
         step=0,
         body_items=body,
         body_height=body_h,
+        width=width,
+        height=height,
+        title_text=provider["name"],
+    )
+
+
+def _build_model_loading_screen(
+    provider: dict[str, Any],
+    tick: float,
+    *,
+    width: int = 80,
+    height: int = 24,
+) -> Panel:
+    """Build the "discovering models" screen shown while live discovery runs.
+
+    ``tick`` is a monotonic elapsed-seconds value; a travelling accent highlight
+    sweeps across the message so the frame keeps animating while the (threaded)
+    ``fetch_available_models`` network call is in flight — no frozen screen.
+    """
+    msg = "Discovering available models…"
+    text = Text(justify="center")
+    for i, ch in enumerate(msg):
+        text.append(ch, style=shimmer_style(_ACCENT, i, len(msg), tick))
+
+    return _build_screen_frame(
+        subtitle="Choose a model",
+        step=0,
+        body_items=[Align.center(text)],
+        body_height=1,
         width=width,
         height=height,
         title_text=provider["name"],
@@ -382,12 +493,7 @@ def _build_model_input_screen(
     """
     import rich.box
 
-    style = provider["color"]
-    lines = render_ascii_text(provider["name"])
-    provider_text = Text(justify="center")
-    provider_text.append(lines[0] + "\n", style=style)
-    provider_text.append(lines[1], style=style)
-
+    # Provider identity is in the tall frame title; body starts at the instructions.
     instructions = Text("Enter any model id supported by your account", style="dim", justify="center")
 
     box_inner_w = min(70, width - 10) - 2 - 4
@@ -411,7 +517,7 @@ def _build_model_input_screen(
     elif verified is False or error:
         border_color = "bright_red"
     else:
-        border_color = "white"
+        border_color = _ACCENT
 
     input_box = Panel(
         input_content,
@@ -440,15 +546,13 @@ def _build_model_input_screen(
         )
 
     body = [
-        Align.center(provider_text),
-        Text(""),
         Align.center(instructions),
         Text(""),
         Align.center(input_box),
         Align.center(status_text),
         Align.center(hint_text),
     ]
-    body_h = 10  # provider(2) + blank + instructions(1) + blank + input_box(5) + status + hint
+    body_h = 8  # instructions(1) + blank + input_box(5) + status + hint
 
     return _build_screen_frame(
         subtitle="Type a model id",

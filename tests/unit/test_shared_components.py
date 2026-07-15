@@ -148,7 +148,7 @@ class TestUsageScreen:
 
         data = {
             "provider": "anthropic",
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "api_key_status": "configured",
             "tokens": {"input": 15000, "output": 3000, "total": 18000, "estimated_cost": 0.054},
             "sessions": {"total": 12, "planning": 8, "analysis": 4, "last_used": "2026-03-29 10:30"},

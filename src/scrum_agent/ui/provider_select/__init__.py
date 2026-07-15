@@ -23,10 +23,16 @@ from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIO
 from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking  # noqa: F401
 from scrum_agent.ui.provider_select._phase_notion import _run_notion  # noqa: F401
 from scrum_agent.ui.provider_select._transitions import _transition_to_input  # noqa: F401
-from scrum_agent.ui.provider_select._verification import _verify_api_key, _verify_model, _verify_vc_token
+from scrum_agent.ui.provider_select._verification import (
+    _verify_api_key,
+    _verify_model,
+    _verify_vc_token,
+    fetch_available_models,
+)
 from scrum_agent.ui.provider_select.screens._screens import (
     _build_input_screen,
     _build_model_input_screen,
+    _build_model_loading_screen,
     _build_model_select_screen,
     _build_select_screen,
 )
@@ -40,6 +46,10 @@ from scrum_agent.ui.shared._input import read_key as _read_key  # noqa: F401 —
 from scrum_agent.ui.shared._music_bar import make_live
 
 logger = logging.getLogger(__name__)
+
+# Cap the live-discovered model list so the (non-scrolling) select screen stays
+# usable; "Custom…" covers anything beyond the newest few.
+_MAX_LIVE_MODELS = 8
 
 
 def _detect_aws_region() -> str | None:
@@ -152,6 +162,34 @@ def select_provider(
             models_cfg = provider.get("models") or {}
             presets = list(models_cfg.get("presets") or [])
             default_model = models_cfg.get("default", "")
+
+            # Live discovery: ask the provider what this key can actually run, so
+            # the menu never offers a retired id. The hardcoded presets above are
+            # only an offline seed. Bedrock is excluded (auto-detects via OpenClaw).
+            if provider.get("provider_val") != "bedrock" and api_key_val:
+                # Run the (blocking, up-to-8s) HTTP discovery on a daemon thread while
+                # the Live loop keeps animating a "Discovering…" screen — otherwise the
+                # render loop freezes and the user stares at a frozen frame. Same
+                # threaded-pulse pattern as _verify_pulsing and the verify loops.
+                import threading
+
+                discovered_box: list[list[str]] = []
+
+                def _do_discover() -> None:
+                    discovered_box.append(fetch_available_models(provider, api_key_val))
+
+                thread = threading.Thread(target=_do_discover, daemon=True)
+                thread.start()
+                disc_start = time.monotonic()
+                while thread.is_alive():
+                    w, h = console.size
+                    tick = time.monotonic() - disc_start
+                    live.update(_build_model_loading_screen(provider, tick, width=w, height=h))
+                    time.sleep(FRAME_TIME_30FPS)
+                thread.join()
+                discovered = discovered_box[0] if discovered_box else []
+                if discovered:
+                    presets = discovered[:_MAX_LIVE_MODELS]
 
             # A detected Bedrock model (from OpenClaw) or a previously-saved LLM_MODEL
             # is offered at the top of the list and pre-selected, preserving zero-config.
