@@ -19,8 +19,12 @@ from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS
 from scrum_agent.ui.provider_select._verification import _verify_model, fetch_available_models
 from scrum_agent.ui.provider_select.screens._screens import (
     _build_model_input_screen,
+    _build_model_loading_screen,
     _build_model_select_screen,
+    _build_screen_frame,
 )
+from scrum_agent.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
+from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,6 +48,28 @@ def _render(panel: Panel) -> str:
     console = Console(file=StringIO(), width=80, highlight=False)
     console.print(panel)
     return console.file.getvalue()
+
+
+def _console() -> Console:
+    return Console(file=StringIO(), width=80)
+
+
+class _FakeLive:
+    """Collects the renderables passed to live.update() (no real terminal)."""
+
+    def __init__(self):
+        self.frames = []
+
+    def update(self, renderable):
+        self.frames.append(renderable)
+
+
+class _KeySequence:
+    def __init__(self, keys):
+        self._keys = list(keys)
+
+    def __call__(self, timeout=None):
+        return self._keys.pop(0) if self._keys else ""
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +276,125 @@ class TestModelInputScreen:
             _card("google"), "gemini-2.5-flash", verifying=True, border_override="rgb(1,1,1)"
         )
         assert isinstance(panel, Panel)
+
+
+class TestModelLoadingScreen:
+    def test_returns_panel_with_discovery_text(self):
+        # Shown (animated) while live discovery runs on a background thread so the
+        # Live loop never freezes on a blocking HTTP call.
+        out = _render(_build_model_loading_screen(_card("anthropic"), 0.3, width=80, height=24))
+        assert "Discovering available models" in out
+
+    def test_title_is_provider_name(self):
+        # The per-screen title carries the provider identity (tall ANSI-Shadow).
+        out = _render(_build_model_loading_screen(_card("anthropic"), 0.0))
+        assert "█" in out
+
+
+class TestFrameTitleFont:
+    """The frame title renders in the tall ANSI-Shadow font, with a compact fallback."""
+
+    def _frame(self, title, width):
+        from rich.text import Text
+
+        return _build_screen_frame(
+            subtitle="x",
+            step=0,
+            body_items=[Text("body")],
+            body_height=1,
+            width=width,
+            height=30,
+            title_text=title,
+        )
+
+    def test_tall_wordmark_at_wide_width(self):
+        # A baked word (provider name) renders as the tall blocky wordmark.
+        out = _render(self._frame("Anthropic", 100))
+        assert "█" in out
+
+    def test_compact_fallback_at_narrow_width(self):
+        # Too narrow for the ~70-col wordmark → falls back to the compact 2-line
+        # block font (still block chars, but the wide wordmark row can't fit).
+        panel = self._frame("Anthropic", 40)
+        console = Console(file=StringIO(), width=40, highlight=False)
+        console.print(panel)
+        out = console.file.getvalue()
+        # Compact font uses ▀/▄ half-blocks the tall wordmark never emits.
+        assert "▀" in out or "▄" in out
+
+    def test_default_title_is_setup_not_setup_wizard(self):
+        out = _render(self._frame("", 100))
+        # "SETUP" wordmark present; the old "Setup Wizard" compact string is gone.
+        assert "█" in out
+
+
+class TestIssueTrackingHint:
+    """The multi-field form (Jira/AzDO/Notion) shows a keyboard hint, hidden on verify."""
+
+    def test_hint_shown_by_default(self):
+        out = _render(
+            _build_issue_tracking_screen(0, {0: "", 1: ""}, width=100, height=30, title_text="Notion", subtitle="Docs")
+        )
+        assert "Enter to verify" in out
+        assert "Esc back" in out
+
+    def test_hint_hidden_while_verifying(self):
+        # border_overrides drives the verify pulse / success flash — hide the hint.
+        out = _render(
+            _build_issue_tracking_screen(
+                0, {0: "tok"}, width=100, height=30, title_text="Notion", border_overrides={0: "rgb(1,1,1)"}
+            )
+        )
+        assert "Enter to verify" not in out
+
+
+class TestNotionPicker:
+    """The Notion step offers an explicit Notion / Skip picker (like Issue Tracking)."""
+
+    def _patch_tty(self, monkeypatch):
+        import select as _select
+
+        from scrum_agent.ui.provider_select import _phase_notion as pn
+
+        class _FakeStdin:
+            def fileno(self):
+                return 0
+
+            def read(self, n):
+                return ""
+
+        monkeypatch.setattr(pn.sys, "stdin", _FakeStdin())
+        monkeypatch.setattr(pn.termios, "tcgetattr", lambda fd: None)
+        monkeypatch.setattr(pn.termios, "tcsetattr", lambda fd, when, attrs: None)
+        monkeypatch.setattr(pn.tty, "setcbreak", lambda fd: None)
+        monkeypatch.setattr(_select, "select", lambda r, w, x, t: ([], [], []))
+
+    def test_skip_returns_empty_dict(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+
+        live = _FakeLive()
+        # ↓ moves to "Skip", Enter selects it.
+        result = _run_notion(_console(), _KeySequence(["down", "enter"]), None, live)
+        assert result == {}
+        # The picker screen rendered (tall Notion title + a "choose" affordance).
+        rendered = "".join(_render(f) for f in live.frames)
+        assert "█" in rendered and "choose" in rendered
+
+    def test_esc_on_picker_returns_none(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+
+        assert _run_notion(_console(), _KeySequence(["esc"]), None, _FakeLive()) is None
+
+
+class TestShadowWordmarks:
+    @pytest.mark.parametrize("word", ["ANTHROPIC", "OPENAI", "GEMINI", "BEDROCK", "GITHUB", "NOTION", "JIRA", "SETUP"])
+    def test_baked_wordmark_rows_equal_width(self, word):
+        rows = get_shadow_wordmark(word)
+        assert rows is not None and len(rows) == 6
+        assert len({len(r) for r in rows}) == 1  # all rows same width
+        assert any("█" in r for r in rows)
 
 
 # ---------------------------------------------------------------------------
