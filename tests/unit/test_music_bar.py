@@ -54,12 +54,12 @@ def test_subtitle_when_paused():
 
 
 def test_subtitle_shows_crash_notice_when_stopped_with_error():
-    # A daemon that died on its own reverts to "stopped" but leaves a last_error;
-    # the bar shows it instead of a bare "off" so a broken cliamp is diagnosable.
+    # A player that died on its own reverts to "stopped" but leaves a last_error;
+    # the bar shows it instead of a bare "off" so a broken player is diagnosable.
     music._state.status = "stopped"
-    music._state.last_error = "cliamp exited — run `cliamp` to check it works"
+    music._state.last_error = "music stopped — stream unavailable, ^P to retry"
     text = build_music_subtitle().plain
-    assert "cliamp exited" in text
+    assert "stream unavailable" in text
     assert "off" not in text
     assert "^P play" in text
 
@@ -105,20 +105,20 @@ def test_ignores_non_panel_renderables():
 
 
 def test_install_hint_when_unavailable(monkeypatch):
-    monkeypatch.setattr(music, "is_music_available", lambda: (False, "no cliamp"))
+    monkeypatch.setattr(music, "is_music_available", lambda: (False, "no ffplay"))
     text = build_music_subtitle().plain
-    assert "brew install" in text and "cliamp" in text
+    assert "brew install" in text and "ffmpeg" in text
 
 
 def test_stamps_install_hint_when_unavailable(monkeypatch):
-    # The bar stays present (dim install hint) even without cliamp, so the
+    # The bar stays present (dim install hint) even without ffplay, so the
     # feature remains discoverable.
-    monkeypatch.setattr(music, "is_music_available", lambda: (False, "no cliamp"))
+    monkeypatch.setattr(music, "is_music_available", lambda: (False, "no ffplay"))
     ml = make_live(Text(""))
     panel = Panel(Text("body"))
     ml._stamp(panel)
     assert panel.subtitle is not None
-    assert "brew install" in panel.subtitle.plain and "cliamp" in panel.subtitle.plain
+    assert "brew install" in panel.subtitle.plain and "ffmpeg" in panel.subtitle.plain
     assert getattr(panel, "_music_stamped", False) is True
 
 

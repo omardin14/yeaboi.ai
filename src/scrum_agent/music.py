@@ -1,45 +1,60 @@
-"""Background music via cliamp — optional, auto-detected terminal music player.
+"""Background music via ffplay — optional, auto-detected headless stream player.
 
 This module lets users play focus music while planning. It shells out to
-**cliamp** (https://github.com/bjarneo/cliamp), a standalone Winamp-inspired Go
-terminal music player, and is modelled directly on :mod:`scrum_agent.voice`: an
-optional, provider-agnostic helper that talks to an external binary.
+**ffplay** (ffmpeg's bundled player), and is modelled directly on
+:mod:`scrum_agent.voice`: an optional, provider-agnostic helper that talks to an
+external binary.
 
-# See README: "Music (cliamp)" — like voice input, background music does NOT go
+# See README: "Music (ffplay)" — like voice input, background music does NOT go
 # through the LangGraph agent or the get_llm() provider factory. It is a pure
 # terminal-UX helper.
 
 Design notes / architectural decisions:
-- **Optional and auto-detected.** cliamp is a Go binary, not a Python package, so
-  we never import or bundle it. :func:`is_music_available` just checks
-  ``shutil.which("cliamp")`` — cheap enough to call on every screen render,
+- **Why ffplay, not a TUI player.** Background music has to play *headlessly*
+  alongside our own full-screen TUI. Interactive terminal players (e.g. cliamp,
+  which this module originally targeted) refuse to start without a controlling TTY
+  and would fight us for the terminal. ``ffplay -nodisp`` has no UI of its own and
+  reads a stream URL directly, so it plays in the background and never touches the
+  terminal. ffmpeg is ubiquitous and frequently already installed.
+- **Optional and auto-detected.** ffplay is a binary, not a Python package, so we
+  never import or bundle it. :func:`is_music_available` just checks
+  ``shutil.which("ffplay")`` — cheap enough to call on every screen render,
   mirroring :func:`scrum_agent.voice.is_voice_available`. If the binary is absent
   every entry point below is a graceful no-op.
-- **Daemon + IPC.** cliamp exposes a headless daemon mode
-  (``cliamp --daemon <url> --auto-play``) that plays without its own TUI while
-  listening on a Unix socket, plus short-lived IPC commands (``cliamp pause`` /
-  ``cliamp play`` / ``cliamp stop``) that control the running daemon. We keep a
-  handle to the daemon subprocess; transport controls are separate one-shot runs.
-- **Channels = radio streams.** cliamp can play a stream URL directly, so a
+- **One long-lived process per stream.** We keep a handle to a single ffplay
+  subprocess playing the current channel. ffplay exposes no IPC, so transport is
+  done on the process itself: pause/resume suspend and continue it with
+  ``SIGSTOP`` / ``SIGCONT`` (a genuine pause of audio output), and switching
+  channel or stopping terminates and respawns it.
+- **Channels = radio streams.** ffplay plays a stream URL directly, so a
   "channel" is just an entry in :data:`CHANNELS`. Switching channel respawns the
-  daemon with the next stream URL — the robust, documented way to change a radio
-  station headlessly (IPC has no "load URL" verb).
-- **Never raises into the TUI.** Every subprocess call is wrapped; a missing or
-  broken cliamp logs a warning and leaves music off. Music must never break
-  planning.
+  player on the next stream URL.
+- **Never raises into the TUI.** Every subprocess/signal call is wrapped; a
+  missing or broken ffplay logs a warning and leaves music off. Music must never
+  break planning.
 """
 
 from __future__ import annotations
 
 import atexit
 import logging
+import os
 import shutil
+import signal
 import subprocess
 
 logger = logging.getLogger(__name__)
 
+# The headless player we drive. ffplay ships with ffmpeg and, with -nodisp, plays
+# a stream URL with no window and no terminal of its own.
+_PLAYER = "ffplay"
+
+# SIGSTOP/SIGCONT give us a true pause without any player-side IPC. They are
+# POSIX-only; on a platform without them (Windows) pause degrades to stop.
+_CAN_SUSPEND = hasattr(signal, "SIGSTOP") and hasattr(signal, "SIGCONT")
+
 # Built-in "channels": stable public internet-radio streams suited to focus work.
-# Kept intentionally small; cliamp plays each URL directly in daemon mode.
+# Kept intentionally small; ffplay plays each URL directly.
 CHANNELS: tuple[dict[str, str], ...] = (
     {"name": "Lofi", "url": "https://ice1.somafm.com/groovesalad-128-mp3"},
     {"name": "Jazz", "url": "https://ice1.somafm.com/sonicuniverse-128-mp3"},
@@ -47,9 +62,15 @@ CHANNELS: tuple[dict[str, str], ...] = (
     {"name": "Ambient", "url": "https://ice1.somafm.com/dronezone-128-mp3"},
 )
 
-# How long to wait on a one-shot IPC control command before giving up. Kept short
-# so a wedged cliamp can never stall the render loop.
-_CTL_TIMEOUT = 3.0
+
+def _player_command(url: str) -> list[str]:
+    """Return the ffplay argv for headless playback of ``url``.
+
+    ``-nodisp`` suppresses the video/SDL window (the key to running headlessly),
+    ``-autoexit`` ends the process when the stream does, and ``-loglevel quiet``
+    ``-nostats`` silence ffplay's banner/progress so nothing leaks onto our TUI.
+    """
+    return [_PLAYER, "-nodisp", "-autoexit", "-loglevel", "quiet", "-nostats", url]
 
 
 class _State:
@@ -59,14 +80,14 @@ class _State:
         # "stopped" (no audio), "playing", or "paused".
         self.status: str = "stopped"
         self.channel_idx: int = 0
-        # Handle to the running ``cliamp --daemon`` subprocess, or None.
+        # Handle to the running ``ffplay`` subprocess, or None.
         self.daemon: subprocess.Popen | None = None
         # True while playback is suspended for a voice recording, so we only auto
         # resume music that *we* paused (not music the user paused themselves).
         self._paused_for_voice: bool = False
         self._initialised: bool = False
-        # Last user-relevant failure (e.g. cliamp crashed at startup), surfaced by
-        # the status bar so a silent daemon death doesn't masquerade as playback.
+        # Last user-relevant failure (e.g. the player exited on its own), surfaced
+        # by the status bar so a silent process death doesn't masquerade as playback.
         self.last_error: str = ""
 
 
@@ -91,12 +112,13 @@ def _init_state() -> None:
 def is_music_available() -> tuple[bool, str]:
     """Return (available, reason) describing whether background music can be used.
 
-    Music needs the optional ``cliamp`` binary on PATH. ``reason`` is empty when
-    available, otherwise a short human-readable install hint for the UI. Mirrors
-    :func:`scrum_agent.voice.is_voice_available` so callers/tests feel familiar.
+    Music needs the optional ``ffplay`` binary (part of ffmpeg) on PATH. ``reason``
+    is empty when available, otherwise a short human-readable install hint for the
+    UI. Mirrors :func:`scrum_agent.voice.is_voice_available` so callers/tests feel
+    familiar.
     """
-    if shutil.which("cliamp") is None:
-        return False, "Install cliamp to enable music (brew install cliamp)"
+    if shutil.which(_PLAYER) is None:
+        return False, "Install ffmpeg to enable music (brew install ffmpeg)"
     return True, ""
 
 
@@ -104,24 +126,24 @@ def is_music_available() -> tuple[bool, str]:
 
 
 def _reconcile_status() -> None:
-    """Fall back to a truthful "stopped" state when the daemon has died on its own.
+    """Fall back to a truthful "stopped" state when the player has died on its own.
 
-    ``subprocess.Popen`` only reports that the *spawn* succeeded — not that cliamp
-    keeps running. cliamp can exit immediately (a missing shared library, an
-    unreachable stream URL, no audio device) while :func:`_start_channel` has
-    already optimistically set the status to "playing". Because we discard stderr,
-    that death is otherwise invisible and the status bar animates a phantom
-    equalizer with no audio. This is called from every read below, so a crash is
-    reflected within roughly one render frame — the "verify shortly after launch"
-    check, done lazily instead of blocking the toggle.
+    ``subprocess.Popen`` only reports that the *spawn* succeeded — not that ffplay
+    keeps running. ffplay can exit on its own (an unreachable/failed stream URL, a
+    codec/audio-device problem) while :func:`_start_channel` has already
+    optimistically set the status to "playing". Because we discard stderr, that
+    death is otherwise invisible and the status bar animates a phantom equalizer
+    with no audio. This is called from every read below, so a crash is reflected
+    within roughly one render frame — the "verify shortly after launch" check, done
+    lazily instead of blocking the toggle.
     """
     if _state.status in ("playing", "paused") and _state.daemon is not None and _state.daemon.poll() is not None:
         rc = _state.daemon.returncode
         _state.daemon = None
         _state.status = "stopped"
         _state._paused_for_voice = False
-        _state.last_error = "cliamp exited — run `cliamp` to check it works"
-        logger.warning("Music daemon exited on its own (rc=%s); reverting to stopped", rc)
+        _state.last_error = "music stopped — stream unavailable, ^P to retry"
+        logger.warning("Music player exited on its own (rc=%s); reverting to stopped", rc)
 
 
 def status() -> str:
@@ -138,9 +160,9 @@ def is_playing() -> bool:
 def last_error() -> str:
     """Return the last user-relevant music failure message, or "" if none.
 
-    Set when a spawned cliamp daemon dies unexpectedly (see :func:`_reconcile_status`)
+    Set when a spawned ffplay process dies unexpectedly (see :func:`_reconcile_status`)
     and cleared on the next successful start. Read by the status bar to explain why
-    music isn't playing despite cliamp being installed.
+    music isn't playing despite ffplay being installed.
     """
     return _state.last_error
 
@@ -154,34 +176,32 @@ def current_channel_name() -> str:
 # ── Subprocess helpers ────────────────────────────────────────────────────────
 
 
-def _control(*args: str) -> bool:
-    """Run a one-shot ``cliamp`` IPC command (play/pause/stop). Never raises.
+def _signal_daemon(sig: int) -> bool:
+    """Send ``sig`` to the running player process. Never raises.
 
-    Returns True on a clean exit, False on any failure. Failures are logged and
-    swallowed so a broken cliamp can't disrupt the TUI.
+    Used for pause (``SIGSTOP``) and resume (``SIGCONT``) — ffplay has no IPC, so
+    transport is done on the process itself. Returns True when the signal was
+    delivered to a live player, False otherwise (no player, dead player, or an
+    OS-level failure). Failures are logged and swallowed so the TUI is never
+    disrupted.
     """
+    if not (_CAN_SUSPEND and _daemon_alive()):
+        return False
     try:
-        subprocess.run(
-            ["cliamp", *args],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            timeout=_CTL_TIMEOUT,
-            check=False,
-        )
+        os.kill(_state.daemon.pid, sig)
         return True
     except Exception:  # noqa: BLE001 - music is best-effort; surface as a warning only
-        logger.warning("cliamp control command failed: %s", " ".join(args), exc_info=True)
+        logger.warning("Failed to signal music player (sig=%s)", sig, exc_info=True)
         return False
 
 
 def _daemon_alive() -> bool:
-    """Return True if the cliamp daemon subprocess is running."""
+    """Return True if the player subprocess is running."""
     return _state.daemon is not None and _state.daemon.poll() is None
 
 
 def _stop_daemon() -> None:
-    """Terminate the running cliamp daemon (if any) and clear the handle."""
+    """Terminate the running player (if any) and clear the handle."""
     if _state.daemon is None:
         return
     try:
@@ -199,17 +219,17 @@ def _stop_daemon() -> None:
 
 
 def _start_channel() -> bool:
-    """Spawn a fresh cliamp daemon playing the currently selected channel.
+    """Spawn a fresh ffplay process playing the currently selected channel.
 
-    Any existing daemon is torn down first so we never leave an orphan or play two
-    streams at once. Returns True when the daemon was spawned.
+    Any existing player is torn down first so we never leave an orphan or play two
+    streams at once. Returns True when the player was spawned.
     """
     _init_state()
     _stop_daemon()
     channel = CHANNELS[_state.channel_idx]
     try:
         _state.daemon = subprocess.Popen(
-            ["cliamp", "--daemon", channel["url"], "--auto-play"],
+            _player_command(channel["url"]),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
@@ -219,7 +239,7 @@ def _start_channel() -> bool:
         logger.info("Music playing channel %s", channel["name"])
         return True
     except Exception:  # noqa: BLE001 - music is best-effort
-        logger.warning("Failed to start music daemon for %s", channel["name"], exc_info=True)
+        logger.warning("Failed to start music player for %s", channel["name"], exc_info=True)
         _state.daemon = None
         _state.status = "stopped"
         return False
@@ -246,11 +266,17 @@ def toggle() -> None:
         return
     _init_state()
     if _state.status == "playing":
-        if _control("pause"):
+        if _signal_daemon(signal.SIGSTOP if _CAN_SUSPEND else 0):
             _state.status = "paused"
             logger.info("Music paused")
+        else:
+            # No POSIX suspend (e.g. Windows) — stop the player so "pause" still
+            # silences audio rather than doing nothing.
+            _stop_daemon()
+            _state.status = "stopped"
+            logger.info("Music stopped (suspend unavailable)")
     elif _state.status == "paused" and _daemon_alive():
-        if _control("play"):
+        if _signal_daemon(signal.SIGCONT):
             _state.status = "playing"
             logger.info("Music resumed")
     else:
@@ -281,7 +307,7 @@ def cycle_channel() -> None:
 def pause_for_voice() -> None:
     """Pause playback while a voice note is recorded; remember to resume it."""
     if _state.status == "playing":
-        _state._paused_for_voice = _control("pause")
+        _state._paused_for_voice = _signal_daemon(signal.SIGSTOP) if _CAN_SUSPEND else False
         if _state._paused_for_voice:
             _state.status = "paused"
             logger.info("Music paused for voice recording")
@@ -291,7 +317,7 @@ def resume_after_voice() -> None:
     """Resume playback that :func:`pause_for_voice` suspended."""
     if _state._paused_for_voice:
         _state._paused_for_voice = False
-        if _daemon_alive() and _control("play"):
+        if _signal_daemon(signal.SIGCONT):
             _state.status = "playing"
             logger.info("Music resumed after voice recording")
 

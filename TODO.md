@@ -236,7 +236,8 @@ Comprehensive task list for building the project. Check items off as they're com
 - [x] Music tip added to the rotating welcome-screen tips
 - [x] Persist on/off + channel preference; stop daemon on exit
 - [x] Unit tests (`test_music.py`, `test_music_bar.py`, voice-hook tests) + README section
-- [x] Detect a cliamp daemon that dies on its own (missing dylib / bad stream / no audio device) — revert to a truthful "stopped" state with a diagnosable status-bar notice instead of a phantom equalizer; README troubleshooting note
+- [x] Detect a player process that dies on its own (bad stream / codec / no audio device) — revert to a truthful "stopped" state with a diagnosable status-bar notice instead of a phantom equalizer; README troubleshooting note
+- [x] Switch backend from cliamp to `ffplay` (ffmpeg) — cliamp can't run headless (needs a TTY, no `--daemon`/IPC), so it never actually played audio. `ffplay -nodisp` plays streams headlessly; pause/resume via `SIGSTOP`/`SIGCONT`. Updated availability check, status bar, tips, README to ffmpeg
 
 ---
 

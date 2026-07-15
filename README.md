@@ -147,7 +147,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 
 📊 **Usage Dashboard** — Track token consumption per session, per provider, and lifetime totals with a dedicated usage page
 
-🎵 **Focus Music** — Optional background music via [cliamp](https://github.com/bjarneo/cliamp): `Ctrl+P` play/pause, `Ctrl+O` to switch channel, from any screen. Auto-pauses while you dictate a voice note
+🎵 **Focus Music** — Optional background music via [`ffplay`](https://ffmpeg.org/ffplay.html) (ffmpeg): `Ctrl+P` play/pause, `Ctrl+O` to switch channel, from any screen. Auto-pauses while you dictate a voice note
 
 ---
 
@@ -610,13 +610,15 @@ yeaboi [OPTIONS]
 |------|-------------|
 | `--export-questionnaire [PATH]` | Export a blank questionnaire template as Markdown |
 
-### 🎵 Music (cliamp)
+### 🎵 Music (ffplay)
 
 Play focus music while you plan. This is an **optional** integration with
-[cliamp](https://github.com/bjarneo/cliamp), a standalone terminal music player — install it
-separately (`brew install bjarneo/cliamp/cliamp`, or `go install github.com/bjarneo/cliamp@latest`).
-If the `cliamp` binary isn't on your `PATH`, the feature is disabled — the status bar shows a dim
-`♪ music: brew install bjarneo/cliamp/cliamp` hint and the controls are no-ops until you install it.
+[`ffplay`](https://ffmpeg.org/ffplay.html), the headless player bundled with **ffmpeg** — install it
+separately (`brew install ffmpeg`, or your platform's package manager). ffplay is used because
+background music has to play *headlessly* alongside our own full-screen TUI: interactive terminal
+players refuse to start without a controlling terminal, whereas `ffplay -nodisp` plays a stream with
+no UI of its own. If the `ffplay` binary isn't on your `PATH`, the feature is disabled — the status
+bar shows a dim `♪ music: brew install ffmpeg` hint and the controls are no-ops until you install it.
 
 Once installed, a compact player status appears on the bottom border of **every** screen, and two
 control chords work app-wide — even while typing in a text field:
@@ -628,16 +630,17 @@ control chords work app-wide — even while typing in a text field:
 
 Music **auto-pauses while you record a voice note** (double-tap Space) and resumes when the
 recording ends, so it never bleeds into your dictation. The on/off state and selected channel are
-remembered between runs. Under the hood, playback runs as a headless `cliamp --daemon` process that
-is stopped automatically when you exit.
+remembered between runs. Under the hood, playback runs as a headless `ffplay -nodisp` process (one
+per stream); pause/resume suspend and continue it with `SIGSTOP`/`SIGCONT`, and it is stopped
+automatically when you exit.
 
-> **Troubleshooting — the equalizer animates but there's no sound.** The `cliamp` binary is on your
-> `PATH` but crashes on launch. The usual cause on macOS is a Homebrew bottle that links against
-> shared libraries which aren't installed, e.g. `dyld: Library not loaded: …/libFLAC.14.dylib` or
-> `…/libvorbisenc.2.dylib`. Run `cliamp --version` in a terminal to see the exact missing library,
-> then install it (`brew install flac libvorbis`) or `brew reinstall cliamp` to pull all of cliamp's
-> dependencies. The status bar detects a daemon that exits on its own and reverts to
-> `♪ cliamp exited — run \`cliamp\` to check it works` instead of showing a phantom "playing" state.
+> **Troubleshooting — the equalizer animates but there's no sound.** The equalizer is a light
+> animation that only means "a player was launched"; it is not driven by the audio itself. If you
+> hear nothing, the `ffplay` process likely exited on its own (a stream URL that's down, or a codec
+> the build can't decode). The status bar detects a player that exits unexpectedly and reverts to
+> `♪ music stopped — stream unavailable, ^P to retry` instead of showing a phantom "playing" state —
+> press `Ctrl+P` to retry, or `Ctrl+O` to switch to a different stream. Confirm your ffmpeg build can
+> play a stream directly with `ffplay -nodisp https://ice1.somafm.com/groovesalad-128-mp3`.
 
 <details>
 <summary>💻 In-session commands</summary>

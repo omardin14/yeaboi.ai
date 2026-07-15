@@ -240,7 +240,7 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
         # with no per-loop changes, and works even inside text fields because these
         # control bytes are never printable text. The action mutates music state and
         # nudges the status bar; we return "" (idle) so loops just re-render.
-        # # See README: "Music (cliamp)"
+        # # See README: "Music (ffplay)"
         if ch in ("\x10", "\x0f"):
             from scrum_agent import music
 

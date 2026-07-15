@@ -51,8 +51,8 @@ def test_music_tip_when_available(monkeypatch):
 def test_music_tip_when_unavailable(monkeypatch):
     _clear_cache()
     monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
-    monkeypatch.setattr("scrum_agent.music.is_music_available", lambda: (False, "no cliamp"))
-    assert any("brew install" in t and "cliamp" in t for t in get_tips())
+    monkeypatch.setattr("scrum_agent.music.is_music_available", lambda: (False, "no ffplay"))
+    assert any("brew install" in t and "ffmpeg" in t for t in get_tips())
     _clear_cache()
 
 
