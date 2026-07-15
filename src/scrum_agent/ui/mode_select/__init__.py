@@ -2710,6 +2710,7 @@ def select_mode(
                     _ana_del_popup_flash = 0.0
                     _ana_del_pending = False
                     _ana_prev = time.monotonic()
+                    _ana_anim0 = _ana_prev  # shimmer title clock
 
                     while True:
                         key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -3141,6 +3142,7 @@ def select_mode(
                                 delete_popup_pulse=_ana_del_popup_pulse,
                                 delete_popup_flash=_ana_del_popup_flash,
                                 mode="analysis",
+                                shimmer_tick=_now - _ana_anim0,
                             )
                         )
 
@@ -3701,6 +3703,7 @@ def select_mode(
                         card_fade=1.0,
                         jira_enabled=_jira_ok,
                         azdevops_enabled=_azdevops_ok,
+                        shimmer_tick=dt_r,
                     )
                 )
                 time.sleep(_FRAME_TIME)
@@ -3775,6 +3778,7 @@ def select_mode(
                 _team_popup_msg = ""  # dynamic staleness message
 
                 prev_tick = time.monotonic()
+                _list_anim0 = prev_tick  # shimmer title clock
 
                 while True:
                     key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
@@ -4400,6 +4404,7 @@ def select_mode(
                             team_popup_message=_team_popup_msg,
                             jira_enabled=_jira_ok,
                             azdevops_enabled=_azdevops_ok,
+                            shimmer_tick=now - _list_anim0,
                         )
                     )
 

@@ -301,13 +301,15 @@ def _build_project_list_screen(
     profile_submenu_visible: float = 0.0,
     profile_exp_fade: float = 0.0,
     mode: str = "planning",
+    shimmer_tick: float | None = None,
 ) -> Panel:
     """Build the project list screen with title pinned at top.
 
     mode="planning": Shows "Your projects" section + optional Team Analysis.
     mode="analysis": Shows only profile cards + analysis buttons (no projects).
+    shimmer_tick: if set, animates the title's travelling highlight.
     """
-    title = analysis_title() if mode == "analysis" else planning_title()
+    title = analysis_title(shimmer_tick) if mode == "analysis" else planning_title(shimmer_tick)
 
     sub_color = lerp_color(card_opacity, BLACK_RGB, (100, 100, 100))
     if mode == "analysis":
