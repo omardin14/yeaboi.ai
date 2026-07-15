@@ -2559,22 +2559,25 @@ def select_mode(
                 _board_configured = _jira_ok or _azdevops_ok
 
                 if not _board_configured:
-                    # No board configured — show message and return to mode select
-                    w, h = console.size
-                    live.update(
-                        _build_project_export_success_screen(
-                            "No board configured.\n\n"
-                            "Set JIRA_BASE_URL + JIRA_API_TOKEN\n"
-                            "or AZURE_DEVOPS_ORG_URL + AZURE_DEVOPS_TOKEN\n"
-                            "in your .env file.",
-                            width=w,
-                            height=h,
-                            subtitle="Board required",
-                            hint="Press any key to go back.",
-                            mode="analysis",
-                        )
-                    )
+                    # No board configured — show message and return to mode select.
+                    # Re-render each frame so the ANALYSIS title keeps shimmering.
+                    _br_anim0 = time.monotonic()  # shimmer title clock
                     while True:
+                        w, h = console.size
+                        live.update(
+                            _build_project_export_success_screen(
+                                "No board configured.\n\n"
+                                "Set JIRA_BASE_URL + JIRA_API_TOKEN\n"
+                                "or AZURE_DEVOPS_ORG_URL + AZURE_DEVOPS_TOKEN\n"
+                                "in your .env file.",
+                                width=w,
+                                height=h,
+                                subtitle="Board required",
+                                hint="Press any key to go back.",
+                                mode="analysis",
+                                shimmer_tick=time.monotonic() - _br_anim0,
+                            )
+                        )
                         k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
                         if k:
                             break
@@ -2680,6 +2683,7 @@ def select_mode(
                             profiles=_profiles_for_analysis,
                             new_analysis_labels=_ana_labels,
                             mode="analysis",
+                            shimmer_tick=dt_r,
                         )
                     )
                     time.sleep(_FRAME_TIME)
