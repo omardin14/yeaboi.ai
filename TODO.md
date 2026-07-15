@@ -294,6 +294,23 @@ Comprehensive task list for building the project. Check items off as they're com
 - [x] Add user confirmation before any Confluence write operation
 - [x] Truncate large pages at 8 000 chars (same pattern as GitHub/AzDO file tools)
 
+#### Notion
+
+Independent doc tool with its own integration token (NOTION_TOKEN) — not shared Atlassian auth. Mirrors Confluence across analysis / planning / standup.
+
+- [x] Set up Notion authentication (own `NOTION_TOKEN`; optional `NOTION_ROOT_PAGE_ID` scoping)
+- [x] `notion_search_pages` — keyword search across granted pages to locate docs before planning
+- [x] `notion_read_page` — fetch a page and flatten its blocks to plain text (truncate at 8 000 chars)
+- [x] `notion_read_database` — list entries in a database / data source (2025 data-sources API)
+- [x] Feed Notion context into `project_analyzer` — `## Notion Documentation` section alongside repo/Confluence/Jira
+- [x] `notion_create_page` — publish the sprint plan / brief as a Notion page (with user confirmation)
+- [x] `notion_update_page` — append content to an existing page, optional rename (with user confirmation)
+- [x] `notion_recent_pages` — recently-edited pages feed for Daily Standup (graceful skip; 401/403 → Notice)
+- [x] Handle Notion API errors gracefully (401/403/404/429)
+- [x] Add user confirmation before any Notion write operation (`_HIGH_RISK_TOOLS`)
+- [x] Dedicated "Docs / Notion" setup-wizard step with live token verification + Settings display
+- [x] Unit tests (`test_tools_notion.py`) + contract cassettes (`test_notion_contract.py`)
+
 ### Tool Registration
 
 - [x] Register all tools with `@tool` decorator and descriptive docstrings

@@ -36,6 +36,9 @@ dependencies = [
     "azure-devops",
     "jira",
     "atlassian-python-api",
+    # Notion doc tools (tools/notion.py) — official SDK, mirrors how Confluence
+    # uses atlassian-python-api. Notion has its own integration token (NOTION_TOKEN).
+    "notion-client",
     # SQLite-backed checkpoint store for Phase 8 session persistence.
     # SqliteSaver is used as a standalone store; the graph itself stays
     # stateless for now (Phase 8B wires it as a full LangGraph checkpointer).

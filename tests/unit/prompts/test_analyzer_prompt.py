@@ -94,6 +94,35 @@ class TestGetAnalyzerPrompt:
         assert "Repository Scan" in result
         assert "Confluence Documentation" in result
 
+    def test_notion_context_section_present_when_provided(self):
+        """'Notion Documentation' section should appear when notion_context is given."""
+        notion_data = "[Runbook] (ID: abc123)\n  Deploy steps..."
+        result = get_analyzer_prompt("answers", 3, 15, notion_context=notion_data)
+        assert "Notion Documentation" in result
+        assert notion_data in result
+
+    def test_notion_context_section_absent_when_none(self):
+        """'Notion Documentation' section should be absent when notion_context is None."""
+        result = get_analyzer_prompt("answers", 3, 15, notion_context=None)
+        assert "Notion Documentation" not in result
+
+    def test_notion_context_section_absent_by_default(self):
+        """'Notion Documentation' section should be absent when notion_context is omitted."""
+        result = get_analyzer_prompt("answers", 3, 15)
+        assert "Notion Documentation" not in result
+
+    def test_confluence_and_notion_context_together(self):
+        """Both Confluence and Notion sections should appear when both are provided."""
+        result = get_analyzer_prompt(
+            "answers",
+            3,
+            15,
+            confluence_context="Confluence ADRs...",
+            notion_context="Notion specs...",
+        )
+        assert "Confluence Documentation" in result
+        assert "Notion Documentation" in result
+
     def test_user_context_section_present_when_provided(self):
         """'User Context (SCRUM.md / scrum-docs)' section should appear when user_context is given."""
         scrum_data = "# My Project\nWe use React + FastAPI. Budget: £500k."

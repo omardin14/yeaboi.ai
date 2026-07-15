@@ -55,6 +55,7 @@ def get_analyzer_prompt(
     repo_context: str | None = None,
     detected_stack: list[str] | None = None,
     confluence_context: str | None = None,
+    notion_context: str | None = None,
     user_context: str | None = None,
     team_profile_summary: str = "",
     ceremony_history: str = "",
@@ -93,6 +94,9 @@ def get_analyzer_prompt(
             excerpts). When provided, a "Confluence Documentation" section is
             injected so the LLM can ground constraints and integrations in
             existing architecture docs, ADRs, and runbooks.
+        notion_context: Search results / page content from Notion. When provided,
+            a "Notion Documentation" section is injected — same purpose as
+            confluence_context, for teams whose docs live in Notion.
         user_context: Content of SCRUM.md and/or scrum-docs/ files from the
             user's project root. When provided, a "User Context" section is
             injected so the LLM can incorporate PRDs, design docs, and notes.
@@ -136,6 +140,20 @@ def get_analyzer_prompt(
             f"{confluence_context}\n"
         )
         if confluence_context
+        else ""
+    )
+
+    # Inject Notion search results / page content when available. Same role as the
+    # Confluence section — Notion is the doc home for teams that don't use Confluence.
+    notion_section = (
+        (
+            "\n## Notion Documentation\n\n"
+            "The following pages were found in the team's Notion workspace. "
+            "Use them to identify existing architecture decisions, integrations, "
+            "constraints, and tech_stack details that the questionnaire may not capture.\n\n"
+            f"{notion_context}\n"
+        )
+        if notion_context
         else ""
     )
 
@@ -213,6 +231,7 @@ def get_analyzer_prompt(
         f"- Velocity: {velocity_per_sprint} story points per sprint\n"
         f"{repo_section}"
         f"{confluence_section}"
+        f"{notion_section}"
         f"{user_section}"
         f"{team_section}"
         f"{ceremony_section}"

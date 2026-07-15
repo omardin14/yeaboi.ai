@@ -320,6 +320,34 @@ def _verify_jira(base_url: str, email: str, token: str) -> tuple[bool, str]:
         return False, f"Connection error: {e}"
 
 
+def _verify_notion(token: str) -> tuple[bool, str]:
+    """Verify a Notion integration token with a lightweight API call.
+
+    Hits GET /v1/users/me — the cheapest authenticated endpoint. Notion requires
+    the Notion-Version header on every request.
+    """
+    try:
+        import httpx
+
+        resp = httpx.get(
+            "https://api.notion.com/v1/users/me",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": "2022-06-28",
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return True, "Notion verified"
+        if resp.status_code == 401:
+            return False, "Invalid Notion token"
+        if resp.status_code == 403:
+            return False, "Token lacks access — share pages with the integration"
+        return False, f"Unexpected response: {resp.status_code}"
+    except Exception as e:
+        return False, f"Connection error: {e}"
+
+
 def _verify_azdevops(org_url: str, project: str, token: str) -> tuple[bool, str]:
     """Verify Azure DevOps credentials by listing work item types for the project."""
     try:

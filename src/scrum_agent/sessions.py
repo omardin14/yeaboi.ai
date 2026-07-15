@@ -168,6 +168,7 @@ _SCALAR_KEYS = {
     "target_sprints",
     "repo_context",
     "confluence_context",
+    "notion_context",
     "user_context",
     "pending_review",
     "last_review_feedback",

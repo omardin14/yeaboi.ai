@@ -297,3 +297,31 @@ class TestStandupConfig:
         ok, msg = is_llm_configured()
         assert ok is False
         assert "ANTHROPIC_API_KEY" in msg
+
+
+class TestNotionConfig:
+    """Notion has its own integration token (no shared Atlassian auth)."""
+
+    def test_token_returns_value(self, monkeypatch):
+        from scrum_agent.config import get_notion_token
+
+        monkeypatch.setenv("NOTION_TOKEN", "ntn_secret")
+        assert get_notion_token() == "ntn_secret"
+
+    def test_token_none_when_absent(self, monkeypatch):
+        from scrum_agent.config import get_notion_token
+
+        monkeypatch.delenv("NOTION_TOKEN", raising=False)
+        assert get_notion_token() is None
+
+    def test_root_page_id_returns_value(self, monkeypatch):
+        from scrum_agent.config import get_notion_root_page_id
+
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root123")
+        assert get_notion_root_page_id() == "root123"
+
+    def test_root_page_id_none_when_absent(self, monkeypatch):
+        from scrum_agent.config import get_notion_root_page_id
+
+        monkeypatch.delenv("NOTION_ROOT_PAGE_ID", raising=False)
+        assert get_notion_root_page_id() is None

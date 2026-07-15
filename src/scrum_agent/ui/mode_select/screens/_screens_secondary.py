@@ -4262,6 +4262,12 @@ def _build_settings_screen(
     _heading("GitHub")
     _row("Token", config_data.get("GITHUB_TOKEN", ""), masked=True)
 
+    # ── Notion ────────────────────────────────────────────────────
+    # Independent doc tool (its own integration token, unlike Confluence).
+    _heading("Notion")
+    _row("Token", config_data.get("NOTION_TOKEN", ""), masked=True)
+    _row("Root Page/DB", config_data.get("NOTION_ROOT_PAGE_ID", ""))
+
     # ── Daily Standup delivery ────────────────────────────────────
     # Secrets (Slack webhook, SMTP password) are masked like every other credential.
     _heading("Daily Standup")

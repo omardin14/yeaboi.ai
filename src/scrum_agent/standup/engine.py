@@ -43,18 +43,22 @@ def _resolve_source_params(config: dict | None) -> dict:
     """Resolve collector source identifiers from config/env.
 
     Returns kwargs for collect_recent_activity: jira_project, azdo_project,
-    github_repo, local_repo_path, confluence_space.
+    github_repo, local_repo_path, confluence_space, notion_root.
     """
     from scrum_agent.config import (
         get_azure_devops_project,
         get_confluence_space_key,
         get_jira_project_key,
+        get_notion_root_page_id,
     )
 
     params = {
         "jira_project": get_jira_project_key() or "",
         "azdo_project": get_azure_devops_project() or "",
         "confluence_space": get_confluence_space_key() or "",
+        # Notion's standup source is enabled by NOTION_ROOT_PAGE_ID — the same
+        # "identifying parameter" gate Confluence uses with its space key.
+        "notion_root": get_notion_root_page_id() or "",
         "github_repo": "",
         "local_repo_path": (config or {}).get("repo_path", "") or "",
     }

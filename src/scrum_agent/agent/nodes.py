@@ -127,7 +127,7 @@ def _is_llm_auth_or_billing_error(exc: Exception) -> bool:
 # High-risk tool constants
 # ---------------------------------------------------------------------------
 
-# These are write operations that modify external systems (Jira, Confluence).
+# These are write operations that modify external systems (Jira, Confluence, Notion).
 # They require explicit user confirmation before execution — the agent must ask
 # and receive a "yes" before the graph routes to the ToolNode.
 # See README: "Guardrails" — human-in-the-loop pattern (Tool layer)
@@ -138,6 +138,8 @@ _HIGH_RISK_TOOLS: frozenset[str] = frozenset(
         "jira_create_sprint",
         "confluence_create_page",
         "confluence_update_page",
+        "notion_create_page",
+        "notion_update_page",
     }
 )
 
@@ -1996,6 +1998,108 @@ def _fetch_confluence_context(
     except Exception as e:
         logger.debug("Confluence context fetch failed (non-fatal)", exc_info=True)
         return None, {"name": "Confluence", "status": "error", "detail": str(e)[:80]}
+
+
+def _extract_notion_page_ids(text: str) -> list[str]:
+    """Extract Notion page IDs from URLs found in free-form text (e.g. SCRUM.md).
+
+    # See README: "Tools" — read-only tool pattern
+    #
+    # Notion URLs end with a 32-hex-character page ID (optionally dash-formatted),
+    # usually appended to a slugified title, e.g.:
+    #   https://www.notion.so/My-Runbook-1234567890abcdef1234567890abcdef
+    #   https://www.notion.so/workspace/Title-12345678-90ab-cdef-1234-567890abcdef
+    # We extract the raw 32-hex id (stripping dashes) so we can call notion_read_page
+    # directly instead of relying on keyword search which often misses specific pages.
+    """
+    ids: list[str] = []
+    # Match a 32-hex run, allowing the dash-separated 8-4-4-4-12 UUID form too.
+    hex32 = r"[0-9a-fA-F]{32}"
+    uuid = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    for m in re.findall(rf"({hex32}|{uuid})", text):
+        ids.append(m.replace("-", ""))
+    return ids
+
+
+def _fetch_notion_context(
+    questionnaire: QuestionnaireState,
+    user_context: str | None = None,
+) -> tuple[str | None, dict]:
+    """Search Notion for docs related to the project and return combined context + status.
+
+    # See README: "Tools" — read-only tool pattern
+    #
+    # Mirrors _fetch_confluence_context exactly, with two strategies:
+    # 1. Keyword search using the project name (Q1) — broad discovery.
+    # 2. Direct page fetch for any Notion URLs found in SCRUM.md — precise
+    #    targeting of pages the user has explicitly linked.
+    #
+    # Falls back to (None, status) when Notion is not configured; the caller
+    # proceeds gracefully with reduced context when None is returned.
+
+    Args:
+        questionnaire: The completed QuestionnaireState with Q1 (project name).
+        user_context: Raw SCRUM.md content — scanned for Notion URLs to fetch directly.
+
+    Returns:
+        Tuple of (context string or None, status dict with name/status/detail).
+    """
+    try:
+        from scrum_agent.config import get_notion_token
+
+        # Only proceed if the Notion integration token is configured.
+        if not get_notion_token():
+            return None, {"name": "Notion", "status": "skipped", "detail": "not configured"}
+
+        from scrum_agent.tools.notion import notion_read_page, notion_search_pages
+
+        parts: list[str] = []
+
+        # Strategy 1: Keyword search using project name (Q1).
+        project_name = questionnaire.answers.get(1, "").strip()
+        if project_name and project_name != QUESTION_DEFAULTS.get(1):
+            result = notion_search_pages.invoke({"query": project_name, "limit": 5})
+            if result and not result.startswith("Error") and not result.startswith("No Notion"):
+                parts.append(result)
+                logger.debug("NOTION: keyword search returned results for %r", project_name)
+            else:
+                logger.debug("NOTION: keyword search returned no results for %r", project_name)
+
+        # Strategy 2: Fetch pages directly from Notion URLs in SCRUM.md.
+        if user_context:
+            page_ids = _extract_notion_page_ids(user_context)
+            logger.debug("NOTION: extracted %d page ID(s) from user_context: %s", len(page_ids), page_ids[:10])
+            seen = set()
+            for pid in page_ids:
+                if pid in seen:
+                    continue
+                seen.add(pid)
+                try:
+                    logger.debug("NOTION: fetching page ID %s", pid)
+                    page_content = notion_read_page.invoke({"page_id": pid})
+                    if page_content and not page_content.startswith("Error"):
+                        parts.append(page_content)
+                        logger.debug("NOTION: fetched page ID %s (%d chars)", pid, len(page_content))
+                    else:
+                        logger.debug(
+                            "NOTION: page ID %s returned error: %s",
+                            pid,
+                            page_content[:100] if page_content else "empty",
+                        )
+                except Exception:
+                    logger.debug("NOTION: failed to fetch page %s (non-fatal)", pid, exc_info=True)
+        else:
+            logger.debug("NOTION: no user_context provided, skipping URL extraction")
+
+        if not parts:
+            return None, {"name": "Notion", "status": "error", "detail": "no docs found"}
+
+        combined = "\n\n---\n\n".join(parts)
+        detail = f"search + {len(parts) - 1} linked page(s)" if len(parts) > 1 else f"docs for '{project_name}'"
+        return combined, {"name": "Notion", "status": "success", "detail": detail}
+    except Exception as e:
+        logger.debug("Notion context fetch failed (non-fatal)", exc_info=True)
+        return None, {"name": "Notion", "status": "error", "detail": str(e)[:80]}
 
 
 def _scan_repo_context(questionnaire: QuestionnaireState) -> tuple[str | None, dict]:
@@ -5434,6 +5538,13 @@ def project_analyzer(state: ScrumState) -> dict:
         "CONFLUENCE: result status=%s detail=%s", confluence_status.get("status"), confluence_status.get("detail")
     )
 
+    # Same two-strategy discovery for Notion (keyword search + direct page fetch
+    # from URLs in SCRUM.md). Notion is an independent doc source with its own
+    # token — graceful (None, status) when it's not configured or no docs found.
+    # See README: "Tools" — read-only tool pattern
+    notion_context, notion_status = _fetch_notion_context(questionnaire, user_context=user_context)
+    logger.debug("NOTION: result status=%s detail=%s", notion_status.get("status"), notion_status.get("detail"))
+
     # Load team profile for calibration-aware analysis.
     # Non-fatal — if no profile exists, the prompt runs without calibration context.
     # See README: "Scrum Standards" — team learning, self-calibrating estimates
@@ -5465,6 +5576,7 @@ def project_analyzer(state: ScrumState) -> dict:
         repo_context=repo_context,
         detected_stack=repo_signals.detected_stack or None,
         confluence_context=confluence_context,
+        notion_context=notion_context,
         user_context=user_context,
         team_profile_summary=team_profile_summary,
         ceremony_history=ceremony.summary_md,
@@ -5570,15 +5682,17 @@ def project_analyzer(state: ScrumState) -> dict:
         "messages": [AIMessage(content=display)],
         # Context source diagnostics — tells the REPL which external sources
         # were used, skipped, or failed so the user gets transparency.
-        "context_sources": [repo_status, confluence_status, user_status],
+        "context_sources": [repo_status, confluence_status, notion_status, user_status],
     }
-    # Only write repo_context / confluence_context / user_context when present —
-    # avoids overwriting a prior value on re-runs (e.g. edit review) where
-    # the scan might silently fail (network down, token expired, file deleted).
+    # Only write repo_context / confluence_context / notion_context / user_context
+    # when present — avoids overwriting a prior value on re-runs (e.g. edit review)
+    # where the scan might silently fail (network down, token expired, file deleted).
     if repo_context is not None:
         return_dict["repo_context"] = repo_context
     if confluence_context is not None:
         return_dict["confluence_context"] = confluence_context
+    if notion_context is not None:
+        return_dict["notion_context"] = notion_context
     if user_context is not None:
         return_dict["user_context"] = user_context
     return return_dict
@@ -6976,6 +7090,11 @@ def _build_doc_context(state: ScrumState) -> str | None:
     confluence = state.get("confluence_context", "")
     if confluence and confluence.strip():
         parts.append(f"- **Confluence:** {confluence.strip()[:500]}")
+
+    # Notion context — scraped page content from notion_search_pages / notion_read_page
+    notion = state.get("notion_context", "")
+    if notion and notion.strip():
+        parts.append(f"- **Notion:** {notion.strip()[:500]}")
 
     # User context from SCRUM.md — may contain wiki URLs, design doc links, etc.
     user_ctx = state.get("user_context", "")

@@ -121,7 +121,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 
 📊 **Capacity Planning** — Bank holidays (100+ countries), PTO/leave tracking, unplanned absence %, onboarding ramp-up, per-sprint velocity
 
-🔌 **30 Tools** — GitHub, Azure DevOps, Jira, Confluence, local codebase scanning, bank holiday detection, LLM-powered estimation
+🔌 **35 Tools** — GitHub, Azure DevOps, Jira, Confluence, Notion, local codebase scanning, bank holiday detection, LLM-powered estimation
 
 📤 **5 Export Formats** — Markdown, HTML, JSON, Jira sync, Azure DevOps Boards sync
 
@@ -137,7 +137,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 
 📄 **SCRUM.md Context** — Drop a `SCRUM.md` in your project directory; the agent reads it to pre-fill answers and ground output
 
-☀️ **Daily Standup** — Detects team activity (Jira/AzDO/GitHub/Confluence/git), infers per-person updates or takes your own, scores sprint-day confidence, and delivers to terminal/desktop/Slack/email — on an OS schedule that runs even when the app is closed
+☀️ **Daily Standup** — Detects team activity (Jira/AzDO/GitHub/Confluence/Notion/git), infers per-person updates or takes your own, scores sprint-day confidence, and delivers to terminal/desktop/Slack/email — on an OS schedule that runs even when the app is closed
 
 🔬 **Team Analysis Mode** — Connect your Jira or Azure DevOps board to analyze your team's real patterns: velocity, sprint cadence, story structure, acceptance criteria style, naming conventions, and per-developer breakdown
 
@@ -830,7 +830,7 @@ Open it from the mode-selection screen (the magenta **Standup** card) or run it 
 
 ### What it does
 
-1. **Detects recent activity** across every configured source — Jira issues, Azure DevOps work items, GitHub commits + PRs, recently-updated Confluence pages, and a local git log. Each source is best-effort: an unconfigured or failing source is skipped, never fatal. An **authentication failure (401/403) surfaces as a Notice**, not silence.
+1. **Detects recent activity** across every configured source — Jira issues, Azure DevOps work items, GitHub commits + PRs, recently-updated Confluence pages, recently-edited Notion pages, and a local git log. Each source is best-effort: an unconfigured or failing source is skipped, never fatal. An **authentication failure (401/403) surfaces as a Notice**, not silence.
 2. **Asks for your own update first**, then infers everyone else. Press **Generate** and it prompts for your update (Enter to skip); people without a self-report get an inferred summary from a single LLM call.
 3. **Computes sprint day + confidence** deterministically (no LLM): which working day of the sprint you're on (weekends and bank holidays excluded), and how actual "Done" points compare to the ideal linear burn-down → **On track / At risk / Behind**.
 4. **Delivers** the summary to any combination of **terminal, desktop notification, Slack, and email**.
@@ -1289,6 +1289,21 @@ The agent has access to 30 tools, organized by integration:
 | `confluence_read_space` | Read space metadata and page list | Low |
 | `confluence_create_page` | Create a new page | High (requires confirmation) |
 | `confluence_update_page` | Update an existing page | High (requires confirmation) |
+
+</details>
+
+<details>
+<summary>📓 Notion (5 tools)</summary>
+
+Notion is an independent doc tool with its **own** integration token (`NOTION_TOKEN`) — it does not share Atlassian auth like Confluence. It feeds the same analysis / planning / standup workflows.
+
+| Tool | Description | Risk |
+|------|-------------|------|
+| `notion_search_pages` | Search pages by keyword across granted pages | Low |
+| `notion_read_page` | Read a page (blocks flattened to text) by ID | Low |
+| `notion_read_database` | List entries in a database / data source | Low |
+| `notion_create_page` | Create a new page | High (requires confirmation) |
+| `notion_update_page` | Append content to a page (and optionally rename) | High (requires confirmation) |
 
 </details>
 
@@ -2004,6 +2019,7 @@ src/scrum_agent/
 │   ├── calendar_tools.py       #   Bank holiday detection
 │   ├── codebase.py             #   Local repo scanning
 │   ├── confluence.py           #   Confluence search/read/write
+│   ├── notion.py               #   Notion search/read/write (own token)
 │   ├── github.py               #   GitHub repo/file/issues/readme
 │   ├── jira.py                 #   Jira board/velocity/sprint/epic/story
 │   └── llm_tools.py            #   LLM-powered estimation and AC generation
@@ -2060,6 +2076,8 @@ src/scrum_agent/
 | `JIRA_API_TOKEN` | If using Jira | Jira API token |
 | `JIRA_PROJECT_KEY` | If using Jira | Project key (e.g. `MYPROJ`) |
 | `CONFLUENCE_SPACE_KEY` | No | Confluence space key (shares Atlassian auth with Jira) |
+| `NOTION_TOKEN` | No | Notion integration token (its own auth; enables Notion doc tools) |
+| `NOTION_ROOT_PAGE_ID` | No | Default parent for created Notion pages; enables the Notion standup source |
 | `LANGSMITH_TRACING` | No | Enable LangSmith tracing (`true`) |
 | `LANGSMITH_API_KEY` | No | LangSmith API key |
 | `LANGSMITH_PROJECT` | No | LangSmith project name |
@@ -2083,7 +2101,7 @@ src/scrum_agent/
 |-------|---------|
 | **Unit Tests** | Prompt formatting, tool input/output validation, state transitions, artifact immutability |
 | **Integration Tests** | CLI argument parsing, graph compilation, multi-node flows, session persistence |
-| **Contract Tests** | VCR cassettes for GitHub, Jira, Confluence API responses |
+| **Contract Tests** | VCR cassettes for GitHub, Jira, Confluence, Notion API responses |
 | **Golden Datasets** | Curated project descriptions with expected feature/story breakdowns |
 | **Smoke Tests** | Live API tests (require real credentials) |
 | **Token Budget Tests** | Monitor prompt token counts for trend analysis |
