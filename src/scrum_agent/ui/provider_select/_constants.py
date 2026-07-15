@@ -28,12 +28,11 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "instructions": "Get yours at: https://console.anthropic.com \u2192 API Keys",
         "color": "rgb(70,100,180)",
         "models": {
-            "default": "claude-sonnet-4-20250514",
+            "default": "claude-sonnet-4-6",
             "presets": [
-                "claude-sonnet-4-20250514",
-                "claude-opus-4-8",
-                "claude-sonnet-5",
                 "claude-sonnet-4-6",
+                "claude-opus-4-8",
+                "claude-opus-4-6",
                 "claude-haiku-4-5",
             ],
         },
@@ -47,11 +46,12 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "instructions": "Get yours at: https://aistudio.google.com \u2192 Get API key",
         "color": "rgb(70,100,180)",
         "models": {
-            "default": "gemini-2.0-flash",
+            "default": "gemini-2.5-flash",
             "presets": [
-                "gemini-2.0-flash",
-                "gemini-1.5-pro",
-                "gemini-1.5-flash",
+                "gemini-2.5-flash",
+                "gemini-3.5-flash",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash-lite",
             ],
         },
     },
@@ -68,8 +68,8 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
             "presets": [
                 "gpt-4o",
                 "gpt-4o-mini",
-                "gpt-4-turbo",
-                "o1",
+                "gpt-5.6",
+                "gpt-5.5",
             ],
         },
     },
@@ -85,9 +85,9 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         # Bedrock's real model id is usually auto-detected from OpenClaw and
         # prepended at runtime; the default here keeps parity with _PROVIDER_DEFAULTS.
         "models": {
-            "default": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+            "default": "us.anthropic.claude-sonnet-4-6-v1:0",
             "presets": [
-                "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                "us.anthropic.claude-sonnet-4-6-v1:0",
             ],
         },
     },

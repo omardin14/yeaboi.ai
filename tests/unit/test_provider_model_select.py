@@ -16,7 +16,7 @@ from rich.panel import Panel
 from scrum_agent.agent.llm import _PROVIDER_DEFAULTS
 from scrum_agent.setup_wizard import _PROVIDERS, run_setup_wizard
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS
-from scrum_agent.ui.provider_select._verification import _verify_model
+from scrum_agent.ui.provider_select._verification import _verify_model, fetch_available_models
 from scrum_agent.ui.provider_select.screens._screens import (
     _build_model_input_screen,
     _build_model_select_screen,
@@ -123,7 +123,7 @@ class TestVerifyModelGoogle:
         import httpx
 
         monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200))
-        ok, _ = _verify_model(_card("google"), "AIzaKey", "gemini-2.0-flash")
+        ok, _ = _verify_model(_card("google"), "AIzaKey", "gemini-2.5-flash")
         assert ok is True
 
     def test_unknown_model(self, monkeypatch):
@@ -211,6 +211,22 @@ class TestModelSelectScreen:
         out = _render(_build_model_select_screen(_card("openai"), ["gpt-4o", "Custom…"], 0, error="Unknown model"))
         assert "Unknown model" in out
 
+    def test_renders_as_rounded_cards(self):
+        # Each model is a rounded box-drawing card (matches app cards/buttons),
+        # not plain text — the corner glyphs must be present.
+        out = _render(_build_model_select_screen(_card("anthropic"), ["claude-opus-4-8", "Custom…"], 0))
+        assert "╭" in out and "╰" in out
+        assert "claude-opus-4-8" in out
+
+    def test_long_list_windows_with_more_hint(self):
+        # More models than fit a short screen → window + a "N more" affordance,
+        # and the render must not exceed the frame height.
+        entries = [f"model-{i}" for i in range(12)] + ["Custom…"]
+        panel = _build_model_select_screen(_card("openai"), entries, 6, width=80, height=24)
+        out = _render(panel)
+        assert "more" in out
+        assert out.count("\n") <= 24
+
 
 class TestModelInputScreen:
     def test_returns_panel(self):
@@ -231,7 +247,7 @@ class TestModelInputScreen:
 
     def test_verifying_state(self):
         panel = _build_model_input_screen(
-            _card("google"), "gemini-2.0-flash", verifying=True, border_override="rgb(1,1,1)"
+            _card("google"), "gemini-2.5-flash", verifying=True, border_override="rgb(1,1,1)"
         )
         assert isinstance(panel, Panel)
 
@@ -282,3 +298,71 @@ class TestWizardModelPropagation:
         run_setup_wizard(console)
         content = config_file.read_text()
         assert "LLM_MODEL" not in content
+
+
+# ---------------------------------------------------------------------------
+# fetch_available_models — live discovery (the anti-staleness mechanism)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAvailableModels:
+    def test_anthropic_returns_ids_in_order(self, monkeypatch):
+        import httpx
+
+        payload = {"data": [{"id": "claude-opus-4-8"}, {"id": "claude-sonnet-4-6"}]}
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, payload))
+        assert fetch_available_models(_card("anthropic"), "sk-ant-key") == [
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+        ]
+
+    def test_openai_filters_noise_newest_first(self, monkeypatch):
+        import httpx
+
+        payload = {
+            "data": [
+                {"id": "gpt-4o", "created": 100},
+                {"id": "text-embedding-3-large", "created": 90},
+                {"id": "whisper-1", "created": 80},
+                {"id": "gpt-5.6", "created": 200},
+                {"id": "dall-e-3", "created": 70},
+                {"id": "o1", "created": 150},
+            ]
+        }
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, payload))
+        result = fetch_available_models(_card("openai"), "sk-key")
+        # embeddings/whisper/dall-e dropped; chat models newest-first by `created`.
+        assert result == ["gpt-5.6", "o1", "gpt-4o"]
+
+    def test_google_keeps_only_generate_content(self, monkeypatch):
+        import httpx
+
+        payload = {
+            "models": [
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"]},
+                {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]},
+            ]
+        }
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, payload))
+        result = fetch_available_models(_card("google"), "AIzaKey")
+        assert result == ["gemini-2.5-flash", "gemini-2.5-pro"]
+
+    def test_non_200_returns_empty(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(401))
+        assert fetch_available_models(_card("anthropic"), "sk-ant-key") == []
+
+    def test_network_error_returns_empty(self, monkeypatch):
+        import httpx
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("offline")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        assert fetch_available_models(_card("openai"), "sk-key") == []
+
+    def test_bedrock_excluded(self):
+        # No API key model listing for Bedrock — returns [] without any call.
+        assert fetch_available_models(_card("bedrock"), "us-east-1") == []

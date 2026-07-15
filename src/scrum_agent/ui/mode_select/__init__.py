@@ -958,10 +958,10 @@ def _collect_usage_data() -> dict:
     model = os.environ.get("LLM_MODEL", "")
     if not model:
         _defaults = {
-            "anthropic": "claude-sonnet-4-20250514",
+            "anthropic": "claude-sonnet-4-6",
             "openai": "gpt-4o",
-            "google": "gemini-2.0-flash",
-            "bedrock": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+            "google": "gemini-2.5-flash",
+            "bedrock": "us.anthropic.claude-sonnet-4-6-v1:0",
         }
         model = _defaults.get(provider, "unknown")
     data["provider"] = provider

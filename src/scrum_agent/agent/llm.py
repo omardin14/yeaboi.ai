@@ -99,10 +99,10 @@ def reset_usage_stats() -> None:
 # Default models per provider — chosen for best quality/cost balance.
 # Override any of these with the LLM_MODEL env var.
 _PROVIDER_DEFAULTS: dict[str, str] = {
-    "anthropic": "claude-sonnet-4-20250514",
+    "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o",
-    "google": "gemini-2.0-flash",
-    "bedrock": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+    "google": "gemini-2.5-flash",
+    "bedrock": "us.anthropic.claude-sonnet-4-6-v1:0",
 }
 
 # Kept for backward compatibility — callers that imported DEFAULT_MODEL still work.

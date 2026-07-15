@@ -312,6 +312,44 @@ def _build_input_screen(
     )
 
 
+# Model-card colours — kept in sync with the app's project cards / action
+# buttons (rgb(70,100,180) accent, rgb(35,35,45) dim) so the setup wizard's
+# model list reads as the same "card" component used elsewhere in the TUI.
+_MODEL_CARD_SEL_BORDER = "rgb(70,100,180)"
+_MODEL_CARD_DIM_BORDER = "rgb(35,35,45)"
+_MODEL_CARD_DIM_TEXT = "rgb(140,140,140)"
+_MODEL_CARD_H = 3  # rows per card: top border + label + bottom border
+
+
+def _build_model_card(label: str, *, selected: bool, inner_w: int) -> list[Align]:
+    """Build one rounded model card as three centred rows (top/label/bottom).
+
+    Matches ``build_action_buttons`` / ``_build_project_card``: accent border +
+    bold white label when selected, dim border + grey label otherwise.
+    """
+    border = _MODEL_CARD_SEL_BORDER if selected else _MODEL_CARD_DIM_BORDER
+    text_style = "bold white" if selected else _MODEL_CARD_DIM_TEXT
+
+    # Truncate over-long ids (e.g. bedrock inference profiles) so the box stays
+    # aligned; middle-ellipsis keeps both the family and the version visible.
+    if len(label) > inner_w:
+        keep = inner_w - 1
+        head = keep // 2
+        label = label[:head] + "…" + label[len(label) - (keep - head) :]
+
+    pad_l = (inner_w - len(label)) // 2
+    pad_r = inner_w - len(label) - pad_l
+    centered = " " * pad_l + label + " " * pad_r
+
+    top = Text("╭" + "─" * inner_w + "╮", style=border)
+    mid = Text()
+    mid.append("│", style=border)
+    mid.append(centered, style=text_style)
+    mid.append("│", style=border)
+    bot = Text("╰" + "─" * inner_w + "╯", style=border)
+    return [Align.center(top), Align.center(mid), Align.center(bot)]
+
+
 def _build_model_select_screen(
     provider: dict[str, Any],
     entries: list[str],
@@ -319,38 +357,50 @@ def _build_model_select_screen(
     *,
     width: int = 80,
     height: int = 24,
-    shimmer_tick: float = 0.0,
+    shimmer_tick: float = 0.0,  # accepted for caller compatibility; cards are static
     error: str = "",
 ) -> Panel:
-    """Build the model-selection screen — an arrow-selectable list of model ids.
+    """Build the model-selection screen — a stack of rounded, arrow-selectable cards.
 
-    Unlike _build_select_screen (which renders 2-line ASCII art), model ids are
-    long plain strings, so each entry is a single centred line. ``entries`` is the
-    full display list, typically presets + ["Custom…"] (a detected/current model
-    may be prepended by the caller with a "(detected)"/"(current)" label).
+    Each ``entries`` item (presets/live models + a trailing "Custom…") renders as
+    a rounded card matching the app's project cards / action buttons. The list is
+    windowed to the available height so it never overflows the (non-scrolling)
+    frame — the window follows the selection and shows a "N more" hint when the
+    list is longer than fits.
     """
-    rows: list[Text] = []
-    for i, label in enumerate(entries):
-        if i == selected:
-            # Per-character shimmer on the selected entry (matches provider rows).
-            line = Text(justify="center")
-            total = max(len(label), 1)
-            for j, ch in enumerate(label):
-                line.append(ch, style=shimmer_style(provider["color"], j, total, shimmer_tick))
-        else:
-            line = Text(label, style="dim", justify="center")
-        rows.append(line)
+    # Card inner width: fit the longest label, clamped to the screen.
+    longest = max((len(e) for e in entries), default=8)
+    max_inner = max(16, width - 16)
+    inner_w = min(max(longest, 16), max_inner)
 
-    body = [item for row in rows for item in (Align.center(row), Text(""))]
-    if body:
-        body = body[:-1]  # remove trailing blank
+    # Vertical budget: header(5) + footer(2) inside the frame's inner height.
+    middle_h = max(_MODEL_CARD_H, (height - 4) - 5 - 2)
+    reserve = 2 if error else 0
+    avail = max(_MODEL_CARD_H, middle_h - reserve)
+    max_cards = max(1, avail // _MODEL_CARD_H)
+
+    truncated = len(entries) > max_cards
+    if truncated:
+        max_cards = max(1, (avail - 1) // _MODEL_CARD_H)  # reserve a row for the hint
+        # Window follows the selection, keeping it roughly centred.
+        start = min(max(0, selected - max_cards // 2), len(entries) - max_cards)
+    else:
+        start = 0
+    window = range(start, min(start + max_cards, len(entries)))
+
+    body: list = []
+    for i in window:
+        body.extend(_build_model_card(entries[i], selected=(i == selected), inner_w=inner_w))
+    body_h = len(list(window)) * _MODEL_CARD_H
+
+    if truncated:
+        hidden = len(entries) - len(list(window))
+        body.append(Align.center(Text(f"↑↓  {hidden} more", style="dim")))
+        body_h += 1
 
     if error:
         body.append(Text(""))
-        body.append(Align.center(Text(f"✗ {error}", style="bright_red", justify="center")))
-
-    body_h = len(rows) * 2 - 1 if rows else 0
-    if error:
+        body.append(Align.center(Text(f"✗ {error}", style="bright_red")))
         body_h += 2
 
     return _build_screen_frame(

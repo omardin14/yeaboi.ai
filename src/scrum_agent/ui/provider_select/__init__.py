@@ -23,7 +23,12 @@ from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIO
 from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking  # noqa: F401
 from scrum_agent.ui.provider_select._phase_notion import _run_notion  # noqa: F401
 from scrum_agent.ui.provider_select._transitions import _transition_to_input  # noqa: F401
-from scrum_agent.ui.provider_select._verification import _verify_api_key, _verify_model, _verify_vc_token
+from scrum_agent.ui.provider_select._verification import (
+    _verify_api_key,
+    _verify_model,
+    _verify_vc_token,
+    fetch_available_models,
+)
 from scrum_agent.ui.provider_select.screens._screens import (
     _build_input_screen,
     _build_model_input_screen,
@@ -40,6 +45,10 @@ from scrum_agent.ui.shared._input import read_key as _read_key  # noqa: F401 —
 from scrum_agent.ui.shared._music_bar import make_live
 
 logger = logging.getLogger(__name__)
+
+# Cap the live-discovered model list so the (non-scrolling) select screen stays
+# usable; "Custom…" covers anything beyond the newest few.
+_MAX_LIVE_MODELS = 8
 
 
 def _detect_aws_region() -> str | None:
@@ -152,6 +161,16 @@ def select_provider(
             models_cfg = provider.get("models") or {}
             presets = list(models_cfg.get("presets") or [])
             default_model = models_cfg.get("default", "")
+
+            # Live discovery: ask the provider what this key can actually run, so
+            # the menu never offers a retired id. The hardcoded presets above are
+            # only an offline seed. Bedrock is excluded (auto-detects via OpenClaw).
+            if provider.get("provider_val") != "bedrock" and api_key_val:
+                w, h = console.size
+                live.update(_build_model_select_screen(provider, ["Loading available models…"], 0, width=w, height=h))
+                discovered = fetch_available_models(provider, api_key_val)
+                if discovered:
+                    presets = discovered[:_MAX_LIVE_MODELS]
 
             # A detected Bedrock model (from OpenClaw) or a previously-saved LLM_MODEL
             # is offered at the top of the list and pre-selected, preserving zero-config.
