@@ -173,9 +173,7 @@ class TestRunStandup:
         monkeypatch.setattr(
             engine.sprint_context,
             "gather",
-            lambda state, **kw: __import__(
-                "yeaboi.standup.sprint_context", fromlist=["SprintContext"]
-            ).SprintContext(),
+            lambda state, **kw: __import__("yeaboi.standup.sprint_context", fromlist=["SprintContext"]).SprintContext(),
         )
         monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
         monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))

@@ -326,9 +326,7 @@ class TestReplGraphIntegration:
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke_fail_then_succeed
         monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr(
-            "yeaboi.repl.PromptSession", _mock_session_factory(["fail-input", "retry-input", "exit"])
-        )
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["fail-input", "retry-input", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
 
