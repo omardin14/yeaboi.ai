@@ -73,8 +73,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://yeaboi.ai"
-Repository = "https://github.com/omardin14/yeaboi"
-Issues = "https://github.com/omardin14/yeaboi/issues"
+Repository = "https://github.com/omardin14/yeaboi.ai"
+Issues = "https://github.com/omardin14/yeaboi.ai/issues"
 
 [project.scripts]
 yeaboi = "yeaboi.cli:main"

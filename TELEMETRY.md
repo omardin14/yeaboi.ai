@@ -129,4 +129,4 @@ export YEABOI_TELEMETRY_URL=https://your-endpoint.example.com/collect
 
 ## Questions?
 
-Open an issue at [github.com/omardin14/yeaboi](https://github.com/omardin14/yeaboi/issues).
+Open an issue at [github.com/omardin14/yeaboi.ai](https://github.com/omardin14/yeaboi.ai/issues).
