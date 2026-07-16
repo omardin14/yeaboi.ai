@@ -247,6 +247,9 @@ textarea { width:100%; background:var(--card); color:var(--text); border:1px sol
          border-radius:8px; padding:9px; font:inherit; }
 .dice { background:var(--panel); border:1px solid var(--line); border-radius:8px;
         padding:0 12px; cursor:pointer; font-size:18px; }
+.join-btn { background:var(--accent); color:var(--ink); border:0; border-radius:8px;
+            padding:0 20px; font:inherit; font-weight:700; cursor:pointer; white-space:nowrap; }
+.join-btn:hover { filter:brightness(1.1); }
 .avatars { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
 .av { font-size:22px; background:var(--card); border:1px solid var(--line); border-radius:10px;
       width:40px; height:40px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
@@ -831,7 +834,7 @@ def build_board_html() -> str:
         "  <h2>Join a retro</h2>\n"
         '  <p class="muted">Enter the share code shown on the host\'s screen.</p>\n'
         '  <div class="namerow"><input id="code-in" class="field" placeholder="e.g. A3F9-1B2C" autofocus>'
-        '<button class="dice" id="code-join">Join</button></div>\n'
+        '<button class="join-btn" id="code-join">Join</button></div>\n'
         '  <p class="muted" id="code-err" style="color:#f85149"></p>\n'
         "</div></div>\n"
         # Profile modal (name + avatar; reused for rename)
