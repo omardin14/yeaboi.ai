@@ -2,7 +2,7 @@
 
 import json
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -14,7 +14,7 @@ from scrum_agent.agent.state import (
     Task,
     UserStory,
 )
-from scrum_agent.json_exporter import export_plan_json
+from yeaboi.json_exporter import export_plan_json
 
 
 class TestExportPlanJson:

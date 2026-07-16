@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scrum_agent.sessions import (
+from yeaboi.sessions import (
     CURRENT_SCHEMA_VERSION,
     SessionStore,
     make_session_id,

@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from scrum_agent.agent.state import DeliveredItem
-from scrum_agent.reporting import activity as activity_mod
-from scrum_agent.reporting import engine
+from yeaboi.agent.state import DeliveredItem
+from yeaboi.reporting import activity as activity_mod
+from yeaboi.reporting import engine
 
 
 @pytest.fixture
@@ -22,10 +22,10 @@ class _FakeResp:
 
 def _patch_llm(monkeypatch, content):
     """Make the engine's single LLM call return ``content`` and report configured."""
-    monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-    monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+    monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
     monkeypatch.setattr(
-        "scrum_agent.agent.llm.get_llm",
+        "yeaboi.agent.llm.get_llm",
         lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(content)})(),
     )
 
@@ -41,7 +41,7 @@ def _patch_activity(monkeypatch, items=(), sprints=(), warnings=()):
 @pytest.fixture(autouse=True)
 def _no_export(monkeypatch):
     # Keep tests off the real ~/.scrum-agent export dir.
-    monkeypatch.setattr("scrum_agent.reporting.export.export_report", lambda *a, **k: {})
+    monkeypatch.setattr("yeaboi.reporting.export.export_report", lambda *a, **k: {})
 
 
 def _items(n=2):
@@ -80,13 +80,13 @@ class TestRunDeliveryReport:
     def test_llm_failure_falls_back(self, monkeypatch, db_path):
         _patch_activity(monkeypatch, items=_items(2))
         # is_llm_configured True but the call raises a generic error → fallback
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-        monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
 
         def _boom(**k):
             raise RuntimeError("network down")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", _boom)
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _boom)
         report = engine.run_delivery_report("last_month", session_id="", db_path=db_path)
         assert report.delivered_items  # evidence preserved
         assert report.themes  # deterministic "Delivered work" theme
@@ -94,14 +94,14 @@ class TestRunDeliveryReport:
 
     def test_auth_error_becomes_warning_not_raised(self, monkeypatch, db_path):
         _patch_activity(monkeypatch, items=_items(1))
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-        monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
-        monkeypatch.setattr("scrum_agent.agent.nodes._is_llm_auth_or_billing_error", lambda e: True)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._is_llm_auth_or_billing_error", lambda e: True)
 
         def _boom(**k):
             raise RuntimeError("401 invalid api key")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", _boom)
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _boom)
         report = engine.run_delivery_report("last_sprint", db_path=db_path)  # must not raise
         assert any("billing" in w.lower() or "invalid" in w.lower() for w in report.warnings)
 
@@ -112,8 +112,8 @@ class TestRunDeliveryReport:
         def _fail(**k):
             raise AssertionError("LLM must not be called when there is no delivered work")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", _fail)
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _fail)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
         report = engine.run_delivery_report("last_month", db_path=db_path)
         assert report.delivered_items == ()
         assert report.warnings == ("No board configured",)
@@ -123,7 +123,7 @@ class TestRunDeliveryReport:
         _patch_activity(monkeypatch, items=_items(2))
         _patch_llm(monkeypatch, "{}")  # empty parse → fallback, still persists
         engine.run_delivery_report("last_sprint", session_id="s1", db_path=db_path)
-        from scrum_agent.reporting.store import ReportingStore
+        from yeaboi.reporting.store import ReportingStore
 
         with ReportingStore(db_path) as store:
             assert store.get_latest_report() is not None

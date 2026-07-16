@@ -5,14 +5,21 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import HumanMessage
 
-from scrum_agent.agent.nodes import (
+from tests._node_helpers import (
+    VALID_FEATURES_JSON,
+    VALID_SPRINTS_JSON,
+    VALID_STORIES_JSON,
+    VALID_TASKS_JSON,
+    make_dummy_analysis,
+)
+from yeaboi.agent.nodes import (
     _parse_review_intent,
     feature_generator,
     sprint_planner,
     story_writer,
     task_decomposer,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Feature,
     Priority,
@@ -20,13 +27,6 @@ from scrum_agent.agent.state import (
     ReviewDecision,
     StoryPointValue,
     UserStory,
-)
-from tests._node_helpers import (
-    VALID_FEATURES_JSON,
-    VALID_SPRINTS_JSON,
-    VALID_STORIES_JSON,
-    VALID_TASKS_JSON,
-    make_dummy_analysis,
 )
 
 
@@ -111,7 +111,7 @@ class TestFeatureGeneratorReview:
         fake_response.content = VALID_FEATURES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = feature_generator(self._make_state())
         assert result["pending_review"] == "feature_generator"
@@ -132,7 +132,7 @@ class TestFeatureGeneratorReview:
             mock.invoke.side_effect = capture_invoke
             return mock
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", mock_llm_factory)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", mock_llm_factory)
 
         state = self._make_state(
             last_review_decision=ReviewDecision.REJECT,
@@ -159,7 +159,7 @@ class TestFeatureGeneratorReview:
             mock.invoke.side_effect = capture_invoke
             return mock
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", mock_llm_factory)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", mock_llm_factory)
 
         state = self._make_state(
             last_review_decision=ReviewDecision.EDIT,
@@ -186,7 +186,7 @@ class TestFeatureGeneratorReview:
             mock.invoke.side_effect = capture_invoke
             return mock
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", mock_llm_factory)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", mock_llm_factory)
 
         state = self._make_state()
         feature_generator(state)
@@ -215,7 +215,7 @@ class TestStoryWriterReview:
         fake_response.content = VALID_STORIES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = story_writer(self._make_state())
         assert result["pending_review"] == "story_writer"
@@ -236,7 +236,7 @@ class TestStoryWriterReview:
             mock.invoke.side_effect = capture_invoke
             return mock
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", mock_llm_factory)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", mock_llm_factory)
 
         state = self._make_state(
             last_review_decision=ReviewDecision.REJECT,
@@ -284,7 +284,7 @@ class TestTaskDecomposerReview:
         fake_response.content = VALID_TASKS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = task_decomposer(self._make_state())
         assert result["pending_review"] == "task_decomposer"
@@ -305,7 +305,7 @@ class TestTaskDecomposerReview:
             mock.invoke.side_effect = capture_invoke
             return mock
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", mock_llm_factory)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", mock_llm_factory)
 
         state = self._make_state(
             last_review_decision=ReviewDecision.REJECT,
@@ -352,7 +352,7 @@ class TestSprintPlannerReview:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = sprint_planner(self._make_state())
         assert result["pending_review"] == "sprint_planner"
@@ -373,7 +373,7 @@ class TestSprintPlannerReview:
             mock.invoke.side_effect = capture_invoke
             return mock
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", mock_llm_factory)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", mock_llm_factory)
 
         state = self._make_state(
             last_review_decision=ReviewDecision.REJECT,

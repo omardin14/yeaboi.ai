@@ -1,4 +1,4 @@
-"""Tests for the ffplay background-music controller (scrum_agent/music.py).
+"""Tests for the ffplay background-music controller (yeaboi/music.py).
 
 Everything is mocked at the subprocess/signal boundary so no real ``ffplay``
 binary, audio device, or config file is touched. Playback is one long-lived
@@ -11,7 +11,7 @@ import signal
 
 import pytest
 
-from scrum_agent import music
+from yeaboi import music
 
 
 class _FakePopen:

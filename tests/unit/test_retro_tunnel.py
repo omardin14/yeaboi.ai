@@ -5,7 +5,7 @@ import stat
 
 import pytest
 
-from scrum_agent.retro import tunnel
+from yeaboi.retro import tunnel
 
 
 class TestAssetName:

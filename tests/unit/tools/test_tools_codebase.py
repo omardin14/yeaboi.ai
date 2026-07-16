@@ -8,7 +8,7 @@ skipped directories, and error handling.
 
 import pathlib
 
-from scrum_agent.tools.codebase import (
+from yeaboi.tools.codebase import (
     _BINARY_EXTENSIONS,
     _EXT_TO_LANG,
     _KEY_FILES,

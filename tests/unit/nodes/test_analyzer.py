@@ -12,7 +12,12 @@ except ImportError:
     _HAS_PYMUPDF = False
 from langchain_core.messages import AIMessage, HumanMessage
 
-from scrum_agent.agent.nodes import (
+from tests._node_helpers import (
+    VALID_ANALYSIS_JSON,
+    make_completed_questionnaire,
+    make_dummy_analysis,
+)
+from yeaboi.agent.nodes import (
     _build_answers_block,
     _build_fallback_analysis,
     _extract_confluence_page_ids,
@@ -24,17 +29,12 @@ from scrum_agent.agent.nodes import (
     compute_prompt_quality,
     project_analyzer,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     ProjectAnalysis,
     QuestionnaireState,
 )
-from scrum_agent.prompts.intake import QUESTION_DEFAULTS
-from tests._node_helpers import (
-    VALID_ANALYSIS_JSON,
-    make_completed_questionnaire,
-    make_dummy_analysis,
-)
+from yeaboi.prompts.intake import QUESTION_DEFAULTS
 
 
 class TestBuildAnswersBlock:
@@ -309,7 +309,7 @@ class TestProjectAnalyzer:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = project_analyzer(self._make_state())
         assert "project_analysis" in result
@@ -321,7 +321,7 @@ class TestProjectAnalyzer:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = project_analyzer(self._make_state())
         assert "messages" in result
@@ -334,7 +334,7 @@ class TestProjectAnalyzer:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = project_analyzer(self._make_state())
         assert result["project_name"] == "Todo App"
@@ -348,7 +348,7 @@ class TestProjectAnalyzer:
         fake_response.content = "not valid json at all"
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = project_analyzer(self._make_state())
         assert isinstance(result["project_analysis"], ProjectAnalysis)
@@ -359,7 +359,7 @@ class TestProjectAnalyzer:
         """When the LLM call raises an exception, the fallback should be used."""
         mock_llm = MagicMock()
         mock_llm.invoke.side_effect = RuntimeError("API down")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = project_analyzer(self._make_state())
         assert isinstance(result["project_analysis"], ProjectAnalysis)
@@ -371,7 +371,7 @@ class TestProjectAnalyzer:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = self._make_state()
         del state["team_size"]
@@ -433,8 +433,8 @@ class TestScanRepoContext:
         mock_readme = MagicMock()
         mock_readme.invoke.return_value = "# MyProject\nA great project."
 
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", mock_repo)
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_readme", mock_readme)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", mock_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_readme", mock_readme)
 
         qs = self._make_qs("https://github.com/owner/repo", "GitHub")
         result, status = _scan_repo_context(qs)
@@ -453,8 +453,8 @@ class TestScanRepoContext:
         mock_readme = MagicMock()
         mock_readme.invoke.return_value = "readme data"
 
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", mock_repo)
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_readme", mock_readme)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", mock_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_readme", mock_readme)
 
         qs = self._make_qs("https://github.com/owner/repo", "GitHub")
         result, _status = _scan_repo_context(qs)
@@ -470,8 +470,8 @@ class TestScanRepoContext:
         mock_readme = MagicMock()
         mock_readme.invoke.return_value = "Error: network error"
 
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", mock_repo)
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_readme", mock_readme)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", mock_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_readme", mock_readme)
 
         qs = self._make_qs("https://github.com/owner/repo", "GitHub")
         ctx, status = _scan_repo_context(qs)
@@ -485,8 +485,8 @@ class TestScanRepoContext:
         mock_readme = MagicMock()
         mock_readme.invoke.return_value = "# README content"
 
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", mock_repo)
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_readme", mock_readme)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", mock_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_readme", mock_readme)
 
         qs = self._make_qs("https://github.com/owner/repo", "GitHub")
         result, status = _scan_repo_context(qs)
@@ -502,8 +502,8 @@ class TestScanRepoContext:
         mock_readme = MagicMock()
         mock_readme.invoke.return_value = "# README"
 
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", mock_repo)
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_readme", mock_readme)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", mock_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_readme", mock_readme)
 
         qs = self._make_qs("https://github.com/owner/repo", "GitHub")
         result, status = _scan_repo_context(qs)
@@ -518,7 +518,7 @@ class TestScanRepoContext:
         mock_fn = MagicMock()
         mock_fn.invoke.return_value = "## AzDO File Tree\n- src/"
 
-        monkeypatch.setattr("scrum_agent.tools.azure_devops.azdevops_read_repo", mock_fn)
+        monkeypatch.setattr("yeaboi.tools.azure_devops.azdevops_read_repo", mock_fn)
 
         qs = self._make_qs("https://dev.azure.com/org/proj/_git/repo", "Azure DevOps")
         result, status = _scan_repo_context(qs)
@@ -533,7 +533,7 @@ class TestScanRepoContext:
         mock_fn = MagicMock()
         mock_fn.invoke.return_value = "Error: unauthorized"
 
-        monkeypatch.setattr("scrum_agent.tools.azure_devops.azdevops_read_repo", mock_fn)
+        monkeypatch.setattr("yeaboi.tools.azure_devops.azdevops_read_repo", mock_fn)
 
         qs = self._make_qs("https://dev.azure.com/org/proj/_git/repo", "Azure DevOps")
         ctx, status = _scan_repo_context(qs)
@@ -561,9 +561,9 @@ class TestProjectAnalyzerRepoContext:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._scan_repo_context",
+            "yeaboi.agent.nodes._scan_repo_context",
             lambda _qs: ("## File Tree\n- src/", {"name": "Repository", "status": "success", "detail": "test"}),
         )
 
@@ -577,9 +577,9 @@ class TestProjectAnalyzerRepoContext:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._scan_repo_context",
+            "yeaboi.agent.nodes._scan_repo_context",
             lambda _qs: (None, {"name": "Repository", "status": "skipped", "detail": "test"}),
         )
 
@@ -621,7 +621,7 @@ class TestFetchConfluenceContext:
         # Replace the whole module-level object with a MagicMock instead.
         mock_tool = MagicMock()
         mock_tool.invoke.return_value = "Error: Confluence is not configured."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_tool)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_tool)
         # Patch credentials to appear configured so we reach the search call
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
@@ -636,7 +636,7 @@ class TestFetchConfluenceContext:
         """Returns None when confluence_search_docs returns 'No Confluence pages found'."""
         mock_tool = MagicMock()
         mock_tool.invoke.return_value = "No Confluence pages found for 'My Project'."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_tool)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_tool)
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
         monkeypatch.setenv("JIRA_API_TOKEN", "token")
@@ -651,7 +651,7 @@ class TestFetchConfluenceContext:
         fake_results = "Confluence search results for 'My Project':\n\n[Arch Docs] (ID: 1)\n  Auth system..."
         mock_tool = MagicMock()
         mock_tool.invoke.return_value = fake_results
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_tool)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_tool)
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
         monkeypatch.setenv("JIRA_API_TOKEN", "token")
@@ -665,7 +665,7 @@ class TestFetchConfluenceContext:
         """Returns None (does not raise) when an unexpected error occurs."""
         mock_tool = MagicMock()
         mock_tool.invoke.side_effect = RuntimeError("Network error")
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_tool)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_tool)
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
         monkeypatch.setenv("JIRA_API_TOKEN", "token")
@@ -680,11 +680,11 @@ class TestFetchConfluenceContext:
         # Search returns nothing, but SCRUM.md has a direct page URL
         mock_search = MagicMock()
         mock_search.invoke.return_value = "No Confluence pages found for 'My Project'."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_search)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_search)
 
         mock_read = MagicMock()
         mock_read.invoke.return_value = "=== RunBook: Container Restart ===\nURL: ...\n\nStep 1: Check pods..."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_read_page", mock_read)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_read_page", mock_read)
 
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
@@ -705,11 +705,11 @@ class TestFetchConfluenceContext:
         """Combines keyword search results with directly fetched pages from SCRUM.md URLs."""
         mock_search = MagicMock()
         mock_search.invoke.return_value = "Confluence search results for 'My Project':\n\n[ADR-001] ..."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_search)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_search)
 
         mock_read = MagicMock()
         mock_read.invoke.return_value = "=== RunBook ===\nStep 1..."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_read_page", mock_read)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_read_page", mock_read)
 
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
@@ -727,11 +727,11 @@ class TestFetchConfluenceContext:
         """Does not fetch the same Confluence page ID twice."""
         mock_search = MagicMock()
         mock_search.invoke.return_value = "No Confluence pages found."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_search)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_search)
 
         mock_read = MagicMock()
         mock_read.invoke.return_value = "=== Page ===\nContent"
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_read_page", mock_read)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_read_page", mock_read)
 
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
@@ -750,14 +750,14 @@ class TestFetchConfluenceContext:
         """Continues when individual page fetches fail."""
         mock_search = MagicMock()
         mock_search.invoke.return_value = "No Confluence pages found."
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_search_docs", mock_search)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_search_docs", mock_search)
 
         mock_read = MagicMock()
         mock_read.invoke.side_effect = [
             RuntimeError("Page deleted"),
             "=== Good Page ===\nContent",
         ]
-        monkeypatch.setattr("scrum_agent.tools.confluence.confluence_read_page", mock_read)
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_read_page", mock_read)
 
         monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
@@ -829,13 +829,13 @@ class TestProjectAnalyzerConfluenceContext:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._scan_repo_context",
+            "yeaboi.agent.nodes._scan_repo_context",
             lambda _qs: (None, {"name": "Repository", "status": "skipped", "detail": "test"}),
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._fetch_confluence_context",
+            "yeaboi.agent.nodes._fetch_confluence_context",
             lambda _qs, **kw: (
                 "Confluence search results for 'My Project':\n\n[ADR-001] ...",
                 {"name": "Confluence", "status": "success", "detail": "test"},
@@ -852,13 +852,13 @@ class TestProjectAnalyzerConfluenceContext:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._scan_repo_context",
+            "yeaboi.agent.nodes._scan_repo_context",
             lambda _qs: (None, {"name": "Repository", "status": "skipped", "detail": "test"}),
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._fetch_confluence_context",
+            "yeaboi.agent.nodes._fetch_confluence_context",
             lambda _qs, **kw: (None, {"name": "Confluence", "status": "skipped", "detail": "test"}),
         )
 
@@ -946,7 +946,7 @@ class TestLoadUserContext:
 
     def test_docs_dir_respects_budget(self, tmp_path):
         """Files in scrum-docs/ are truncated when they exceed the character budget."""
-        from scrum_agent.tools.codebase import _MAX_DOCS_CHARS
+        from yeaboi.tools.codebase import _MAX_DOCS_CHARS
 
         docs = tmp_path / "scrum-docs"
         docs.mkdir()
@@ -1053,17 +1053,17 @@ class TestProjectAnalyzerUserContext:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._scan_repo_context",
+            "yeaboi.agent.nodes._scan_repo_context",
             lambda _qs: (None, {"name": "Repository", "status": "skipped", "detail": "test"}),
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._fetch_confluence_context",
+            "yeaboi.agent.nodes._fetch_confluence_context",
             lambda _qs, **kw: (None, {"name": "Confluence", "status": "skipped", "detail": "test"}),
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._load_user_context",
+            "yeaboi.agent.nodes._load_user_context",
             lambda: ("# SCRUM notes\nUse Postgres.", {"name": "SCRUM.md", "status": "success", "detail": "test"}),
         )
 
@@ -1073,7 +1073,7 @@ class TestProjectAnalyzerUserContext:
             captured.update(kwargs)
             return "mock prompt"
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_analyzer_prompt", mock_prompt)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_analyzer_prompt", mock_prompt)
 
         project_analyzer(self._make_state())
         assert captured.get("user_context") == "# SCRUM notes\nUse Postgres."
@@ -1084,17 +1084,17 @@ class TestProjectAnalyzerUserContext:
         fake_response.content = VALID_ANALYSIS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._scan_repo_context",
+            "yeaboi.agent.nodes._scan_repo_context",
             lambda _qs: (None, {"name": "Repository", "status": "skipped", "detail": "test"}),
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._fetch_confluence_context",
+            "yeaboi.agent.nodes._fetch_confluence_context",
             lambda _qs, **kw: (None, {"name": "Confluence", "status": "skipped", "detail": "test"}),
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._load_user_context",
+            "yeaboi.agent.nodes._load_user_context",
             lambda: (None, {"name": "SCRUM.md", "status": "skipped", "detail": "test"}),
         )
 
@@ -1104,7 +1104,7 @@ class TestProjectAnalyzerUserContext:
             captured.update(kwargs)
             return "mock prompt"
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_analyzer_prompt", mock_prompt)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_analyzer_prompt", mock_prompt)
 
         project_analyzer(self._make_state())
         assert captured.get("user_context") is None

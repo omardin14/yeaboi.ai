@@ -1,15 +1,15 @@
 # Telemetry — What We Collect
 
-scrum-agent includes **opt-in anonymous telemetry** to help us improve planning quality. It is **disabled by default** and must be explicitly enabled.
+yeaboi includes **opt-in anonymous telemetry** to help us improve planning quality. It is **disabled by default** and must be explicitly enabled.
 
 ## Enabling / Disabling
 
 ```bash
 # Enable
-export SCRUM_AGENT_TELEMETRY=true
+export YEABOI_TELEMETRY=true
 
 # Disable (default)
-export SCRUM_AGENT_TELEMETRY=false
+export YEABOI_TELEMETRY=false
 # or simply don't set the variable
 ```
 
@@ -22,7 +22,7 @@ When telemetry is enabled, the following **anonymized, structural data** is sent
 |-------|---------|---------|
 | `event_id` | `a3f91b2c-...` | Unique event ID (random UUID, not tied to user) |
 | `timestamp` | `2026-03-23T12:00:00Z` | When the session completed |
-| `agent_version` | `1.0.0` | Which version of scrum-agent |
+| `agent_version` | `1.0.0` | Which version of yeaboi |
 | `platform` | `Darwin` | OS (macOS/Linux/Windows) |
 | `python_version` | `3.12.1` | Python version |
 | `llm_provider` | `anthropic` | Which LLM provider was used |
@@ -116,17 +116,17 @@ When telemetry is enabled, the following **anonymized, structural data** is sent
 
 - Raw telemetry is stored indefinitely for trend analysis
 - Data is never sold or shared with third parties
-- Data is used exclusively to improve scrum-agent
+- Data is used exclusively to improve yeaboi
 
 ## Custom Endpoint
 
 If you want to collect telemetry for your own analysis:
 
 ```bash
-export SCRUM_AGENT_TELEMETRY=true
-export SCRUM_AGENT_TELEMETRY_URL=https://your-endpoint.example.com/collect
+export YEABOI_TELEMETRY=true
+export YEABOI_TELEMETRY_URL=https://your-endpoint.example.com/collect
 ```
 
 ## Questions?
 
-Open an issue at [github.com/omardin14/scrum-planning-ai-agent](https://github.com/omardin14/scrum-planning-ai-agent/issues).
+Open an issue at [github.com/omardin14/yeaboi.ai](https://github.com/omardin14/yeaboi.ai/issues).

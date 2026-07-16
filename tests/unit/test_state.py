@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     PHASE_QUESTION_RANGES,
     TOTAL_QUESTIONS,
     AcceptanceCriterion,
@@ -654,7 +654,7 @@ class TestQuestionnaireIntakeMode:
 
     def test_intake_mode_survives_round_trip(self):
         """small_project intake_mode persists across session serialization."""
-        from scrum_agent.sessions import _dict_to_questionnaire, _questionnaire_to_dict
+        from yeaboi.sessions import _dict_to_questionnaire, _questionnaire_to_dict
 
         qs = QuestionnaireState(intake_mode="small_project")
         restored = _dict_to_questionnaire(_questionnaire_to_dict(qs))
@@ -665,7 +665,7 @@ class TestSmallProjectOversizedField:
     """The _small_project_oversized advisory flag round-trips through session state."""
 
     def test_round_trip(self):
-        from scrum_agent.sessions import _deserialize_state, _serialize_state
+        from yeaboi.sessions import _deserialize_state, _serialize_state
 
         state = {"messages": [], "_small_project_oversized": True, "_intake_mode": "small_project"}
         restored = _deserialize_state(_serialize_state(state))
@@ -862,7 +862,7 @@ class TestStandupReport:
 
     def test_round_trip_via_store_helpers(self):
         """StandupReport survives serialize -> JSON -> reconstruct with types intact."""
-        from scrum_agent.standup.store import _dict_to_standup_report, _standup_report_to_json
+        from yeaboi.standup.store import _dict_to_standup_report, _standup_report_to_json
 
         original = StandupReport(
             date="2026-07-10",
@@ -892,7 +892,7 @@ class TestStandupReport:
 
     def test_reconstruct_backfills_missing_fields(self):
         """A report dict from an older version (missing keys) still deserializes."""
-        from scrum_agent.standup.store import _dict_to_standup_report
+        from yeaboi.standup.store import _dict_to_standup_report
 
         restored = _dict_to_standup_report({"date": "2026-07-10", "session_id": "s1"})
         assert restored.date == "2026-07-10"
@@ -904,7 +904,7 @@ class TestDeliveryReport:
     """The Reporting mode's DeliveryReport frozen dataclass + serialization."""
 
     def test_frozen(self):
-        from scrum_agent.agent.state import DeliveryReport
+        from yeaboi.agent.state import DeliveryReport
 
         r = DeliveryReport(period_label="Last sprint")
         with pytest.raises(FrozenInstanceError):
@@ -912,8 +912,8 @@ class TestDeliveryReport:
 
     def test_round_trip_via_store_helpers(self):
         """DeliveryReport survives serialize -> JSON -> reconstruct with types intact."""
-        from scrum_agent.agent.state import DeliveredItem, DeliveryReport
-        from scrum_agent.reporting.store import _dict_to_report, _report_to_json
+        from yeaboi.agent.state import DeliveredItem, DeliveryReport
+        from yeaboi.reporting.store import _dict_to_report, _report_to_json
 
         original = DeliveryReport(
             period_label="Last month (~2 sprints)",
@@ -941,7 +941,7 @@ class TestDeliveryReport:
         assert isinstance(restored.delivered_items[0], DeliveredItem)
 
     def test_reconstruct_backfills_missing_fields(self):
-        from scrum_agent.reporting.store import _dict_to_report
+        from yeaboi.reporting.store import _dict_to_report
 
         restored = _dict_to_report({"period_label": "Last sprint"})
         assert restored.period_label == "Last sprint"

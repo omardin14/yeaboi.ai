@@ -3,8 +3,8 @@
 import pytest
 from rich.console import Group
 
-from scrum_agent.agent.state import OneOnOnePrep, OneOnOneRecord, SixMonthReview
-from scrum_agent.performance import delivery, export, render
+from yeaboi.agent.state import OneOnOnePrep, OneOnOneRecord, SixMonthReview
+from yeaboi.performance import delivery, export, render
 
 
 class TestRender:
@@ -43,7 +43,7 @@ class TestExport:
             d.mkdir(parents=True, exist_ok=True)
             return d
 
-        monkeypatch.setattr("scrum_agent.paths.get_performance_export_dir", _dir)
+        monkeypatch.setattr("yeaboi.paths.get_performance_export_dir", _dir)
 
     def test_export_prep_writes_md_and_html(self, tmp_path):
         prep = OneOnOnePrep(engineer="Ada", date="2026-07-12", talking_points=("point",))
@@ -70,8 +70,8 @@ class TestExport:
 
 class TestDelivery:
     def test_skips_when_smtp_unconfigured(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.config.get_smtp_host", lambda: "")
-        monkeypatch.setattr("scrum_agent.config.get_standup_email_recipients", lambda: [])
+        monkeypatch.setattr("yeaboi.config.get_smtp_host", lambda: "")
+        monkeypatch.setattr("yeaboi.config.get_standup_email_recipients", lambda: [])
         rec = OneOnOneRecord(engineer="Ada", date="2026-07-12", email_summary="hi")
         assert delivery.send_completion_email(rec) is False
 
@@ -100,12 +100,12 @@ class TestDelivery:
             def send_message(self, msg):
                 sent["to"] = msg["To"]
 
-        monkeypatch.setattr("scrum_agent.config.get_smtp_host", lambda: "smtp.example.com")
-        monkeypatch.setattr("scrum_agent.config.get_smtp_port", lambda: 587)
-        monkeypatch.setattr("scrum_agent.config.get_smtp_user", lambda: "me@example.com")
-        monkeypatch.setattr("scrum_agent.config.get_smtp_password", lambda: "pw")
-        monkeypatch.setattr("scrum_agent.config.get_smtp_sender", lambda: "me@example.com")
-        monkeypatch.setattr("scrum_agent.config.get_standup_email_recipients", lambda: ["boss@example.com"])
+        monkeypatch.setattr("yeaboi.config.get_smtp_host", lambda: "smtp.example.com")
+        monkeypatch.setattr("yeaboi.config.get_smtp_port", lambda: 587)
+        monkeypatch.setattr("yeaboi.config.get_smtp_user", lambda: "me@example.com")
+        monkeypatch.setattr("yeaboi.config.get_smtp_password", lambda: "pw")
+        monkeypatch.setattr("yeaboi.config.get_smtp_sender", lambda: "me@example.com")
+        monkeypatch.setattr("yeaboi.config.get_standup_email_recipients", lambda: ["boss@example.com"])
         monkeypatch.setattr("smtplib.SMTP", _FakeSMTP)
 
         rec = OneOnOneRecord(engineer="Ada", date="2026-07-12", email_subject="1:1", email_summary="hi")

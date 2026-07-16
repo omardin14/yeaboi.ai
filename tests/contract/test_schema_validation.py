@@ -380,7 +380,7 @@ class TestGithubCassetteSchemas:
 # ---------------------------------------------------------------------------
 #
 # These schemas correspond exactly to the _JSON_SCHEMA strings embedded in each
-# prompt builder in src/scrum_agent/prompts/. Keeping them in sync ensures the
+# prompt builder in src/yeaboi/prompts/. Keeping them in sync ensures the
 # prompt documentation and the parse logic agree on the expected structure.
 #
 # See README: "Prompt Construction" — JSON schema in each prompt

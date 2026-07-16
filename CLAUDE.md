@@ -36,7 +36,7 @@ Run a single test class: `uv run pytest tests/unit/test_state.py::TestPriority -
 
 ```bash
 brew install asciinema agg
-asciinema rec docs/demo.cast -c "scrum-agent --dry-run"   # record
+asciinema rec docs/demo.cast -c "yeaboi --dry-run"   # record
 agg docs/demo.cast docs/demo.gif --theme github-dark       # convert to GIF
 rm docs/demo.cast                                           # clean up source
 ```
@@ -45,7 +45,7 @@ rm docs/demo.cast                                           # clean up source
 
 - Python 3.11+, ruff for linting/formatting (line-length 120)
 - Imports sorted by ruff (isort rules: stdlib, third-party, local)
-- Tests in `tests/`, source in `src/scrum_agent/`
+- Tests in `tests/`, source in `src/yeaboi/`
 
 ## REQUIRED: Learning-First Development
 
@@ -92,11 +92,11 @@ Every new feature MUST include all three pillars before it can be considered com
 
 ### 2. Log Directory
 - **New TUI pages** (Usage, Settings, etc.) use the appropriate log directory from `paths.py`
-- **Analysis mode** logs go to `paths.ANALYSIS_LOGS_DIR` (~/.scrum-agent/logs/analysis/)
-- **Planning mode** session logs go to `paths.PLANNING_LOGS_DIR` (~/.scrum-agent/logs/planning/)
-- **TUI-level logs** go to `paths.TUI_LOGS_DIR` (~/.scrum-agent/logs/tui/)
+- **Analysis mode** logs go to `paths.ANALYSIS_LOGS_DIR` (~/.yeaboi/logs/analysis/)
+- **Planning mode** session logs go to `paths.PLANNING_LOGS_DIR` (~/.yeaboi/logs/planning/)
+- **TUI-level logs** go to `paths.TUI_LOGS_DIR` (~/.yeaboi/logs/tui/)
 - **Exports** use `paths.get_analysis_export_dir()` or `paths.get_planning_export_dir()`
-- All paths MUST come from `src/scrum_agent/paths.py` — never hardcode `Path.home() / ".scrum-agent"`
+- All paths MUST come from `src/yeaboi/paths.py` — never hardcode `Path.home() / ".yeaboi"`
 
 ### 3. Tests
 - **Every new function** gets at least one unit test (happy path + error case)
@@ -108,7 +108,7 @@ Every new feature MUST include all three pillars before it can be considered com
 
 ## REQUIRED: TUI Component Standards
 
-All TUI screens MUST use the shared component system in `src/scrum_agent/ui/shared/_components.py`. Do NOT duplicate rendering logic.
+All TUI screens MUST use the shared component system in `src/yeaboi/ui/shared/_components.py`. Do NOT duplicate rendering logic.
 
 ### Shared Primitives (use these, don't rewrite)
 | Component | Function | Purpose |
@@ -144,12 +144,12 @@ Panel(height=height, padding=(1,2))
 4. **Consistency** — All pages use the same Panel structure (title → subtitle → viewport → buttons). No exceptions.
 5. **Scrollbar** — Content that can overflow MUST use `build_scrollbar()`. Use `always_show=True` for pages where the track should always be visible.
 6. **Buttons** — Register new button labels in `_BTN_COLORS` dict in `_components.py` with accent/grey colour tuples.
-7. **No `_PAD` aliases** — Import `PAD` directly from `scrum_agent.ui.shared._components`. Legacy `_PAD = PAD` aliases exist but should not be added to new files.
+7. **No `_PAD` aliases** — Import `PAD` directly from `yeaboi.ui.shared._components`. Legacy `_PAD = PAD` aliases exist but should not be added to new files.
 
 ## Project Structure
 
 ```
-src/scrum_agent/
+src/yeaboi/
   __init__.py           — Version (__version__), LangSmith noise suppression
   cli.py                — CLI entry point (argparse, 20 flags, headless mode, session mgmt)
   config.py             — Environment/config (API keys, LangSmith, proxy detection)
@@ -260,7 +260,7 @@ Conventions:
 - Agent logic lives in `agent/` — state, graph wiring, and node functions
 - Prompts are separate from agent logic in `prompts/`
 - Tools are separate in `tools/` — each tool gets a `@tool` decorator with a descriptive docstring
-- Re-export public APIs from `__init__.py` (e.g. `from scrum_agent.agent import ScrumState`)
+- Re-export public APIs from `__init__.py` (e.g. `from yeaboi.agent import ScrumState`)
 - The `ui/` package is the full-screen TUI; `repl/` is the legacy REPL for CLI-flag-driven flows (`--quick`, `--full-intake`, `--questionnaire`, `--mode`)
 - Files prefixed with `_` inside `repl/` and `ui/` subpackages are internal — not public API
 
@@ -338,7 +338,7 @@ All tools are registered via `get_tools()` in `tools/__init__.py`. This single f
 
 ### Lazy imports
 
-Tool modules are imported **inside** `get_tools()`, not at module level. This is because tool dependencies (PyGithub, azure-devops, jira SDK) may not be installed. Lazy import means `from scrum_agent.tools import get_tools` always succeeds; ImportError surfaces only when `get_tools()` is called.
+Tool modules are imported **inside** `get_tools()`, not at module level. This is because tool dependencies (PyGithub, azure-devops, jira SDK) may not be installed. Lazy import means `from yeaboi.tools import get_tools` always succeeds; ImportError surfaces only when `get_tools()` is called.
 
 ### Adding a new tool
 
@@ -412,16 +412,16 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - Test both happy path and edge cases (empty input, boundary values, immutability)
 - Node tests live in `tests/unit/nodes/` — split into ~9 files by node (analyzer, route, tasks, etc.)
 - Shared node test helpers in `tests/_node_helpers.py`: `make_completed_questionnaire()`, `make_dummy_analysis()`, `make_sample_features()`, `make_sample_stories()`, `make_sample_sprints()`
-- **Never modify `tests/integration/test_repl.py`** — it monkeypatches 10+ names in `scrum_agent.repl` and is the only test file with this level of coupling. Future tests should avoid this pattern.
+- **Never modify `tests/integration/test_repl.py`** — it monkeypatches 10+ names in `yeaboi.repl` and is the only test file with this level of coupling. Future tests should avoid this pattern.
 - Pytest markers: `slow` (graph compilation), `eval` (golden evaluators), `vcr` (contract tests), `smoke` (live API)
 
 ## Logging
 
-- **TUI log**: `~/.scrum-agent/logs/tui/scrum-agent.log` (rotates at 2 MB, 3 backups)
-- **Analysis logs**: `~/.scrum-agent/logs/analysis/team-analysis-{project}-{timestamp}.log`
-- **Planning logs**: `~/.scrum-agent/logs/planning/{session-id}.log`
+- **TUI log**: `~/.yeaboi/logs/tui/yeaboi.log` (rotates at 2 MB, 3 backups)
+- **Analysis logs**: `~/.yeaboi/logs/analysis/team-analysis-{project}-{timestamp}.log`
+- **Planning logs**: `~/.yeaboi/logs/planning/{session-id}.log`
 - Log level controlled by `LOG_LEVEL` env var (default: `WARNING`; set to `DEBUG` for full diagnostics)
-- All paths defined in `src/scrum_agent/paths.py` — use `get_tui_log_path()`, `get_analysis_log_dir()`, `get_planning_log_dir()`
+- All paths defined in `src/yeaboi/paths.py` — use `get_tui_log_path()`, `get_analysis_log_dir()`, `get_planning_log_dir()`
 - LangSmith 429 rate-limit errors are auto-suppressed via a custom logging filter in `__init__.py`
 - Token usage is tracked via `track_usage()` in `agent/llm.py` and persisted to `token_usage` table in SQLite
 
@@ -445,7 +445,7 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - `SLACK_WEBHOOK_URL` — optional, Slack incoming-webhook URL for Daily Standup delivery
 - `STANDUP_SMTP_HOST` / `STANDUP_SMTP_PORT` / `STANDUP_SMTP_USER` / `STANDUP_SMTP_PASSWORD` / `STANDUP_SMTP_SENDER` / `STANDUP_EMAIL_RECIPIENTS` — optional, SMTP email delivery for Daily Standup
 - `RETRO_PORT` — optional, base port for the Retro LAN collaboration server (default 5173; walks upward if busy)
-- `CLOUDFLARED_PATH` — optional, path to an existing `cloudflared` binary for Retro remote tunnels (else the app auto-downloads one to `~/.scrum-agent/bin/`)
+- `CLOUDFLARED_PATH` — optional, path to an existing `cloudflared` binary for Retro remote tunnels (else the app auto-downloads one to `~/.yeaboi/bin/`)
 - `PERFORMANCE_FRAMEWORK_PATH` — optional, path to a custom competency framework / review template for Performance mode's 6-month review (else the bundled `performance/references/competency_framework.md` default is used). 1:1 summary emails reuse the standup `STANDUP_SMTP_*` / `STANDUP_EMAIL_RECIPIENTS` settings.
 - `SESSION_PRUNE_DAYS` — auto-prune sessions older than N days (default: 30, 0 = disabled)
 - `LOG_LEVEL` — file logger level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
@@ -455,11 +455,11 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 
 ## Version Management
 
-Version is **single-sourced in `pyproject.toml`** (`version = "…"`). `src/scrum_agent/__init__.py` reads it at runtime from the installed package metadata (`importlib.metadata.version("scrum-agent")`, with a `0.0.0+dev` fallback for uninstalled source trees). `__version__` is imported by `cli.py` for the `--version` flag. Package entry point: `scrum-agent = "scrum_agent.cli:main"`.
+Version is **single-sourced in `pyproject.toml`** (`version = "…"`). `src/yeaboi/__init__.py` reads it at runtime from the installed package metadata (`importlib.metadata.version("yeaboi")`, with a `0.0.0+dev` fallback for uninstalled source trees). `__version__` is imported by `cli.py` for the `--version` flag. Package entry points: `yeaboi = "yeaboi.cli:main"` (canonical) and a one-release back-compat alias `scrum-agent = "yeaboi.cli:main"`. The PyPI distribution was renamed `scrum-agent` → `yeaboi`; a thin `scrum-agent` redirect package (`packaging/scrum-agent-shim/`) depends on `yeaboi` so existing installs migrate.
 
 **Releasing is automatic on a version bump.** To ship a release: bump `version` in `pyproject.toml` (semver) and merge to `main`. On that push, `publish.yml` detects there's no `v<version>` tag yet and runs test → build → PyPI publish (OIDC) → creates the `v<version>` tag + GitHub Release. Merges that don't change the version are a no-op. Never tag manually — the workflow owns tagging.
 
-**The bump itself is automated too (`auto-version.yml`).** On each PR, cheap deterministic guards run first (skip if the version was already changed in the PR, or if no `src/scrum_agent/**` files changed and no `semver:*` label is present); otherwise Claude classifies the diff into a semver level and commits `chore: bump version to X.Y.Z [auto]` **to the PR branch** — so merging fires `publish.yml` with no manual step. Rules:
+**The bump itself is automated too (`auto-version.yml`).** On each PR, cheap deterministic guards run first (skip if the version was already changed in the PR, or if no `src/yeaboi/**` files changed and no `semver:*` label is present); otherwise Claude classifies the diff into a semver level and commits `chore: bump version to X.Y.Z [auto]` **to the PR branch** — so merging fires `publish.yml` with no manual step. Rules:
 - **Bump on the PR branch, not `main`** — a workflow pushing to `main` with the default `GITHUB_TOKEN` would not re-trigger `publish.yml` (recursion suppression); the human merge does. This means no PAT is needed.
 - **Override with a label**: `semver:major` / `semver:minor` / `semver:patch` forces the level; `release:skip` (or `semver:none`) suppresses the bump.
 - **Manual bumps still work** — if you edit `version` yourself, the guard sees it already differs from `main` and leaves it alone.
@@ -485,12 +485,12 @@ There is no Homebrew tap auto-update: the `omardin14/homebrew-tap` formula is di
 
 ## OpenClaw Skill
 
-The `skills/scrum-planner/` directory contains an OpenClaw skill that replicates the smart intake TUI experience conversationally. OpenClaw acts as the front-end (asks questions, handles follow-ups), then invokes `scrum-agent --non-interactive` as the back-end.
+The `skills/scrum-planner/` directory contains an OpenClaw skill that replicates the smart intake TUI experience conversationally. OpenClaw acts as the front-end (asks questions, handles follow-ups), then invokes `yeaboi --non-interactive` as the back-end.
 
 **How it works:**
 1. OpenClaw asks ~7 essential questions (matching `SMART_ESSENTIALS` from `prompts/intake.py`)
 2. Answers map to: Q1/Q6/Q8 → CLI args, everything else → temp `SCRUM.md` in CWD
-3. Invokes: `scrum-agent --non-interactive --description "Q1" --team-size Q6 --sprint-length Q8 --output json`
+3. Invokes: `yeaboi --non-interactive --description "Q1" --team-size Q6 --sprint-length Q8 --output json`
 4. `_load_user_context()` in `nodes.py` reads the SCRUM.md from CWD, `_keyword_extract_fallback()` does keyword scanning
 5. JSON output is parsed and presented to the user
 
@@ -502,13 +502,13 @@ The `skills/scrum-planner/` directory contains an OpenClaw skill that replicates
 
 **Installing the skill:**
 ```bash
-scrum-agent --install-skill          # installs to ~/.openclaw/skills/
-scrum-agent --install-skill /path    # custom directory
+yeaboi --install-skill          # installs to ~/.openclaw/skills/
+yeaboi --install-skill /path    # custom directory
 ```
 
 ## Daily Standup Mode
 
-The `src/scrum_agent/standup/` package implements a daily scrum that detects team activity, scores sprint progress, and delivers a summary — runnable from the TUI or headlessly on an OS schedule.
+The `src/yeaboi/standup/` package implements a daily scrum that detects team activity, scores sprint progress, and delivers a summary — runnable from the TUI or headlessly on an OS schedule.
 
 **Design choice — standalone pipeline, not a LangGraph node.** `engine.run_standup()` calls `get_llm()`/`track_usage()` directly following the node **parse → fallback → format** convention, but is *not* a compiled graph — the scheduled headless run must be fast and checkpoint-free. Activity gathering + confidence are deterministic function calls; the LLM is used only to synthesize prose (one call).
 
@@ -516,7 +516,7 @@ The `src/scrum_agent/standup/` package implements a daily scrum that detects tea
 
 **Recent-activity helpers** are plain functions (not `@tool`) on each tool module: `jira_recent_activity`, `azdevops_recent_activity`, `github_recent_commits`/`github_recent_prs`, `confluence_recent_pages`, `tools/local_git.local_git_recent_commits`, plus `*_active_sprint_progress` for burn-down. All return normalized `list[dict]` and degrade to `[]` on error. The collector lazy-imports them (optional SDKs).
 
-**Scheduling** (`scheduler.py`) is OS-native so standups fire when the app is closed. The user configures the **standup time** (when the meeting happens) + `lead_minutes` (default 10); the job fires `standup_time − lead` (`run_time()` helper). On macOS it opens a **Terminal** at run time (a launcher script under `~/Library/Application Support/scrum-agent/` + `osascript`) so the run can prompt; on Linux it's a crontab entry that runs headless. Both invoke `scrum-agent --standup-run --standup-interactive --standup-session <id>`; `interactive.py` prompts only when a TTY is attached, else falls back to headless. Windows is unsupported (graceful message).
+**Scheduling** (`scheduler.py`) is OS-native so standups fire when the app is closed. The user configures the **standup time** (when the meeting happens) + `lead_minutes` (default 10); the job fires `standup_time − lead` (`run_time()` helper). On macOS it opens a **Terminal** at run time (a launcher script under `~/Library/Application Support/yeaboi/` + `osascript`) so the run can prompt; on Linux it's a crontab entry that runs headless. Both invoke `yeaboi --standup-run --standup-interactive --standup-session <id>`; `interactive.py` prompts only when a TTY is attached, else falls back to headless. Windows is unsupported (graceful message).
 
 **Warnings, not empty content** (`errors.py` + engine): activity helpers raise `StandupSourceError` on 401/403 → collector records `ActivityBundle.errors`. The engine also checks `config.is_llm_configured()` and catches LLM auth/billing errors (no longer re-raised) — all fold into `StandupReport.warnings`, rendered as a **⚠ Notices** section in the dashboard and delivery output. `Generate` also prompts for the user's own update first (`STANDUP_USER_NAME`, default "Me").
 
@@ -524,11 +524,11 @@ The `src/scrum_agent/standup/` package implements a daily scrum that detects tea
 
 **Persistence**: `store.py` defines `_STANDUP_SCHEMA` (schema v6 in `sessions.py`) with `standup_config` / `standup_history` / `standup_updates`. `StandupReport`/`MemberUpdate` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat).
 
-**TUI**: the magenta **Standup** card → `_build_standup_screen` + `_run_standup_page` in `ui/mode_select/`, with **Generate / My Update / Configure / Export / Back** actions. Logs go to `~/.scrum-agent/logs/standup/`; readable output (Markdown + HTML) is auto-saved to `~/.scrum-agent/exports/standup/<project>/` every run and via the Export button (`export.py`, `paths.get_standup_export_dir`).
+**TUI**: the magenta **Standup** card → `_build_standup_screen` + `_run_standup_page` in `ui/mode_select/`, with **Generate / My Update / Configure / Export / Back** actions. Logs go to `~/.yeaboi/logs/standup/`; readable output (Markdown + HTML) is auto-saved to `~/.yeaboi/exports/standup/<project>/` every run and via the Export button (`export.py`, `paths.get_standup_export_dir`).
 
 ## Retro Mode
 
-The `src/scrum_agent/retro/` package implements a **collaborative** sprint retrospective: the host opens the Retro page and teammates add sticky cards to four grids — *What went well*, *What didn't go well*, *Action items*, *Demos* — from their own browsers on the LAN.
+The `src/yeaboi/retro/` package implements a **collaborative** sprint retrospective: the host opens the Retro page and teammates add sticky cards to four grids — *What went well*, *What didn't go well*, *Action items*, *Demos* — from their own browsers on the LAN.
 
 **Design choice — LAN browser board, stdlib-only.** A retro needs the whole team, but the app is a local terminal tool. So the host's TUI starts a small **`http.server.ThreadingHTTPServer`** (NOT FastAPI/Flask — matches the stdlib-only ethos of `standup/delivery.py`) bound to `0.0.0.0`, and shows a **share code + URL**. Teammates open the URL in any browser (no install) and POST cards; the page (`page.py`) polls every 2 s. There is **no new dependency**.
 
@@ -538,19 +538,19 @@ The `src/scrum_agent/retro/` package implements a **collaborative** sprint retro
 
 **AI action items** (`engine.py`): `generate_action_items(board)` makes one `get_llm()` call (prompt in `prompts/retro.py`, ARC framework) from the "didn't go well" cards (+ selectively "went well"), following the standup **parse → fallback** convention — an auth/billing error becomes a status message + deterministic fallback, never a crash. Added cards get `origin="ai"` and are badged in both the TUI and browser.
 
-**Persistence & export**: `store.py` defines `_RETRO_SCHEMA` (schema **v7** in `sessions.py`) with one `retro_history` table; the board is flushed via `RetroStore.record_run` in a `finally` on page exit. `export.py` writes Markdown + HTML to `~/.scrum-agent/exports/retro/<project>/` (`paths.get_retro_export_dir`), reusing `html_exporter._CSS`.
+**Persistence & export**: `store.py` defines `_RETRO_SCHEMA` (schema **v7** in `sessions.py`) with one `retro_history` table; the board is flushed via `RetroStore.record_run` in a `finally` on page exit. `export.py` writes Markdown + HTML to `~/.yeaboi/exports/retro/<project>/` (`paths.get_retro_export_dir`), reusing `html_exporter._CSS`.
 
 **Live web interface** (`page.py`, one self-contained offline page): teammates get emoji **reactions** on cards (fixed `REACTION_EMOJIS` set, click to toggle), **drag** to reorder/move cards between grids, **edit/delete** their *own* cards (author-only), a shared **countdown timer** (presets + custom, synced via the server clock, **confetti + Web-Audio alarm** on finish), a join modal with an **avatar picker** + 🎲 **random-name** generator (**renamable later** via the `#me` pill), a **theme switcher** (5 `[data-theme]` palettes), and **Web-Audio-generated music** (ambient/lofi/focus/**hip-hop**/**jazz**, no files, offline) with a live `AnalyserNode` **visualizer**. The **header** is a compact toolbar: brand + card count, a distinct "you" `me-chip`, an **others-only** overlapping-avatar presence stack (the current user is filtered out so they're never shown twice), a **👥 room count** that opens a left-anchored **roster** popover listing everyone present (you tagged "you", live "typing…" tags), and small icon buttons (`♪` Music / `⏱` Timer / `◑` Theme / Invite) that each open a **popover** (`.pop`, one open at a time, closed on click-outside/Esc) holding that control's UI — Theme is a row of colour **swatches**, the running timer's `MM:SS` shows inline on its button. Per-grid **typing indicators** sit under each column. All of it is driven by a **unified `/api/state`** polled ~1.2 s — the page POSTs `/api/presence` (heartbeat + fetch in one round-trip) and renders the returned `{cards, reactions, presence, typing, timer}`; each card carries a `mine` flag (owner == viewer `pid`) that drives the ✎/✕ controls without ever putting raw pids on the wire. Reactions/presence/typing/timer/ownership are lock-guarded board state (`board.py`); `REACTION_EMOJIS`/`AVATARS` are server-validated (LAN peers untrusted). Card mutations go through `/api/card/{edit,delete,move}` (edit/delete owner-checked server-side; move open to all). Reactions fold into `RetroCard.reactions` at report time (shown in MD/HTML exports; fed to the AI as a priority hint). The big CSS/JS lives in plain `_CSS`/`_JS` module strings filled by placeholder `str.replace`; `page.py` is E501-exempt in `pyproject.toml` as an embedded asset.
 
 **Joining & token security** (`server.py`): the served `/` page is **token-free** — `GET /` is unauthenticated, so the token is *never* baked into the HTML (it would leak to any LAN peer). The client reads the token from its own URL `?token=`, or a teammate opens the bare host address and types the short **join code** into the code-entry gate → `POST /api/join` (unauthenticated; `compare_digest(code, join_code)` → returns the token). `RetroServer.join_code` (an 8-char unambiguous code, shown in the TUI as `display_code`) is a LAN-trust convenience credential; the 128-bit `token` still guards direct URLs/QR. `GET /api/qr` (token-gated) renders a scannable **QR** of `scheme://<Host header>/?token=…` via `segno` (pure-python dep) — the Host header makes it correct for LAN *and* tunnel automatically, and being token-gated it can't leak the token to unauthenticated visitors.
 
-**Remote joining — Cloudflare tunnel** (`tunnel.py`): the LAN server only reaches same-network teammates. The **Share Remotely** button starts a **Cloudflare quick tunnel** (`cloudflared tunnel --url http://localhost:<port>`) exposing a public `https://…trycloudflare.com` URL that forwards to the token-gated server. It's genuinely **zero-setup**: no Cloudflare account/token (unlike ngrok, which forces a per-user authtoken), so the app owns the whole flow — `ensure_cloudflared()` downloads the platform binary on first use to `~/.scrum-agent/bin/` (cached; honours a `cloudflared` already on PATH or `CLOUDFLARED_PATH`). Setup runs on a **worker thread** (download + handshake are slow) while the frame-timed loop shows progress; the button toggles **Stop Sharing**. The tunnel is torn down in the page's `finally`. Everything is best-effort — a failed download/tunnel never raises, the retro stays LAN-only. The public URL is internet-reachable while up (token-gated, HTTPS); the browser page uses relative fetch URLs so it works identically over LAN or tunnel.
+**Remote joining — Cloudflare tunnel** (`tunnel.py`): the LAN server only reaches same-network teammates. The **Share Remotely** button starts a **Cloudflare quick tunnel** (`cloudflared tunnel --url http://localhost:<port>`) exposing a public `https://…trycloudflare.com` URL that forwards to the token-gated server. It's genuinely **zero-setup**: no Cloudflare account/token (unlike ngrok, which forces a per-user authtoken), so the app owns the whole flow — `ensure_cloudflared()` downloads the platform binary on first use to `~/.yeaboi/bin/` (cached; honours a `cloudflared` already on PATH or `CLOUDFLARED_PATH`). Setup runs on a **worker thread** (download + handshake are slow) while the frame-timed loop shows progress; the button toggles **Stop Sharing**. The tunnel is torn down in the page's `finally`. Everything is best-effort — a failed download/tunnel never raises, the retro stays LAN-only. The public URL is internet-reachable while up (token-gated, HTTPS); the browser page uses relative fetch URLs so it works identically over LAN or tunnel.
 
-**TUI**: the teal **Retro** card → `_build_retro_screen` + `_run_retro_page` in `ui/mode_select/`, with **Generate Action Items / Share Remotely / Export / Close** actions. Targets the most recent session; logs go to `~/.scrum-agent/logs/retro/`. Configure the server port with `RETRO_PORT` (default 5173, walks upward if busy).
+**TUI**: the teal **Retro** card → `_build_retro_screen` + `_run_retro_page` in `ui/mode_select/`, with **Generate Action Items / Share Remotely / Export / Close** actions. Targets the most recent session; logs go to `~/.yeaboi/logs/retro/`. Configure the server port with `RETRO_PORT` (default 5173, walks upward if busy).
 
 ## Performance Mode
 
-The `src/scrum_agent/performance/` package helps a team lead manage each engineer with three connected, LLM-backed workflows. It follows the **standup/retro blueprint** exactly: a self-contained package (`engine` + `store` + `render`/`export`), frozen-dataclass artifacts in `agent/state.py`, a SQLite schema bumped in `sessions.py`, a TUI page via the shared component system, and a `gather_performance_context()` reader that feeds Planning & Analysis.
+The `src/yeaboi/performance/` package helps a team lead manage each engineer with three connected, LLM-backed workflows. It follows the **standup/retro blueprint** exactly: a self-contained package (`engine` + `store` + `render`/`export`), frozen-dataclass artifacts in `agent/state.py`, a SQLite schema bumped in `sessions.py`, a TUI page via the shared component system, and a `gather_performance_context()` reader that feeds Planning & Analysis.
 
 **Design choice — standalone pipelines, not LangGraph nodes.** Each workflow (`engine.run_one_on_one_prep`, `complete_one_on_one`, `run_six_month_review`) is one deterministic gather step + a single `get_llm()`/`track_usage()` call following the node **parse → fallback → format** convention. An LLM auth/billing error is *never* re-raised — it becomes a `warnings` entry + a deterministic fallback artifact, so the page always renders.
 
@@ -563,13 +563,13 @@ The `src/scrum_agent/performance/` package helps a team lead manage each enginee
 
 **Feeds Planning & Analysis** (`context.py`): `gather_performance_context()` mirrors `agent/ceremony_history.py` — team-wide, graceful, distils per-engineer open 1:1 actions + review growth areas into a markdown block injected into the analyzer (`performance_context` param) and sprint planner (via `ScrumState._performance_context`). Only already-summarised signals cross the boundary — never raw transcripts.
 
-**Persistence**: `store.py` defines `_PERFORMANCE_SCHEMA` (schema **v8** in `sessions.py`) with `performance_one_on_ones` / `performance_reviews` / `performance_notes`. `EngineerRef`/`EngineerActivity`/`OneOnOnePrep`/`OneOnOneRecord`/`SixMonthReview` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat). Readable output (Markdown + HTML) auto-saves to `~/.scrum-agent/exports/performance/<engineer>/` every run and via the Export button.
+**Persistence**: `store.py` defines `_PERFORMANCE_SCHEMA` (schema **v8** in `sessions.py`) with `performance_one_on_ones` / `performance_reviews` / `performance_notes`. `EngineerRef`/`EngineerActivity`/`OneOnOnePrep`/`OneOnOneRecord`/`SixMonthReview` are frozen dataclasses in `agent/state.py` (all fields defaulted for backward-compat). Readable output (Markdown + HTML) auto-saves to `~/.yeaboi/exports/performance/<engineer>/` every run and via the Export button.
 
-**TUI**: the coral **Performance** card → `_build_performance_screen` + `_run_performance_page` in `ui/mode_select/`. Two views: a **roster** (↑/↓ select an engineer) with **1:1 Prep / 1:1 Complete / 6mo Review / Notes / Export / Back** actions, and a **detail** view showing the produced artifact (scroll + Export/Back). Logs go to `~/.scrum-agent/logs/performance/`.
+**TUI**: the coral **Performance** card → `_build_performance_screen` + `_run_performance_page` in `ui/mode_select/`. Two views: a **roster** (↑/↓ select an engineer) with **1:1 Prep / 1:1 Complete / 6mo Review / Notes / Export / Back** actions, and a **detail** view showing the produced artifact (scroll + Export/Back). Logs go to `~/.yeaboi/logs/performance/`.
 
 ## Reporting Mode
 
-The `src/scrum_agent/reporting/` package produces a **business-friendly summary of delivered work** to relay back to stakeholders — for either **the last sprint** or **the last ~month (~2 sprints)**. It follows the **standup/retro/performance blueprint** exactly: a self-contained package (`engine` + `store` + `render`/`export` + `presentation`), a frozen-dataclass artifact in `agent/state.py`, a SQLite schema bumped in `sessions.py`, and a TUI page via the shared component system.
+The `src/yeaboi/reporting/` package produces a **business-friendly summary of delivered work** to relay back to stakeholders — for either **the last sprint** or **the last ~month (~2 sprints)**. It follows the **standup/retro/performance blueprint** exactly: a self-contained package (`engine` + `store` + `render`/`export` + `presentation`), a frozen-dataclass artifact in `agent/state.py`, a SQLite schema bumped in `sessions.py`, and a TUI page via the shared component system.
 
 **Design choice — standalone pipeline, not a LangGraph node.** `engine.run_delivery_report(period)` is one deterministic gather step + a single `get_llm()`/`track_usage()` "design" call following the node **parse → fallback → format** convention. An LLM auth/billing error is *never* re-raised — it folds into `warnings` + a deterministic fallback report (counts + item list + generic emojis), so the page always renders.
 
@@ -579,13 +579,13 @@ The `src/scrum_agent/reporting/` package produces a **business-friendly summary 
 
 **Hybrid presentation** (the user's chosen approach): the LLM design call supplies the *content* — the executive narrative, the outcome **themes**, the **highlights**, and one **emoji per section slot** (parsed by `engine._parse_themes` / `_parse_emoji`, with a deterministic `_DEFAULT_EMOJI` fallback). `presentation.build_presentation_html()` only *renders* it into a **self-contained, offline HTML slide deck** (inline `_CSS`/`_JS` module strings filled by `str.replace`, same embedded-asset pattern as `retro/page.py`, E501-exempt in pyproject): Title → Executive summary → Metrics → per-Theme → Highlights → Thank-you, with keyboard nav (←/→/Space), a progress bar, and 4 `[data-theme]` palettes cycled with **T**. Slide data is injected as a JSON blob and rendered via `textContent`; `_json_for_script()` escapes `<`/`>`/`&` to `\uXXXX` so an untrusted ticket title can't break out of the `<script>` (defense in depth).
 
-**Persistence & export**: `store.py` defines `_REPORTING_SCHEMA` (schema **v9** in `sessions.py`) with one `reporting_history` table. `DeliveryReport`/`DeliveredItem` are frozen dataclasses in `agent/state.py` (all fields defaulted; `themes`/`metrics`/`emoji_theme` are tuple-of-pairs so the whole artifact stays serializable). `export.export_report()` auto-saves **Markdown + HTML + slide deck** to `~/.scrum-agent/exports/reporting/<project>/` every run and via the Export button; the HTML report reuses `html_exporter._CSS`, all tracker text `html.escape`-d.
+**Persistence & export**: `store.py` defines `_REPORTING_SCHEMA` (schema **v9** in `sessions.py`) with one `reporting_history` table. `DeliveryReport`/`DeliveredItem` are frozen dataclasses in `agent/state.py` (all fields defaulted; `themes`/`metrics`/`emoji_theme` are tuple-of-pairs so the whole artifact stays serializable). `export.export_report()` auto-saves **Markdown + HTML + slide deck** to `~/.yeaboi/exports/reporting/<project>/` every run and via the Export button; the HTML report reuses `html_exporter._CSS`, all tracker text `html.escape`-d.
 
-**TUI**: the indigo **Reporting** card → `_build_reporting_screen` + `_run_reporting_page` in `ui/mode_select/`. Three views: a **picker** (↑/↓ choose Last sprint / Last month / Whole quarter) with **Generate Report / Theme / Back**; a **sprint_select** checkbox list (↑/↓ move, Space toggle, Enter generate) shown when generating a quarter; and a **detail** view of the generated report (scroll + **Export / Theme / Back**; Theme cycles the slide-deck palette). Targets the most recent session for sprint length / project name. Logs go to `~/.scrum-agent/logs/reporting/`.
+**TUI**: the indigo **Reporting** card → `_build_reporting_screen` + `_run_reporting_page` in `ui/mode_select/`. Three views: a **picker** (↑/↓ choose Last sprint / Last month / Whole quarter) with **Generate Report / Theme / Back**; a **sprint_select** checkbox list (↑/↓ move, Space toggle, Enter generate) shown when generating a quarter; and a **detail** view of the generated report (scroll + **Export / Theme / Back**; Theme cycles the slide-deck palette). Targets the most recent session for sprint length / project name. Logs go to `~/.yeaboi/logs/reporting/`.
 
 ## Deployment (AWS Lightsail)
 
-scrum-agent is deployed on AWS Lightsail via the OpenClaw blueprint:
+yeaboi is deployed on AWS Lightsail via the OpenClaw blueprint:
 - OpenClaw comes pre-installed on the Lightsail instance
 - Uses Amazon Bedrock (Claude Sonnet 4.6) via IAM instance role — no API key needed
 - Bedrock IAM setup script: `curl -s https://d25b4yjpexuuj4.cloudfront.net/scripts/lightsail/setup-lightsail-openclaw-bedrock-role.sh | bash -s -- <instance-name> <region>`

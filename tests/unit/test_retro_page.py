@@ -1,6 +1,6 @@
 """Unit tests for the served browser board page + config getter."""
 
-from scrum_agent.retro.page import build_board_html
+from yeaboi.retro.page import build_board_html
 
 
 class TestBuildBoardHtml:
@@ -126,19 +126,19 @@ class TestBuildBoardHtml:
 
 class TestConfig:
     def test_default_port(self, monkeypatch):
-        from scrum_agent import config
+        from yeaboi import config
 
         monkeypatch.delenv("RETRO_PORT", raising=False)
         assert config.get_retro_server_port() == 5173
 
     def test_env_override(self, monkeypatch):
-        from scrum_agent import config
+        from yeaboi import config
 
         monkeypatch.setenv("RETRO_PORT", "6000")
         assert config.get_retro_server_port() == 6000
 
     def test_bad_env_falls_back(self, monkeypatch):
-        from scrum_agent import config
+        from yeaboi import config
 
         monkeypatch.setenv("RETRO_PORT", "notanint")
         assert config.get_retro_server_port() == 5173

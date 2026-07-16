@@ -4,7 +4,7 @@ from io import StringIO
 
 from rich.console import Console
 
-from scrum_agent.ui.mode_select import (
+from yeaboi.ui.mode_select import (
     ProjectSummary,
     _build_action_button,
     _build_peek_above,

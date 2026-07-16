@@ -18,7 +18,7 @@ from collections import deque
 
 import pytest
 
-from scrum_agent.agent.graph import create_graph
+from yeaboi.agent.graph import create_graph
 
 # ---------------------------------------------------------------------------
 # Shared fixture
@@ -236,7 +236,7 @@ class TestCompileTimeGuardrails:
         """Wiring an edge to a non-existent node raises ValueError during compile()."""
         from langgraph.graph import START, StateGraph
 
-        from scrum_agent.agent.state import ScrumState
+        from yeaboi.agent.state import ScrumState
 
         g = StateGraph(ScrumState)
         g.add_node("valid_node", lambda s: {"messages": []})
@@ -254,7 +254,7 @@ class TestCompileTimeGuardrails:
         """
         from langgraph.graph import END, START, StateGraph
 
-        from scrum_agent.agent.state import ScrumState
+        from yeaboi.agent.state import ScrumState
 
         g = StateGraph(ScrumState)
         g.add_node("connected", lambda s: {"messages": []})

@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scrum_agent.input_guardrails import (
+from yeaboi.input_guardrails import (
     MAX_INPUT_CHARS,
     _passes_allowlist,
     check_input_length,
@@ -34,8 +34,8 @@ from scrum_agent.input_guardrails import (
     validate_input,
 )
 
-_LLM_PATCH = "scrum_agent.agent.llm.get_llm"
-_PROVIDER_PATCH = "scrum_agent.config.get_llm_provider"
+_LLM_PATCH = "yeaboi.agent.llm.get_llm"
+_PROVIDER_PATCH = "yeaboi.config.get_llm_provider"
 
 
 # ---------------------------------------------------------------------------

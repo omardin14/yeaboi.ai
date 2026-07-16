@@ -5,11 +5,11 @@ from datetime import date
 
 import pytest
 
-from scrum_agent.sessions import SessionStore
-from scrum_agent.standup import engine
-from scrum_agent.standup.collector import ActivityBundle
-from scrum_agent.standup.sprint_context import SprintContext
-from scrum_agent.standup.store import StandupStore
+from yeaboi.sessions import SessionStore
+from yeaboi.standup import engine
+from yeaboi.standup.collector import ActivityBundle
+from yeaboi.standup.sprint_context import SprintContext
+from yeaboi.standup.store import StandupStore
 
 
 @pytest.fixture
@@ -52,10 +52,10 @@ def _patch_common(monkeypatch, *, items, counts):
             have_burn=True,
         ),
     )
-    monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+    monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
     # Pretend the LLM provider is configured so the summarizer exercises the LLM
     # branch (individual tests override this to test the not-configured path).
-    monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
 
 
 class TestRunStandup:
@@ -75,7 +75,7 @@ class TestRunStandup:
             }
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.llm.get_llm",
+            "yeaboi.agent.llm.get_llm",
             lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
         )
 
@@ -100,7 +100,7 @@ class TestRunStandup:
             store.save_my_update(seeded_session, "2026-07-10", "Alice", "I paired with Bob on auth all day.")
         llm_json = json.dumps({"members": [{"name": "Bob", "summary": "Worked on x"}], "team_summary": "ok"})
         monkeypatch.setattr(
-            "scrum_agent.agent.llm.get_llm",
+            "yeaboi.agent.llm.get_llm",
             lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
         )
 
@@ -119,7 +119,7 @@ class TestRunStandup:
         def boom(self, m):
             raise RuntimeError("timeout")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
         report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
         # Fallback: Alice's summary is her activity title.
         alice = next(m for m in report.member_updates if m.name == "Alice")
@@ -138,7 +138,7 @@ class TestRunStandup:
         def boom(self, m):
             raise anthropic.AuthenticationError.__new__(anthropic.AuthenticationError)
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
         # No longer raises — surfaces a warning and falls back deterministically.
         report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
         assert any("API key invalid" in w for w in report.warnings)
@@ -151,19 +151,19 @@ class TestRunStandup:
             items=[{"author": "Alice", "kind": "commit", "title": "shipped x", "source": "github"}],
             counts=[("github", 1)],
         )
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (False, "ANTHROPIC_API_KEY not set"))
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "ANTHROPIC_API_KEY not set"))
 
         # get_llm should never be called when the provider isn't configured.
         def _should_not_call(**k):
             raise AssertionError("LLM must not be invoked when unconfigured")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", _should_not_call)
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _should_not_call)
         report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
         assert any("ANTHROPIC_API_KEY not set" in w for w in report.warnings)
 
     def test_source_auth_error_surfaces_as_warning(self, monkeypatch, db_path, seeded_session):
         # Collector reports a source auth error → it appears in report.warnings.
-        from scrum_agent.standup.collector import ActivityBundle
+        from yeaboi.standup.collector import ActivityBundle
 
         monkeypatch.setattr(
             engine.collector,
@@ -173,17 +173,15 @@ class TestRunStandup:
         monkeypatch.setattr(
             engine.sprint_context,
             "gather",
-            lambda state, **kw: __import__(
-                "scrum_agent.standup.sprint_context", fromlist=["SprintContext"]
-            ).SprintContext(),
+            lambda state, **kw: __import__("yeaboi.standup.sprint_context", fromlist=["SprintContext"]).SprintContext(),
         )
-        monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
         llm_json = json.dumps(
             {"members": [{"name": "Alice", "summary": "x"}, {"name": "Bob", "summary": "y"}], "team_summary": "ok"}
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.llm.get_llm",
+            "yeaboi.agent.llm.get_llm",
             lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
         )
         report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
@@ -191,12 +189,12 @@ class TestRunStandup:
 
     def test_auto_exports_md_and_html(self, monkeypatch, db_path, seeded_session, tmp_path):
         _patch_common(monkeypatch, items=[], counts=[])
-        monkeypatch.setattr("scrum_agent.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
+        monkeypatch.setattr("yeaboi.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
         llm_json = json.dumps(
             {"members": [{"name": "Alice", "summary": "x"}, {"name": "Bob", "summary": "y"}], "team_summary": "ok"}
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.llm.get_llm",
+            "yeaboi.agent.llm.get_llm",
             lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
         )
         engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
@@ -214,7 +212,7 @@ class TestRunStandup:
             }
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.llm.get_llm",
+            "yeaboi.agent.llm.get_llm",
             lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
         )
 
@@ -231,7 +229,7 @@ class TestRunStandup:
             {"members": [{"name": "Alice", "summary": "x"}, {"name": "Bob", "summary": "y"}], "team_summary": "ok"}
         )
         monkeypatch.setattr(
-            "scrum_agent.agent.llm.get_llm",
+            "yeaboi.agent.llm.get_llm",
             lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
         )
 
@@ -241,7 +239,7 @@ class TestRunStandup:
             delivered["channels"] = channels
             return {c: True for c in channels}
 
-        import scrum_agent.standup.delivery as delivery_mod
+        import yeaboi.standup.delivery as delivery_mod
 
         monkeypatch.setattr(delivery_mod, "deliver", fake_deliver)
         engine.run_standup(

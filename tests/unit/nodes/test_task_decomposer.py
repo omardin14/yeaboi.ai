@@ -4,7 +4,13 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from scrum_agent.agent.nodes import (
+from tests._node_helpers import (
+    VALID_TASKS_JSON,
+    make_dummy_analysis,
+    make_sample_features,
+    make_sample_stories,
+)
+from yeaboi.agent.nodes import (
     _build_doc_context,
     _build_fallback_tasks,
     _format_stories_for_prompt,
@@ -12,7 +18,7 @@ from scrum_agent.agent.nodes import (
     _parse_tasks_response,
     task_decomposer,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Priority,
     QuestionnaireState,
@@ -21,13 +27,7 @@ from scrum_agent.agent.state import (
     TaskLabel,
     UserStory,
 )
-from scrum_agent.prompts.task_decomposer import get_task_decomposer_prompt
-from tests._node_helpers import (
-    VALID_TASKS_JSON,
-    make_dummy_analysis,
-    make_sample_features,
-    make_sample_stories,
-)
+from yeaboi.prompts.task_decomposer import get_task_decomposer_prompt
 
 # ── _format_stories_for_prompt tests ──────────────────────────────────
 
@@ -275,7 +275,7 @@ class TestTaskDecomposer:
         fake_response.content = VALID_TASKS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = task_decomposer(self._make_state())
         assert "tasks" in result
@@ -289,7 +289,7 @@ class TestTaskDecomposer:
         """When the LLM call raises an exception, the fallback should be used."""
         mock_llm = MagicMock()
         mock_llm.invoke.side_effect = RuntimeError("API down")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = task_decomposer(self._make_state())
         assert isinstance(result["tasks"], list)
@@ -302,7 +302,7 @@ class TestTaskDecomposer:
         fake_response.content = VALID_TASKS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = self._make_state()
         story_ids = {s.id for s in state["stories"]}
@@ -316,7 +316,7 @@ class TestTaskDecomposer:
         fake_response.content = VALID_TASKS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = task_decomposer(self._make_state())
         content = result["messages"][0].content
@@ -335,7 +335,7 @@ class TestTaskDecomposer:
             return fake_response
 
         mock_llm.invoke.side_effect = capture_invoke
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         qs = QuestionnaireState(completed=True)
         q14_text = "See our API docs at https://docs.example.com/api"
@@ -359,7 +359,7 @@ class TestTaskDecomposer:
             return fake_response
 
         mock_llm.invoke.side_effect = capture_invoke
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         qs = QuestionnaireState(completed=True)
         qs.answers[14] = "No existing documentation to reference"

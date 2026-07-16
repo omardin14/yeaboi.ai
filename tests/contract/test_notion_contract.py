@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from scrum_agent.tools.notion import (
+from yeaboi.tools.notion import (
     notion_create_page,
     notion_read_database,
     notion_read_page,

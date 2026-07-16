@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph.state import CompiledStateGraph
 
-from scrum_agent.agent.graph import create_graph
-from scrum_agent.agent.state import (
+from yeaboi.agent.graph import create_graph
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Feature,
     Priority,
@@ -172,7 +172,7 @@ class TestCreateGraphInvocation:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -198,7 +198,7 @@ class TestCreateGraphInvocation:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         graph = create_graph()
         graph.invoke(
@@ -222,7 +222,7 @@ class TestCreateGraphInvocation:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         msg1 = HumanMessage(content="Build a todo app")
         msg2 = AIMessage(content="Tell me more.")
@@ -256,14 +256,14 @@ class TestCreateGraphImports:
     """Verify create_graph is importable from the expected locations."""
 
     def test_importable_from_agent_package(self):
-        """create_graph should be re-exported from scrum_agent.agent."""
-        from scrum_agent.agent import create_graph as imported_fn
+        """create_graph should be re-exported from yeaboi.agent."""
+        from yeaboi.agent import create_graph as imported_fn
 
         assert imported_fn is create_graph
 
     def test_importable_from_graph_module(self):
-        """create_graph should be importable directly from scrum_agent.agent.graph."""
-        from scrum_agent.agent.graph import create_graph as imported_fn
+        """create_graph should be importable directly from yeaboi.agent.graph."""
+        from yeaboi.agent.graph import create_graph as imported_fn
 
         assert imported_fn is create_graph
 
@@ -338,7 +338,7 @@ class TestFeatureGenerationScenario:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -411,7 +411,7 @@ class TestFeatureGenerationScenario:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -458,7 +458,7 @@ class TestMultiTurnFeatureConversation:
         mock_llm.bind_tools.return_value = mock_llm
         # First call → clarifying question, second call → feature decomposition
         mock_llm.invoke.side_effect = [clarification_response, feature_response]
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         completed_qs = QuestionnaireState(completed=True)
         analysis = _dummy_analysis()
@@ -554,7 +554,7 @@ class TestIntakeRouting:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -579,7 +579,7 @@ class TestIntakeRouting:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -605,7 +605,7 @@ class TestIntakeRouting:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -637,7 +637,7 @@ class TestIntakeRouting:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         graph = create_graph()
         base_state = {
@@ -667,7 +667,7 @@ class TestIntakeRouting:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -698,7 +698,7 @@ class TestIntakeRouting:
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         graph = create_graph()
         result = graph.invoke(
@@ -718,7 +718,7 @@ class TestIntakeRouting:
         """The project_intake node is deterministic — it should NOT call the LLM."""
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         graph = create_graph()
         graph.invoke({"messages": []})

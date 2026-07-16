@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 
 import httpx
 
-from scrum_agent.tools import get_tools
-from scrum_agent.tools.notion import (
+from yeaboi.tools import get_tools
+from yeaboi.tools.notion import (
     _MISSING_CONFIG_MSG,
     _blocks_to_text,
     _notion_error_msg,
@@ -164,7 +164,7 @@ class TestNotionSearchPages:
     def test_happy_path_returns_titles_and_urls(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.search.return_value = {"results": [_make_page("111", "Architecture Overview")]}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_search_pages.invoke({"query": "architecture"})
 
@@ -175,7 +175,7 @@ class TestNotionSearchPages:
     def test_no_results_returns_message(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.search.return_value = {"results": []}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_search_pages.invoke({"query": "missing topic"})
 
@@ -184,7 +184,7 @@ class TestNotionSearchPages:
     def test_filters_to_pages(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.search.return_value = {"results": []}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         notion_search_pages.invoke({"query": "test"})
 
@@ -194,14 +194,14 @@ class TestNotionSearchPages:
     def test_http_error_401(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.search.side_effect = _make_api_error(401)
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_search_pages.invoke({"query": "test"})
 
         assert "authentication failed" in result.lower()
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: None)
 
         result = notion_search_pages.invoke({"query": "test"})
 
@@ -218,7 +218,7 @@ class TestNotionReadPage:
         mock_client = MagicMock()
         mock_client.pages.retrieve.return_value = _make_page("999", "ADR-001")
         mock_client.blocks.children.list.return_value = {"results": [_para_block("We chose PostgreSQL.")]}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_read_page.invoke({"page_id": "999"})
 
@@ -226,7 +226,7 @@ class TestNotionReadPage:
         assert "PostgreSQL" in result
 
     def test_empty_page_id_returns_error(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: MagicMock())
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: MagicMock())
 
         result = notion_read_page.invoke({"page_id": ""})
 
@@ -237,7 +237,7 @@ class TestNotionReadPage:
         mock_client = MagicMock()
         mock_client.pages.retrieve.return_value = _make_page("1", "Big")
         mock_client.blocks.children.list.return_value = {"results": [_para_block(long_text)]}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_read_page.invoke({"page_id": "1"})
 
@@ -246,14 +246,14 @@ class TestNotionReadPage:
     def test_http_error_404(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.pages.retrieve.side_effect = _make_api_error(404)
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_read_page.invoke({"page_id": "999"})
 
         assert "not found" in result.lower()
 
     def test_missing_config(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: None)
         assert notion_read_page.invoke({"page_id": "1"}) == _MISSING_CONFIG_MSG
 
 
@@ -266,7 +266,7 @@ class TestNotionReadDatabase:
     def test_happy_path_lists_entries(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.data_sources.query.return_value = {"results": [_make_page("1", "Runbook"), _make_page("2", "Spec")]}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_read_database.invoke({"database_id": "db1"})
 
@@ -281,7 +281,7 @@ class TestNotionReadDatabase:
             {"results": [_make_page("1", "Runbook")]},
         ]
         mock_client.databases.retrieve.return_value = {"data_sources": [{"id": "ds1"}]}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_read_database.invoke({"database_id": "db1"})
 
@@ -291,18 +291,18 @@ class TestNotionReadDatabase:
     def test_empty_database(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.data_sources.query.return_value = {"results": []}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_read_database.invoke({"database_id": "db1"})
 
         assert "No entries" in result
 
     def test_empty_id_returns_error(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: MagicMock())
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: MagicMock())
         assert "Error" in notion_read_database.invoke({"database_id": ""})
 
     def test_missing_config(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: None)
         assert notion_read_database.invoke({"database_id": "db1"}) == _MISSING_CONFIG_MSG
 
 
@@ -315,7 +315,7 @@ class TestNotionCreatePage:
     def test_happy_path_uses_explicit_parent(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.pages.create.return_value = _make_page("new1", "Sprint Plan")
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_create_page.invoke({"title": "Sprint Plan", "body": "Goals", "parent_id": "parent99"})
 
@@ -326,7 +326,7 @@ class TestNotionCreatePage:
     def test_falls_back_to_env_root(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.pages.create.return_value = _make_page("new1", "Plan")
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
         monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "envroot")
 
         notion_create_page.invoke({"title": "Plan", "body": "x"})
@@ -334,7 +334,7 @@ class TestNotionCreatePage:
         assert mock_client.pages.create.call_args.kwargs["parent"] == {"page_id": "envroot"}
 
     def test_no_parent_returns_error(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: MagicMock())
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: MagicMock())
         monkeypatch.delenv("NOTION_ROOT_PAGE_ID", raising=False)
 
         result = notion_create_page.invoke({"title": "Plan", "body": "x"})
@@ -344,14 +344,14 @@ class TestNotionCreatePage:
     def test_http_error_403(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.pages.create.side_effect = _make_api_error(403)
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_create_page.invoke({"title": "P", "body": "x", "parent_id": "p"})
 
         assert "permission" in result.lower()
 
     def test_missing_config(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: None)
         assert notion_create_page.invoke({"title": "P", "body": "x"}) == _MISSING_CONFIG_MSG
 
 
@@ -364,7 +364,7 @@ class TestNotionUpdatePage:
     def test_appends_body_blocks(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.pages.retrieve.return_value = _make_page("p1", "Log")
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_update_page.invoke({"page_id": "p1", "body": "New entry"})
 
@@ -374,27 +374,27 @@ class TestNotionUpdatePage:
     def test_renames_when_title_given(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.pages.retrieve.return_value = _make_page("p1", "Renamed")
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         notion_update_page.invoke({"page_id": "p1", "body": "x", "title": "Renamed"})
 
         mock_client.pages.update.assert_called_once()
 
     def test_empty_page_id_returns_error(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: MagicMock())
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: MagicMock())
         assert "Error" in notion_update_page.invoke({"page_id": "", "body": "x"})
 
     def test_http_error_404(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.blocks.children.append.side_effect = _make_api_error(404)
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         result = notion_update_page.invoke({"page_id": "p1", "body": "x"})
 
         assert "not found" in result.lower()
 
     def test_missing_config(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: None)
         assert notion_update_page.invoke({"page_id": "p1", "body": "x"}) == _MISSING_CONFIG_MSG
 
 
@@ -417,7 +417,7 @@ class TestNotionRecentPages:
             ]
         }
         mock_client.users.retrieve.return_value = {"name": "Alice"}
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         # Page is future-dated (2999), so any positive look-back keeps it.
         items = notion_recent_pages(days=1)
@@ -433,22 +433,22 @@ class TestNotionRecentPages:
         mock_client.search.return_value = {
             "results": [{"id": "old", "last_edited_time": "2000-01-01T00:00:00.000Z", "properties": {}}]
         }
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         assert notion_recent_pages(days=1) == []
 
     def test_unconfigured_returns_empty(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: None)
         assert notion_recent_pages(days=1) == []
 
     def test_auth_error_raises_standup_source_error(self, monkeypatch):
         import pytest
 
-        from scrum_agent.standup.errors import StandupSourceError
+        from yeaboi.standup.errors import StandupSourceError
 
         mock_client = MagicMock()
         mock_client.search.side_effect = _make_api_error(403)
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         with pytest.raises(StandupSourceError):
             notion_recent_pages(days=1)
@@ -456,7 +456,7 @@ class TestNotionRecentPages:
     def test_other_error_returns_empty(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.search.side_effect = _make_api_error(500)
-        monkeypatch.setattr("scrum_agent.tools.notion._make_notion_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.notion._make_notion_client", lambda: mock_client)
 
         assert notion_recent_pages(days=1) == []
 

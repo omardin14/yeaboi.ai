@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scrum_agent.tools.team_learning import (
+from yeaboi.tools.team_learning import (
     _analyse_repositories,
     _azdo_pr_matches_work_item,
     _azdo_work_item_link_target_id,
@@ -236,15 +236,15 @@ class TestBuildProfileFromSprintData:
 class TestAnalyzeTeamHistoryTool:
     def test_returns_error_when_no_source(self):
         """When no source is detected and none passed, return error JSON."""
-        with patch("scrum_agent.tools.team_learning._detect_source", return_value=""):
-            from scrum_agent.tools.team_learning import analyze_team_history
+        with patch("yeaboi.tools.team_learning._detect_source", return_value=""):
+            from yeaboi.tools.team_learning import analyze_team_history
 
             result = analyze_team_history.invoke({"source": "", "project_key": ""})
             data = json.loads(result)
             assert "error" in data
 
     def test_returns_error_for_unknown_source(self):
-        from scrum_agent.tools.team_learning import analyze_team_history
+        from yeaboi.tools.team_learning import analyze_team_history
 
         result = analyze_team_history.invoke({"source": "gitlab", "project_key": "X"})
         data = json.loads(result)
@@ -252,12 +252,12 @@ class TestAnalyzeTeamHistoryTool:
 
     def test_sprint_count_clamped(self):
         """Sprint count is clamped to [3, 12]."""
-        with patch("scrum_agent.tools.team_learning._detect_source", return_value="jira"):
+        with patch("yeaboi.tools.team_learning._detect_source", return_value="jira"):
             with patch(
-                "scrum_agent.tools.team_learning._fetch_jira_history",
+                "yeaboi.tools.team_learning._fetch_jira_history",
                 return_value=[],
             ) as mock_fetch:
-                from scrum_agent.tools.team_learning import analyze_team_history
+                from yeaboi.tools.team_learning import analyze_team_history
 
                 analyze_team_history.invoke({"source": "jira", "sprint_count": 50})
                 # clamped to 12
@@ -370,7 +370,7 @@ class TestComparePlanToActuals:
     def test_returns_error_no_db(self, tmp_path, monkeypatch):
         """Returns error JSON when sessions.db does not exist."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "nonexistent_home")
-        from scrum_agent.tools.team_learning import compare_plan_to_actuals
+        from yeaboi.tools.team_learning import compare_plan_to_actuals
 
         result = compare_plan_to_actuals.invoke({"session_id": "test-123"})
         data = json.loads(result)
@@ -384,7 +384,7 @@ class TestComparePlanToActuals:
 
 class TestGeneratePointDescriptions:
     def _make_calibrations(self):
-        from scrum_agent.team_profile import StoryPointCalibration
+        from yeaboi.team_profile import StoryPointCalibration
 
         return (
             StoryPointCalibration(
@@ -423,9 +423,9 @@ class TestGeneratePointDescriptions:
             {"points": 5, "summary": "Migrate database to new cluster"},
         ]
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_successful_generation(self, mock_get_llm):
-        from scrum_agent.tools.team_learning import _generate_point_descriptions
+        from yeaboi.tools.team_learning import _generate_point_descriptions
 
         result_json = json.dumps(
             {
@@ -448,9 +448,9 @@ class TestGeneratePointDescriptions:
         assert "5" in result
         assert "config" in result["1"].lower() or "day" in result["1"].lower()
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_error(self, mock_get_llm):
-        from scrum_agent.tools.team_learning import _generate_point_descriptions
+        from yeaboi.tools.team_learning import _generate_point_descriptions
 
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("API error")
 
@@ -466,14 +466,14 @@ class TestGeneratePointDescriptions:
         assert "1" in result
 
     def test_empty_calibrations(self):
-        from scrum_agent.tools.team_learning import _generate_point_descriptions
+        from yeaboi.tools.team_learning import _generate_point_descriptions
 
         result = _generate_point_descriptions([], (), {}, {})
         assert result == {}
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_json_with_code_fences(self, mock_get_llm):
-        from scrum_agent.tools.team_learning import _generate_point_descriptions
+        from yeaboi.tools.team_learning import _generate_point_descriptions
 
         result_json = '```json\n{"3": "Standard feature work."}\n```'
         mock_get_llm.return_value.invoke.return_value = SimpleNamespace(content=result_json)
@@ -490,8 +490,8 @@ class TestGeneratePointDescriptions:
 
 class TestFallbackPointDescriptions:
     def test_produces_descriptions(self):
-        from scrum_agent.team_profile import StoryPointCalibration
-        from scrum_agent.tools.team_learning import _fallback_point_descriptions
+        from yeaboi.team_profile import StoryPointCalibration
+        from yeaboi.tools.team_learning import _fallback_point_descriptions
 
         cals = (
             StoryPointCalibration(
@@ -508,8 +508,8 @@ class TestFallbackPointDescriptions:
         assert "cycle time" in result["3"].lower() or "3d" in result["3"].lower()
 
     def test_high_overshoot_warning(self):
-        from scrum_agent.team_profile import StoryPointCalibration
-        from scrum_agent.tools.team_learning import _fallback_point_descriptions
+        from yeaboi.team_profile import StoryPointCalibration
+        from yeaboi.tools.team_learning import _fallback_point_descriptions
 
         cals = (
             StoryPointCalibration(
@@ -524,6 +524,6 @@ class TestFallbackPointDescriptions:
         assert "splitting" in result["5"].lower() or "overshoots" in result["5"].lower()
 
     def test_empty_calibrations(self):
-        from scrum_agent.tools.team_learning import _fallback_point_descriptions
+        from yeaboi.tools.team_learning import _fallback_point_descriptions
 
         assert _fallback_point_descriptions(()) == {}

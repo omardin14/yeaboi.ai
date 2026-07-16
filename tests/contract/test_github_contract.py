@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scrum_agent.tools.github import (
+from yeaboi.tools.github import (
     github_list_issues,
     github_read_file,
     github_read_readme,
@@ -174,7 +174,7 @@ class TestGithubErrorResponsesContract:
 
         assert "Not Found" in result
 
-    @patch("scrum_agent.tools.github._get_github_client")
+    @patch("yeaboi.tools.github._get_github_client")
     def test_403_rate_limit(self, mock_get_client):
         """403 rate limit → user-friendly message with upgrade hint.
 

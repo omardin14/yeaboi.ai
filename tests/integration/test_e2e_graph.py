@@ -23,13 +23,13 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import HumanMessage
 
-from scrum_agent.agent.graph import create_graph
-from scrum_agent.agent.nodes import (
+from yeaboi.agent.graph import create_graph
+from yeaboi.agent.nodes import (
     feature_generator,
     route_entry,
     story_writer,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     Feature,
     Priority,
@@ -41,7 +41,7 @@ from scrum_agent.agent.state import (
     Task,
     UserStory,
 )
-from scrum_agent.sessions import SessionStore, _deserialize_state, _serialize_state
+from yeaboi.sessions import SessionStore, _deserialize_state, _serialize_state
 
 # ---------------------------------------------------------------------------
 # JSON fixtures — valid LLM responses for each pipeline stage
@@ -239,9 +239,9 @@ def _dummy_analysis() -> ProjectAnalysis:
 
 def _patch_external_lookups(monkeypatch):
     """Disable repo scanning, Confluence, and SCRUM.md loading."""
-    monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
-    monkeypatch.setattr("scrum_agent.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
-    monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+    monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+    monkeypatch.setattr("yeaboi.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
+    monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +263,7 @@ class TestFullQuestionnaireToSprintPipeline:
         # Phase 1 uses a no-op LLM (intake extraction / vague checks get empty JSON).
         # Phase 2 switches to ordered pipeline responses after questionnaire completes.
         intake_llm = _make_simple_llm("{}")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: intake_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: intake_llm)
 
         graph = create_graph(tools=[])
 
@@ -304,7 +304,7 @@ class TestFullQuestionnaireToSprintPipeline:
                 _SPRINTS_JSON,
             ]
         )
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: pipeline_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: pipeline_llm)
 
         # Analyzer
         assert route_entry(state) == "project_analyzer"
@@ -360,7 +360,7 @@ class TestQuickIntakeMode:
         """Quick mode should auto-default most questions, leaving only essential gaps."""
         # Provide many empty-JSON responses for any extraction/vague-check calls
         stage_llm = _make_stage_llm(["{}"] * 30)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: stage_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: stage_llm)
 
         graph = create_graph(tools=[])
 
@@ -406,7 +406,7 @@ class TestSmartIntakeMode:
     def test_smart_mode_extracts_and_reduces_questions(self, monkeypatch):
         """Smart mode should extract answers from description, reducing gap count."""
         stage_llm = _make_stage_llm(["{}"] * 30)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: stage_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: stage_llm)
 
         graph = create_graph(tools=[])
 
@@ -462,7 +462,7 @@ class TestReviewRejectFeatures:
 
         # First call returns original features, second returns v2
         stage_llm = _make_stage_llm([_FEATURES_JSON, _FEATURES_V2_JSON])
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: stage_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: stage_llm)
 
         # Build state with completed questionnaire + analysis (skip intake)
         state = {
@@ -509,7 +509,7 @@ class TestReviewEditStories:
         _patch_external_lookups(monkeypatch)
 
         stage_llm = _make_stage_llm([_STORIES_JSON, _STORIES_V2_JSON])
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: stage_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: stage_llm)
 
         # Build state with features already generated
         state = {
@@ -565,7 +565,7 @@ class TestFallbackPathViaGraph:
         _patch_external_lookups(monkeypatch)
 
         garbage_llm = _make_simple_llm("This is absolute garbage, not JSON!")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: garbage_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: garbage_llm)
 
         graph = create_graph(tools=[])
 
@@ -662,7 +662,7 @@ class TestSessionResume:
 
         # Verify we can continue the pipeline from here
         stage_llm = _make_stage_llm([_STORIES_JSON, _TASKS_JSON, _SPRINTS_JSON])
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: stage_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: stage_llm)
 
         graph = create_graph(tools=[])
 

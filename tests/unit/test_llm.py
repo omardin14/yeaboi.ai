@@ -4,7 +4,7 @@ import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 
-from scrum_agent.agent.llm import (
+from yeaboi.agent.llm import (
     _PROVIDER_DEFAULTS,
     DEFAULT_MODEL,
     get_llm,
@@ -277,7 +277,7 @@ class TestTrackUsage:
         from types import SimpleNamespace
 
         resp = SimpleNamespace(response_metadata={})
-        with caplog.at_level(logging.WARNING, logger="scrum_agent.agent.llm"):
+        with caplog.at_level(logging.WARNING, logger="yeaboi.agent.llm"):
             track_usage(resp)
         assert "no token data found" in caplog.text
         stats = get_usage_stats()

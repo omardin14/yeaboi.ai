@@ -12,14 +12,14 @@ from unittest.mock import MagicMock
 from langchain_core.messages import HumanMessage
 from rich.console import Console
 
-from scrum_agent.agent.nodes import _apply_repo_signals, project_analyzer
-from scrum_agent.agent.repo_signals import RepoSignals
-from scrum_agent.agent.state import QuestionnaireState
-from scrum_agent.formatters import render_analysis_panel
-from scrum_agent.prompts.story_writer import get_story_writer_prompt
-from scrum_agent.prompts.task_decomposer import get_task_decomposer_prompt
-from scrum_agent.sessions import _dict_to_analysis
 from tests._node_helpers import VALID_ANALYSIS_JSON, make_completed_questionnaire, make_dummy_analysis
+from yeaboi.agent.nodes import _apply_repo_signals, project_analyzer
+from yeaboi.agent.repo_signals import RepoSignals
+from yeaboi.agent.state import QuestionnaireState
+from yeaboi.formatters import render_analysis_panel
+from yeaboi.prompts.story_writer import get_story_writer_prompt
+from yeaboi.prompts.task_decomposer import get_task_decomposer_prompt
+from yeaboi.sessions import _dict_to_analysis
 
 
 def _render(panel) -> str:
@@ -33,7 +33,7 @@ def _mock_llm(monkeypatch, content: str):
     fake.content = content
     llm = MagicMock()
     llm.invoke.return_value = fake
-    monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: llm)
+    monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: llm)
 
 
 def _analyzer_state(description: str) -> dict:
@@ -53,7 +53,7 @@ class TestAnalyzerReconciliation:
     def test_deterministic_marker_flips_low_code(self, monkeypatch):
         # LLM JSON has no is_low_code (→ False), but the description trips a marker.
         _mock_llm(monkeypatch, VALID_ANALYSIS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
         result = project_analyzer(_analyzer_state("Build a Webflow + Zapier marketing site"))
         analysis = result["project_analysis"]
         assert analysis.is_low_code is True
@@ -66,20 +66,20 @@ class TestAnalyzerReconciliation:
         parsed["is_low_code"] = True
         parsed["low_code_reason"] = "config-only integration"
         _mock_llm(monkeypatch, json.dumps(parsed))
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
         # A plain description (no markers) — the flag must come from the LLM.
         result = project_analyzer(_analyzer_state("An internal reporting tool"))
         assert result["project_analysis"].is_low_code is True
 
     def test_ordinary_project_not_low_code(self, monkeypatch):
         _mock_llm(monkeypatch, VALID_ANALYSIS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
         result = project_analyzer(_analyzer_state("A FastAPI backend with a React frontend"))
         assert result["project_analysis"].is_low_code is False
 
     def test_display_shows_low_code_notice(self, monkeypatch):
         _mock_llm(monkeypatch, VALID_ANALYSIS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
         result = project_analyzer(_analyzer_state("A WordPress content site, no custom code"))
         assert "Low-code" in result["messages"][0].content
 
@@ -89,7 +89,7 @@ class TestApplyRepoSignals:
 
     def _patch_scan(self, monkeypatch, signals: RepoSignals, raw="RAW"):
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes.scan_repo_signals",
+            "yeaboi.agent.nodes.scan_repo_signals",
             lambda qs: (raw, signals, {"status": "success"}),
         )
 

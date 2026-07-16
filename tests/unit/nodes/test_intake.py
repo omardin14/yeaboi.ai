@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from scrum_agent.agent.nodes import (
+from yeaboi.agent.nodes import (
     _Q2_REPO_URL_PROMPT,
     _VELOCITY_PER_ENGINEER,
     _auto_apply_extractions,
@@ -32,11 +32,11 @@ from scrum_agent.agent.nodes import (
     project_intake,
     route_entry,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     QuestionnaireState,
 )
-from scrum_agent.prompts.intake import (
+from yeaboi.prompts.intake import (
     CONDITIONAL_ESSENTIALS,
     INTAKE_QUESTIONS,
     PHASE_INTROS,
@@ -62,7 +62,7 @@ class TestProjectIntake:
         patches it to always return None (accept the answer as-is), keeping
         existing test logic unchanged.
         """
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def test_first_call_initializes_questionnaire(self):
         """No questionnaire in state → returns a new QuestionnaireState (smart mode)."""
@@ -168,12 +168,12 @@ class TestProjectIntakeImports:
     """Verify project_intake is importable from the expected locations."""
 
     def test_importable_from_agent_package(self):
-        from scrum_agent.agent import project_intake as imported_fn
+        from yeaboi.agent import project_intake as imported_fn
 
         assert imported_fn is project_intake
 
     def test_importable_from_nodes_module(self):
-        from scrum_agent.agent.nodes import project_intake as imported_fn
+        from yeaboi.agent.nodes import project_intake as imported_fn
 
         assert imported_fn is project_intake
 
@@ -189,7 +189,7 @@ class TestExtractAnswersFromDescription:
         fake_response = AIMessage(content='{"1": "A todo app", "6": "3 engineers"}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("Building a todo app with 3 engineers")
         assert result == {1: "A todo app", 6: "3 engineers"}
@@ -197,7 +197,7 @@ class TestExtractAnswersFromDescription:
     def test_empty_description_skips_llm(self, monkeypatch):
         """Empty description should return {} without calling the LLM."""
         mock_llm = MagicMock()
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("")
         assert result == {}
@@ -206,7 +206,7 @@ class TestExtractAnswersFromDescription:
     def test_whitespace_only_description_skips_llm(self, monkeypatch):
         """Whitespace-only description should return {} without calling the LLM."""
         mock_llm = MagicMock()
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("   \n  ")
         assert result == {}
@@ -217,7 +217,7 @@ class TestExtractAnswersFromDescription:
         fake_response = AIMessage(content="This is not JSON at all")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("Some project description")
         assert result == {}
@@ -226,7 +226,7 @@ class TestExtractAnswersFromDescription:
         """LLM raises an exception → graceful fallback to {}."""
         mock_llm = MagicMock()
         mock_llm.invoke.side_effect = RuntimeError("API timeout")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("Some project description")
         assert result == {}
@@ -236,7 +236,7 @@ class TestExtractAnswersFromDescription:
         fake_response = AIMessage(content='```json\n{"1": "A todo app"}\n```')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("Building a todo app")
         assert result == {1: "A todo app"}
@@ -246,7 +246,7 @@ class TestExtractAnswersFromDescription:
         fake_response = AIMessage(content='{"0": "bad", "1": "good", "31": "bad", "abc": "bad"}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("Some description")
         assert result == {1: "good"}
@@ -256,7 +256,7 @@ class TestExtractAnswersFromDescription:
         fake_response = AIMessage(content='{"1": "A todo app", "2": "", "3": "   "}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("Some description")
         assert result == {1: "A todo app"}
@@ -266,7 +266,7 @@ class TestExtractAnswersFromDescription:
         fake_response = AIMessage(content='["not", "a", "dict"]')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _extract_answers_from_description("Some description")
         assert result == {}
@@ -332,12 +332,12 @@ class TestAdaptiveSkipIntegration:
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
         """Disable vague-answer checking so adaptive-skip tests don't hit the LLM."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def _mock_extract(self, monkeypatch, extracted: dict[int, str]):
         """Monkeypatch _extract_answers_from_description to return the given dict."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: extracted,
         )
 
@@ -419,7 +419,7 @@ class TestCheckVagueAnswer:
     def test_long_answer_short_circuits(self, monkeypatch):
         """Answers longer than 100 characters skip the LLM call entirely."""
         mock_llm = MagicMock()
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         long_answer = "x" * 101
         result = _check_vague_answer("What is your project?", long_answer)
@@ -429,7 +429,7 @@ class TestCheckVagueAnswer:
     def test_numeric_answer_short_circuits(self, monkeypatch):
         """Pure numeric answers (e.g. '7' for team size) skip the LLM call — never vague."""
         mock_llm = MagicMock()
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         assert _check_vague_answer("How many engineers?", "7") is None
         assert _check_vague_answer("How many sprints?", "3") is None
@@ -439,7 +439,7 @@ class TestCheckVagueAnswer:
     def test_no_preference_short_circuits_q11(self, monkeypatch):
         """'any' / 'no preference' for Q11 (tech stack) should skip the LLM — not vague."""
         mock_llm = MagicMock()
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         for answer in ("any", "Any", "anything", "no preference", "tbd", "flexible"):
             assert _check_vague_answer(INTAKE_QUESTIONS[11], answer, q_num=11) is None
@@ -448,7 +448,7 @@ class TestCheckVagueAnswer:
     def test_no_preference_short_circuits_q12(self, monkeypatch):
         """'none' / 'no integrations' for Q12 should skip the LLM — not vague."""
         mock_llm = MagicMock()
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         for answer in ("none", "None", "no integrations", "n/a", "no"):
             assert _check_vague_answer(INTAKE_QUESTIONS[12], answer, q_num=12) is None
@@ -460,7 +460,7 @@ class TestCheckVagueAnswer:
         fake_response = MagicMock()
         fake_response.content = '{"vague": true, "follow_up": "Tell me more", "choices": ["A", "B"]}'
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "any", q_num=1)
         assert result is not None
@@ -471,7 +471,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content='{"vague": false}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         answer = "x" * 100
         _check_vague_answer("What is your project?", answer)
@@ -485,7 +485,7 @@ class TestCheckVagueAnswer:
         )
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "A web app")
         assert result is not None
@@ -498,7 +498,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content='{"vague": false}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What tech stack?", "React 18, FastAPI, PostgreSQL")
         assert result is None
@@ -507,7 +507,7 @@ class TestCheckVagueAnswer:
         """LLM raises an exception → graceful fallback, returns None."""
         mock_llm = MagicMock()
         mock_llm.invoke.side_effect = RuntimeError("API timeout")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "A web app")
         assert result is None
@@ -517,7 +517,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content="I think this is vague")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "stuff")
         assert result is None
@@ -529,7 +529,7 @@ class TestCheckVagueAnswer:
         )
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "An app")
         assert result is not None
@@ -542,7 +542,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content='["not", "a", "dict"]')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "stuff")
         assert result is None
@@ -552,7 +552,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content='{"vague": true, "follow_up": "", "choices": ["A", "B"]}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "stuff")
         assert result is None
@@ -562,7 +562,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content='{"vague": true}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "stuff")
         assert result is None
@@ -574,7 +574,7 @@ class TestCheckVagueAnswer:
         )
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         # 200 spaces + 5 chars = len > 100 but strip() gives 5 chars
         padded = " " * 200 + "stuff"
@@ -590,7 +590,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content='{"vague": true, "follow_up": "Tell me more."}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "stuff")
         assert result is not None
@@ -603,7 +603,7 @@ class TestCheckVagueAnswer:
         fake_response = AIMessage(content='{"vague": true, "follow_up": "Tell me more.", "choices": ["Only one"]}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "stuff")
         assert result is not None
@@ -617,7 +617,7 @@ class TestCheckVagueAnswer:
         )
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         result = _check_vague_answer("What is your project?", "stuff")
         assert result is not None
@@ -640,7 +640,7 @@ class TestFollowUpProbing:
         """A vague answer should trigger a follow-up and NOT advance the question."""
         choices = ("Task management", "E-commerce", "Social platform")
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._check_vague_answer",
+            "yeaboi.agent.nodes._check_vague_answer",
             lambda q, a, n=0: ("Can you describe the main features?", choices),
         )
 
@@ -669,7 +669,7 @@ class TestFollowUpProbing:
     def test_vague_answer_without_choices_stores_nothing(self, monkeypatch):
         """A vague answer with no valid choices should NOT store _follow_up_choices."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._check_vague_answer",
+            "yeaboi.agent.nodes._check_vague_answer",
             lambda q, a, n=0: ("Can you be more specific?", ()),
         )
 
@@ -686,7 +686,7 @@ class TestFollowUpProbing:
     def test_follow_up_response_combines_answers_and_advances(self, monkeypatch):
         """After a follow-up, the user's second answer is combined with the first and the question advances."""
         # Disable vague check for the second pass (already probed → combines)
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
         # Simulate: Q1 was probed, user is now responding to the follow-up
         qs = QuestionnaireState(current_question=1)
@@ -721,7 +721,7 @@ class TestFollowUpProbing:
             call_count["n"] += 1
             return original_check(q, a, n)
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", tracking_check)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", tracking_check)
 
         qs = QuestionnaireState(current_question=1)
         qs.answers[1] = "A web app"
@@ -739,7 +739,7 @@ class TestFollowUpProbing:
 
     def test_specific_answer_advances_without_probing(self, monkeypatch):
         """A specific answer should advance the question without triggering a follow-up."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
         qs = QuestionnaireState(current_question=1)
         state = {
@@ -756,7 +756,7 @@ class TestFollowUpProbing:
     def test_probing_does_not_affect_progress(self, monkeypatch):
         """A probed-but-not-advanced question should not double-count progress."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._check_vague_answer",
+            "yeaboi.agent.nodes._check_vague_answer",
             lambda q, a, n=0: ("Tell me more?", ()),
         )
 
@@ -780,7 +780,7 @@ class TestFollowUpProbing:
     def test_follow_up_message_has_no_phase_label(self, monkeypatch):
         """Follow-up messages should feel conversational — no phase header or progress indicator."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._check_vague_answer",
+            "yeaboi.agent.nodes._check_vague_answer",
             lambda q, a, n=0: ("What kind of users?", ()),
         )
 
@@ -807,7 +807,7 @@ class TestFollowUpProbing:
         """
         # First call: vague answer on Q23 → follow-up
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._check_vague_answer",
+            "yeaboi.agent.nodes._check_vague_answer",
             lambda q, a, n=0: ("What specifically is out of scope?", ("Mobile app", "Analytics")),
         )
 
@@ -823,7 +823,7 @@ class TestFollowUpProbing:
         assert 23 in result1["questionnaire"].probed_questions
 
         # Second call: follow-up answer on Q23 → should advance to Q24
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
         state2 = {
             "messages": [HumanMessage(content="Mobile app and advanced analytics are out of scope")],
@@ -958,7 +958,7 @@ class TestSkipHandling:
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
         """Disable vague-answer checking so skip tests don't hit the LLM."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     # ── Default storage & advancement ────────────────────────────────
 
@@ -1099,7 +1099,7 @@ class TestSkipHandling:
             check_called["n"] += 1
             return None
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", tracking_check)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", tracking_check)
 
         qs = QuestionnaireState(current_question=5)
         state = {
@@ -1257,7 +1257,7 @@ class TestConfirmation:
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
         """Disable vague-answer checking so confirmation tests don't hit the LLM."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def _make_awaiting_state(self) -> QuestionnaireState:
         """Build a QuestionnaireState in awaiting_confirmation mode."""
@@ -1481,7 +1481,7 @@ class TestEditFlow:
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
         """Disable vague-answer checking so edit tests don't hit the LLM."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def _make_awaiting_state(self) -> QuestionnaireState:
         """Build a QuestionnaireState in awaiting_confirmation mode."""
@@ -1794,7 +1794,7 @@ class TestConfirmationVelocity:
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
         """Disable vague-answer checking so confirmation tests don't hit the LLM."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def _make_awaiting_state(self, **answer_overrides) -> QuestionnaireState:
         """Build a QuestionnaireState in awaiting_confirmation mode."""
@@ -2039,7 +2039,7 @@ class TestDefaultsCommand:
 
     def test_defaults_command_in_intake_node(self, monkeypatch):
         """Typing 'defaults' during intake should apply defaults and advance past the phase."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
         qs = QuestionnaireState(current_question=8)
         qs.answers = {i: f"answer {i}" for i in range(1, 8)}
@@ -2056,7 +2056,7 @@ class TestDefaultsCommand:
 
     def test_defaults_on_last_phase_shows_summary(self, monkeypatch):
         """Typing 'defaults' on the last phase should show the intake summary."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
         qs = QuestionnaireState(current_question=27)
         qs.answers = {i: f"answer {i}" for i in range(1, 27)}
@@ -2085,7 +2085,7 @@ class TestVaguenessSkipForChoiceQuestions:
             vague_called = True
             return "This is vague!"
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", fake_vague)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", fake_vague)
 
         qs = QuestionnaireState(current_question=2)
         qs.answers = {1: "A todo app"}
@@ -2107,7 +2107,7 @@ class TestVaguenessSkipForChoiceQuestions:
             vague_called = True
             return None  # Accept the answer
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", fake_vague)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", fake_vague)
 
         qs = QuestionnaireState(current_question=3)
         qs.answers = {1: "A todo app", 2: "Greenfield"}
@@ -2221,7 +2221,7 @@ class TestQ2RepoUrlFollowUp:
 
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def _make_state(self, current_q, answers):
         qs = QuestionnaireState(current_question=current_q)
@@ -2293,7 +2293,7 @@ class TestQ2RepoUrlFollowUp:
 
     def test_smart_mode_q2_existing_triggers_repo_prompt(self, monkeypatch):
         """Smart mode: Q2 gap answered 'Existing codebase' → ask for repo URL."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._extract_answers_from_description", lambda _: {})
+        monkeypatch.setattr("yeaboi.agent.nodes._extract_answers_from_description", lambda _: {})
         qs = QuestionnaireState(current_question=2, intake_mode="smart")
         qs.answers.update({3: "goals", 4: "done", 6: "4", 11: "React"})
         state = {
@@ -2306,7 +2306,7 @@ class TestQ2RepoUrlFollowUp:
 
     def test_smart_mode_repo_url_stored_in_q17(self, monkeypatch):
         """Smart mode: repo URL follow-up stores answer in Q17."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._extract_answers_from_description", lambda _: {})
+        monkeypatch.setattr("yeaboi.agent.nodes._extract_answers_from_description", lambda _: {})
         qs = QuestionnaireState(current_question=2, intake_mode="smart")
         qs.answers.update({3: "goals", 4: "done", 6: "4", 11: "React"})
         qs.answers[2] = "Existing codebase"
@@ -2326,7 +2326,7 @@ class TestQ2RepoUrlFollowUp:
         inline. Q17 (repo URL) is asked later when the user confirms Q2.
         """
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda _: {2: "Existing codebase", 3: "goals", 4: "done", 6: "4", 11: "React"},
         )
         state = {
@@ -2452,17 +2452,17 @@ class TestSmartIntakeMode:
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
         """Disable vague-answer checking so smart mode tests don't hit the LLM."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     @pytest.fixture(autouse=True)
     def _no_scrum_md(self, monkeypatch):
         """Prevent SCRUM.md loading from CWD so tests are hermetic."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
     def test_auto_applies_extractions_and_asks_gaps(self, monkeypatch):
         """Smart mode: non-essential extractions go to answers, essential ones to suggestions."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {1: "A todo app", 3: "Task management", 4: "Users can track tasks"},
         )
         state = {
@@ -2486,7 +2486,7 @@ class TestSmartIntakeMode:
         # Even when all SMART_ESSENTIALS are extracted, they go to suggestions
         # (not answers), so gaps remain and the user is asked to confirm them.
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {
                 1: "A todo app",
                 2: "Greenfield",
@@ -2514,7 +2514,7 @@ class TestSmartIntakeMode:
     def test_auto_defaults_non_essential(self, monkeypatch):
         """Smart mode auto-defaults optional questions."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {1: "A todo app"},
         )
         state = {
@@ -2530,7 +2530,7 @@ class TestSmartIntakeMode:
     def test_q2_derives_q15(self, monkeypatch):
         """Smart mode: Q2 extraction goes to suggestions; Q15 derived when user confirms Q2."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {1: "A todo app", 2: "Greenfield"},
         )
         state = {
@@ -2622,7 +2622,7 @@ class TestSmartIntakeMode:
         which asks only essential gaps rather than starting at Q1.
         """
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {},
         )
         state = {
@@ -2639,7 +2639,7 @@ class TestSmartIntakeMode:
         """Smart mode: a vague answer should trigger a follow-up probe."""
         # Override the autouse fixture for this test — we need vague detection active.
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._check_vague_answer",
+            "yeaboi.agent.nodes._check_vague_answer",
             lambda q, a, n=0: ("Can you be more specific?", ("Option A", "Option B")),
         )
         qs = QuestionnaireState(intake_mode="smart", current_question=6)
@@ -2697,7 +2697,7 @@ class TestSmartIntakeMode:
             tracking["called"] = True
             return ("follow-up?", ("A", "B"))
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", tracking_check)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", tracking_check)
         # Q2 is a choice question — vague check should be skipped
         qs = QuestionnaireState(intake_mode="smart", current_question=2)
         qs.answers = {1: "A todo app"}
@@ -2725,7 +2725,7 @@ class TestSmartIntakeMode:
             tracking["question_text"] = q
             return ("Can you be more specific?", ("Option A", "Option B"))
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", tracking_check)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", tracking_check)
         qs = QuestionnaireState(intake_mode="smart", current_question=3)
         qs.answers = {1: "A todo app", 2: "Greenfield"}
         qs.extracted_questions = {1, 2}
@@ -2751,7 +2751,7 @@ class TestSmartIntakeMode:
 
     def test_q3_non_vague_advances_to_q4(self, monkeypatch):
         """Smart mode: a detailed Q3 answer advances to Q4 as the next gap."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
         qs = QuestionnaireState(intake_mode="smart", current_question=3)
         qs.answers = {1: "A todo app", 2: "Greenfield", 6: "3 engineers", 11: "Python, React"}
         qs.extracted_questions = {1, 2}
@@ -2778,12 +2778,12 @@ class TestQuickIntakeMode:
     @pytest.fixture(autouse=True)
     def _no_scrum_md(self, monkeypatch):
         """Prevent SCRUM.md loading from CWD so tests are hermetic."""
-        monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
     def test_asks_only_q6_and_q11(self, monkeypatch):
         """Quick mode: only Q6 and Q11 are asked when not extracted."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {1: "A todo app"},
         )
         state = {
@@ -2803,7 +2803,7 @@ class TestQuickIntakeMode:
     def test_all_extracted_asks_essentials_with_suggestions(self, monkeypatch):
         """Quick mode: extracted essentials (Q6, Q11) become suggestions, not auto-accepted."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {1: "A todo app", 6: "3 engineers", 11: "React"},
         )
         state = {
@@ -2822,7 +2822,7 @@ class TestQuickIntakeMode:
     def test_fallback_defaults_applied(self, monkeypatch):
         """Quick mode: QUICK_FALLBACK_DEFAULTS fill Q2, Q3, Q4, Q15."""
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._extract_answers_from_description",
+            "yeaboi.agent.nodes._extract_answers_from_description",
             lambda desc: {1: "A todo app"},
         )
         state = {
@@ -2877,7 +2877,7 @@ class TestScrumMdAutoPopulation:
 
     @pytest.fixture(autouse=True)
     def _disable_vague_check(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
+        monkeypatch.setattr("yeaboi.agent.nodes._check_vague_answer", lambda q, a, n=0: None)
 
     def test_scrum_md_extractions_fill_gaps(self, monkeypatch):
         """SCRUM.md extractions fill questions not covered by the user's description."""
@@ -2892,9 +2892,9 @@ class TestScrumMdAutoPopulation:
                 return description_extractions  # first call: from description
             return scrum_md_extractions  # second call: from SCRUM.md
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._extract_answers_from_description", fake_extract)
+        monkeypatch.setattr("yeaboi.agent.nodes._extract_answers_from_description", fake_extract)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._load_user_context",
+            "yeaboi.agent.nodes._load_user_context",
             lambda *a, **kw: ("## Tech\nPython & Langchain", {"name": "User context", "status": "success"}),
         )
         state = {
@@ -2922,9 +2922,9 @@ class TestScrumMdAutoPopulation:
                 return {1: "An AI agent", 11: "JavaScript, React"}
             return {11: "Python, Langchain"}  # SCRUM.md has different tech stack
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._extract_answers_from_description", fake_extract)
+        monkeypatch.setattr("yeaboi.agent.nodes._extract_answers_from_description", fake_extract)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._load_user_context",
+            "yeaboi.agent.nodes._load_user_context",
             lambda *a, **kw: ("## Tech\nPython", {"name": "User context", "status": "success"}),
         )
         state = {
@@ -2946,8 +2946,8 @@ class TestScrumMdAutoPopulation:
             call_count["n"] += 1
             return {1: "An AI agent"}
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._extract_answers_from_description", fake_extract)
-        monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._extract_answers_from_description", fake_extract)
+        monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
         state = {
             "messages": [HumanMessage(content="An AI agent")],
             "_intake_mode": "smart",
@@ -2965,9 +2965,9 @@ class TestScrumMdAutoPopulation:
                 return {1: "An AI agent"}
             return {8: "2 weeks", 24: "Fibonacci"}
 
-        monkeypatch.setattr("scrum_agent.agent.nodes._extract_answers_from_description", fake_extract)
+        monkeypatch.setattr("yeaboi.agent.nodes._extract_answers_from_description", fake_extract)
         monkeypatch.setattr(
-            "scrum_agent.agent.nodes._load_user_context",
+            "yeaboi.agent.nodes._load_user_context",
             lambda *a, **kw: ("sprint: 2 weeks", {"name": "User context", "status": "success"}),
         )
         state = {
@@ -3272,7 +3272,7 @@ class TestPTOSubLoop:
         """All four date formats (DD/MM/YYYY, DD/MM/YY, DD-MM-YYYY, DD-MM-YY) should work."""
         from datetime import date
 
-        from scrum_agent.agent.nodes import _parse_date_dmy
+        from yeaboi.agent.nodes import _parse_date_dmy
 
         assert _parse_date_dmy("06/04/2026") == date(2026, 4, 6)
         assert _parse_date_dmy("06/04/26") == date(2026, 4, 6)
@@ -3281,7 +3281,7 @@ class TestPTOSubLoop:
 
     def test_rejects_dates_far_in_past(self):
         """Dates more than 6 months in the past should be rejected (catches 2-digit year typos)."""
-        from scrum_agent.agent.nodes import _parse_date_dmy
+        from yeaboi.agent.nodes import _parse_date_dmy
 
         assert _parse_date_dmy("12/12/12") is None  # 2012 — clearly in the past
         assert _parse_date_dmy("01/01/2020") is None
@@ -3303,13 +3303,13 @@ class TestAnswerSources:
         # Disable vague check and extraction
         from unittest.mock import patch
 
-        with patch("scrum_agent.agent.nodes._check_vague_answer", return_value=None):
+        with patch("yeaboi.agent.nodes._check_vague_answer", return_value=None):
             result = project_intake(state)
         assert result["questionnaire"].answer_sources.get(1) == "direct"
 
     def test_extracted_answer_sets_source(self):
         """Auto-applied extractions should set answer_sources to 'extracted'."""
-        from scrum_agent.agent.nodes import _auto_apply_extractions
+        from yeaboi.agent.nodes import _auto_apply_extractions
 
         qs = QuestionnaireState()
         _auto_apply_extractions(qs, {6: "5 engineers", 11: "Python, FastAPI"})
@@ -3318,7 +3318,7 @@ class TestAnswerSources:
 
     def test_defaulted_answer_sets_source(self):
         """Defaulted answers should set answer_sources to 'defaulted'."""
-        from scrum_agent.agent.nodes import _auto_default_remaining
+        from yeaboi.agent.nodes import _auto_default_remaining
 
         qs = QuestionnaireState()
         qs.answers[1] = "A project"
@@ -3350,7 +3350,7 @@ class TestAnswerSources:
 
     def test_low_confidence_areas_in_prompt_quality(self):
         """compute_prompt_quality should populate low_confidence_areas for defaulted essentials."""
-        from scrum_agent.agent.nodes import compute_prompt_quality
+        from yeaboi.agent.nodes import compute_prompt_quality
 
         qs = QuestionnaireState()
         qs.answers = {i: f"Answer {i}" for i in range(1, TOTAL_QUESTIONS + 1)}
@@ -3365,7 +3365,7 @@ class TestAnswerSources:
 
     def test_no_low_confidence_when_all_direct(self):
         """No low_confidence_areas when all essentials are direct."""
-        from scrum_agent.agent.nodes import compute_prompt_quality
+        from yeaboi.agent.nodes import compute_prompt_quality
 
         qs = QuestionnaireState()
         qs.answers = {i: f"Answer {i}" for i in range(1, TOTAL_QUESTIONS + 1)}
@@ -3379,7 +3379,7 @@ class TestKeywordExtraction:
 
     def test_refactor_infers_existing_codebase(self):
         """'refactor' keyword should infer Q2 as 'Existing codebase'."""
-        from scrum_agent.agent.nodes import _keyword_extract_fallback
+        from yeaboi.agent.nodes import _keyword_extract_fallback
 
         extracted: dict[int, str] = {}
         _keyword_extract_fallback("We're refactoring our legacy API", extracted)
@@ -3387,7 +3387,7 @@ class TestKeywordExtraction:
 
     def test_greenfield_keyword_infers_greenfield(self):
         """'from scratch' keyword should infer Q2 as 'Greenfield'."""
-        from scrum_agent.agent.nodes import _keyword_extract_fallback
+        from yeaboi.agent.nodes import _keyword_extract_fallback
 
         extracted: dict[int, str] = {}
         _keyword_extract_fallback("Building a new project from scratch", extracted)
@@ -3395,7 +3395,7 @@ class TestKeywordExtraction:
 
     def test_llm_extracted_q2_takes_priority(self):
         """LLM-extracted Q2 should not be overwritten by keyword fallback."""
-        from scrum_agent.agent.nodes import _keyword_extract_fallback
+        from yeaboi.agent.nodes import _keyword_extract_fallback
 
         extracted: dict[int, str] = {2: "Hybrid"}
         _keyword_extract_fallback("We're refactoring our legacy API", extracted)
@@ -3403,7 +3403,7 @@ class TestKeywordExtraction:
 
     def test_stripe_extracts_q12(self):
         """'stripe' keyword should extract Q12 integration."""
-        from scrum_agent.agent.nodes import _keyword_extract_fallback
+        from yeaboi.agent.nodes import _keyword_extract_fallback
 
         extracted: dict[int, str] = {}
         _keyword_extract_fallback("integrating Stripe for payments and Sentry for monitoring", extracted)
@@ -3412,7 +3412,7 @@ class TestKeywordExtraction:
 
     def test_kubernetes_extracts_q13(self):
         """'kubernetes' keyword should extract Q13 constraint."""
-        from scrum_agent.agent.nodes import _keyword_extract_fallback
+        from yeaboi.agent.nodes import _keyword_extract_fallback
 
         extracted: dict[int, str] = {}
         _keyword_extract_fallback("deployed on kubernetes with docker containers", extracted)
@@ -3421,7 +3421,7 @@ class TestKeywordExtraction:
 
     def test_no_keywords_no_extraction(self):
         """Description without any keywords should not add Q2/Q12/Q13."""
-        from scrum_agent.agent.nodes import _keyword_extract_fallback
+        from yeaboi.agent.nodes import _keyword_extract_fallback
 
         extracted: dict[int, str] = {}
         _keyword_extract_fallback("A simple web application", extracted)
@@ -3431,7 +3431,7 @@ class TestKeywordExtraction:
 
     def test_case_insensitive(self):
         """Keywords should match case-insensitively."""
-        from scrum_agent.agent.nodes import _keyword_extract_fallback
+        from yeaboi.agent.nodes import _keyword_extract_fallback
 
         extracted: dict[int, str] = {}
         _keyword_extract_fallback("Running on AWS with Docker", extracted)
@@ -3443,7 +3443,7 @@ class TestAdaptiveQuestionText:
 
     def test_q7_personalized_with_team_size(self):
         """Q7 should reference Q6 team size when available."""
-        from scrum_agent.agent.nodes import _resolve_adaptive_text
+        from yeaboi.agent.nodes import _resolve_adaptive_text
 
         qs = QuestionnaireState()
         qs.answers[6] = "5"
@@ -3452,7 +3452,7 @@ class TestAdaptiveQuestionText:
 
     def test_q12_personalized_with_tech_stack(self):
         """Q12 should reference Q11 tech stack when available."""
-        from scrum_agent.agent.nodes import _resolve_adaptive_text
+        from yeaboi.agent.nodes import _resolve_adaptive_text
 
         qs = QuestionnaireState()
         qs.answers[11] = "Python, FastAPI, PostgreSQL"
@@ -3461,7 +3461,7 @@ class TestAdaptiveQuestionText:
 
     def test_q13_personalized_with_project_type(self):
         """Q13 should reference Q2 project type and show appropriate hints."""
-        from scrum_agent.agent.nodes import _resolve_adaptive_text
+        from yeaboi.agent.nodes import _resolve_adaptive_text
 
         qs = QuestionnaireState()
         qs.answers[2] = "Existing codebase"
@@ -3471,7 +3471,7 @@ class TestAdaptiveQuestionText:
 
     def test_fallback_when_dependency_missing(self):
         """Should return default question text when dependency is missing."""
-        from scrum_agent.agent.nodes import _resolve_adaptive_text
+        from yeaboi.agent.nodes import _resolve_adaptive_text
 
         qs = QuestionnaireState()
         # Q6 not answered — Q7 should fall back to default
@@ -3480,7 +3480,7 @@ class TestAdaptiveQuestionText:
 
     def test_fallback_when_dependency_defaulted(self):
         """Should return default question text when dependency was defaulted."""
-        from scrum_agent.agent.nodes import _resolve_adaptive_text
+        from yeaboi.agent.nodes import _resolve_adaptive_text
 
         qs = QuestionnaireState()
         qs.answers[6] = "Roles not specified"
@@ -3490,7 +3490,7 @@ class TestAdaptiveQuestionText:
 
     def test_no_template_returns_default(self):
         """Questions without templates should return INTAKE_QUESTIONS text."""
-        from scrum_agent.agent.nodes import _resolve_adaptive_text
+        from yeaboi.agent.nodes import _resolve_adaptive_text
 
         qs = QuestionnaireState()
         text = _resolve_adaptive_text(1, qs)
@@ -3516,7 +3516,7 @@ class TestFollowUpTemplates:
         def capturing_llm(**kwargs):
             return mock_llm
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", capturing_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", capturing_llm)
 
         result = _check_vague_answer("What problem?", "stuff", q_num=3)
         assert result is not None
@@ -3530,7 +3530,7 @@ class TestFollowUpTemplates:
         fake_response = AIMessage(content='{"vague": true, "follow_up": "Tell me more", "choices": ["A", "B"]}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         _check_vague_answer("What is the project?", "stuff", q_num=1)
         call_args = mock_llm.invoke.call_args[0][0]
@@ -3542,7 +3542,7 @@ class TestFollowUpTemplates:
         fake_response = AIMessage(content='{"vague": false}')
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kwargs: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kwargs: mock_llm)
 
         _check_vague_answer("Question?", "answer")
         call_args = mock_llm.invoke.call_args[0][0]
@@ -3555,7 +3555,7 @@ class TestCrossQuestionValidation:
 
     def test_greenfield_with_repo_url_warns(self):
         """Greenfield + repo URL should produce a warning."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {2: "Greenfield", 17: "https://github.com/org/repo"}
         warnings = _validate_cross_questions(answers)
@@ -3565,7 +3565,7 @@ class TestCrossQuestionValidation:
 
     def test_greenfield_case_insensitive(self):
         """Greenfield check should be case-insensitive."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         for variant in ("greenfield", "GREENFIELD", "Greenfield", " greenfield "):
             answers = {2: variant, 17: "https://github.com/org/repo"}
@@ -3574,7 +3574,7 @@ class TestCrossQuestionValidation:
 
     def test_existing_codebase_with_repo_url_no_warning(self):
         """Existing codebase + repo URL should NOT produce a warning."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {2: "Existing codebase", 17: "https://github.com/org/repo"}
         warnings = _validate_cross_questions(answers)
@@ -3582,7 +3582,7 @@ class TestCrossQuestionValidation:
 
     def test_long_timeline_warns(self):
         """Sprint weeks × sprint count > 26 weeks should produce an info warning."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {8: "2 weeks", 10: "15 sprints"}
         warnings = _validate_cross_questions(answers)
@@ -3590,7 +3590,7 @@ class TestCrossQuestionValidation:
 
     def test_short_timeline_no_warning(self):
         """Sprint weeks × sprint count ≤ 26 weeks should NOT warn."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {8: "2 weeks", 10: "5 sprints"}
         warnings = _validate_cross_questions(answers)
@@ -3598,7 +3598,7 @@ class TestCrossQuestionValidation:
 
     def test_velocity_sanity_warns_too_high(self):
         """Velocity/team_size > 15 should produce a warning."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {6: "2 engineers", 9: "50 points"}
         warnings = _validate_cross_questions(answers)
@@ -3606,7 +3606,7 @@ class TestCrossQuestionValidation:
 
     def test_velocity_sanity_warns_too_low(self):
         """Velocity/team_size < 2 should produce a warning."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {6: "10 engineers", 9: "5 points"}
         warnings = _validate_cross_questions(answers)
@@ -3614,7 +3614,7 @@ class TestCrossQuestionValidation:
 
     def test_normal_velocity_no_warning(self):
         """Velocity/team_size in 2-15 range should NOT warn."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {6: "5 engineers", 9: "30 points"}
         warnings = _validate_cross_questions(answers)
@@ -3622,7 +3622,7 @@ class TestCrossQuestionValidation:
 
     def test_clean_answers_no_warnings(self):
         """A complete, consistent answer set should produce no warnings."""
-        from scrum_agent.agent.nodes import _validate_cross_questions
+        from yeaboi.agent.nodes import _validate_cross_questions
 
         answers = {
             2: "Existing codebase",

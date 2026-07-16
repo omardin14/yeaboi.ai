@@ -1,6 +1,6 @@
 """Tests for the feature generator prompt template."""
 
-from scrum_agent.prompts.feature_generator import (
+from yeaboi.prompts.feature_generator import (
     _ALLOWED_PRIORITIES,
     MAX_FEATURES,
     MIN_FEATURES,
@@ -121,7 +121,7 @@ class TestFeatureGeneratorPromptImports:
     """Verify imports from the expected locations."""
 
     def test_importable_from_feature_generator_module(self):
-        from scrum_agent.prompts.feature_generator import get_feature_generator_prompt as imported_fn
+        from yeaboi.prompts.feature_generator import get_feature_generator_prompt as imported_fn
 
         assert imported_fn is get_feature_generator_prompt
 

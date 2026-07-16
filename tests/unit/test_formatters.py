@@ -1,4 +1,4 @@
-"""Snapshot tests for Rich formatter output in src/scrum_agent/formatters.py.
+"""Snapshot tests for Rich formatter output in src/yeaboi/formatters.py.
 
 # See README: "Architecture" — REPL-side formatter layer
 
@@ -34,7 +34,7 @@ from io import StringIO
 
 from rich.console import Console, ConsoleRenderable
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -148,18 +148,18 @@ class TestRenderAnalysisPanel:
     """
 
     def test_full(self, snapshot):
-        from scrum_agent.formatters import render_analysis_panel
+        from yeaboi.formatters import render_analysis_panel
 
         assert _render(render_analysis_panel(_ANALYSIS)) == snapshot
 
     def test_compact(self, snapshot):
-        from scrum_agent.formatters import render_analysis_panel
+        from yeaboi.formatters import render_analysis_panel
 
         assert _render(render_analysis_panel(_ANALYSIS, compact=True)) == snapshot
 
     def test_no_assumptions_or_contributions(self, snapshot):
         """Analysis without optional fields renders cleanly (no extra section)."""
-        from scrum_agent.formatters import render_analysis_panel
+        from yeaboi.formatters import render_analysis_panel
 
         analysis = ProjectAnalysis(
             project_name="Minimal",
@@ -192,24 +192,24 @@ class TestRenderFeaturesTable:
     """
 
     def test_full(self, snapshot):
-        from scrum_agent.formatters import render_features_table
+        from yeaboi.formatters import render_features_table
 
         assert _render(render_features_table([_FEATURE_AUTH, _FEATURE_TASKS])) == snapshot
 
     def test_compact(self, snapshot):
-        from scrum_agent.formatters import render_features_table
+        from yeaboi.formatters import render_features_table
 
         assert _render(render_features_table([_FEATURE_AUTH, _FEATURE_TASKS], compact=True)) == snapshot
 
     def test_empty_list(self, snapshot):
         """Empty features list produces a table with headers but no rows."""
-        from scrum_agent.formatters import render_features_table
+        from yeaboi.formatters import render_features_table
 
         assert _render(render_features_table([])) == snapshot
 
     def test_all_priorities_represented(self, snapshot):
         """All four Priority levels are rendered with their colour-coded styles."""
-        from scrum_agent.formatters import render_features_table
+        from yeaboi.formatters import render_features_table
 
         features = [
             Feature(id="F1", title="Critical Feature", description="Urgent", priority=Priority.CRITICAL),
@@ -232,26 +232,26 @@ class TestRenderStoriesTable:
     """
 
     def test_full(self, snapshot):
-        from scrum_agent.formatters import render_stories_table
+        from yeaboi.formatters import render_stories_table
 
         stories = [_STORY_LOGIN, _STORY_CREATE_TASK]
         assert _render(render_stories_table(stories, [_FEATURE_AUTH, _FEATURE_TASKS])) == snapshot
 
     def test_compact(self, snapshot):
-        from scrum_agent.formatters import render_stories_table
+        from yeaboi.formatters import render_stories_table
 
         stories = [_STORY_LOGIN, _STORY_CREATE_TASK]
         assert _render(render_stories_table(stories, [_FEATURE_AUTH, _FEATURE_TASKS], compact=True)) == snapshot
 
     def test_empty_list(self, snapshot):
         """Empty stories list returns an empty Group (no tables rendered)."""
-        from scrum_agent.formatters import render_stories_table
+        from yeaboi.formatters import render_stories_table
 
         assert _render(render_stories_table([], [])) == snapshot
 
     def test_multiple_stories_per_feature(self, snapshot):
         """Two stories under the same feature are rendered in a single table."""
-        from scrum_agent.formatters import render_stories_table
+        from yeaboi.formatters import render_stories_table
 
         story_b = UserStory(
             id="US-3",
@@ -278,7 +278,7 @@ class TestRenderTasksTable:
     """
 
     def test_full(self, snapshot):
-        from scrum_agent.formatters import render_tasks_table
+        from yeaboi.formatters import render_tasks_table
 
         tasks = [_TASK_1, _TASK_2, _TASK_3]
         stories = [_STORY_LOGIN, _STORY_CREATE_TASK]
@@ -286,7 +286,7 @@ class TestRenderTasksTable:
         assert _render(render_tasks_table(tasks, stories, features)) == snapshot
 
     def test_compact(self, snapshot):
-        from scrum_agent.formatters import render_tasks_table
+        from yeaboi.formatters import render_tasks_table
 
         assert (
             _render(
@@ -302,13 +302,13 @@ class TestRenderTasksTable:
 
     def test_empty_list(self, snapshot):
         """Empty tasks list returns an empty Group."""
-        from scrum_agent.formatters import render_tasks_table
+        from yeaboi.formatters import render_tasks_table
 
         assert _render(render_tasks_table([], [], [])) == snapshot
 
     def test_multiple_tasks_per_story(self, snapshot):
         """Two tasks under the same story both appear under the story header row."""
-        from scrum_agent.formatters import render_tasks_table
+        from yeaboi.formatters import render_tasks_table
 
         assert _render(render_tasks_table([_TASK_1, _TASK_2], [_STORY_LOGIN], [_FEATURE_AUTH])) == snapshot
 
@@ -325,7 +325,7 @@ class TestRenderSprintPlan:
     """
 
     def test_full(self, snapshot):
-        from scrum_agent.formatters import render_sprint_plan
+        from yeaboi.formatters import render_sprint_plan
 
         assert (
             _render(
@@ -340,7 +340,7 @@ class TestRenderSprintPlan:
         )
 
     def test_compact(self, snapshot):
-        from scrum_agent.formatters import render_sprint_plan
+        from yeaboi.formatters import render_sprint_plan
 
         assert (
             _render(
@@ -357,7 +357,7 @@ class TestRenderSprintPlan:
 
     def test_overcapacity_sprint(self, snapshot):
         """Sprint with more points than velocity gets a red capacity bar and border."""
-        from scrum_agent.formatters import render_sprint_plan
+        from yeaboi.formatters import render_sprint_plan
 
         overcapacity = Sprint(
             id="SP1", name="Sprint 1", goal="Too much work", capacity_points=15, story_ids=("US-1", "US-2")
@@ -376,6 +376,6 @@ class TestRenderSprintPlan:
 
     def test_empty_sprints(self, snapshot):
         """Empty sprint list renders only the summary line."""
-        from scrum_agent.formatters import render_sprint_plan
+        from yeaboi.formatters import render_sprint_plan
 
         assert _render(render_sprint_plan([], [], [], velocity=10)) == snapshot

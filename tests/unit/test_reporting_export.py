@@ -1,7 +1,7 @@
 """Unit tests for reporting/export — Markdown, HTML, and file writing."""
 
-from scrum_agent.agent.state import DeliveredItem, DeliveryReport
-from scrum_agent.reporting import export
+from yeaboi.agent.state import DeliveredItem, DeliveryReport
+from yeaboi.reporting import export
 
 
 def _report():
@@ -60,7 +60,7 @@ class TestHtml:
 
 class TestExportReport:
     def test_writes_three_files(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("scrum_agent.paths.get_reporting_export_dir", lambda key: tmp_path)
+        monkeypatch.setattr("yeaboi.paths.get_reporting_export_dir", lambda key: tmp_path)
         paths = export.export_report(_report(), theme="aurora")
         assert set(paths) == {"markdown", "html", "slides"}
         for p in paths.values():

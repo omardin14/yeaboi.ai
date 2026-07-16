@@ -23,7 +23,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from scrum_agent.ui.mode_select.screens._screens_secondary import (
+from yeaboi.ui.mode_select.screens._screens_secondary import (
     _build_analysis_progress_screen,
     _build_analysis_review_screen,
     _build_instructions_review_screen,
@@ -700,7 +700,7 @@ class TestBuildTeamAnalysisScreenExtended:
 
     @pytest.fixture()
     def profile(self):
-        from scrum_agent.team_profile import (
+        from yeaboi.team_profile import (
             DoDSignal,
             EpicPattern,
             SpilloverStats,

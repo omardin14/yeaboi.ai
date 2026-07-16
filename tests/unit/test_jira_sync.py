@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -25,7 +25,7 @@ from scrum_agent.agent.state import (
     TaskLabel,
     UserStory,
 )
-from scrum_agent.jira_sync import (
+from yeaboi.jira_sync import (
     JiraSyncResult,
     _feature_title_to_label,
     _format_story_description,
@@ -198,12 +198,12 @@ class TestIsJiraConfigured:
 
 class TestSyncStoriesToJira:
     def test_returns_error_when_jira_not_configured(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.jira_sync.get_jira_token", lambda: None)
+        monkeypatch.setattr("yeaboi.jira_sync.get_jira_token", lambda: None)
         result, state = sync_stories_to_jira(_make_graph_state())
         assert result.errors
         assert "not configured" in result.errors[0].lower() or "missing" in result.errors[0].lower()
 
-    @patch("scrum_agent.jira_sync.get_jira_project_key", return_value="PROJ")
+    @patch("yeaboi.jira_sync.get_jira_project_key", return_value="PROJ")
     def test_creates_epic_and_stories(self, mock_key):
         mock_jira = MagicMock()
         mock_epic = MagicMock()
@@ -213,9 +213,9 @@ class TestSyncStoriesToJira:
 
         mock_jira.create_issue.return_value = mock_epic
 
-        with patch("scrum_agent.tools.jira._make_jira_client", return_value=mock_jira):
+        with patch("yeaboi.tools.jira._make_jira_client", return_value=mock_jira):
             with patch(
-                "scrum_agent.tools.jira._create_issue_with_epic_link",
+                "yeaboi.tools.jira._create_issue_with_epic_link",
                 return_value=(mock_story_issue, "parent"),
             ):
                 result, state = sync_stories_to_jira(_make_graph_state())
@@ -226,7 +226,7 @@ class TestSyncStoriesToJira:
         assert result.stories_created["story-1"] == "PROJ-2"
         assert state["jira_story_keys"]["story-1"] == "PROJ-2"
 
-    @patch("scrum_agent.jira_sync.get_jira_project_key", return_value="PROJ")
+    @patch("yeaboi.jira_sync.get_jira_project_key", return_value="PROJ")
     def test_skips_existing_stories(self, mock_key):
         """Stories already in jira_story_keys should be skipped."""
         mock_jira = MagicMock()
@@ -239,7 +239,7 @@ class TestSyncStoriesToJira:
             jira_story_keys={"story-1": "PROJ-2"},
         )
 
-        with patch("scrum_agent.tools.jira._make_jira_client", return_value=mock_jira):
+        with patch("yeaboi.tools.jira._make_jira_client", return_value=mock_jira):
             result, new_state = sync_stories_to_jira(state)
 
         # Epic was skipped (already exists)
@@ -249,7 +249,7 @@ class TestSyncStoriesToJira:
         # No Jira API calls for story creation
         assert not mock_jira.create_issue.called  # epic also skipped
 
-    @patch("scrum_agent.jira_sync.get_jira_project_key", return_value="PROJ")
+    @patch("yeaboi.jira_sync.get_jira_project_key", return_value="PROJ")
     def test_error_accumulation(self, mock_key):
         """One failing story shouldn't prevent others from being created."""
         from jira import JIRAError
@@ -275,15 +275,15 @@ class TestSyncStoriesToJira:
                 raise JIRAError(status_code=500, text="Server error")
             return mock_good_issue, "parent"
 
-        with patch("scrum_agent.tools.jira._make_jira_client", return_value=mock_jira):
-            with patch("scrum_agent.tools.jira._create_issue_with_epic_link", side_effect=mock_create_with_epic):
+        with patch("yeaboi.tools.jira._make_jira_client", return_value=mock_jira):
+            with patch("yeaboi.tools.jira._create_issue_with_epic_link", side_effect=mock_create_with_epic):
                 result, new_state = sync_stories_to_jira(state)
 
         assert len(result.errors) == 1
         assert "s2" in result.stories_created
         assert "s1" not in result.stories_created
 
-    @patch("scrum_agent.jira_sync.get_jira_project_key", return_value="PROJ")
+    @patch("yeaboi.jira_sync.get_jira_project_key", return_value="PROJ")
     def test_progress_callback_called(self, mock_key):
         mock_jira = MagicMock()
         mock_epic = MagicMock()
@@ -295,9 +295,9 @@ class TestSyncStoriesToJira:
 
         progress_calls = []
 
-        with patch("scrum_agent.tools.jira._make_jira_client", return_value=mock_jira):
+        with patch("yeaboi.tools.jira._make_jira_client", return_value=mock_jira):
             with patch(
-                "scrum_agent.tools.jira._create_issue_with_epic_link",
+                "yeaboi.tools.jira._create_issue_with_epic_link",
                 return_value=(mock_story_issue, "parent"),
             ):
                 result, state = sync_stories_to_jira(
@@ -314,7 +314,7 @@ class TestSyncStoriesToJira:
 
 
 class TestSyncTasksToJira:
-    @patch("scrum_agent.jira_sync.get_jira_project_key", return_value="PROJ")
+    @patch("yeaboi.jira_sync.get_jira_project_key", return_value="PROJ")
     def test_cascades_to_create_stories_first(self, mock_key):
         """When no stories exist in Jira, tasks sync should create stories first."""
         mock_jira = MagicMock()
@@ -328,12 +328,12 @@ class TestSyncTasksToJira:
         mock_task_issue.key = "PROJ-3"
 
         # Mock create_subtask separately from the module
-        with patch("scrum_agent.tools.jira._make_jira_client", return_value=mock_jira):
+        with patch("yeaboi.tools.jira._make_jira_client", return_value=mock_jira):
             with patch(
-                "scrum_agent.tools.jira._create_issue_with_epic_link",
+                "yeaboi.tools.jira._create_issue_with_epic_link",
                 return_value=(mock_story_issue, "parent"),
             ):
-                with patch("scrum_agent.tools.jira.create_subtask", return_value="PROJ-3"):
+                with patch("yeaboi.tools.jira.create_subtask", return_value="PROJ-3"):
                     result, state = sync_tasks_to_jira(_make_graph_state())
 
         # Stories should have been created via cascade
@@ -341,7 +341,7 @@ class TestSyncTasksToJira:
         # Tasks should be created
         assert "task-1" in state.get("jira_task_keys", {})
 
-    @patch("scrum_agent.jira_sync.get_jira_project_key", return_value="PROJ")
+    @patch("yeaboi.jira_sync.get_jira_project_key", return_value="PROJ")
     def test_skips_existing_tasks(self, mock_key):
         mock_jira = MagicMock()
         state = _make_graph_state(
@@ -350,7 +350,7 @@ class TestSyncTasksToJira:
             jira_task_keys={"task-1": "PROJ-3"},
         )
 
-        with patch("scrum_agent.tools.jira._make_jira_client", return_value=mock_jira):
+        with patch("yeaboi.tools.jira._make_jira_client", return_value=mock_jira):
             result, new_state = sync_tasks_to_jira(state)
 
         assert result.skipped >= 1
@@ -363,7 +363,7 @@ class TestSyncTasksToJira:
 
 
 class TestSyncAllToJira:
-    @patch("scrum_agent.jira_sync.get_jira_project_key", return_value="PROJ")
+    @patch("yeaboi.jira_sync.get_jira_project_key", return_value="PROJ")
     def test_full_pipeline(self, mock_key):
         mock_jira = MagicMock()
         mock_epic = MagicMock()
@@ -380,12 +380,12 @@ class TestSyncAllToJira:
         mock_boards = [MagicMock(id=10)]
         mock_jira.boards.return_value = mock_boards
 
-        with patch("scrum_agent.tools.jira._make_jira_client", return_value=mock_jira):
+        with patch("yeaboi.tools.jira._make_jira_client", return_value=mock_jira):
             with patch(
-                "scrum_agent.tools.jira._create_issue_with_epic_link",
+                "yeaboi.tools.jira._create_issue_with_epic_link",
                 return_value=(mock_story_issue, "parent"),
             ):
-                with patch("scrum_agent.tools.jira.create_subtask", return_value="PROJ-3"):
+                with patch("yeaboi.tools.jira.create_subtask", return_value="PROJ-3"):
                     result, state = sync_all_to_jira(_make_graph_state())
 
         assert result.epic_key == "PROJ-1"

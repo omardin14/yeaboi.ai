@@ -3,10 +3,10 @@
 from rich.panel import Panel
 from rich.text import Text
 
-from scrum_agent.retro.board import RetroBoard
-from scrum_agent.ui.mode_select.screens._screens import _MODE_CARDS
-from scrum_agent.ui.mode_select.screens._screens_secondary import _build_retro_screen
-from scrum_agent.ui.shared._components import RETRO_THEME, retro_title
+from yeaboi.retro.board import RetroBoard
+from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS
+from yeaboi.ui.mode_select.screens._screens_secondary import _build_retro_screen
+from yeaboi.ui.shared._components import RETRO_THEME, retro_title
 
 
 class TestComponents:
@@ -21,12 +21,12 @@ class TestComponents:
         assert "retro" in keys
 
     def test_color_registered(self):
-        from scrum_agent.ui.shared._animations import COLOR_RGB
+        from yeaboi.ui.shared._animations import COLOR_RGB
 
         assert COLOR_RGB["rgb(80,190,190)"] == (80, 190, 190)
 
     def test_button_colors_registered(self):
-        from scrum_agent.ui.shared._components import _BTN_COLORS
+        from yeaboi.ui.shared._components import _BTN_COLORS
 
         assert "Generate Action Items" in _BTN_COLORS and "Close" in _BTN_COLORS
 

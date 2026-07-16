@@ -5,7 +5,7 @@ handled during intake (Q27). These tests cover the resolve_sprint_selection
 helper which is still used by the intake node and REPL.
 """
 
-from scrum_agent.agent.nodes import resolve_sprint_selection
+from yeaboi.agent.nodes import resolve_sprint_selection
 
 
 class TestResolveSprintSelection:

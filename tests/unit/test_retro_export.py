@@ -1,7 +1,7 @@
 """Unit tests for the Retro Markdown + HTML exporters (incl. escaping)."""
 
-from scrum_agent.agent.state import RetroCard, RetroReport
-from scrum_agent.retro.export import build_retro_html, build_retro_markdown, export_retro
+from yeaboi.agent.state import RetroCard, RetroReport
+from yeaboi.retro.export import build_retro_html, build_retro_markdown, export_retro
 
 
 def _report():
@@ -70,7 +70,7 @@ class TestExportWrites:
             target.mkdir(parents=True, exist_ok=True)
             return target
 
-        monkeypatch.setattr("scrum_agent.paths.get_retro_export_dir", _fake_dir)
+        monkeypatch.setattr("yeaboi.paths.get_retro_export_dir", _fake_dir)
         paths = export_retro(_report(), project_name="Demo")
         assert paths["markdown"].exists() and paths["html"].exists()
         assert paths["markdown"].read_text().startswith("# Sprint Retro")

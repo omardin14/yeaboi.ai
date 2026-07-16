@@ -8,7 +8,14 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from scrum_agent.agent.nodes import (
+from tests._node_helpers import (
+    VALID_STORIES_JSON,
+    make_dummy_analysis,
+    make_sample_features,
+    make_story_for_inference,
+    make_valid_story,
+)
+from yeaboi.agent.nodes import (
     _build_fallback_stories,
     _format_features_for_prompt,
     _format_stories,
@@ -18,7 +25,7 @@ from scrum_agent.agent.nodes import (
     _validate_stories,
     story_writer,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -26,13 +33,6 @@ from scrum_agent.agent.state import (
     QuestionnaireState,
     StoryPointValue,
     UserStory,
-)
-from tests._node_helpers import (
-    VALID_STORIES_JSON,
-    make_dummy_analysis,
-    make_sample_features,
-    make_story_for_inference,
-    make_valid_story,
 )
 
 
@@ -458,7 +458,7 @@ class TestStoryWriter:
         fake_response.content = VALID_STORIES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = story_writer(self._make_state())
         assert "stories" in result
@@ -471,7 +471,7 @@ class TestStoryWriter:
         fake_response.content = VALID_STORIES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = story_writer(self._make_state())
         assert "messages" in result
@@ -484,7 +484,7 @@ class TestStoryWriter:
         fake_response.content = VALID_STORIES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = story_writer(self._make_state())
         content = result["messages"][0].content
@@ -497,7 +497,7 @@ class TestStoryWriter:
         fake_response.content = "not valid json at all"
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = story_writer(self._make_state())
         assert isinstance(result["stories"], list)
@@ -507,7 +507,7 @@ class TestStoryWriter:
         """When the LLM call raises an exception, the fallback should be used."""
         mock_llm = MagicMock()
         mock_llm.invoke.side_effect = RuntimeError("API down")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = story_writer(self._make_state())
         assert isinstance(result["stories"], list)
@@ -527,7 +527,7 @@ class TestStoryWriter:
             captured_kwargs.update(kwargs)
             return mock_llm
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", capture_get_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", capture_get_llm)
 
         story_writer(self._make_state())
         assert captured_kwargs.get("temperature") == 0.0
@@ -930,7 +930,7 @@ class TestStoryWriterValidation:
         fake_response.content = single_ac_json
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = story_writer(self._make_state())
         # The single AC should have been padded to 3 by validation

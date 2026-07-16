@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scrum_agent.agent.graph import create_graph
+from yeaboi.agent.graph import create_graph
 
 
 def main() -> None:

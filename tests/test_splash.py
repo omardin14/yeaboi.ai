@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 
 from rich.panel import Panel
 
-from scrum_agent.ui.shared._ascii_font import render_ascii_text
-from scrum_agent.ui.splash import _build_splash_frame, show_splash
+from yeaboi.ui.shared._ascii_font import render_ascii_text
+from yeaboi.ui.splash import _build_splash_frame, show_splash
 
 
 class TestBuildSplashFrame:
@@ -82,8 +82,8 @@ def from_text_cls():
 class TestShowSplash:
     """Tests for the full show_splash() animation."""
 
-    @patch("scrum_agent.ui.splash.time.sleep")
-    @patch("scrum_agent.ui.splash.make_live")
+    @patch("yeaboi.ui.splash.time.sleep")
+    @patch("yeaboi.ui.splash.make_live")
     def test_completes_without_error(self, mock_make_live, mock_sleep):
         """show_splash runs the full animation loop and exits cleanly."""
         mock_live = MagicMock()

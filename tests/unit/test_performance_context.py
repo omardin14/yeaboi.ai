@@ -1,13 +1,13 @@
 """Unit tests for the Performance → Planning/Analysis context feed."""
 
-from scrum_agent.agent.state import OneOnOneRecord, SixMonthReview
-from scrum_agent.performance import context
-from scrum_agent.performance.store import PerformanceStore
+from yeaboi.agent.state import OneOnOneRecord, SixMonthReview
+from yeaboi.performance import context
+from yeaboi.performance.store import PerformanceStore
 
 
 class TestGatherPerformanceContext:
     def test_empty_when_no_db(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("scrum_agent.config.get_sessions_db", lambda: tmp_path / "missing.db")
+        monkeypatch.setattr("yeaboi.config.get_sessions_db", lambda: tmp_path / "missing.db")
         ctx = context.gather_performance_context()
         assert ctx.is_empty
         assert ctx.summary_md == ""
@@ -17,7 +17,7 @@ class TestGatherPerformanceContext:
         with PerformanceStore(db) as store:
             store.record_completion(OneOnOneRecord(engineer="Ada", date="2026-07-12", action_items=("write tests",)))
             store.record_review(SixMonthReview(engineer="Ada", areas_for_improvement=("delegation",)))
-        monkeypatch.setattr("scrum_agent.config.get_sessions_db", lambda: db)
+        monkeypatch.setattr("yeaboi.config.get_sessions_db", lambda: db)
 
         ctx = context.gather_performance_context()
         assert not ctx.is_empty
@@ -30,6 +30,6 @@ class TestGatherPerformanceContext:
         db = tmp_path / "sessions.db"
         with PerformanceStore(db) as store:
             store.record_completion(OneOnOneRecord(engineer="Ada", date="2026-07-12", action_items=()))
-        monkeypatch.setattr("scrum_agent.config.get_sessions_db", lambda: db)
+        monkeypatch.setattr("yeaboi.config.get_sessions_db", lambda: db)
         ctx = context.gather_performance_context()
         assert ctx.engineers_with_actions == 0

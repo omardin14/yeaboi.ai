@@ -5,7 +5,7 @@ import io
 from rich.console import Console
 from rich.panel import Panel
 
-from scrum_agent.ui.mode_select.screens._screens_secondary import _build_performance_screen
+from yeaboi.ui.mode_select.screens._screens_secondary import _build_performance_screen
 
 
 def _render(panel: Panel) -> str:

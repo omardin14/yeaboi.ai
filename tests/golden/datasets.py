@@ -12,7 +12,7 @@ since LLM outputs vary across runs.
 
 from __future__ import annotations
 
-from scrum_agent.agent.state import TOTAL_QUESTIONS, QuestionnaireState
+from yeaboi.agent.state import TOTAL_QUESTIONS, QuestionnaireState
 
 # ---------------------------------------------------------------------------
 # Dataset 1: Todo App (greenfield, small team)

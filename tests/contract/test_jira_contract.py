@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 from jira import JIRA
 
-from scrum_agent.tools.jira import (
+from yeaboi.tools.jira import (
     jira_create_epic,
     jira_create_sprint,
     jira_create_story,
@@ -51,7 +51,7 @@ def _make_test_client() -> JIRA:
 @pytest.fixture(autouse=True)
 def _jira_env(monkeypatch):
     """Patch _make_jira_client to return a test client + set env vars."""
-    monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", _make_test_client)
+    monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", _make_test_client)
     monkeypatch.setenv("JIRA_BASE_URL", _TEST_BASE_URL)
     monkeypatch.setenv("JIRA_EMAIL", "test@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "fake-token")
@@ -220,7 +220,7 @@ class TestJiraErrorResponsesContract:
         err.text = "Rate limit exceeded"
         mock_client.boards.side_effect = err
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_read_board.invoke({"project_key": "PROJ"})
 

@@ -41,7 +41,7 @@ def test_bump_rejects_bad_version(bad):
 
 def _write_pyproject(tmp_path: Path, version: str) -> Path:
     p = tmp_path / "pyproject.toml"
-    p.write_text(f'[project]\nname = "scrum-agent"\nversion = "{version}"\nrequires-python = ">=3.11"\n')
+    p.write_text(f'[project]\nname = "yeaboi"\nversion = "{version}"\nrequires-python = ">=3.11"\n')
     return p
 
 
@@ -55,12 +55,12 @@ def test_write_version_round_trip(tmp_path):
     bump_version.write_version("1.6.0", p)
     assert bump_version.read_current(p) == "1.6.0"
     # Only the version line changes; the rest of the file is preserved.
-    assert 'name = "scrum-agent"' in p.read_text()
+    assert 'name = "yeaboi"' in p.read_text()
     assert 'requires-python = ">=3.11"' in p.read_text()
 
 
 def test_read_current_missing_version(tmp_path):
     p = tmp_path / "pyproject.toml"
-    p.write_text('[project]\nname = "scrum-agent"\n')
+    p.write_text('[project]\nname = "yeaboi"\n')
     with pytest.raises(SystemExit):
         bump_version.read_current(p)

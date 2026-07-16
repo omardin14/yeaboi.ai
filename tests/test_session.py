@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 from rich.console import Console
 from rich.panel import Panel
 
-from scrum_agent.ui.session import (
+from yeaboi.ui.session import (
     _build_chat_screen,
     _build_description_screen,
     _build_edit_prompt_screen,
@@ -26,8 +26,8 @@ from scrum_agent.ui.session import (
     _wrap_text,
     run_session,
 )
-from scrum_agent.ui.session._renderers import _render_tui_stories
-from scrum_agent.ui.session.editor._editor import _parse_edited_story, _story_to_text, edit_story
+from yeaboi.ui.session._renderers import _render_tui_stories
+from yeaboi.ui.session.editor._editor import _parse_edited_story, _story_to_text, edit_story
 
 
 def _make_console(width: int = 100, height: int = 30) -> Console:
@@ -444,7 +444,7 @@ class TestQuestionInputLoop:
         live = MagicMock()
         console = _make_console()
         # Patch _get_active_suggestion to return the suggestion
-        with patch("scrum_agent.ui.session._get_active_suggestion", return_value="2 weeks"):
+        with patch("yeaboi.ui.session._get_active_suggestion", return_value="2 weeks"):
             result = _question_input_loop(
                 live,
                 console,
@@ -467,7 +467,7 @@ class TestQuestionInputLoop:
 
 
 class TestRunSession:
-    @patch("scrum_agent.ui.session.create_graph")
+    @patch("yeaboi.ui.session.create_graph")
     def test_esc_on_description_exits_cleanly(self, mock_graph):
         """Pressing Esc on the description screen should exit without errors."""
         live = MagicMock()
@@ -490,7 +490,7 @@ class TestRunSession:
 
 def _make_test_stories():
     """Create sample stories and features for rendering tests."""
-    from scrum_agent.agent.state import (
+    from yeaboi.agent.state import (
         AcceptanceCriterion,
         Discipline,
         Feature,
@@ -694,7 +694,7 @@ class TestEditStoryAddCriteria:
 
     def test_round_trip_with_marker(self):
         """The add-criteria marker should not appear in parsed output."""
-        from scrum_agent.ui.session.editor._editor import _story_to_text
+        from yeaboi.ui.session.editor._editor import _story_to_text
 
         stories, _ = _make_test_stories()
         text = _story_to_text(stories[0])

@@ -8,7 +8,7 @@ tests cover each provider branch and the length-bounding fallback.
 
 from __future__ import annotations
 
-from scrum_agent.ui.session._utils import _classify_api_error, _extract_status_code
+from yeaboi.ui.session._utils import _classify_api_error, _extract_status_code
 
 
 def _make_error(name: str, module: str, *, status=None, text=""):

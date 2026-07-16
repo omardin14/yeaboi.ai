@@ -30,22 +30,22 @@ from __future__ import annotations
 
 import json
 
-from scrum_agent.agent.nodes import (
-    _parse_analysis_response,
-    _parse_features_response,
-    _parse_sprints_response,
-    _parse_stories_response,
-    _validate_stories,
-)
-from scrum_agent.agent.state import Priority, StoryPointValue
-from scrum_agent.prompts.feature_generator import MAX_FEATURES
-from scrum_agent.prompts.story_writer import MAX_STORIES_PER_FEATURE
 from tests._node_helpers import (
     make_completed_questionnaire,
     make_dummy_analysis,
     make_sample_features,
     make_sample_stories,
 )
+from yeaboi.agent.nodes import (
+    _parse_analysis_response,
+    _parse_features_response,
+    _parse_sprints_response,
+    _parse_stories_response,
+    _validate_stories,
+)
+from yeaboi.agent.state import Priority, StoryPointValue
+from yeaboi.prompts.feature_generator import MAX_FEATURES
+from yeaboi.prompts.story_writer import MAX_STORIES_PER_FEATURE
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -88,7 +88,7 @@ class TestVagueProjectDescriptions:
 
     def test_minimal_json_uses_defaults_for_missing_fields(self):
         """A one-field JSON dict returns ProjectAnalysis with sane defaults."""
-        from scrum_agent.agent.state import ProjectAnalysis
+        from yeaboi.agent.state import ProjectAnalysis
 
         result = _parse_analysis_response('{"project_name": "MinimalApp"}', _qs(), 5, 20)
         assert isinstance(result, ProjectAnalysis)
@@ -98,7 +98,7 @@ class TestVagueProjectDescriptions:
 
     def test_fallback_always_returns_project_analysis(self):
         """Every known malformed-input form returns a ProjectAnalysis, never None."""
-        from scrum_agent.agent.state import ProjectAnalysis
+        from yeaboi.agent.state import ProjectAnalysis
 
         bad_inputs = [
             "",

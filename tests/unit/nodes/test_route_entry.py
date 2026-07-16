@@ -1,7 +1,8 @@
 """Tests for the route_entry() conditional edge function."""
 
-from scrum_agent.agent.nodes import route_entry
-from scrum_agent.agent.state import (
+from tests._node_helpers import make_dummy_analysis
+from yeaboi.agent.nodes import route_entry
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Feature,
     Priority,
@@ -12,7 +13,6 @@ from scrum_agent.agent.state import (
     Task,
     UserStory,
 )
-from tests._node_helpers import make_dummy_analysis
 
 
 class TestRouteEntry:
@@ -288,11 +288,11 @@ class TestRouteEntryImports:
     """Verify route_entry is importable from the expected locations."""
 
     def test_importable_from_agent_package(self):
-        from scrum_agent.agent import route_entry as imported_fn
+        from yeaboi.agent import route_entry as imported_fn
 
         assert imported_fn is route_entry
 
     def test_importable_from_nodes_module(self):
-        from scrum_agent.agent.nodes import route_entry as imported_fn
+        from yeaboi.agent.nodes import route_entry as imported_fn
 
         assert imported_fn is route_entry

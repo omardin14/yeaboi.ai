@@ -11,16 +11,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from scrum_agent.tools.azure_devops import azdevops_recent_activity
-from scrum_agent.tools.confluence import confluence_recent_pages
-from scrum_agent.tools.github import github_recent_commits, github_recent_prs
-from scrum_agent.tools.jira import jira_recent_activity
-from scrum_agent.tools.local_git import local_git_recent_commits
+from yeaboi.tools.azure_devops import azdevops_recent_activity
+from yeaboi.tools.confluence import confluence_recent_pages
+from yeaboi.tools.github import github_recent_commits, github_recent_prs
+from yeaboi.tools.jira import jira_recent_activity
+from yeaboi.tools.local_git import local_git_recent_commits
 
 
 class TestJiraRecentActivity:
     def test_missing_config_returns_empty(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)
         assert jira_recent_activity("PROJ", days=1) == []
 
     def test_normalizes_issues(self, monkeypatch):
@@ -34,8 +34,8 @@ class TestJiraRecentActivity:
         )
         client = MagicMock()
         client.search_issues.return_value = [issue]
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: client)
-        monkeypatch.setattr("scrum_agent.tools.jira.get_jira_project_key", lambda: "PROJ")
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: client)
+        monkeypatch.setattr("yeaboi.tools.jira.get_jira_project_key", lambda: "PROJ")
 
         items = jira_recent_activity("PROJ", days=2)
         assert items == [
@@ -54,19 +54,19 @@ class TestJiraRecentActivity:
 
         client = MagicMock()
         client.search_issues.side_effect = JIRAError(status_code=500, text="boom")
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: client)
-        monkeypatch.setattr("scrum_agent.tools.jira.get_jira_project_key", lambda: "PROJ")
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: client)
+        monkeypatch.setattr("yeaboi.tools.jira.get_jira_project_key", lambda: "PROJ")
         assert jira_recent_activity("PROJ") == []
 
     def test_auth_error_raises_source_error(self, monkeypatch):
         from jira import JIRAError
 
-        from scrum_agent.standup.errors import StandupSourceError
+        from yeaboi.standup.errors import StandupSourceError
 
         client = MagicMock()
         client.search_issues.side_effect = JIRAError(status_code=401, text="unauthorized")
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: client)
-        monkeypatch.setattr("scrum_agent.tools.jira.get_jira_project_key", lambda: "PROJ")
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: client)
+        monkeypatch.setattr("yeaboi.tools.jira.get_jira_project_key", lambda: "PROJ")
         with pytest.raises(StandupSourceError) as exc:
             jira_recent_activity("PROJ")
         assert exc.value.source == "jira"
@@ -85,7 +85,7 @@ class TestGithubRecentActivity:
         repo.get_commits.return_value = [commit_obj]
         client = MagicMock()
         client.get_repo.return_value = repo
-        monkeypatch.setattr("scrum_agent.tools.github._get_github_client", lambda: client)
+        monkeypatch.setattr("yeaboi.tools.github._get_github_client", lambda: client)
 
         items = github_recent_commits("owner/repo", days=1)
         assert items[0]["author"] == "Bob"
@@ -96,7 +96,7 @@ class TestGithubRecentActivity:
     def test_commits_error_returns_empty(self, monkeypatch):
         client = MagicMock()
         client.get_repo.side_effect = RuntimeError("nope")
-        monkeypatch.setattr("scrum_agent.tools.github._get_github_client", lambda: client)
+        monkeypatch.setattr("yeaboi.tools.github._get_github_client", lambda: client)
         assert github_recent_commits("owner/repo") == []
 
     def test_prs_normalized_and_merged_status(self, monkeypatch):
@@ -114,7 +114,7 @@ class TestGithubRecentActivity:
         repo.get_pulls.return_value = [pr]
         client = MagicMock()
         client.get_repo.return_value = repo
-        monkeypatch.setattr("scrum_agent.tools.github._get_github_client", lambda: client)
+        monkeypatch.setattr("yeaboi.tools.github._get_github_client", lambda: client)
 
         items = github_recent_prs("owner/repo", days=1)
         assert items[0]["status"] == "merged"
@@ -124,7 +124,7 @@ class TestGithubRecentActivity:
 
 class TestAzdoRecentActivity:
     def test_no_project_returns_empty(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.azure_devops.get_azure_devops_project", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.azure_devops.get_azure_devops_project", lambda: None)
         assert azdevops_recent_activity("", days=1) == []
 
     def test_normalizes_work_items(self, monkeypatch):
@@ -140,7 +140,7 @@ class TestAzdoRecentActivity:
             }
         )
         wit.get_work_items.return_value = [item]
-        monkeypatch.setattr("scrum_agent.tools.azure_devops._make_azdo_clients", lambda: (wit, MagicMock()))
+        monkeypatch.setattr("yeaboi.tools.azure_devops._make_azdo_clients", lambda: (wit, MagicMock()))
 
         items = azdevops_recent_activity("Proj", days=1)
         assert items[0]["author"] == "Dana"
@@ -151,7 +151,7 @@ class TestAzdoRecentActivity:
 
 class TestConfluenceRecentPages:
     def test_missing_config_returns_empty(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: None)
         assert confluence_recent_pages("SPACE", days=1) == []
 
     def test_normalizes_pages(self, monkeypatch):
@@ -167,8 +167,8 @@ class TestConfluenceRecentPages:
                 }
             ]
         }
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: conf)
-        monkeypatch.setattr("scrum_agent.tools.confluence.get_confluence_space_key", lambda: "SPACE")
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: conf)
+        monkeypatch.setattr("yeaboi.tools.confluence.get_confluence_space_key", lambda: "SPACE")
 
         items = confluence_recent_pages("SPACE", days=1)
         assert items[0]["author"] == "Eve"

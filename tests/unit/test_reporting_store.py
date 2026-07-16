@@ -2,8 +2,8 @@
 
 import pytest
 
-from scrum_agent.agent.state import DeliveredItem, DeliveryReport
-from scrum_agent.reporting.store import ReportingStore, _dict_to_report, _report_to_json
+from yeaboi.agent.state import DeliveredItem, DeliveryReport
+from yeaboi.reporting.store import ReportingStore, _dict_to_report, _report_to_json
 
 
 @pytest.fixture
@@ -65,14 +65,14 @@ class TestStore:
 
 class TestSchemaMigration:
     def test_current_version_is_9(self):
-        from scrum_agent.sessions import CURRENT_SCHEMA_VERSION
+        from yeaboi.sessions import CURRENT_SCHEMA_VERSION
 
         assert CURRENT_SCHEMA_VERSION == 9
 
     def test_session_store_creates_reporting_table(self, db_path):
         import sqlite3
 
-        from scrum_agent.sessions import SessionStore
+        from yeaboi.sessions import SessionStore
 
         with SessionStore(db_path):
             pass  # opening runs migrations up to v9

@@ -46,12 +46,12 @@ def _bypass_input_guardrails(monkeypatch):
     contamination.
 
     Why patch the *repl* namespace (not the source)?
-    ``scrum_agent/repl/__init__.py`` imports validate_input with
-    ``from scrum_agent.input_guardrails import validate_input``, which binds the
-    name into the ``scrum_agent.repl`` module namespace.  Patching
-    ``scrum_agent.repl.validate_input`` replaces *that* binding, so every call
+    ``yeaboi/repl/__init__.py`` imports validate_input with
+    ``from yeaboi.input_guardrails import validate_input``, which binds the
+    name into the ``yeaboi.repl`` module namespace.  Patching
+    ``yeaboi.repl.validate_input`` replaces *that* binding, so every call
     inside run_repl() sees the stub.  Patching the original module
-    (``scrum_agent.input_guardrails.validate_input``) would not affect the
+    (``yeaboi.input_guardrails.validate_input``) would not affect the
     already-imported reference in the repl module.
     """
-    monkeypatch.setattr("scrum_agent.repl.validate_input", lambda text: None)
+    monkeypatch.setattr("yeaboi.repl.validate_input", lambda text: None)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from rich.panel import Panel
 from rich.text import Text
 
-from scrum_agent.ui.shared._components import (
+from yeaboi.ui.shared._components import (
     ANALYSIS_THEME,
     PLANNING_THEME,
     Theme,
@@ -34,12 +34,12 @@ class TestTheme:
         assert t.muted == "rgb(120,120,140)"  # default
 
     def test_usage_theme_amber(self):
-        from scrum_agent.ui.shared._components import USAGE_THEME
+        from yeaboi.ui.shared._components import USAGE_THEME
 
         assert USAGE_THEME.accent == "rgb(220,160,60)"
 
     def test_settings_theme_silver(self):
-        from scrum_agent.ui.shared._components import SETTINGS_THEME
+        from yeaboi.ui.shared._components import SETTINGS_THEME
 
         assert SETTINGS_THEME.accent == "rgb(160,160,180)"
         assert SETTINGS_THEME.muted == "rgb(120,120,140)"  # inherits default
@@ -138,13 +138,13 @@ class TestBuildProgressDots:
 
 class TestUsageScreen:
     def test_returns_panel(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_usage_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
 
         result = _build_usage_screen({}, width=80, height=24)
         assert isinstance(result, Panel)
 
     def test_with_full_data(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_usage_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
 
         data = {
             "provider": "anthropic",
@@ -168,7 +168,7 @@ class TestUsageScreen:
 
         from rich.console import Console
 
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_usage_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
 
         data = {"provider": "anthropic", "model": "claude-sonnet-4", "api_key_status": "configured"}
         result = _build_usage_screen(data, width=100, height=40)
@@ -179,7 +179,7 @@ class TestUsageScreen:
         assert "claude-sonnet-4" in output
 
     def test_scrollable(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_usage_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
 
         data = {
             "provider": "anthropic",
@@ -197,7 +197,7 @@ class TestUsageScreen:
 
         from rich.console import Console
 
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_usage_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
 
         result = _build_usage_screen({}, width=100, height=40)
         buf = StringIO()
@@ -210,7 +210,7 @@ class TestUsageScreen:
 
         from rich.console import Console
 
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_usage_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
 
         result = _build_usage_screen({"provider": "test"}, width=100, height=30)
         buf = StringIO()
@@ -222,14 +222,14 @@ class TestUsageScreen:
 
 class TestProfilePickerScreen:
     def test_returns_panel(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
 
         result = _build_profile_picker_screen([], 0, width=80, height=24)
         assert isinstance(result, Panel)
 
     def test_with_profiles(self):
-        from scrum_agent.team_profile import TeamProfile
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
+        from yeaboi.team_profile import TeamProfile
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
 
         profiles = [
             TeamProfile(team_id="jira-PROJ", source="jira", project_key="PROJ", sample_sprints=5, sample_stories=30),
@@ -245,8 +245,8 @@ class TestProfilePickerScreen:
 
         from rich.console import Console
 
-        from scrum_agent.team_profile import TeamProfile
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
+        from yeaboi.team_profile import TeamProfile
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
 
         profiles = [TeamProfile(team_id="jira-X", source="jira", project_key="X")]
         result = _build_profile_picker_screen(profiles, 1, width=100, height=30)  # Skip selected
@@ -259,7 +259,7 @@ class TestProfilePickerScreen:
 
         from rich.console import Console
 
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
 
         result = _build_profile_picker_screen([], 0, width=100, height=30)
         buf = StringIO()
@@ -269,8 +269,8 @@ class TestProfilePickerScreen:
 
 class TestExtractAnswersFromProfile:
     def test_extracts_velocity(self):
-        from scrum_agent.agent.nodes import _extract_answers_from_profile
-        from scrum_agent.team_profile import TeamProfile
+        from yeaboi.agent.nodes import _extract_answers_from_profile
+        from yeaboi.team_profile import TeamProfile
 
         p = TeamProfile(team_id="t", source="jira", project_key="P", velocity_avg=23.5)
         answers = _extract_answers_from_profile(p)
@@ -278,7 +278,7 @@ class TestExtractAnswersFromProfile:
         assert "23" in answers[9] or "24" in answers[9]
 
     def test_extracts_team_size(self):
-        from scrum_agent.agent.nodes import _extract_answers_from_profile
+        from yeaboi.agent.nodes import _extract_answers_from_profile
 
         p = type("P", (), {"velocity_avg": 0})()
         examples = {"contributor_stats": [{"name": "alice"}, {"name": "bob"}, {"name": "charlie"}]}
@@ -287,14 +287,14 @@ class TestExtractAnswersFromProfile:
         assert answers[6] == "3"
 
     def test_empty_profile(self):
-        from scrum_agent.agent.nodes import _extract_answers_from_profile
+        from yeaboi.agent.nodes import _extract_answers_from_profile
 
         p = type("P", (), {"velocity_avg": 0})()
         answers = _extract_answers_from_profile(p, {})
         assert len(answers) == 0
 
     def test_extracts_sprint_length(self):
-        from scrum_agent.agent.nodes import _extract_answers_from_profile
+        from yeaboi.agent.nodes import _extract_answers_from_profile
 
         p = type("P", (), {"velocity_avg": 0})()
         examples = {
@@ -308,7 +308,7 @@ class TestExtractAnswersFromProfile:
         assert "2 week" in answers[8]
 
     def test_extracts_tech_stack(self):
-        from scrum_agent.agent.nodes import _extract_answers_from_profile
+        from yeaboi.agent.nodes import _extract_answers_from_profile
 
         p = type("P", (), {"velocity_avg": 0, "tech_stack": ("Python", "React", "PostgreSQL"), "integrations": ()})()
         answers = _extract_answers_from_profile(p)
@@ -318,7 +318,7 @@ class TestExtractAnswersFromProfile:
         assert "PostgreSQL" in answers[11]
 
     def test_extracts_integrations(self):
-        from scrum_agent.agent.nodes import _extract_answers_from_profile
+        from yeaboi.agent.nodes import _extract_answers_from_profile
 
         p = type("P", (), {"velocity_avg": 0, "tech_stack": (), "integrations": ("Jira", "Slack", "GitHub Actions")})()
         answers = _extract_answers_from_profile(p)
@@ -328,7 +328,7 @@ class TestExtractAnswersFromProfile:
         assert 11 not in answers  # empty tech_stack → not filled
 
     def test_empty_tech_stack_not_filled(self):
-        from scrum_agent.agent.nodes import _extract_answers_from_profile
+        from yeaboi.agent.nodes import _extract_answers_from_profile
 
         p = type("P", (), {"velocity_avg": 0, "tech_stack": (), "integrations": ()})()
         answers = _extract_answers_from_profile(p)
@@ -338,13 +338,13 @@ class TestExtractAnswersFromProfile:
 
 class TestSettingsScreen:
     def test_returns_panel(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_settings_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
 
         result = _build_settings_screen({}, width=80, height=24)
         assert isinstance(result, Panel)
 
     def test_with_config_data(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_settings_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
 
         data = {
             "LLM_PROVIDER": "anthropic",
@@ -362,7 +362,7 @@ class TestSettingsScreen:
 
         from rich.console import Console
 
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_settings_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
 
         data = {"ANTHROPIC_API_KEY": "sk-ant-verylongsecretkey123"}
         result = _build_settings_screen(data, width=100, height=40)
@@ -379,7 +379,7 @@ class TestSettingsScreen:
 
         from rich.console import Console
 
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_settings_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
 
         result = _build_settings_screen({}, width=100, height=40)
         buf = StringIO()
@@ -389,7 +389,7 @@ class TestSettingsScreen:
         assert "Back" in output
 
     def test_scrollable(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_settings_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
 
         r1 = _build_settings_screen({}, scroll_offset=0, width=80, height=20)
         r2 = _build_settings_screen({}, scroll_offset=5, width=80, height=20)
@@ -399,7 +399,7 @@ class TestSettingsScreen:
 
 class TestCollectSettingsData:
     def test_returns_dict(self, monkeypatch):
-        from scrum_agent.ui.mode_select import _collect_settings_data
+        from yeaboi.ui.mode_select import _collect_settings_data
 
         monkeypatch.setenv("LLM_PROVIDER", "anthropic")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test123")
@@ -409,14 +409,14 @@ class TestCollectSettingsData:
         assert data["ANTHROPIC_API_KEY"] == "sk-ant-test123"
 
     def test_includes_config_path(self):
-        from scrum_agent.ui.mode_select import _collect_settings_data
+        from yeaboi.ui.mode_select import _collect_settings_data
 
         data = _collect_settings_data()
         assert "_config_path" in data
         assert ".yeaboi" in data["_config_path"]
 
     def test_empty_env_vars(self, monkeypatch):
-        from scrum_agent.ui.mode_select import _collect_settings_data
+        from yeaboi.ui.mode_select import _collect_settings_data
 
         monkeypatch.delenv("JIRA_BASE_URL", raising=False)
         data = _collect_settings_data()
@@ -425,7 +425,7 @@ class TestCollectSettingsData:
 
 class TestSettingsTitle:
     def test_returns_text(self):
-        from scrum_agent.ui.shared._components import settings_title
+        from yeaboi.ui.shared._components import settings_title
 
         result = settings_title()
         assert isinstance(result, Text)

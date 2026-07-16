@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
 
-from scrum_agent.agent.nodes import (
+from yeaboi.agent.nodes import (
     _HIGH_RISK_TOOLS,
     _user_confirmed,
     call_model,
@@ -13,7 +13,7 @@ from scrum_agent.agent.nodes import (
     make_call_model,
     should_continue,
 )
-from scrum_agent.prompts import get_system_prompt
+from yeaboi.prompts import get_system_prompt
 
 # ── Core behaviour ───────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ class TestCallModel:
         fake_response = AIMessage(content="Hello!")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         state = {"messages": [HumanMessage(content="Hi")]}
         result = call_model(state)
@@ -37,7 +37,7 @@ class TestCallModel:
         fake_response = AIMessage(content="I can help with that.")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         state = {"messages": [HumanMessage(content="Hello")]}
         result = call_model(state)
@@ -48,7 +48,7 @@ class TestCallModel:
         fake_response = AIMessage(content="Sure, let me help.")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         state = {"messages": [HumanMessage(content="Hello")]}
         result = call_model(state)
@@ -60,7 +60,7 @@ class TestCallModel:
         fake_response = AIMessage(content="Acknowledged.")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         state = {"messages": [HumanMessage(content="Plan my project")]}
         call_model(state)
@@ -75,7 +75,7 @@ class TestCallModel:
         fake_response = AIMessage(content="Got it.")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         user_msg = HumanMessage(content="Build a todo app")
         state = {"messages": [user_msg]}
@@ -90,7 +90,7 @@ class TestCallModel:
         fake_response = AIMessage(content="Understood.")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         msg1 = HumanMessage(content="Build a todo app")
         msg2 = AIMessage(content="Tell me more about the project.")
@@ -111,7 +111,7 @@ class TestCallModel:
         fake_response = AIMessage(content="Here's a plan.")
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         state = {"messages": [HumanMessage(content="Hello")]}
         result = call_model(state)
@@ -128,14 +128,14 @@ class TestCallModelImports:
     """Verify call_model is importable from the expected locations."""
 
     def test_importable_from_agent_package(self):
-        """call_model should be re-exported from scrum_agent.agent."""
-        from scrum_agent.agent import call_model as imported_fn
+        """call_model should be re-exported from yeaboi.agent."""
+        from yeaboi.agent import call_model as imported_fn
 
         assert imported_fn is call_model
 
     def test_importable_from_nodes_module(self):
-        """call_model should be importable directly from scrum_agent.agent.nodes."""
-        from scrum_agent.agent.nodes import call_model as imported_fn
+        """call_model should be importable directly from yeaboi.agent.nodes."""
+        from yeaboi.agent.nodes import call_model as imported_fn
 
         assert imported_fn is call_model
 
@@ -207,14 +207,14 @@ class TestShouldContinueImports:
     """Verify should_continue is importable from the expected locations."""
 
     def test_importable_from_agent_package(self):
-        """should_continue should be re-exported from scrum_agent.agent."""
-        from scrum_agent.agent import should_continue as imported_fn
+        """should_continue should be re-exported from yeaboi.agent."""
+        from yeaboi.agent import should_continue as imported_fn
 
         assert imported_fn is should_continue
 
     def test_importable_from_nodes_module(self):
-        """should_continue should be importable directly from scrum_agent.agent.nodes."""
-        from scrum_agent.agent.nodes import should_continue as imported_fn
+        """should_continue should be importable directly from yeaboi.agent.nodes."""
+        from yeaboi.agent.nodes import should_continue as imported_fn
 
         assert imported_fn is should_continue
 
@@ -385,7 +385,7 @@ class TestMakeCallModel:
         """make_call_model must return a callable node function."""
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         fn = make_call_model([])
         assert callable(fn)
@@ -394,7 +394,7 @@ class TestMakeCallModel:
         """bind_tools() must be called with the provided tools on first invocation (lazy init)."""
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_llm
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         from langchain_core.tools import tool
 
@@ -417,7 +417,7 @@ class TestMakeCallModel:
 
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_bound_llm
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         fn = make_call_model([])
         state = {"messages": [HumanMessage(content="Hello")]}
@@ -434,7 +434,7 @@ class TestMakeCallModel:
         mock_bound_llm.invoke.return_value = AIMessage(content="Ok")
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_bound_llm
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         fn = make_call_model([])
         result = fn({"messages": [HumanMessage(content="Hi")]})
@@ -447,7 +447,7 @@ class TestMakeCallModel:
         mock_bound_llm.invoke.return_value = AIMessage(content="Ok")
         mock_llm = MagicMock()
         mock_llm.bind_tools.return_value = mock_bound_llm
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda: mock_llm)
 
         fn = make_call_model([])
         fn({"messages": [HumanMessage(content="Plan this")]})
@@ -521,11 +521,11 @@ class TestHumanReviewImports:
     """Verify human_review is importable from expected locations."""
 
     def test_importable_from_agent_package(self):
-        from scrum_agent.agent import human_review as fn
+        from yeaboi.agent import human_review as fn
 
         assert fn is human_review
 
     def test_importable_from_nodes_module(self):
-        from scrum_agent.agent.nodes import human_review as fn
+        from yeaboi.agent.nodes import human_review as fn
 
         assert fn is human_review

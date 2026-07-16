@@ -2,9 +2,9 @@
 
 import pytest
 
-from scrum_agent.agent.state import TOTAL_QUESTIONS, QuestionnaireState
-from scrum_agent.prompts.intake import QUESTION_DEFAULTS
-from scrum_agent.questionnaire_io import (
+from yeaboi.agent.state import TOTAL_QUESTIONS, QuestionnaireState
+from yeaboi.prompts.intake import QUESTION_DEFAULTS
+from yeaboi.questionnaire_io import (
     ESSENTIAL_QUESTIONS,
     build_questionnaire_from_answers,
     export_questionnaire_md,

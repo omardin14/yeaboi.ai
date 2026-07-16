@@ -1,6 +1,6 @@
 """Tests for the sprint planner prompt template."""
 
-from scrum_agent.prompts.sprint_planner import (
+from yeaboi.prompts.sprint_planner import (
     MAX_SPRINTS,
     get_sprint_planner_prompt,
 )
@@ -110,6 +110,6 @@ class TestSprintPlannerPromptImports:
     """Verify imports from the expected locations."""
 
     def test_importable_from_sprint_planner_module(self):
-        from scrum_agent.prompts.sprint_planner import get_sprint_planner_prompt as imported_fn
+        from yeaboi.prompts.sprint_planner import get_sprint_planner_prompt as imported_fn
 
         assert imported_fn is get_sprint_planner_prompt

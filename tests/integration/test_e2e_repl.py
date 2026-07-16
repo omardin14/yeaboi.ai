@@ -21,7 +21,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from rich.console import Console
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     AcceptanceCriterion,
     Feature,
@@ -33,7 +33,7 @@ from scrum_agent.agent.state import (
     Task,
     UserStory,
 )
-from scrum_agent.repl import run_repl
+from yeaboi.repl import run_repl
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,7 +42,7 @@ from scrum_agent.repl import run_repl
 
 def _make_console() -> tuple[Console, StringIO]:
     """Create a Console that writes to a StringIO buffer."""
-    from scrum_agent.formatters import build_theme
+    from yeaboi.formatters import build_theme
 
     buf = StringIO()
     return Console(file=buf, force_terminal=True, theme=build_theme("dark")), buf
@@ -233,11 +233,11 @@ def _make_pipeline_graph():
 @pytest.fixture(autouse=True)
 def _mock_deps(monkeypatch, tmp_path):
     """Avoid filesystem writes, network calls, and delays."""
-    monkeypatch.setattr("scrum_agent.repl.HISTORY_DIR", tmp_path)
-    monkeypatch.setattr("scrum_agent.repl.FileHistory", lambda path: None)
-    monkeypatch.setattr("scrum_agent.repl.time.sleep", lambda _: None)
+    monkeypatch.setattr("yeaboi.repl.HISTORY_DIR", tmp_path)
+    monkeypatch.setattr("yeaboi.repl.FileHistory", lambda path: None)
+    monkeypatch.setattr("yeaboi.repl.time.sleep", lambda _: None)
     # Default graph — individual tests override via monkeypatch
-    monkeypatch.setattr("scrum_agent.repl.create_graph", _make_pipeline_graph)
+    monkeypatch.setattr("yeaboi.repl.create_graph", _make_pipeline_graph)
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +263,8 @@ class TestHappyPathE2E:
             "accept",  # accept sprints → plan complete
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -285,8 +285,8 @@ class TestHappyPathE2E:
             "accept",  # features
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -308,10 +308,10 @@ class TestGracefulExitAtPipelineStages:
     def test_ctrl_c_during_intake(self, monkeypatch):
         """Ctrl-C at the very first prompt should exit gracefully."""
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory([]),  # EOFError on first prompt
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -325,8 +325,8 @@ class TestGracefulExitAtPipelineStages:
             "start",  # post-questionnaire → analysis
             # No more inputs → EOFError at review prompt
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -341,8 +341,8 @@ class TestGracefulExitAtPipelineStages:
             "accept",  # accept analysis → graph produces features
             # EOFError at feature review
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -364,8 +364,8 @@ class TestExportCommandE2E:
             "export",  # export questionnaire
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -381,8 +381,8 @@ class TestExportCommandE2E:
             "export",  # export at feature review checkpoint
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -403,8 +403,8 @@ class TestExportCommandE2E:
             "export",  # export full plan
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -427,8 +427,8 @@ class TestResumeCommandE2E:
             "/resume",
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -448,8 +448,8 @@ class TestResumeCommandE2E:
             "accept",  # accept features (mock graph generates them)
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, resume_state=resume_state)
@@ -497,7 +497,7 @@ class TestErrorRecoveryE2E:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
 
         inputs = [
             "Build a todo app",  # intake
@@ -505,8 +505,8 @@ class TestErrorRecoveryE2E:
             "start",  # retry → works
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -544,7 +544,7 @@ class TestErrorRecoveryE2E:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
 
         inputs = [
             "Build a todo app",
@@ -553,8 +553,8 @@ class TestErrorRecoveryE2E:
             "start",  # success
             "exit",
         ]
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(inputs))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(inputs))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")

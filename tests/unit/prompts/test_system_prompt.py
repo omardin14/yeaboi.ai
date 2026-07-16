@@ -1,6 +1,6 @@
 """Tests for the Scrum Master system prompt."""
 
-from scrum_agent.prompts.system import get_system_prompt
+from yeaboi.prompts.system import get_system_prompt
 
 # ── Content tests ─────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ class TestSystemPromptStructure:
         assert get_system_prompt() == get_system_prompt()
 
     def test_importable_from_package(self):
-        """get_system_prompt should be re-exported from scrum_agent.prompts."""
-        from scrum_agent.prompts import get_system_prompt as imported_fn
+        """get_system_prompt should be re-exported from yeaboi.prompts."""
+        from yeaboi.prompts import get_system_prompt as imported_fn
 
         assert imported_fn() == get_system_prompt()

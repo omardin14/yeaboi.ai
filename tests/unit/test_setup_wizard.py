@@ -5,7 +5,7 @@ from io import StringIO
 
 from rich.console import Console
 
-from scrum_agent.setup_wizard import _PROVIDERS, is_first_run, run_setup_wizard, save_config
+from yeaboi.setup_wizard import _PROVIDERS, is_first_run, run_setup_wizard, save_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -19,8 +19,8 @@ def _make_console() -> Console:
 def _patch_config_file(monkeypatch, tmp_path):
     """Redirect get_config_file() to a path inside tmp_path."""
     config_file = tmp_path / ".env"
-    monkeypatch.setattr("scrum_agent.setup_wizard.get_config_file", lambda: config_file)
-    monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
+    monkeypatch.setattr("yeaboi.setup_wizard.get_config_file", lambda: config_file)
+    monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
     return config_file
 
 
@@ -64,7 +64,7 @@ def _mock_select_provider(
 def _patch_provider(monkeypatch, provider_key: str, **kwargs):
     """Patch select_provider to return the given provider without full-screen UI."""
     monkeypatch.setattr(
-        "scrum_agent.setup_wizard.select_provider",
+        "yeaboi.setup_wizard.select_provider",
         _mock_select_provider(provider_key, **kwargs),
     )
 
@@ -138,7 +138,7 @@ class TestRunSetupWizard:
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "1")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             _mock_inputs("sk-ant-validkey", "n", "n", "n"),
         )
         console = _make_console()
@@ -152,7 +152,7 @@ class TestRunSetupWizard:
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "2")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             _mock_inputs("sk-openai-testkey", "n", "n", "n"),
         )
         console = _make_console()
@@ -165,7 +165,7 @@ class TestRunSetupWizard:
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "3")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             _mock_inputs("AIzaGoogleKey123", "n", "n", "n"),
         )
         console = _make_console()
@@ -185,7 +185,7 @@ class TestRunSetupWizard:
     def test_empty_key_returns_false(self, monkeypatch, tmp_path):
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "1")
-        monkeypatch.setattr("scrum_agent.setup_wizard.prompt", lambda *a, **kw: "")
+        monkeypatch.setattr("yeaboi.setup_wizard.prompt", lambda *a, **kw: "")
         console = _make_console()
         result = run_setup_wizard(console)
         assert result is False
@@ -197,7 +197,7 @@ class TestRunSetupWizard:
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "1")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             # bad key, re-enter=Y (retry), good key, integrations
             _mock_inputs("not-a-valid-key", "y", "sk-ant-real", "n", "n", "n"),
         )
@@ -214,7 +214,7 @@ class TestRunSetupWizard:
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "1")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             _mock_inputs("not-an-anthropic-key", "n", "n", "n", "n"),
         )
         console = _make_console()
@@ -234,7 +234,7 @@ class TestRunSetupWizard:
         result = mock()
         result["vc_env_var"] = "GITHUB_TOKEN"
         result["vc_token"] = "ghp_mytoken"
-        monkeypatch.setattr("scrum_agent.setup_wizard.select_provider", lambda *a, **kw: result)
+        monkeypatch.setattr("yeaboi.setup_wizard.select_provider", lambda *a, **kw: result)
         console = _make_console()
         run_setup_wizard(console)
         content = (tmp_path / ".env").read_text()
@@ -262,7 +262,7 @@ class TestRunSetupWizard:
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "1")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             _mock_inputs("sk-ant-key", "n", "n", "n"),
         )
         console = _make_console()
@@ -282,7 +282,7 @@ class TestRunSetupWizard:
                 return "sk-ant-key"
             return "n"
 
-        monkeypatch.setattr("scrum_agent.setup_wizard.prompt", _mock_prompt)
+        monkeypatch.setattr("yeaboi.setup_wizard.prompt", _mock_prompt)
         console = _make_console()
         run_setup_wizard(console)
         assert not any("Confluence" in c for c in calls)
@@ -318,7 +318,7 @@ class TestRunSetupWizard:
         config_file.write_text("ANTHROPIC_API_KEY=sk-ant-old\nGITHUB_TOKEN=ghp_existing\n")
         _patch_provider(monkeypatch, "1")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             _mock_inputs("sk-ant-new", "n", "n", "n"),
         )
         console = _make_console()
@@ -332,7 +332,7 @@ class TestRunSetupWizard:
         _patch_config_file(monkeypatch, tmp_path)
         _patch_provider(monkeypatch, "1")
         monkeypatch.setattr(
-            "scrum_agent.setup_wizard.prompt",
+            "yeaboi.setup_wizard.prompt",
             _mock_inputs("sk-ant-process-test", "n", "n", "n"),
         )
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -375,14 +375,14 @@ class TestProviderSelect:
     """
 
     def test_q_cancels(self):
-        from scrum_agent.ui.provider_select import select_provider
+        from yeaboi.ui.provider_select import select_provider
 
         console = _make_console()
         result = select_provider(console, _read_key_fn=_safe_key_fn("q"))
         assert result is None
 
     def test_esc_cancels(self):
-        from scrum_agent.ui.provider_select import select_provider
+        from yeaboi.ui.provider_select import select_provider
 
         console = _make_console()
         result = select_provider(console, _read_key_fn=_safe_key_fn("esc"))
@@ -390,7 +390,7 @@ class TestProviderSelect:
 
     def test_enter_does_not_crash(self):
         """Pressing Enter on Phase 1 proceeds to Phase 2 (doesn't crash)."""
-        from scrum_agent.ui.provider_select import select_provider
+        from yeaboi.ui.provider_select import select_provider
 
         # After Enter selects Claude, Phase 2 gets "esc" → recursive restart → "esc" again
         console = _make_console()
@@ -400,7 +400,7 @@ class TestProviderSelect:
 
     def test_right_arrow_does_not_crash(self):
         """Right arrow navigates to next provider without crashing."""
-        from scrum_agent.ui.provider_select import select_provider
+        from yeaboi.ui.provider_select import select_provider
 
         console = _make_console()
         result = select_provider(console, _read_key_fn=_safe_key_fn("right", "esc"))
@@ -408,7 +408,7 @@ class TestProviderSelect:
 
     def test_left_wraps_does_not_crash(self):
         """Left from index 0 wraps to last provider without crashing."""
-        from scrum_agent.ui.provider_select import select_provider
+        from yeaboi.ui.provider_select import select_provider
 
         console = _make_console()
         result = select_provider(console, _read_key_fn=_safe_key_fn("left", "esc"))

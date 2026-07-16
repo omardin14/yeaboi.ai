@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import HumanMessage
 
-from scrum_agent.agent.graph import create_graph
-from scrum_agent.agent.nodes import (
+from yeaboi.agent.graph import create_graph
+from yeaboi.agent.nodes import (
     feature_generator,
     project_analyzer,
     project_intake,
@@ -23,7 +23,7 @@ from scrum_agent.agent.nodes import (
     story_writer,
     task_decomposer,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     AcceptanceCriterion,
     Feature,
@@ -368,7 +368,7 @@ class TestFullGraphExecution:
         # Patch LLM to avoid real calls (intake doesn't call LLM on Q1, but
         # adaptive extraction may be triggered)
         mock_llm = _mock_llm("{}")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         graph = create_graph(tools=[])
         result = graph.invoke({"messages": [HumanMessage(content="Build a todo app")]})
@@ -380,11 +380,11 @@ class TestFullGraphExecution:
     def test_graph_invocation_routes_to_analyzer(self, monkeypatch):
         """Invocation with completed questionnaire should route to project_analyzer."""
         mock_llm = _mock_llm(_VALID_ANALYSIS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
         # Disable repo scanning / confluence / user context to simplify
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
         graph = create_graph(tools=[])
         result = graph.invoke(
@@ -409,7 +409,7 @@ class TestQuestionnaireFlowE2E:
     def test_first_invocation_initializes_questionnaire(self, monkeypatch):
         """First call with no questionnaire should initialize and ask Q1."""
         mock_llm = _mock_llm("{}")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = {"messages": [HumanMessage(content="Build a todo app")]}
         result = project_intake(state)
@@ -423,7 +423,7 @@ class TestQuestionnaireFlowE2E:
     def test_answering_advances_question(self, monkeypatch):
         """Providing an answer should advance current_question."""
         mock_llm = _mock_llm("{}")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         qs = QuestionnaireState()
         qs.current_question = 2
@@ -443,7 +443,7 @@ class TestQuestionnaireFlowE2E:
     def test_last_question_triggers_confirmation(self, monkeypatch):
         """Answering the last question should set awaiting_confirmation=True."""
         mock_llm = _mock_llm("{}")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         # Set up questionnaire at the last question
         qs = QuestionnaireState()
@@ -465,7 +465,7 @@ class TestQuestionnaireFlowE2E:
     def test_confirmation_marks_completed(self, monkeypatch):
         """Confirming answers after Q26 should set completed=True."""
         mock_llm = _mock_llm("{}")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         # Set up questionnaire awaiting confirmation (all answers filled)
         qs = QuestionnaireState()
@@ -492,7 +492,7 @@ class TestQuestionnaireFlowE2E:
     def test_skip_intent_uses_default(self, monkeypatch):
         """Typing 'skip' should use the question's default answer."""
         mock_llm = _mock_llm("{}")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         qs = QuestionnaireState()
         qs.current_question = 5  # A question with a default
@@ -527,10 +527,10 @@ class TestPipelineE2E:
     def test_analyzer_produces_project_analysis(self, monkeypatch):
         """project_analyzer should produce a ProjectAnalysis from questionnaire answers."""
         mock_llm = _mock_llm(_VALID_ANALYSIS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
         state = {
             "messages": [HumanMessage(content="continue")],
@@ -547,7 +547,7 @@ class TestPipelineE2E:
     def test_feature_generator_produces_features_from_analysis(self, monkeypatch):
         """feature_generator should produce Feature list from ProjectAnalysis."""
         mock_llm = _mock_llm(_VALID_FEATURES_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = {
             "messages": [HumanMessage(content="continue")],
@@ -566,7 +566,7 @@ class TestPipelineE2E:
     def test_story_writer_produces_stories_from_features(self, monkeypatch):
         """story_writer should produce UserStory list from features + analysis."""
         mock_llm = _mock_llm(_VALID_STORIES_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = {
             "messages": [HumanMessage(content="continue")],
@@ -589,7 +589,7 @@ class TestPipelineE2E:
     def test_task_decomposer_produces_tasks_from_stories(self, monkeypatch):
         """task_decomposer should produce Task list from stories + analysis."""
         mock_llm = _mock_llm(_VALID_TASKS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = {
             "messages": [HumanMessage(content="continue")],
@@ -613,7 +613,7 @@ class TestPipelineE2E:
     def test_sprint_planner_produces_sprints_from_stories(self, monkeypatch):
         """sprint_planner should produce Sprint list from stories + analysis."""
         mock_llm = _mock_llm(_VALID_SPRINTS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = {
             "messages": [HumanMessage(content="continue")],
@@ -647,13 +647,13 @@ class TestPipelineE2E:
         the graph (which requires REPL interaction between nodes).
         """
         # Patch external lookups — each returns (context, status_dict) tuple
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
         # --- Stage 1: Analyzer ---
         mock_llm = _mock_llm(_VALID_ANALYSIS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = {
             "messages": [HumanMessage(content="continue")],
@@ -665,7 +665,7 @@ class TestPipelineE2E:
 
         # --- Stage 2: Feature generator ---
         mock_llm = _mock_llm(_VALID_FEATURES_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state["project_analysis"] = analysis
         feature_result = feature_generator(state)
@@ -674,7 +674,7 @@ class TestPipelineE2E:
 
         # --- Stage 3: Story writer ---
         mock_llm = _mock_llm(_VALID_STORIES_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state["features"] = features
         story_result = story_writer(state)
@@ -683,7 +683,7 @@ class TestPipelineE2E:
 
         # --- Stage 4: Task decomposer ---
         mock_llm = _mock_llm(_VALID_TASKS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state["stories"] = stories
         task_result = task_decomposer(state)
@@ -692,7 +692,7 @@ class TestPipelineE2E:
 
         # --- Stage 5: Sprint planner ---
         mock_llm = _mock_llm(_VALID_SPRINTS_JSON)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state["tasks"] = tasks
         state["team_size"] = 2
@@ -723,13 +723,13 @@ class TestPipelineE2E:
         All nodes have deterministic fallback logic — this verifies that even
         with garbage LLM responses, the pipeline produces usable artifacts.
         """
-        monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
-        monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
+        monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
         # All LLM calls return garbage — fallback logic should kick in
         mock_llm = _mock_llm("This is not JSON at all!")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = {
             "messages": [HumanMessage(content="continue")],

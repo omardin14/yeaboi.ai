@@ -134,7 +134,7 @@ class TestAzureDevOpsSmoke:
         from azure.devops.connection import Connection
         from msrest.authentication import BasicAuthentication
 
-        from scrum_agent.tools.azure_devops import _parse_azdo_url
+        from yeaboi.tools.azure_devops import _parse_azdo_url
 
         org_url, project, repo = _parse_azdo_url(azdo_creds["repo_url"])
         creds = BasicAuthentication("", azdo_creds["token"])

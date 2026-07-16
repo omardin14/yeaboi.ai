@@ -1,12 +1,12 @@
 """Unit tests for per-engineer activity gathering (mocked sources + sprint ctx)."""
 
-from scrum_agent.performance import activity
-from scrum_agent.standup.sprint_context import SprintContext
+from yeaboi.performance import activity
+from yeaboi.standup.sprint_context import SprintContext
 
 
 def _patch_sprint(monkeypatch, *, name="Sprint 5", start="2026-07-06"):
     monkeypatch.setattr(
-        "scrum_agent.standup.sprint_context.gather",
+        "yeaboi.standup.sprint_context.gather",
         lambda state, **kw: SprintContext(sprint_name=name, start_date=start, sprint_length_weeks=2),
     )
 
@@ -15,7 +15,7 @@ class TestGatherEngineerActivity:
     def test_filters_by_engineer_and_splits_by_sprint(self, monkeypatch):
         _patch_sprint(monkeypatch)
         monkeypatch.setattr(
-            "scrum_agent.tools.jira.jira_recent_activity",
+            "yeaboi.tools.jira.jira_recent_activity",
             lambda project_key, days=1: [
                 {
                     "author": "Ada",
@@ -52,8 +52,8 @@ class TestGatherEngineerActivity:
         assert act.current_sprint == "Sprint 5"
 
     def test_empty_when_no_tracker(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.config.get_jira_project_key", lambda: "")
-        monkeypatch.setattr("scrum_agent.config.get_azure_devops_project", lambda: "")
+        monkeypatch.setattr("yeaboi.config.get_jira_project_key", lambda: "")
+        monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "")
         act = activity.gather_engineer_activity("Ada")
         assert act.total_items == 0
         assert act.stories == ()
@@ -61,7 +61,7 @@ class TestGatherEngineerActivity:
     def test_case_insensitive_author_match(self, monkeypatch):
         _patch_sprint(monkeypatch)
         monkeypatch.setattr(
-            "scrum_agent.tools.jira.jira_recent_activity",
+            "yeaboi.tools.jira.jira_recent_activity",
             lambda project_key, days=1: [
                 {
                     "author": "ada lovelace",

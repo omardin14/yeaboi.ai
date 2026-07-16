@@ -2,8 +2,8 @@
 
 import json
 
-from scrum_agent.retro import engine
-from scrum_agent.retro.board import RetroBoard
+from yeaboi.retro import engine
+from yeaboi.retro.board import RetroBoard
 
 
 class _FakeResp:
@@ -55,22 +55,22 @@ class TestGenerateActionItems:
 
     def test_happy_path_with_llm(self, monkeypatch):
         b = self._seed()
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-        monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
         payload = json.dumps({"action_items": ["Add a CI retry guard", "Split the flaky suite"]})
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", _fake_llm(payload))
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _fake_llm(payload))
         msg = engine.generate_action_items(b)
         assert "Generated 2" in msg
         assert len(b.cards_by_grid()["action_items"]) == 2
 
     def test_not_configured_uses_fallback(self, monkeypatch):
         b = self._seed()
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (False, "ANTHROPIC_API_KEY not set"))
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "ANTHROPIC_API_KEY not set"))
 
         def _should_not_call(**k):
             raise AssertionError("get_llm must not be called when unconfigured")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", _should_not_call)
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _should_not_call)
         msg = engine.generate_action_items(b)
         assert "unavailable" in msg.lower()
         # Deterministic fallback added the one problem card as an action item.
@@ -82,8 +82,8 @@ class TestGenerateActionItems:
         problem = b.cards_by_grid()["didnt_go_well"][0]
         b.toggle_reaction(problem.id, "👍", "p1")
         b.toggle_reaction(problem.id, "🔥", "p2")
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-        monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
 
         captured = {}
 
@@ -94,19 +94,19 @@ class TestGenerateActionItems:
 
             return type("L", (), {"invoke": _invoke})()
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", _fake)
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _fake)
         engine.generate_action_items(b)
         assert "[2 reactions]" in captured["prompt"]
 
     def test_llm_error_falls_back(self, monkeypatch):
         b = self._seed()
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-        monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
 
         def boom(self, m):
             raise RuntimeError("network down")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
         msg = engine.generate_action_items(b)
         assert "failed" in msg.lower()
         assert len(b.cards_by_grid()["action_items"]) == 1

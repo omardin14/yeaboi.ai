@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bump the single-source project version in ``pyproject.toml``.
 
-The version lives only in ``pyproject.toml`` (``src/scrum_agent/__init__.py`` reads
+The version lives only in ``pyproject.toml`` (``src/yeaboi/__init__.py`` reads
 it from the installed package metadata). ``publish.yml`` releases whenever that
 version has no matching ``v<version>`` tag on ``main``, so bumping this one line is
 the whole release trigger.

@@ -2,8 +2,8 @@
 
 from datetime import date
 
-from scrum_agent.agent.state import StandupReport
-from scrum_agent.standup import interactive
+from yeaboi.agent.state import StandupReport
+from yeaboi.standup import interactive
 
 
 class TestHeadlessFallback:
@@ -16,7 +16,7 @@ class TestHeadlessFallback:
             calls["ran"] = session_id
             return StandupReport(session_id=session_id)
 
-        monkeypatch.setattr("scrum_agent.standup.engine.run_standup", fake_run)
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", fake_run)
         rc = interactive.run_interactive_standup("s1")
         assert rc == 0
         assert calls["ran"] == "s1"
@@ -35,7 +35,7 @@ class TestInteractiveFlow:
         # the trailing _hold prompt returns None (timeout).
         prompts = iter(["I shipped the login flow", "", None])
         monkeypatch.setattr(interactive, "_timed_input", lambda prompt, timeout: next(prompts, None))
-        monkeypatch.setattr("scrum_agent.config.get_standup_user_name", lambda: "Omar")
+        monkeypatch.setattr("yeaboi.config.get_standup_user_name", lambda: "Omar")
 
         saved = {}
 
@@ -52,10 +52,10 @@ class TestInteractiveFlow:
             def save_my_update(self, sid, d, member, text):
                 saved.update(session=sid, member=member, text=text)
 
-        monkeypatch.setattr("scrum_agent.standup.store.StandupStore", FakeStore)
+        monkeypatch.setattr("yeaboi.standup.store.StandupStore", FakeStore)
 
         report = StandupReport(session_id="s1", warnings=("Jira: authentication failed",))
-        monkeypatch.setattr("scrum_agent.standup.engine.run_standup", lambda *a, **k: report)
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", lambda *a, **k: report)
 
         rc = interactive.run_interactive_standup("s1", db_path=db, today=date(2026, 7, 10))
         assert rc == 0
@@ -70,7 +70,7 @@ class TestInteractiveFlow:
         def _should_not_run(*a, **k):
             raise AssertionError("run_standup must not be called when cancelled")
 
-        monkeypatch.setattr("scrum_agent.standup.engine.run_standup", _should_not_run)
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", _should_not_run)
         rc = interactive.run_interactive_standup("s1")
         assert rc == 0
 
@@ -85,7 +85,7 @@ class TestInteractiveFlow:
             ran["ok"] = True
             return StandupReport(session_id="s1")
 
-        monkeypatch.setattr("scrum_agent.standup.engine.run_standup", fake_run)
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", fake_run)
         rc = interactive.run_interactive_standup("s1")
         assert rc == 0
         assert ran["ok"] is True

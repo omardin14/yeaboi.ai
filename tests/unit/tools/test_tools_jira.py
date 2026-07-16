@@ -7,8 +7,8 @@ for each tool, plus registration in get_tools().
 
 from unittest.mock import MagicMock
 
-from scrum_agent.tools import get_tools  # noqa: E402 — stdlib/local separation handled by ruff
-from scrum_agent.tools.jira import (
+from yeaboi.tools import get_tools  # noqa: E402 — stdlib/local separation handled by ruff
+from yeaboi.tools.jira import (
     _MISSING_CONFIG_MSG,
     _create_issue_with_epic_link,
     _jira_error_msg,
@@ -105,7 +105,7 @@ class TestJiraReadBoard:
         backlog_result.total = 12
         mock_client.search_issues.return_value = backlog_result
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_read_board.invoke({"project_key": "PROJ"})
 
@@ -123,7 +123,7 @@ class TestJiraReadBoard:
         backlog.total = 0
         mock_client.search_issues.return_value = backlog
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_PROJECT_KEY", "ENVPROJ")
 
         # Empty project_key → falls back to env var
@@ -142,7 +142,7 @@ class TestJiraReadBoard:
         backlog.total = 5
         mock_client.search_issues.return_value = backlog
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_read_board.invoke({"project_key": "PROJ"})
 
@@ -152,7 +152,7 @@ class TestJiraReadBoard:
         mock_client = MagicMock()
         mock_client.boards.return_value = []
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_read_board.invoke({"project_key": "NOPE"})
 
@@ -168,14 +168,14 @@ class TestJiraReadBoard:
         err.text = "Unauthorized"
         mock_client.boards.side_effect = err
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_read_board.invoke({"project_key": "PROJ"})
 
         assert "authentication failed" in result.lower()
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)
 
         result = jira_read_board.invoke({"project_key": "PROJ"})
 
@@ -195,7 +195,7 @@ class TestJiraReadBoard:
         mock_client.search_issues.return_value = backlog
         mock_client.sprint_info.side_effect = lambda bid, sid: {"completedPoints": 20}
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_read_board.invoke({"project_key": "PROJ"})
 
@@ -213,7 +213,7 @@ class TestJiraCreateEpic:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://myorg.atlassian.net")
 
         result = jira_create_epic.invoke({"title": "Auth Epic", "project_key": "PROJ"})
@@ -227,7 +227,7 @@ class TestJiraCreateEpic:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://myorg.atlassian.net")
 
         jira_create_epic.invoke({"title": "Feature X", "project_key": "PROJ", "issue_type": "Feature"})
@@ -240,7 +240,7 @@ class TestJiraCreateEpic:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_PROJECT_KEY", "ENV")
         monkeypatch.setenv("JIRA_BASE_URL", "https://x.atlassian.net")
 
@@ -259,7 +259,7 @@ class TestJiraCreateEpic:
         err.text = "Forbidden"
         mock_client.create_issue.side_effect = err
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_create_epic.invoke({"title": "Epic", "project_key": "PROJ"})
 
@@ -270,7 +270,7 @@ class TestJiraCreateEpic:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://myorg.atlassian.net")
 
         result = jira_create_epic.invoke({"title": "Epic", "project_key": "PROJ", "internal_id": "epic-1"})
@@ -282,7 +282,7 @@ class TestJiraCreateEpic:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://myorg.atlassian.net")
 
         result = jira_create_epic.invoke({"title": "Epic", "project_key": "PROJ"})
@@ -290,7 +290,7 @@ class TestJiraCreateEpic:
         assert "Mapping:" not in result
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)
 
         result = jira_create_epic.invoke({"title": "Epic", "project_key": "PROJ"})
 
@@ -308,7 +308,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = jira_create_story.invoke({"summary": "Login story", "epic_key": "PROJ-1", "project_key": "PROJ"})
@@ -322,7 +322,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         jira_create_story.invoke({"summary": "S", "epic_key": "PROJ-1", "story_points": 5, "project_key": "PROJ"})
@@ -335,7 +335,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         jira_create_story.invoke({"summary": "S", "epic_key": "PROJ-1", "story_points": 0, "project_key": "PROJ"})
@@ -348,7 +348,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         jira_create_story.invoke({"summary": "S", "epic_key": "PROJ-5", "project_key": "PROJ"})
@@ -361,7 +361,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         jira_create_story.invoke({"summary": "S", "epic_key": "PROJ-1", "priority": "High", "project_key": "PROJ"})
@@ -374,7 +374,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = jira_create_story.invoke(
@@ -388,7 +388,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = jira_create_story.invoke({"summary": "S", "epic_key": "PROJ-1", "project_key": "PROJ"})
@@ -400,7 +400,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         jira_create_story.invoke(
@@ -415,7 +415,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         jira_create_story.invoke({"summary": "S", "epic_key": "PROJ-1", "project_key": "PROJ"})
@@ -428,7 +428,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = jira_create_story.invoke(
@@ -442,7 +442,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = jira_create_story.invoke(
@@ -458,7 +458,7 @@ class TestJiraCreateStory:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = jira_create_story.invoke(
@@ -482,7 +482,7 @@ class TestJiraCreateStory:
         err.text = "Field 'customfield_10014' cannot be set."
         mock_client.create_issue.side_effect = [err, issue]
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = jira_create_story.invoke(
@@ -497,7 +497,7 @@ class TestJiraCreateStory:
         assert "PROJ-35" in result
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)
 
         result = jira_create_story.invoke({"summary": "S", "epic_key": "PROJ-1", "project_key": "PROJ"})
 
@@ -594,7 +594,7 @@ class TestJiraCreateSprint:
         mock_client = MagicMock()
         mock_client.create_sprint.return_value = sprint
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_create_sprint.invoke({"sprint_name": "Sprint Alpha", "board_id": 42})
 
@@ -610,7 +610,7 @@ class TestJiraCreateSprint:
         mock_client = MagicMock()
         mock_client.create_sprint.return_value = sprint
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         jira_create_sprint.invoke(
             {
@@ -635,7 +635,7 @@ class TestJiraCreateSprint:
         mock_client = MagicMock()
         mock_client.create_sprint.return_value = sprint
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         jira_create_sprint.invoke({"sprint_name": "Sprint 2", "board_id": 5})
 
@@ -645,7 +645,7 @@ class TestJiraCreateSprint:
         assert "endDate" not in call_kwargs
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)
 
         result = jira_create_sprint.invoke({"sprint_name": "S1", "board_id": 1})
 
@@ -668,7 +668,7 @@ class TestJiraInputValidation:
     def test_read_board_empty_key_no_env_returns_error(self, monkeypatch):
         """Empty project_key with no JIRA_PROJECT_KEY env var should return a clear error."""
         mock_client = MagicMock()
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.delenv("JIRA_PROJECT_KEY", raising=False)
 
         result = jira_read_board.invoke({"project_key": ""})
@@ -679,7 +679,7 @@ class TestJiraInputValidation:
     def test_create_epic_empty_key_no_env_returns_error(self, monkeypatch):
         """create_epic with no project_key and no env var should return an error."""
         mock_client = MagicMock()
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.delenv("JIRA_PROJECT_KEY", raising=False)
 
         result = jira_create_epic.invoke({"title": "Epic", "project_key": ""})
@@ -690,7 +690,7 @@ class TestJiraInputValidation:
     def test_create_story_empty_key_no_env_returns_error(self, monkeypatch):
         """create_story with no project_key and no env var should return an error."""
         mock_client = MagicMock()
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.delenv("JIRA_PROJECT_KEY", raising=False)
 
         result = jira_create_story.invoke({"summary": "Story", "epic_key": "PROJ-1", "project_key": ""})
@@ -708,7 +708,7 @@ class TestJiraInputValidation:
         err.text = "Internal server error"
         mock_client.create_sprint.side_effect = err
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_create_sprint.invoke({"sprint_name": "Sprint 1", "board_id": 42})
 
@@ -721,7 +721,7 @@ class TestJiraInputValidation:
         mock_client = MagicMock()
         mock_client.create_issue.return_value = issue
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_PROJECT_KEY", "ENV")
         monkeypatch.setenv("JIRA_BASE_URL", "https://x.atlassian.net")
 
@@ -735,7 +735,7 @@ class TestJiraInputValidation:
         mock_client = MagicMock()
         mock_client.create_issue.side_effect = ConnectionError("network down")
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_create_epic.invoke({"title": "Epic", "project_key": "PROJ"})
 
@@ -747,7 +747,7 @@ class TestJiraInputValidation:
         mock_client = MagicMock()
         mock_client.boards.side_effect = RuntimeError("unexpected")
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         result = jira_read_board.invoke({"project_key": "PROJ"})
 
@@ -797,7 +797,7 @@ class TestJiraFetchVelocityZeroVelocity:
             [sub1, sub2],  # Sub-task assignees
         ]
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_URL", "https://test.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "test@test.com")
         monkeypatch.setenv("JIRA_API_TOKEN", "tok")
@@ -844,7 +844,7 @@ class TestJiraFetchVelocityZeroVelocity:
             [sub],  # Sub-task assignees
         ]
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_URL", "https://test.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "test@test.com")
         monkeypatch.setenv("JIRA_API_TOKEN", "tok")
@@ -861,7 +861,7 @@ class TestJiraFetchVelocityZeroVelocity:
 
 class TestJiraListSprints:
     def test_lists_and_normalizes_sprints(self, monkeypatch):
-        from scrum_agent.tools.jira import jira_list_sprints
+        from yeaboi.tools.jira import jira_list_sprints
 
         board = _make_board(7, "Board")
         closed = _make_sprint(1, "Sprint 1", "2026-06-01T00:00:00.000Z", "2026-06-14T00:00:00.000Z")
@@ -873,7 +873,7 @@ class TestJiraListSprints:
             "active": [active],
             "future": [],
         }[state]
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
 
         out = jira_list_sprints("PROJ")
         assert [s["name"] for s in out] == ["Sprint 1", "Sprint 2"]  # sorted by start, newest last
@@ -881,17 +881,17 @@ class TestJiraListSprints:
         assert out[1]["state"] == "active"
 
     def test_empty_when_unconfigured(self, monkeypatch):
-        from scrum_agent.tools.jira import jira_list_sprints
+        from yeaboi.tools.jira import jira_list_sprints
 
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)
         assert jira_list_sprints("PROJ") == []
 
     def test_empty_when_no_boards(self, monkeypatch):
-        from scrum_agent.tools.jira import jira_list_sprints
+        from yeaboi.tools.jira import jira_list_sprints
 
         mock_client = MagicMock()
         mock_client.boards.return_value = []
-        monkeypatch.setattr("scrum_agent.tools.jira._make_jira_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: mock_client)
         assert jira_list_sprints("PROJ") == []
 
 
