@@ -15,7 +15,13 @@ from rich.panel import Panel
 
 from scrum_agent.agent.llm import _PROVIDER_DEFAULTS
 from scrum_agent.setup_wizard import _PROVIDERS, run_setup_wizard
-from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS
+from scrum_agent.ui.provider_select._constants import (
+    _AZDEVOPS_TRACKING_FIELDS,
+    _CONFLUENCE_FIELDS,
+    _ISSUE_TRACKING_FIELDS,
+    _NOTION_FIELDS,
+    _PROVIDER_CARDS,
+)
 from scrum_agent.ui.provider_select._verification import (
     _verify_confluence,
     _verify_model,
@@ -362,6 +368,58 @@ class TestIssueTrackingHint:
             )
         )
         assert "Docs" in out
+
+    def test_active_field_shows_where_to_get_hint(self):
+        # The focused field surfaces its "where to get it" hint, like the LLM and
+        # GitHub steps. Field 2 = JIRA_API_TOKEN → the token-creation URL.
+        out = _render(
+            _build_issue_tracking_screen(2, {}, width=100, height=30, fields=_ISSUE_TRACKING_FIELDS, title_text="Jira")
+        )
+        assert "id.atlassian.com" in out
+
+    def test_where_to_get_hint_hidden_while_verifying(self):
+        # The verify pulse / success flash (border_overrides) should read cleanly —
+        # the where-to-get hint is suppressed just like the keyboard hint.
+        out = _render(
+            _build_issue_tracking_screen(
+                2,
+                {},
+                width=100,
+                height=30,
+                fields=_ISSUE_TRACKING_FIELDS,
+                title_text="Jira",
+                border_overrides={2: "rgb(1,1,1)"},
+            )
+        )
+        assert "id.atlassian.com" not in out
+
+    def test_error_replaces_where_to_get_hint(self):
+        # A validation error on the active field takes the slot instead of the hint.
+        out = _render(
+            _build_issue_tracking_screen(
+                2,
+                {},
+                width=100,
+                height=30,
+                fields=_ISSUE_TRACKING_FIELDS,
+                title_text="Jira",
+                errors={2: "Invalid token"},
+            )
+        )
+        assert "Invalid token" in out
+        assert "id.atlassian.com" not in out
+
+
+class TestConnectionFieldHints:
+    """Every connection field carries a non-empty 'where to get it' hint."""
+
+    @pytest.mark.parametrize(
+        "fields",
+        [_ISSUE_TRACKING_FIELDS, _AZDEVOPS_TRACKING_FIELDS, _NOTION_FIELDS, _CONFLUENCE_FIELDS],
+    )
+    def test_all_fields_have_hints(self, fields):
+        for field in fields:
+            assert field.get("hint"), f"{field['env_var']} is missing a where-to-get-it hint"
 
 
 class TestNotionPicker:

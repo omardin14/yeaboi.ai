@@ -308,6 +308,16 @@ def _build_issue_tracking_screen(
             body.append(Text(f"  {err}", style="bright_red", justify="center"))
             body_h += 1
 
+        # Where-to-get-it hint for the focused field — mirrors the LLM and
+        # GitHub steps, which show a "Get yours at: …" line. Only the active
+        # field's hint is shown (keeps the stack uncluttered); it's suppressed
+        # while an error is on screen or the verify animation is running
+        # (border_overrides) so those states read cleanly.
+        hint = field.get("hint", "")
+        if hint and is_active and not err and not border_overrides:
+            body.append(Text(hint, style="dim", justify="center"))
+            body_h += 1
+
     # Keyboard hint — makes editing/clearing/skipping discoverable, matching the
     # LLM API-key screen. Hidden while verifying (border_overrides drives the
     # pulse + success flash) so the animation reads cleanly.
