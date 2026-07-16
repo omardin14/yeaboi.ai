@@ -43,7 +43,7 @@ def get_tips() -> tuple[str, ...]:
     """Return the ordered tips shown on the welcome screen.
 
     The first entry is the voice tip and the last is the music tip; both adapt to
-    whether their optional dependency is installed (dictation extra / the cliamp
+    whether their optional dependency is installed (dictation extra / the ffplay
     binary), showing an install hint otherwise. The middle entries are static
     product tips. Memoised because availability is fixed for the life of the
     process.
@@ -61,7 +61,7 @@ def get_tips() -> tuple[str, ...]:
     music_tip = (
         "\U0001f3b5 Tip: press Ctrl+P for focus music · Ctrl+O to switch channel"
         if music_available
-        else "\U0001f3b5 Tip: play focus music while you plan — brew install bjarneo/cliamp/cliamp"
+        else "\U0001f3b5 Tip: play focus music while you plan — brew install ffmpeg"
     )
     return (voice_tip, *_GENERAL_TIPS, music_tip)
 

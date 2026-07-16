@@ -120,7 +120,7 @@ def record_voice_input(live: Live, console: Console, _key, render_status=None) -
 
     # Silence any background music so it doesn't bleed into the recording. Resumed
     # the moment recording stops (below), including on the mic-failure path.
-    # # See README: "Music (cliamp)"
+    # # See README: "Music (ffplay)"
     from scrum_agent import music
 
     music.pause_for_voice()
