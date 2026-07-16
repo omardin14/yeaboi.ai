@@ -181,13 +181,15 @@ class _RetroHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "not found"})
 
     def _send_qr(self) -> None:
-        """Render a QR of ``scheme://<Host header>/?token=…`` as inline SVG.
+        """Render a QR of the token-free join URL (``scheme://<Host header>/``) as inline SVG.
 
         Using the request's Host header makes the QR correct for both LAN and the
-        Cloudflare tunnel automatically. Best-effort — 501 if segno is unavailable.
+        Cloudflare tunnel automatically. The QR is token-free so scanning it lands
+        on the code gate — a scan alone does not grant access; the visitor still
+        types the join code. Best-effort — 501 if segno is unavailable.
         """
         host = self.headers.get("Host") or f"{self.server.server_address[0]}:{self.server.server_address[1]}"  # type: ignore[attr-defined]
-        url = f"http://{host}/?token={self._token}"
+        url = f"http://{host}/"
         try:
             import io
 
@@ -322,8 +324,18 @@ class RetroServer:
 
     @property
     def url(self) -> str:
-        """The full clickable URL teammates open (carries the token)."""
+        """The host's private direct link (carries the token — do not share).
+
+        This is the host's own convenience link and the value logged on startup;
+        anyone opening it is let straight in. Teammates get :attr:`share_url`
+        instead and must enter the join code.
+        """
         return f"http://{self.ip}:{self.port}/?token={self.token}"
+
+    @property
+    def share_url(self) -> str:
+        """The token-free URL to hand out — recipients must type the join code."""
+        return f"http://{self.ip}:{self.port}/"
 
     @property
     def share_code(self) -> str:

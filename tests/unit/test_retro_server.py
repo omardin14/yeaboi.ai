@@ -32,6 +32,19 @@ class TestShareCode:
         assert make_token() != make_token()
 
 
+class TestShareVsHostUrl:
+    def test_share_url_is_token_free(self):
+        # The shareable URL must NOT carry the token — recipients type the code.
+        srv = RetroServer(RetroBoard("s"), port=5288)
+        assert "token" not in srv.share_url
+        assert srv.share_url == f"http://{srv.ip}:{srv.port}/"
+
+    def test_host_url_still_carries_token(self):
+        # The host's private direct link keeps the token for one-click access.
+        srv = RetroServer(RetroBoard("s"), port=5289)
+        assert f"?token={srv.token}" in srv.url
+
+
 class TestLanIp:
     def test_returns_ipv4_string(self):
         ip = get_lan_ip()
@@ -121,7 +134,7 @@ class TestStateEndpoint:
         srv, b = running_server
         b.add_card(grid="went_well", text="ci", author="Sam")
         data = json.load(_get(f"http://127.0.0.1:{srv.port}/api/state?token={srv.token}"))
-        assert set(data) == {"revision", "cards", "presence", "typing", "timer"}
+        assert set(data) == {"revision", "cards", "presence", "typing", "timer", "reaction_events"}
 
     def test_state_forbidden_without_token(self, running_server):
         srv, _ = running_server

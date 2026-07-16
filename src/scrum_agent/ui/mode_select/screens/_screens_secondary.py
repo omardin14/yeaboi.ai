@@ -3840,7 +3840,8 @@ def _build_retro_screen(
     lives in the browser; here the grids stack vertically so narrow terminals and
     the shared scrollbar behave like every other page.
 
-    retro_data keys: session_name, display_code, url, message (transient status),
+    retro_data keys: session_name, display_code, url (token-free LAN share URL),
+    host_url (optional private token'd host link), message (transient status),
     grids (dict[grid_key -> list[RetroCard]]), public_url (optional remote tunnel
     URL), actions (optional button-label list).
 
@@ -3889,11 +3890,15 @@ def _build_retro_screen(
     _heading("Join this retro")
     _row("Share code", retro_data.get("display_code", "—"), f"bold {theme.accent_bright}")
     _row("LAN URL", retro_data.get("url", "—"), theme.value)
-    _line("Teammates on the same Wi-Fi open the LAN URL in a browser to add cards.", theme.muted)
+    _line("Teammates on the same Wi-Fi open the LAN URL, then enter the Share code above.", theme.muted)
     public_url = retro_data.get("public_url", "")
     if public_url:
         _row("Remote URL", public_url, f"bold {theme.accent_bright}")
-        _line("Off-network teammates open the Remote URL (public HTTPS link).", theme.muted)
+        _line("Off-network teammates open the Remote URL (public HTTPS link), then enter the code.", theme.muted)
+    host_url = retro_data.get("host_url", "")
+    if host_url:
+        _row("Host link (private)", host_url, theme.muted)
+        _line("For you only — this link skips the code. Don't share it.", theme.muted)
 
     # ── The four grids ────────────────────────────────────────────
     grids = retro_data.get("grids") or {}

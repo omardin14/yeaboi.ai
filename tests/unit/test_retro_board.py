@@ -159,6 +159,43 @@ class TestReactions:
         assert dict(rep.cards[0].reactions) == {"👍": 1, "🔥": 1}
 
 
+class TestReactionEvents:
+    def test_add_queues_event_remove_does_not(self):
+        # Adding a reaction broadcasts an event; toggling it back off does not.
+        b = RetroBoard("s")
+        c = b.add_card(grid="went_well", text="ci", author="Sam")
+        b.toggle_reaction(c.id, "👍", "p1")  # add -> one event
+        events = b.state_snapshot()["reaction_events"]
+        assert events == [{"id": 0, "emoji": "👍"}]
+        b.toggle_reaction(c.id, "👍", "p1")  # remove -> no new event
+        assert b.state_snapshot()["reaction_events"] == [{"id": 0, "emoji": "👍"}]
+
+    def test_ids_are_monotonic_across_cards(self):
+        b = RetroBoard("s")
+        c = b.add_card(grid="went_well", text="a", author="x")
+        b.toggle_reaction(c.id, "👍", "p1")
+        b.toggle_reaction(c.id, "🔥", "p2")
+        ids = [e["id"] for e in b.state_snapshot()["reaction_events"]]
+        assert ids == [0, 1]
+
+    def test_rejected_reaction_queues_nothing(self):
+        b = RetroBoard("s")
+        c = b.add_card(grid="demos", text="x", author="a")
+        b.toggle_reaction(c.id, "🦖", "p1")  # unknown emoji
+        b.toggle_reaction("nope", "👍", "p1")  # missing card
+        assert b.state_snapshot()["reaction_events"] == []
+
+    def test_event_buffer_caps_at_25(self):
+        b = RetroBoard("s")
+        c = b.add_card(grid="went_well", text="a", author="x")
+        # 30 distinct reactors adding 👍 -> 30 add-events, buffer keeps the last 25.
+        for i in range(30):
+            b.toggle_reaction(c.id, "👍", f"p{i}")
+        events = b.state_snapshot()["reaction_events"]
+        assert len(events) == 25
+        assert events[0]["id"] == 5 and events[-1]["id"] == 29
+
+
 class TestPresenceAndTyping:
     def test_heartbeat_and_presence_list(self):
         b = RetroBoard("s")
@@ -221,7 +258,7 @@ class TestStateSnapshot:
         b.toggle_reaction(c.id, "👍", "p1")
         b.heartbeat("p1", name="Sam", avatar="🤠", typing_grid="went_well")
         snap = b.state_snapshot()
-        assert set(snap) == {"revision", "cards", "presence", "typing", "timer"}
+        assert set(snap) == {"revision", "cards", "presence", "typing", "timer", "reaction_events"}
         assert snap["cards"][0]["reactions"] == {"👍": 1}
         assert snap["presence"] and snap["typing"][0]["grid"] == "went_well"
 
