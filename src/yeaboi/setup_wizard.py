@@ -273,15 +273,16 @@ def run_setup_wizard(console: Console) -> bool:
     # new users discover they can dictate answers instead of typing. Skipped
     # entirely when the user has switched tips off.
     from yeaboi.config import is_tips_enabled
-    from yeaboi.voice import is_voice_available
+    from yeaboi.voice import is_voice_available, voice_install_command
 
     if is_tips_enabled():
         if is_voice_available():
             console.print("[dim]🎤 Voice input is ready — double-tap Space in any text field to dictate.[/dim]")
         else:
+            cmd = voice_install_command()
             console.print(
                 "[dim]🎤 Tip: enable voice input to dictate answers — "
-                "run [/dim][cyan]uv sync --extra voice[/cyan][dim] (works offline, any LLM provider).[/dim]"
+                f"run [/dim][cyan]{cmd}[/cyan][dim] (works offline, any LLM provider).[/dim]"
             )
 
     logger.info("Setup wizard completed successfully")

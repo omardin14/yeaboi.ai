@@ -49,13 +49,13 @@ def get_tips() -> tuple[str, ...]:
     process.
     """
     from yeaboi.music import is_music_available
-    from yeaboi.voice import is_voice_available
+    from yeaboi.voice import is_voice_available, voice_install_command
 
     available, _reason = is_voice_available()
     voice_tip = (
         "\U0001f3a4 Tip: double-tap Space in any text field to dictate"
         if available
-        else "\U0001f3a4 Tip: enable dictation with — uv sync --extra voice"
+        else f"\U0001f3a4 Tip: enable dictation with — {voice_install_command()}"
     )
     music_available, _music_reason = is_music_available()
     music_tip = (

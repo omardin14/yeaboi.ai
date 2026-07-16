@@ -32,7 +32,7 @@ def _voice_hint() -> str:
     hint too (the double-tap Space shortcut still works regardless).
     """
     from yeaboi.config import is_tips_enabled
-    from yeaboi.voice import is_voice_available
+    from yeaboi.voice import is_voice_available, voice_install_command
 
     if not is_tips_enabled():
         return ""
@@ -40,7 +40,7 @@ def _voice_hint() -> str:
     available, _reason = is_voice_available()
     if available:
         return " · \U0001f3a4 double-tap Space to speak"
-    return " · \U0001f3a4 dictate: uv sync --extra voice"
+    return f" · \U0001f3a4 dictate: {voice_install_command()}"
 
 
 # ---------------------------------------------------------------------------

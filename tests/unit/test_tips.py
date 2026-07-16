@@ -8,6 +8,7 @@ from yeaboi.ui.shared._tips import (
     tip_brightness,
     tip_count,
 )
+from yeaboi.voice import voice_install_command
 
 
 def _clear_cache():
@@ -36,7 +37,9 @@ def test_voice_tip_when_unavailable(monkeypatch):
     _clear_cache()
     monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (False, "reason"))
     voice_tip = get_tips()[0]
-    assert "uv sync --extra voice" in voice_tip
+    # Tip shows the install-method-aware command (not a hardcoded `uv sync`).
+    assert "enable dictation" in voice_tip
+    assert voice_install_command() in voice_tip
     _clear_cache()
 
 

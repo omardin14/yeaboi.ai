@@ -166,6 +166,47 @@ class TestVoiceModel:
 # ---------------------------------------------------------------------------
 
 
+class TestVoiceInstallCommand:
+    """The install hint must match how yeaboi was actually installed."""
+
+    def _no_source_checkout(self, monkeypatch):
+        # Force the source-checkout branch to miss so path-based detection runs.
+        # (When the tests run from a checkout, pyproject.toml exists at the repo
+        # root and would otherwise short-circuit to `uv sync`.)
+        monkeypatch.setattr(voice.pathlib.Path, "exists", lambda self: False)
+
+    def test_source_checkout(self, monkeypatch):
+        # pyproject.toml + src/yeaboi both present -> source checkout.
+        monkeypatch.setattr(voice.pathlib.Path, "exists", lambda self: True)
+        monkeypatch.setattr(voice.pathlib.Path, "is_dir", lambda self: True)
+        assert voice.voice_install_command() == "uv sync --extra voice"
+
+    def test_uv_tool_install(self, monkeypatch):
+        self._no_source_checkout(monkeypatch)
+        monkeypatch.setattr(voice.sys, "executable", "/home/u/.local/share/uv/tools/yeaboi/bin/python")
+        assert voice.voice_install_command() == "uv tool install 'yeaboi[voice]'"
+
+    def test_pipx_by_path(self, monkeypatch):
+        self._no_source_checkout(monkeypatch)
+        monkeypatch.delenv("PIPX_HOME", raising=False)
+        monkeypatch.delenv("PIPX_BIN_DIR", raising=False)
+        monkeypatch.setattr(voice.sys, "executable", "/home/u/.local/pipx/venvs/yeaboi/bin/python")
+        assert voice.voice_install_command() == "pipx install 'yeaboi[voice]'"
+
+    def test_pipx_by_env(self, monkeypatch):
+        self._no_source_checkout(monkeypatch)
+        monkeypatch.setattr(voice.sys, "executable", "/usr/bin/python3")
+        monkeypatch.setenv("PIPX_HOME", "/home/u/.local/pipx")
+        assert voice.voice_install_command() == "pipx install 'yeaboi[voice]'"
+
+    def test_pip_fallback(self, monkeypatch):
+        self._no_source_checkout(monkeypatch)
+        monkeypatch.delenv("PIPX_HOME", raising=False)
+        monkeypatch.delenv("PIPX_BIN_DIR", raising=False)
+        monkeypatch.setattr(voice.sys, "executable", "/usr/bin/python3")
+        assert voice.voice_install_command() == "pip install 'yeaboi[voice]'"
+
+
 class TestIsVoiceAvailable:
     def test_missing_sounddevice(self, _inject):
         _inject(sounddevice=False, faster_whisper_captured={})

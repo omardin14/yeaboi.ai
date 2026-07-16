@@ -4,6 +4,7 @@ from rich.panel import Panel
 
 from yeaboi.ui.mode_select.screens._screens import _build_mode_screen
 from yeaboi.ui.session.screens._screens_input import _voice_hint
+from yeaboi.voice import voice_install_command
 
 
 def test_voice_hint_empty_when_tips_disabled(monkeypatch):
@@ -22,7 +23,9 @@ def test_voice_hint_shows_install_when_unavailable(monkeypatch):
     monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
     monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (False, "x"))
     hint = _voice_hint()
-    assert "uv sync --extra voice" in hint
+    # Hint shows the install-method-aware command (not a hardcoded `uv sync`).
+    assert "dictate:" in hint
+    assert voice_install_command() in hint
 
 
 def test_mode_screen_renders_with_tips_on(monkeypatch):
