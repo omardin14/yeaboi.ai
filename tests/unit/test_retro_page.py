@@ -8,8 +8,11 @@ class TestBuildBoardHtml:
         html = build_board_html()
         assert "<!DOCTYPE html>" in html
         assert "<style>" in html and "<script>" in html
-        # No external resources (CSP-hostile) — no http(s) src/href, no CDN.
-        assert "http://" not in html and "https://" not in html
+        # No external code/style resources (CSP-hostile) — no external script/style/
+        # link tags, no CDN. The music streams (audio URLs in JS data) are the one
+        # deliberate exception, so we forbid resource *tags* rather than any URL.
+        assert 'src="http' not in html and 'href="http' not in html
+        assert "<link" not in html
         assert "cdn" not in html.lower()
 
     def test_token_free_page(self):
@@ -48,8 +51,9 @@ class TestBuildBoardHtml:
         assert "data-set-theme" in html and '[data-theme="synthwave"]' in html
         assert '"synthwave"' in html and "buildSwatches" in html
         assert 'id="theme-btn"' in html and 'id="theme-pop"' in html
-        # richer music moods
-        assert ">Hip-hop<" in html and ">Jazz<" in html and "boombap" in html
+        # internet-radio music: the TUI's SomaFM channels, played via <audio>
+        assert "setChannel" in html and "buildChannels" in html
+        assert '"Lofi"' in html and '"Jazz"' in html and "somafm" in html
         # visualizer + drag + edit/delete + confetti/alarm
         assert 'id="viz"' in html and "drawViz" in html
         assert 'draggable="true"' in html and "/api/card/move" in html
@@ -94,6 +98,30 @@ class TestBuildBoardHtml:
         for emoji in ("👍", "❤️", "🔥"):
             assert emoji in html
         assert "🤠" in html  # an avatar
+
+    def test_reaction_broadcast_and_react_button(self):
+        html = build_board_html()
+        # Collapsed reactions: a React button + a floating picker (not all chips).
+        assert "react-btn" in html and "rx-picker" in html and "openReactPicker" in html
+        # Floating-emoji broadcast overlay + the poll-driven event drain.
+        assert 'id="rx-fx"' in html and "function floatEmoji(" in html
+        assert "reaction_events" in html and "seededRx" in html
+
+    def test_music_uses_audio_element_not_synth(self):
+        html = build_board_html()
+        # Real streams via <audio>; the old synth mood engine is gone.
+        assert "new Audio()" in html and "Music.channels()" in html
+        assert "MOODS" not in html and "boombap" not in html
+        # The alarm no longer borrows the (removed) synth context.
+        assert "Music.ctx()" not in html and "Music.out()" not in html
+
+    def test_share_code_token_hardening(self):
+        html = build_board_html()
+        # Token is persisted per-tab and never re-written into the address bar,
+        # so copying the URL doesn't leak access.
+        assert 'sessionStorage.getItem("retro_token")' in html
+        assert 'sessionStorage.setItem("retro_token"' in html
+        assert '"/?token="' not in html  # never rebuild a token'd URL client-side
 
 
 class TestConfig:

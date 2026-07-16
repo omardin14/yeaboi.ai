@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from datetime import UTC, date, datetime
 from uuid import uuid4
 
@@ -100,6 +101,12 @@ class RetroBoard:
         self._lock = threading.Lock()
         # All guarded by _lock, same as _cards.
         self._reactions: dict[str, dict[str, set[str]]] = {}  # card_id -> emoji -> {pid, …}
+        # Recent reaction *events* — a small ring buffer the browser poll drains to
+        # animate each new reaction exactly once (floating emoji seen by everyone,
+        # the same broadcast-by-polling trick the shared timer uses). Add-only:
+        # un-reacting never animates. Each event is {"id": int, "emoji": str}.
+        self._reaction_events: deque[dict] = deque(maxlen=25)
+        self._reaction_seq = 0
         self._card_owner: dict[str, str] = {}  # card_id -> creator pid (edit/delete permission)
         self._presence: dict[str, dict] = {}  # pid -> {name, avatar, typing_grid, last_seen}
         self._timer: dict = {"running": False, "end_epoch": None, "duration": 0}
@@ -281,6 +288,9 @@ class RetroBoard:
             else:
                 pids.add(pid)
                 now_set = True
+                # Queue a broadcast event so every poller floats this emoji once.
+                self._reaction_events.append({"id": self._reaction_seq, "emoji": emoji})
+                self._reaction_seq += 1
             if not pids:  # keep the map tidy
                 by_emoji.pop(emoji, None)
             self._revision += 1
@@ -387,6 +397,7 @@ class RetroBoard:
                 "presence": presence,
                 "typing": typing,
                 "timer": self._timer_locked(),
+                "reaction_events": list(self._reaction_events),
             }
 
 

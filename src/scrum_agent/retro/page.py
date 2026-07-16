@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 
+from scrum_agent.music import CHANNELS
 from scrum_agent.retro.board import AVATARS, REACTION_EMOJIS, RETRO_GRID_LABELS, RETRO_GRIDS
 
 # Grid (key, label) pairs for the client, kept in server order.
@@ -217,6 +218,17 @@ header .spacer { flex:1; }
 .chip:hover { border-color:var(--accent); }
 .chip.mine { background:rgba(80,190,190,.18); border-color:var(--accent); }
 .chip span { color:var(--muted); font-size:12px; margin-left:3px; }
+.react-btn { background:transparent; border:1px solid var(--line); border-radius:999px;
+             padding:1px 8px; cursor:pointer; font:inherit; font-size:13px; line-height:1.5; color:var(--muted); }
+.react-btn:hover { border-color:var(--accent); color:var(--text); }
+.react-btn .plus { font-size:11px; margin-left:1px; }
+.rx-picker { position:fixed; z-index:31; background:var(--panel); border:1px solid var(--line);
+             border-radius:12px; padding:6px; display:flex; flex-wrap:wrap; gap:4px; max-width:220px;
+             box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.rx-picker .pick { background:transparent; border:1px solid transparent; border-radius:8px;
+                   padding:3px 6px; cursor:pointer; font-size:20px; line-height:1; }
+.rx-picker .pick:hover { border-color:var(--accent); background:rgba(80,190,190,.14); }
+.rx-picker .pick.mine { border-color:var(--accent); background:rgba(80,190,190,.22); }
 .typing { color:var(--accent2); font-size:12px; min-height:16px; margin-top:6px; font-style:italic; }
 .add { margin-top:6px; }
 textarea { width:100%; background:var(--card); color:var(--text); border:1px solid var(--line);
@@ -235,6 +247,9 @@ textarea { width:100%; background:var(--card); color:var(--text); border:1px sol
          border-radius:8px; padding:9px; font:inherit; }
 .dice { background:var(--panel); border:1px solid var(--line); border-radius:8px;
         padding:0 12px; cursor:pointer; font-size:18px; }
+.join-btn { background:var(--accent); color:var(--ink); border:0; border-radius:8px;
+            padding:0 20px; font:inherit; font-weight:700; cursor:pointer; white-space:nowrap; }
+.join-btn:hover { filter:brightness(1.1); }
 .avatars { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
 .av { font-size:22px; background:var(--card); border:1px solid var(--line); border-radius:10px;
       width:40px; height:40px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
@@ -245,6 +260,14 @@ textarea { width:100%; background:var(--card); color:var(--text); border:1px sol
 .qrwrap img { width:220px; height:220px; }
 .hidden { display:none !important; }
 #confetti { position:fixed; inset:0; pointer-events:none; z-index:30; }
+#rx-fx { position:fixed; inset:0; pointer-events:none; z-index:29; overflow:hidden; }
+.floater { position:absolute; bottom:8vh; opacity:0; will-change:transform,opacity;
+           animation:rxfloat 2.8s ease-out forwards; text-shadow:0 2px 6px rgba(0,0,0,.35); }
+@keyframes rxfloat {
+  0% { transform:translateY(0) scale(.6); opacity:0; }
+  15% { opacity:1; }
+  100% { transform:translateY(-64vh) scale(1.15); opacity:0; }
+}
 """
 
 
@@ -255,7 +278,7 @@ const AVATARS = __AVATARS__;
 const ADJS = __ADJS__;
 const NOUNS = __NOUNS__;
 
-let TOKEN = new URLSearchParams(location.search).get("token") || "";
+let TOKEN = new URLSearchParams(location.search).get("token") || sessionStorage.getItem("retro_token") || "";
 let PID = localStorage.getItem("retro_pid");
 if (!PID) { PID = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : "p" + Math.random().toString(36).slice(2); localStorage.setItem("retro_pid", PID); }
 let NAME = localStorage.getItem("retro_name") || "";
@@ -266,6 +289,8 @@ let TYPING_GRID = "", typingTimer = null;
 let TIMER = { running: false }, OFFSET = 0, firedFor = null;
 let EDITING = null;                          // card id being edited inline
 const MY_REACTIONS = {};                     // card_id -> Set(emoji) I reacted with
+let lastRxEvent = -1, seededRx = false;       // high-water mark of animated reaction events
+let RX_CARD = null;                           // card whose react-picker is open
 let DRAG_ID = null;
 
 function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
@@ -287,9 +312,8 @@ async function submitCode() {
     if (!r.ok) { err.textContent = "That code didn't work — check the host's screen."; return; }
     const d = await r.json();
     TOKEN = d.token;
-    history.replaceState(null, "", "/?token=" + encodeURIComponent(TOKEN));
     document.getElementById("code-modal").classList.add("hidden");
-    afterToken();
+    afterToken();   // persists the token + strips it from the URL
   } catch (e) { err.textContent = "Could not reach the retro."; }
 }
 
@@ -342,13 +366,15 @@ function buildCols() {
 function onType(grid) { TYPING_GRID = grid; clearTimeout(typingTimer); typingTimer = setTimeout(() => { TYPING_GRID = ""; }, 2500); }
 
 function reactionBar(card) {
+  // Only emojis that already have a count show as chips; all the rest live behind
+  // the React button's picker, so cards stay uncluttered.
   const mine = MY_REACTIONS[card.id] || new Set();
   const rx = card.reactions || {};
-  return '<div class="rx">' + EMOJIS.map(e => {
-    const n = rx[e] || 0;
-    return '<button class="chip' + (mine.has(e) ? " mine" : "") + '" data-card="' + card.id + '" data-emoji="' + e + '">' +
-           e + (n ? '<span>' + n + '</span>' : "") + '</button>';
-  }).join("") + '</div>';
+  const chips = EMOJIS.filter(e => rx[e]).map(e =>
+    '<button class="chip' + (mine.has(e) ? " mine" : "") + '" data-card="' + card.id + '" data-emoji="' + e + '">' +
+    e + '<span>' + rx[e] + '</span></button>').join("");
+  return '<div class="rx">' + chips +
+    '<button class="react-btn" data-react="' + card.id + '" title="Add a reaction">😊<span class="plus">+</span></button></div>';
 }
 function cardHTML(card, avatarByName) {
   const isAI = card.origin === "ai";
@@ -382,6 +408,39 @@ async function react(cardId, emoji) {
     if (d.reacted) set.add(emoji); else set.delete(emoji);
     render(d.state);
   } catch (e) {}
+}
+/* React picker: a floating menu (survives the ~1.2s re-render) with every emoji. */
+function openReactPicker(cardId, btn) {
+  const p = document.getElementById("rx-picker");
+  if (RX_CARD === cardId && !p.classList.contains("hidden")) { closeReactPicker(); return; }
+  RX_CARD = cardId;
+  const mine = MY_REACTIONS[cardId] || new Set();
+  p.innerHTML = EMOJIS.map(e =>
+    '<button class="pick' + (mine.has(e) ? " mine" : "") + '" data-emoji="' + e + '">' + e + '</button>').join("");
+  p.querySelectorAll(".pick").forEach(b =>
+    b.onclick = () => { react(cardId, b.getAttribute("data-emoji")); closeReactPicker(); });
+  p.classList.remove("hidden");
+  const r = btn.getBoundingClientRect();
+  let left = Math.min(r.left, innerWidth - p.offsetWidth - 8);
+  let top = r.bottom + 6;
+  if (top + p.offsetHeight > innerHeight) top = r.top - p.offsetHeight - 6;
+  p.style.left = Math.max(8, left) + "px";
+  p.style.top = Math.max(8, top) + "px";
+}
+function closeReactPicker() { RX_CARD = null; document.getElementById("rx-picker").classList.add("hidden"); }
+/* Floating emoji: a reaction everyone sees rise up the screen (broadcast via poll). */
+function floatEmoji(emoji) {
+  const fx = document.getElementById("rx-fx");
+  if (!fx || fx.childElementCount > 60) return;   // guard against a flood
+  for (let i = 0; i < 3; i++) {
+    const s = document.createElement("span");
+    s.className = "floater"; s.textContent = emoji;
+    s.style.left = (8 + Math.random() * 84) + "vw";
+    s.style.animationDelay = (Math.random() * 0.4) + "s";
+    s.style.fontSize = (26 + Math.random() * 18) + "px";
+    s.addEventListener("animationend", () => s.remove());
+    fx.appendChild(s);
+  }
 }
 async function saveEdit(cardId) {
   const box = document.getElementById("edit-" + cardId);
@@ -434,6 +493,14 @@ setInterval(paintTimer, 250);
 function render(state) {
   if (!state) return;
   if (state.timer) { TIMER = state.timer; OFFSET = state.timer.now_epoch - Date.now() / 1000; }
+  // Float any reaction events we haven't shown yet. On the first render we only
+  // seed the high-water mark (no backlog burst for someone who just joined).
+  if (state.reaction_events) {
+    const maxId = state.reaction_events.reduce((m, e) => Math.max(m, e.id), lastRxEvent);
+    if (seededRx) state.reaction_events.forEach(e => { if (e.id > lastRxEvent) floatEmoji(e.emoji); });
+    seededRx = true;
+    lastRxEvent = maxId;
+  }
   const avatarByName = {};
   (state.presence || []).forEach(p => { if (p.avatar) avatarByName[p.name] = p.avatar; });
 
@@ -479,6 +546,7 @@ function renderRoom(state) {
 }
 function wireCards() {
   document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => react(ch.getAttribute("data-card"), ch.getAttribute("data-emoji")));
+  document.querySelectorAll("[data-react]").forEach(b => b.onclick = e => { e.stopPropagation(); openReactPicker(b.getAttribute("data-react"), b); });
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => { EDITING = b.getAttribute("data-edit"); tick(); });
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteCard(b.getAttribute("data-del")));
   document.querySelectorAll("[data-save]").forEach(b => b.onclick = () => saveEdit(b.getAttribute("data-save")));
@@ -532,10 +600,11 @@ function togglePop(popId) {
   }
 }
 document.addEventListener("click", e => {
+  if (!e.target.closest("#rx-picker") && !e.target.closest("[data-react]")) closeReactPicker();
   if (e.target.closest(".pop") || e.target.closest(".tbtn") || e.target.closest(".room-btn")) return;
   closePops();
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape") closePops(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closePops(); closeReactPicker(); } });
 
 /* ── Theme swatches ─────────────────────────────────────────── */
 const THEMES = ["midnight", "light", "solarized", "synthwave", "forest"];
@@ -559,97 +628,62 @@ function buildSwatches() {
 }
 function markSwatch() { document.querySelectorAll(".swatch").forEach(s => s.classList.toggle("sel", s.getAttribute("data-set-theme") === THEME)); }
 
-/* ── Web-Audio music (offline, generated) + visualizer ──────── */
+/* Populate the station dropdown from the injected channel library. */
+function buildChannels() {
+  const sel = document.getElementById("music-mood");
+  sel.innerHTML = Music.channels().map((c, i) => '<option value="' + i + '">' + esc(c.name) + "</option>").join("");
+}
+
+/* ── Internet-radio music (same library as the TUI) + visualizer ─────
+ * The TUI streams SomaFM/SRG MP3 URLs (scrum_agent.music.CHANNELS); we play
+ * the very same URLs with a plain <audio> element. We deliberately do NOT route
+ * the stream through Web Audio (createMediaElementSource) — a cross-origin
+ * stream without CORS headers would be silenced. So the visualizer is a light
+ * decorative animation gated on "is it playing", not real frequency data. */
+const CHANNELS = __MUSIC_CHANNELS__;
 const Music = (function () {
-  let ctx = null, master = null, analyser = null, nodes = [], loop = null, playing = false;
-  const NOTE = { C2:65.41, E2:82.41, G2:98, A2:110, D3:146.83, F3:174.61, G3:196, A3:220, C4:261.63, D4:293.66, E4:329.63, F4:349.23, G4:392, A4:440, B4:493.88, "C#4":277.18 };
-  const MOODS = {
-    calm:  { pad: [220, 277.18, 329.63], bpm: 0 },
-    lofi:  { pad: [220, 261.63, 329.63, 392], bpm: 72, beat: "lofi" },
-    focus: { pad: [261.63, 329.63, 392], bpm: 66, beat: "soft" },
-    hiphop:{ pad: [110, 164.81], bpm: 86, beat: "boombap", bass: [65.41, 65.41, 98, 82.41] },
-    jazz:  { pad: [261.63, 329.63, 392, 493.88], bpm: 120, beat: "swing", bass: [130.81, 146.83, 164.81, 196] },
-  };
-  let mood = "calm", volume = 0.35, step = 0;
-  function ensure() {
-    if (!ctx) { const AC = window.AudioContext || window.webkitAudioContext; ctx = new AC();
-      master = ctx.createGain(); master.gain.value = volume;
-      analyser = ctx.createAnalyser(); analyser.fftSize = 64;
-      master.connect(analyser); analyser.connect(ctx.destination); }
+  const audio = new Audio(); audio.preload = "none"; audio.crossOrigin = "anonymous";
+  let channel = 0, volume = 0.35, playing = false, vizRAF = null;
+  audio.volume = volume;
+  audio.addEventListener("playing", () => { playing = true; paintBtn(); });
+  audio.addEventListener("pause", () => { playing = false; paintBtn(); });
+  audio.addEventListener("error", () => { playing = false; paintBtn(); });
+  function paintBtn() {
+    document.getElementById("music-play").textContent = playing ? "⏸" : "▶";
+    document.getElementById("music-btn").classList.toggle("playing", playing);
+    document.getElementById("viz").classList.toggle("on", playing);
+    if (playing) drawViz();
   }
-  function tone(freq, t, dur, type, peak) {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = type || "sine"; o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak || 0.3, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.05);
-  }
-  function noise(t, dur, peak) {
-    const n = ctx.createBufferSource(), buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
-    const data = buf.getChannelData(0); for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-    n.buffer = buf; const g = ctx.createGain(), hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 6000;
-    g.gain.setValueAtTime(peak || 0.2, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    n.connect(hp); hp.connect(g); g.connect(master); n.start(t); n.stop(t + dur);
-  }
-  function kick(t) { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.12);
-    g.gain.setValueAtTime(0.6, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.2); }
-  function snare(t) { noise(t, 0.18, 0.35); tone(180, t, 0.12, "triangle", 0.15); }
-  function tickStep() {
-    if (!playing) return;
-    const cfg = MOODS[mood]; const t = ctx.currentTime + 0.02; const beat = step % 4;
-    if (cfg.beat === "boombap") { if (beat === 0 || beat === 2) kick(t); if (beat === 1 || beat === 3) snare(t); noise(t, 0.05, 0.08); }
-    else if (cfg.beat === "swing") { noise(t, 0.04, 0.06); if (beat % 2 === 0) noise(t + (60 / cfg.bpm) * 0.66, 0.04, 0.05); if (beat === 0) kick(t); if (beat === 2) snare(t); }
-    else if (cfg.beat === "lofi") { if (beat === 0 || beat === 2) kick(t); if (beat === 2) snare(t); noise(t, 0.04, 0.05); }
-    else if (cfg.beat === "soft") { if (beat === 0) kick(t); }
-    if (cfg.bass) { tone(cfg.bass[step % cfg.bass.length], t, (60 / cfg.bpm) * 0.9, "sawtooth", 0.18); }
-    step++;
-  }
-  function startPad() {
-    const cfg = MOODS[mood];
-    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1100; lp.connect(master);
-    const pad = ctx.createGain(); pad.gain.value = 0.14; pad.connect(lp);
-    cfg.pad.forEach((f, i) => { const o = ctx.createOscillator(); o.type = i % 2 ? "sine" : "triangle"; o.frequency.value = f; o.detune.value = (i - 1) * 4; o.connect(pad); o.start(); nodes.push(o); });
-    const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 0.08; lg.gain.value = 0.05; lfo.connect(lg); lg.connect(pad.gain); lfo.start(); nodes.push(lfo);
-    nodes.push(pad, lp, lg);
-  }
-  function play() {
-    ensure(); if (ctx.state === "suspended") ctx.resume();
-    stopNodes(); step = 0; playing = true; startPad();
-    const cfg = MOODS[mood];
-    if (cfg.bpm > 0) loop = setInterval(tickStep, 60000 / cfg.bpm);
-    document.getElementById("music-play").textContent = "⏸";
-    document.getElementById("music-btn").classList.add("playing");
-    document.getElementById("viz").classList.add("on");
-    drawViz();
-  }
-  function stopNodes() { if (loop) { clearInterval(loop); loop = null; } nodes.forEach(n => { try { n.stop && n.stop(); n.disconnect && n.disconnect(); } catch (e) {} }); nodes = []; }
-  function stop() {
-    playing = false; stopNodes();
-    document.getElementById("music-play").textContent = "▶";
-    document.getElementById("music-btn").classList.remove("playing");
-    document.getElementById("viz").classList.remove("on");
-  }
+  function load(i) { channel = ((i % CHANNELS.length) + CHANNELS.length) % CHANNELS.length; audio.src = CHANNELS[channel].url; }
+  function play() { if (!audio.src) load(channel); audio.play().catch(() => {}); }
+  function stop() { audio.pause(); }
   function drawViz() {
-    const cv = document.getElementById("viz"); if (!cv || !analyser) return;
-    const cx = cv.getContext("2d"), buf = new Uint8Array(analyser.frequencyBinCount);
+    const cv = document.getElementById("viz"); if (!cv) return;
+    const cx = cv.getContext("2d"), bars = 16, w = cv.width / bars;
+    let phase = 0;
+    if (vizRAF) cancelAnimationFrame(vizRAF);
     function frame() {
-      if (!playing) { cx.clearRect(0, 0, cv.width, cv.height); return; }
-      analyser.getByteFrequencyData(buf);
+      if (!playing) { cx.clearRect(0, 0, cv.width, cv.height); vizRAF = null; return; }
       cx.clearRect(0, 0, cv.width, cv.height);
-      const bars = 16, w = cv.width / bars;
       const col = getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#50bebe";
       cx.fillStyle = col.trim() || "#50bebe";
-      for (let i = 0; i < bars; i++) { const v = buf[i] / 255; const h = Math.max(2, v * cv.height); cx.fillRect(i * w, cv.height - h, w - 1, h); }
-      requestAnimationFrame(frame);
+      phase += 0.18;
+      for (let i = 0; i < bars; i++) {
+        // Layered sines give a lively, music-like bounce without touching the stream.
+        const v = (Math.sin(phase + i * 0.7) + Math.sin(phase * 1.7 + i) + 2) / 4;
+        const h = Math.max(2, v * cv.height);
+        cx.fillRect(i * w, cv.height - h, w - 1, h);
+      }
+      vizRAF = requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
+    vizRAF = requestAnimationFrame(frame);
   }
   return {
     toggle() { playing ? stop() : play(); },
-    setVolume(v) { volume = v; if (master) master.gain.value = v; },
-    setMood(m) { mood = m; if (playing) play(); },
-    ctx() { ensure(); return ctx; }, out() { ensure(); return master; },
+    setVolume(v) { volume = v; audio.volume = v; },
+    setChannel(i) { const wasPlaying = playing || !audio.paused; load(i); if (wasPlaying) play(); },
+    playing() { return playing; },
+    channels() { return CHANNELS; },
   };
 })();
 
@@ -669,12 +703,16 @@ function confetti() {
 }
 function alarm() {
   try {
-    const ctx = Music.ctx(), out = Music.out(); const t0 = ctx.currentTime;
+    // Own short-lived Web-Audio context (music is now a plain <audio> element).
+    const AC = window.AudioContext || window.webkitAudioContext; const ctx = new AC();
+    if (ctx.state === "suspended") ctx.resume();
+    const t0 = ctx.currentTime;
     for (let k = 0; k < 4; k++) {
       [880, 1175].forEach(f => { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = "square"; o.frequency.value = f;
         const t = t0 + k * 0.4; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
-        o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.32); });
+        o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.32); });
     }
+    setTimeout(() => { try { ctx.close(); } catch (e) {} }, 2000);
   } catch (e) {}
 }
 
@@ -683,6 +721,7 @@ applyTheme(THEME);
 buildCols();
 buildAvatars();
 buildSwatches();
+buildChannels();
 paintTimer();
 document.getElementById("dice").addEventListener("click", () => { document.getElementById("name-in").value = randomName(); });
 document.getElementById("name-in").addEventListener("keydown", e => { if (e.key === "Enter") saveProfile(); });
@@ -697,7 +736,7 @@ document.getElementById("theme-btn").addEventListener("click", () => togglePop("
 document.getElementById("room-btn").addEventListener("click", () => togglePop("room-pop"));
 document.getElementById("music-play").addEventListener("click", () => Music.toggle());
 document.getElementById("music-vol").addEventListener("input", e => Music.setVolume(parseFloat(e.target.value)));
-document.getElementById("music-mood").addEventListener("change", e => Music.setMood(e.target.value));
+document.getElementById("music-mood").addEventListener("change", e => Music.setChannel(parseInt(e.target.value, 10)));
 document.querySelectorAll(".preset").forEach(b => b.addEventListener("click", () => { startTimer(parseInt(b.getAttribute("data-secs"), 10)); closePops(); }));
 document.getElementById("custom-go").addEventListener("click", () => { customTimer(); closePops(); });
 document.getElementById("timer-stop").addEventListener("click", () => { stopTimer(); closePops(); });
@@ -705,7 +744,9 @@ document.getElementById("invite-btn").addEventListener("click", toggleInvite);
 document.getElementById("invite-close").addEventListener("click", toggleInvite);
 
 function afterToken() {
-  // Token known: go straight in if we have a saved profile, else prompt for it.
+  // Token known: keep it in sessionStorage (per-tab, survives refresh) and strip
+  // it from the address bar, so copying the URL never leaks access to others.
+  if (TOKEN) { sessionStorage.setItem("retro_token", TOKEN); history.replaceState(null, "", "/"); }
   paintMe();
   if (NAME && localStorage.getItem("retro_avatar")) { JOINED = true; document.getElementById("modal").classList.add("hidden"); startLoop(); }
   else { openProfile(); }
@@ -728,6 +769,9 @@ def build_board_html() -> str:
         .replace("__AVATARS__", _lit(list(AVATARS)))
         .replace("__ADJS__", _lit(_ADJECTIVES))
         .replace("__NOUNS__", _lit(_NOUNS))
+        # Same internet-radio library the TUI uses (scrum_agent.music.CHANNELS),
+        # so the browser plays real streams instead of synthesized tones.
+        .replace("__MUSIC_CHANNELS__", _lit([{"name": c["name"], "url": c["url"]} for c in CHANNELS]))
     )
     return (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
@@ -756,9 +800,7 @@ def build_board_html() -> str:
         '<div id="music-pop" class="pop hidden"><div class="row">\n'
         '  <button class="playbtn" id="music-play">▶</button>\n'
         '  <input type="range" id="music-vol" min="0" max="1" step="0.05" value="0.35" title="Volume">\n'
-        '  <select id="music-mood" title="Mood"><option value="calm">Ambient</option>'
-        '<option value="lofi">Lo-fi</option><option value="focus">Focus</option>'
-        '<option value="hiphop">Hip-hop</option><option value="jazz">Jazz</option></select>\n'
+        '  <select id="music-mood" title="Station"></select>\n'
         "</div></div>\n"
         # Timer popover
         '<div id="timer-pop" class="pop hidden">\n'
@@ -785,12 +827,14 @@ def build_board_html() -> str:
         "</div>\n"
         '<div class="grids" id="grids"></div>\n'
         '<canvas id="confetti"></canvas>\n'
+        '<div id="rx-fx"></div>\n'
+        '<div id="rx-picker" class="rx-picker hidden"></div>\n'
         # Code-entry gate (shown when the URL has no token)
         '<div id="code-modal" class="overlay hidden"><div class="box">\n'
         "  <h2>Join a retro</h2>\n"
         '  <p class="muted">Enter the share code shown on the host\'s screen.</p>\n'
         '  <div class="namerow"><input id="code-in" class="field" placeholder="e.g. A3F9-1B2C" autofocus>'
-        '<button class="dice" id="code-join">Join</button></div>\n'
+        '<button class="join-btn" id="code-join">Join</button></div>\n'
         '  <p class="muted" id="code-err" style="color:#f85149"></p>\n'
         "</div></div>\n"
         # Profile modal (name + avatar; reused for rename)
@@ -804,7 +848,7 @@ def build_board_html() -> str:
         # Invite popover (QR)
         '<div id="invite-modal" class="overlay hidden"><div class="box">\n'
         "  <h2>Invite the team</h2>\n"
-        '  <p class="muted">Scan to join instantly, or share the code from the host.</p>\n'
+        '  <p class="muted">Scan to open the retro, then enter the Share code from the host.</p>\n'
         '  <div class="qrwrap"><img id="invite-img" alt="join QR"></div>\n'
         '  <button class="primary" id="invite-close">Close</button>\n'
         "</div></div>\n"

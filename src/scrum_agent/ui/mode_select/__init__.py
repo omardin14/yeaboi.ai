@@ -2257,7 +2257,9 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                     remote["status"] = "Remote link failed — tunnel did not start (see logs)."
                     return
                 remote["tunnel"] = tunnel
-                remote["url"] = f"{public}/?token={server.token}"
+                # Token-free public URL: off-network teammates must still enter the
+                # join code (the token is never handed out in a shareable link).
+                remote["url"] = f"{public}/"
                 remote["active"] = True
                 remote["status"] = "Remote link ready — share the Remote URL with off-network teammates."
             except Exception as e:  # never let the worker crash anything
@@ -2292,7 +2294,8 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
         return {
             "session_name": session_name,
             "display_code": server.display_code,
-            "url": server.url,
+            "url": server.share_url,
+            "host_url": server.url,
             "public_url": remote["url"],
             "message": remote["status"] or message,
             "grids": board.cards_by_grid(),
