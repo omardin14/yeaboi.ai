@@ -22,6 +22,12 @@ from scrum_agent.ui.provider_select._constants import (
     _NOTION_FIELDS,
     _PROVIDER_CARDS,
 )
+from scrum_agent.ui.provider_select._nav import (
+    _LAST_STEP,
+    _STEP_LLM,
+    StepNav,
+    nav_for_key,
+)
 from scrum_agent.ui.provider_select._verification import (
     _verify_confluence,
     _verify_model,
@@ -454,6 +460,99 @@ class TestHintStyling:
         assert not any("underline" in str(s.style) for s in t.spans)
 
 
+class TestIssueTrackingPickerNav:
+    """The Issue Tracking picker also honours ←/→/F section navigation."""
+
+    _PROVIDER = {
+        "full_name": "Anthropic (Claude)",
+        "name": "Anthropic",
+        "env_var": "ANTHROPIC_API_KEY",
+        "provider_val": "anthropic",
+        "prefix": "sk-ant-",
+        "instructions": "x",
+    }
+
+    def _patch_tty(self, monkeypatch):
+        import select as _select
+
+        from scrum_agent.ui.provider_select import _phase_issue_tracking as it
+
+        class _FakeStdin:
+            def fileno(self):
+                return 0
+
+            def read(self, n):
+                return ""
+
+        monkeypatch.setattr(it.sys, "stdin", _FakeStdin())
+        monkeypatch.setattr(it.termios, "tcgetattr", lambda fd: None)
+        monkeypatch.setattr(it.termios, "tcsetattr", lambda fd, when, attrs: None)
+        monkeypatch.setattr(it.tty, "setcbreak", lambda fd: None)
+        monkeypatch.setattr(_select, "select", lambda r, w, x, t: ([], [], []))
+
+    def _run(self, monkeypatch, keys):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking
+
+        return _run_issue_tracking(
+            _console(),
+            _KeySequence(keys),
+            None,
+            self._PROVIDER,
+            "sk-ant-key",
+            {"env_var": "", "name": ""},
+            "",
+            live=_FakeLive(),
+            llm_model="claude-opus-4-8",
+        )
+
+    def test_right_arrow_navigates_to_docs(self, monkeypatch):
+        # Issue Tracking is step 1 → → jumps to Docs (step 2).
+        assert self._run(monkeypatch, ["right"]) == StepNav(target=2)
+
+    def test_left_arrow_navigates_to_llm(self, monkeypatch):
+        assert self._run(monkeypatch, ["left"]) == StepNav(target=0)
+
+    def test_f_finishes(self, monkeypatch):
+        assert self._run(monkeypatch, ["f"]) == StepNav(finish=True)
+
+    def test_esc_still_returns_none(self, monkeypatch):
+        assert self._run(monkeypatch, ["esc"]) is None
+
+
+class TestStepNav:
+    """`nav_for_key` maps ←/→/F to section jumps, clamped to the chip range."""
+
+    def test_f_finishes_from_any_step(self):
+        for step in range(4):
+            assert nav_for_key("f", step) == StepNav(finish=True)
+        # Upper-case F (some terminals) also finishes.
+        assert nav_for_key("F", 2) == StepNav(finish=True)
+
+    def test_left_goes_to_previous_chip(self):
+        assert nav_for_key("left", 1) == StepNav(target=0)
+        assert nav_for_key("left", 3) == StepNav(target=2)
+
+    def test_right_goes_to_next_chip(self):
+        assert nav_for_key("right", 0) == StepNav(target=1)
+        assert nav_for_key("right", 2) == StepNav(target=3)
+
+    def test_arrows_clamp_at_boundaries(self):
+        # ← at the first chip and → at the last chip do nothing (fall through).
+        assert nav_for_key("left", _STEP_LLM) is None
+        assert nav_for_key("right", _LAST_STEP) is None
+
+    def test_non_nav_keys_fall_through(self):
+        for key in ("up", "down", "enter", "esc", "a", "tab", "backspace"):
+            assert nav_for_key(key, 2) is None
+
+    def test_stepnav_equality_and_defaults(self):
+        assert StepNav(target=2) == StepNav(target=2)
+        assert StepNav(target=2) != StepNav(target=3)
+        assert StepNav(finish=True) != StepNav(target=None)
+        assert StepNav(target=1).finish is False
+
+
 class TestNotionPicker:
     """The Notion step offers an explicit Notion / Skip picker (like Issue Tracking)."""
 
@@ -492,6 +591,28 @@ class TestNotionPicker:
         from scrum_agent.ui.provider_select._phase_notion import _run_notion
 
         assert _run_notion(_console(), _KeySequence(["esc"]), None, _FakeLive()) is None
+
+    def test_right_arrow_navigates_to_version_control(self, monkeypatch):
+        # Docs is step 2 → → jumps to Version Control (step 3).
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+
+        result = _run_notion(_console(), _KeySequence(["right"]), None, _FakeLive())
+        assert result == StepNav(target=3)
+
+    def test_left_arrow_navigates_to_issue_tracking(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+
+        result = _run_notion(_console(), _KeySequence(["left"]), None, _FakeLive())
+        assert result == StepNav(target=1)
+
+    def test_f_finishes(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+
+        result = _run_notion(_console(), _KeySequence(["f"]), None, _FakeLive())
+        assert result == StepNav(finish=True)
 
 
 def _active_progress_label(step: int) -> str | None:
@@ -613,6 +734,20 @@ class TestConfluencePicker:
 
         result = _run_confluence(_console(), _KeySequence(["esc"]), None, _FakeLive(), jira_creds=self._JIRA)
         assert result is None
+
+    def test_right_arrow_navigates_to_version_control(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+
+        result = _run_confluence(_console(), _KeySequence(["right"]), None, _FakeLive(), jira_creds=self._JIRA)
+        assert result == StepNav(target=3)
+
+    def test_f_finishes(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+
+        result = _run_confluence(_console(), _KeySequence(["f"]), None, _FakeLive(), jira_creds=self._JIRA)
+        assert result == StepNav(finish=True)
 
 
 class TestShadowWordmarks:

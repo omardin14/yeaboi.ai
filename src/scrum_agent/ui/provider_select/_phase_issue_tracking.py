@@ -19,6 +19,7 @@ from rich.live import Live
 
 from scrum_agent.ui.provider_select._config import _save_progress
 from scrum_agent.ui.provider_select._constants import _ISSUE_TRACKING_OPTIONS
+from scrum_agent.ui.provider_select._nav import StepNav, nav_for_key
 from scrum_agent.ui.provider_select._verification import _verify_azdevops, _verify_jira
 from scrum_agent.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
 from scrum_agent.ui.shared._animations import FRAME_TIME_30FPS
@@ -36,7 +37,7 @@ def _run_issue_tracking(
     *,
     live: Live | None = None,
     llm_model: str = "",
-) -> dict[str, str] | None:
+) -> dict[str, str] | StepNav | None:
     """Run the issue tracking phase with provider selection.
 
     First shows a provider picker (Jira / Azure DevOps Boards / Skip),
@@ -59,8 +60,8 @@ def _run_issue_tracking(
     ]
     tracker_selected = 0
 
-    def _run_tracker_selection(_live: Live) -> int | None:
-        """Show tracker provider picker. Returns index or None on Esc."""
+    def _run_tracker_selection(_live: Live) -> int | StepNav | None:
+        """Show tracker provider picker. Returns index, a StepNav (←/→/F), or None on Esc."""
         nonlocal tracker_selected
         from rich.align import Align
         from rich.text import Text
@@ -76,7 +77,7 @@ def _run_issue_tracking(
             body_h = len(rows) * 3 - 1 if rows else 0
             w, h = console.size
             return _build_screen_frame(
-                subtitle="Issue tracking  ·  ↑↓ choose  ·  Enter select",
+                subtitle="Issue tracking · ↑↓ choose · Enter select · ←→ section · F finish",
                 step=1,
                 body_items=body,
                 body_height=body_h,
@@ -99,6 +100,11 @@ def _run_issue_tracking(
         _live.update(_render_tracker_menu())
         while True:
             key = read_key()
+            # Section navigation (←/→ between chips, F to finish) takes priority
+            # over the menu's own ↑/↓/Enter so the user can jump straight out.
+            nav = nav_for_key(key, 1)
+            if nav is not None:
+                return nav
             if key in ("up", "scroll_up"):
                 tracker_selected = (tracker_selected - 1) % len(tracker_options)
             elif key in ("down", "scroll_down"):
@@ -357,8 +363,10 @@ def _run_issue_tracking(
                 )
             )
 
-    def _run_full(_live: Live) -> dict[str, str] | None:
+    def _run_full(_live: Live) -> dict[str, str] | StepNav | None:
         tracker_idx = _run_tracker_selection(_live)
+        if isinstance(tracker_idx, StepNav):
+            return tracker_idx
         if tracker_idx is None:
             return None
         return _run_form(_live, tracker_idx)

@@ -24,6 +24,7 @@ from rich.live import Live
 
 from scrum_agent.ui.provider_select._config import _save_progress
 from scrum_agent.ui.provider_select._constants import _NOTION_FIELDS
+from scrum_agent.ui.provider_select._nav import StepNav, nav_for_key
 from scrum_agent.ui.provider_select._verification import _verify_notion
 from scrum_agent.ui.provider_select.screens._screens import (
     _ACCENT,
@@ -42,7 +43,7 @@ def _run_notion(
     read_key,
     existing_config: dict[str, str] | None,
     live: Live,
-) -> dict[str, str] | None:
+) -> dict[str, str] | StepNav | None:
     """Show the optional Notion credential form and verify the token.
 
     Shows a Notion / Skip picker first (matching the Issue Tracking & Version
@@ -80,8 +81,8 @@ def _run_notion(
     # --- Step 1: Notion / Skip picker (matches the Issue Tracking & Version
     # Control steps, which both offer an explicit Skip rather than making the user
     # guess that an empty submit skips the step). ---
-    def _run_notion_selection() -> str | None:
-        """Show the Notion / Skip picker. Returns "notion", "skip", or None (Esc)."""
+    def _run_notion_selection() -> str | StepNav | None:
+        """Show the Notion / Skip picker. Returns "notion"/"skip", a StepNav (←/→/F), or None (Esc)."""
         cards = [{"name": "Notion", "color": _ACCENT}, {"name": "Skip", "color": _ACCENT}]
         pick = 0
 
@@ -94,7 +95,7 @@ def _run_notion(
             w, h = console.size
             live.update(
                 _build_screen_frame(
-                    subtitle="Docs  ·  ↑↓ choose  ·  Enter select",
+                    subtitle="Docs · ↑↓ choose · Enter select · ←→ section · F finish",
                     step=2,
                     body_items=body,
                     body_height=body_h,
@@ -108,6 +109,11 @@ def _run_notion(
         _render_menu()
         while True:
             key = read_key()
+            # Section navigation (←/→ between chips, F to finish) short-circuits
+            # the picker so the user can leave the Docs step without choosing.
+            nav = nav_for_key(key, 2)
+            if nav is not None:
+                return nav
             if key in ("up", "scroll_up"):
                 pick = (pick - 1) % len(cards)
             elif key in ("down", "scroll_down"):
@@ -119,6 +125,8 @@ def _run_notion(
             _render_menu()
 
     choice = _run_notion_selection()
+    if isinstance(choice, StepNav):
+        return choice
     if choice is None:
         return None
     if choice == "skip":
