@@ -77,7 +77,7 @@ def _run_issue_tracking(
             w, h = console.size
             return _build_screen_frame(
                 subtitle="Issue tracking  ·  ↑↓ choose  ·  Enter select",
-                step=2,
+                step=1,
                 body_items=body,
                 body_height=body_h,
                 width=w,

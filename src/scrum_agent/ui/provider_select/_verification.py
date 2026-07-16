@@ -419,6 +419,42 @@ def _verify_jira(base_url: str, email: str, token: str) -> tuple[bool, str]:
         return False, f"Connection error: {e}"
 
 
+def _verify_confluence(base_url: str, email: str, token: str, space_key: str) -> tuple[bool, str]:
+    """Verify a Confluence space is reachable with the Jira Atlassian credentials.
+
+    Confluence Cloud shares the Atlassian account auth used for Jira (base URL +
+    email + API token — see tools/confluence.py); the space key is the only extra
+    input. Hits GET /wiki/rest/api/space/{key} — 200 confirms the space exists and
+    the credentials can read it. Mirrors _verify_jira's basic-auth pattern.
+    """
+    logger.info("Verifying Confluence space '%s'", space_key)
+    try:
+        import base64
+
+        import httpx
+
+        b64 = base64.b64encode(f"{email}:{token}".encode()).decode()
+        url = f"{base_url.rstrip('/')}/wiki/rest/api/space/{space_key}"
+        resp = httpx.get(
+            url,
+            headers={"Authorization": f"Basic {b64}", "Accept": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            logger.info("Confluence space '%s' verified", space_key)
+            return True, "Confluence verified"
+        if resp.status_code in (401, 403):
+            logger.warning("Confluence auth failed for space '%s' (%s)", space_key, resp.status_code)
+            return False, "Invalid Atlassian credentials"
+        if resp.status_code == 404:
+            logger.warning("Confluence space '%s' not found", space_key)
+            return False, f"Space '{space_key}' not found"
+        return False, f"Unexpected response: {resp.status_code}"
+    except Exception as e:
+        logger.warning("Confluence verification error for space '%s': %s", space_key, e)
+        return False, f"Connection error: {e}"
+
+
 def _verify_notion(token: str) -> tuple[bool, str]:
     """Verify a Notion integration token with a lightweight API call.
 

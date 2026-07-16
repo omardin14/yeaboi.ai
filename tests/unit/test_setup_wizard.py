@@ -30,15 +30,22 @@ def _mock_inputs(*values):
     return lambda *a, **kw: next(it)
 
 
-def _mock_select_provider(provider_key: str, *, api_key: str = "", issue_tracking: dict | None = None):
+def _mock_select_provider(
+    provider_key: str,
+    *,
+    api_key: str = "",
+    issue_tracking: dict | None = None,
+    confluence: dict | None = None,
+):
     """Return a mock select_provider that returns the provider dict.
 
     provider_key: "1" for Anthropic, "2" for OpenAI, "3" for Google, or None for cancel.
     api_key: optional API key — when set, the wizard skips inline key prompt.
-    issue_tracking: optional dict of Jira/Confluence env vars.
+    issue_tracking: optional dict of Jira env vars.
+    confluence: optional dict of Confluence env vars (collected in the Docs step).
 
     The full-screen select_provider returns a dict with optional keys:
-        api_key, vc_env_var, vc_token, issue_tracking
+        api_key, vc_env_var, vc_token, issue_tracking, notion, confluence
     This mock emulates that so the wizard doesn't need inline prompts.
     """
     if provider_key is None:
@@ -49,6 +56,8 @@ def _mock_select_provider(provider_key: str, *, api_key: str = "", issue_trackin
         p["api_key"] = api_key
     if issue_tracking:
         p["issue_tracking"] = issue_tracking
+    if confluence:
+        p["confluence"] = confluence
     return lambda *a, **kw: p
 
 
@@ -279,16 +288,25 @@ class TestRunSetupWizard:
         assert not any("Confluence" in c for c in calls)
 
     def test_confluence_saves_space_key(self, monkeypatch, tmp_path):
-        """Confluence vars are collected via select_provider's issue tracking phase."""
+        """Confluence is collected in the Docs step (separate from issue tracking).
+
+        The space key rides on the Jira Atlassian creds gathered in the Issue
+        Tracking step, but is returned under its own `confluence` result key.
+        """
         _patch_config_file(monkeypatch, tmp_path)
         issue_tracking = {
             "JIRA_BASE_URL": "https://org.atlassian.net",
             "JIRA_EMAIL": "user@example.com",
             "JIRA_API_TOKEN": "tok",
             "JIRA_PROJECT_KEY": "PROJ",
-            "CONFLUENCE_SPACE_KEY": "MYSPACE",
         }
-        _patch_provider(monkeypatch, "1", api_key="sk-ant-key", issue_tracking=issue_tracking)
+        _patch_provider(
+            monkeypatch,
+            "1",
+            api_key="sk-ant-key",
+            issue_tracking=issue_tracking,
+            confluence={"CONFLUENCE_SPACE_KEY": "MYSPACE"},
+        )
         console = _make_console()
         run_setup_wizard(console)
         content = (tmp_path / ".env").read_text()
