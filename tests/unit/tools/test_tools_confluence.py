@@ -7,8 +7,8 @@ edge cases for each tool, plus helpers and registration in get_tools().
 
 from unittest.mock import MagicMock
 
-from scrum_agent.tools import get_tools
-from scrum_agent.tools.confluence import (
+from yeaboi.tools import get_tools
+from yeaboi.tools.confluence import (
     _MISSING_CONFIG_MSG,
     _confluence_error_msg,
     _strip_html_tags,
@@ -144,7 +144,7 @@ class TestConfluenceSearchDocs:
                 }
             ]
         }
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://myorg.atlassian.net")
 
         result = confluence_search_docs.invoke({"query": "architecture", "space_key": "ENG"})
@@ -156,7 +156,7 @@ class TestConfluenceSearchDocs:
     def test_no_results_returns_message(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.cql.return_value = {"results": []}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
 
         result = confluence_search_docs.invoke({"query": "missing topic", "space_key": "ENG"})
 
@@ -165,7 +165,7 @@ class TestConfluenceSearchDocs:
     def test_falls_back_to_env_space_key(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.cql.return_value = {"results": []}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "ENVSPACE")
 
         confluence_search_docs.invoke({"query": "test", "space_key": ""})
@@ -176,7 +176,7 @@ class TestConfluenceSearchDocs:
     def test_no_space_key_searches_globally(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.cql.return_value = {"results": []}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.delenv("CONFLUENCE_SPACE_KEY", raising=False)
 
         confluence_search_docs.invoke({"query": "test", "space_key": ""})
@@ -187,14 +187,14 @@ class TestConfluenceSearchDocs:
     def test_http_error_401(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.cql.side_effect = _make_http_error(401)
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
 
         result = confluence_search_docs.invoke({"query": "test"})
 
         assert "authentication failed" in result.lower()
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: None)
 
         result = confluence_search_docs.invoke({"query": "test"})
 
@@ -211,7 +211,7 @@ class TestConfluenceReadPage:
         page = _make_page("999", "ADR-001", "<p>We chose PostgreSQL.</p>")
         mock_client = MagicMock()
         mock_client.get_page_by_id.return_value = page
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://myorg.atlassian.net")
 
         result = confluence_read_page.invoke({"page_id": "999"})
@@ -224,7 +224,7 @@ class TestConfluenceReadPage:
         page = _make_page("888", "Runbook", "<p>Restart instructions.</p>")
         mock_client = MagicMock()
         mock_client.get_page_by_title.return_value = page
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://myorg.atlassian.net")
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "OPS")
 
@@ -235,7 +235,7 @@ class TestConfluenceReadPage:
         assert "Restart instructions" in result
 
     def test_no_page_id_or_title_returns_error(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: MagicMock())
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: MagicMock())
 
         result = confluence_read_page.invoke({"page_id": "", "page_title": ""})
 
@@ -244,7 +244,7 @@ class TestConfluenceReadPage:
     def test_page_not_found_returns_error(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.get_page_by_id.return_value = None
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
 
         result = confluence_read_page.invoke({"page_id": "000"})
 
@@ -255,7 +255,7 @@ class TestConfluenceReadPage:
         page = _make_page("777", "Big Page", long_body)
         mock_client = MagicMock()
         mock_client.get_page_by_id.return_value = page
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = confluence_read_page.invoke({"page_id": "777"})
@@ -265,7 +265,7 @@ class TestConfluenceReadPage:
         assert "x" * 8001 not in result
 
     def test_title_required_with_page_title_when_no_env(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: MagicMock())
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: MagicMock())
         monkeypatch.delenv("CONFLUENCE_SPACE_KEY", raising=False)
 
         result = confluence_read_page.invoke({"page_title": "Some Page", "space_key": ""})
@@ -274,7 +274,7 @@ class TestConfluenceReadPage:
         assert "space_key" in result or "CONFLUENCE_SPACE_KEY" in result
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: None)
 
         result = confluence_read_page.invoke({"page_id": "123"})
 
@@ -294,7 +294,7 @@ class TestConfluenceReadSpace:
         ]
         mock_client = MagicMock()
         mock_client.get_all_pages_from_space.return_value = pages
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = confluence_read_space.invoke({"space_key": "ENG"})
@@ -306,7 +306,7 @@ class TestConfluenceReadSpace:
     def test_empty_space_returns_message(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.get_all_pages_from_space.return_value = []
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
 
         result = confluence_read_space.invoke({"space_key": "EMPTY"})
 
@@ -315,7 +315,7 @@ class TestConfluenceReadSpace:
     def test_falls_back_to_env_space_key(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.get_all_pages_from_space.return_value = []
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "FROMENV")
 
         confluence_read_space.invoke({"space_key": ""})
@@ -323,7 +323,7 @@ class TestConfluenceReadSpace:
         mock_client.get_all_pages_from_space.assert_called_once_with(space="FROMENV", limit=25)
 
     def test_no_space_key_returns_error(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: MagicMock())
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: MagicMock())
         monkeypatch.delenv("CONFLUENCE_SPACE_KEY", raising=False)
 
         result = confluence_read_space.invoke({"space_key": ""})
@@ -335,7 +335,7 @@ class TestConfluenceReadSpace:
         pages = [{"id": str(i), "title": f"Page {i}", "_links": {}} for i in range(1, 6)]
         mock_client = MagicMock()
         mock_client.get_all_pages_from_space.return_value = pages
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = confluence_read_space.invoke({"space_key": "ENG", "limit": 5})
@@ -343,7 +343,7 @@ class TestConfluenceReadSpace:
         assert "increase limit to see more" in result
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: None)
 
         result = confluence_read_space.invoke({"space_key": "ENG"})
 
@@ -362,7 +362,7 @@ class TestConfluenceCreatePage:
             "id": "555",
             "_links": {"webui": "/wiki/spaces/ENG/pages/555"},
         }
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = confluence_create_page.invoke(
@@ -376,7 +376,7 @@ class TestConfluenceCreatePage:
     def test_plain_text_body_converted_to_storage_format(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.create_page.return_value = {"id": "556", "_links": {}}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         confluence_create_page.invoke({"title": "T", "body": "Plain text", "space_key": "ENG"})
@@ -387,7 +387,7 @@ class TestConfluenceCreatePage:
     def test_html_body_passed_through_unchanged(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.create_page.return_value = {"id": "557", "_links": {}}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         html_body = "<p>Already <strong>formatted</strong></p>"
@@ -399,7 +399,7 @@ class TestConfluenceCreatePage:
     def test_falls_back_to_env_space_key(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.create_page.return_value = {"id": "558", "_links": {}}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "ENVSPACE")
 
@@ -410,14 +410,14 @@ class TestConfluenceCreatePage:
     def test_http_error_403(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.create_page.side_effect = _make_http_error(403)
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
 
         result = confluence_create_page.invoke({"title": "T", "body": "B", "space_key": "ENG"})
 
         assert "permission" in result.lower()
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: None)
 
         result = confluence_create_page.invoke({"title": "T", "body": "B", "space_key": "ENG"})
 
@@ -439,7 +439,7 @@ class TestConfluenceUpdatePage:
         mock_client = MagicMock()
         mock_client.get_page_by_id.return_value = existing
         mock_client.update_page.return_value = {"id": "111"}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = confluence_update_page.invoke({"page_id": "111", "body": "Updated content", "title": "Sprint 2 Plan"})
@@ -453,7 +453,7 @@ class TestConfluenceUpdatePage:
         mock_client = MagicMock()
         mock_client.get_page_by_id.return_value = existing
         mock_client.update_page.return_value = {}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         result = confluence_update_page.invoke({"page_id": "222", "body": "New content"})
@@ -466,7 +466,7 @@ class TestConfluenceUpdatePage:
     def test_page_not_found_returns_error(self, monkeypatch):
         mock_client = MagicMock()
         mock_client.get_page_by_id.return_value = None
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
 
         result = confluence_update_page.invoke({"page_id": "000", "body": "content"})
 
@@ -477,7 +477,7 @@ class TestConfluenceUpdatePage:
         mock_client = MagicMock()
         mock_client.get_page_by_id.return_value = existing
         mock_client.update_page.return_value = {}
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: mock_client)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: mock_client)
         monkeypatch.setenv("JIRA_BASE_URL", "https://org.atlassian.net")
 
         confluence_update_page.invoke({"page_id": "333", "body": "content", "version_comment": "Added Sprint 3"})
@@ -486,7 +486,7 @@ class TestConfluenceUpdatePage:
         assert update_kwargs["version_comment"] == "Added Sprint 3"
 
     def test_missing_config_returns_message(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.tools.confluence._make_confluence_client", lambda: None)
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: None)
 
         result = confluence_update_page.invoke({"page_id": "111", "body": "content"})
 

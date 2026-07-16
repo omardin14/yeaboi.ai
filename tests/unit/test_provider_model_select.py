@@ -13,27 +13,27 @@ import pytest
 from rich.console import Console
 from rich.panel import Panel
 
-from scrum_agent.agent.llm import _PROVIDER_DEFAULTS
-from scrum_agent.setup_wizard import _PROVIDERS, run_setup_wizard
-from scrum_agent.ui.provider_select._constants import (
+from yeaboi.agent.llm import _PROVIDER_DEFAULTS
+from yeaboi.setup_wizard import _PROVIDERS, run_setup_wizard
+from yeaboi.ui.provider_select._constants import (
     _AZDEVOPS_TRACKING_FIELDS,
     _CONFLUENCE_FIELDS,
     _ISSUE_TRACKING_FIELDS,
     _NOTION_FIELDS,
     _PROVIDER_CARDS,
 )
-from scrum_agent.ui.provider_select._nav import (
+from yeaboi.ui.provider_select._nav import (
     _LAST_STEP,
     _STEP_LLM,
     StepNav,
     nav_for_key,
 )
-from scrum_agent.ui.provider_select._verification import (
+from yeaboi.ui.provider_select._verification import (
     _verify_confluence,
     _verify_model,
     fetch_available_models,
 )
-from scrum_agent.ui.provider_select.screens._screens import (
+from yeaboi.ui.provider_select.screens._screens import (
     _STEPS,
     _build_model_input_screen,
     _build_model_loading_screen,
@@ -41,8 +41,8 @@ from scrum_agent.ui.provider_select.screens._screens import (
     _build_progress,
     _build_screen_frame,
 )
-from scrum_agent.ui.provider_select.screens._screens_vc import _build_hint_text, _build_issue_tracking_screen
-from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
+from yeaboi.ui.provider_select.screens._screens_vc import _build_hint_text, _build_issue_tracking_screen
+from yeaboi.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -210,7 +210,7 @@ class TestVerifyModelBedrock:
         fake = types.ModuleType("boto3")
         fake.Session = _Session
         monkeypatch.setitem(sys.modules, "boto3", fake)
-        monkeypatch.setattr("scrum_agent.config.get_aws_profile", lambda: None)
+        monkeypatch.setattr("yeaboi.config.get_aws_profile", lambda: None)
 
     def test_plain_model_id_found_in_region(self, monkeypatch):
         self._inject_boto3(monkeypatch, [{"modelId": "anthropic.claude-3-sonnet"}])
@@ -475,7 +475,7 @@ class TestIssueTrackingPickerNav:
     def _patch_tty(self, monkeypatch):
         import select as _select
 
-        from scrum_agent.ui.provider_select import _phase_issue_tracking as it
+        from yeaboi.ui.provider_select import _phase_issue_tracking as it
 
         class _FakeStdin:
             def fileno(self):
@@ -492,7 +492,7 @@ class TestIssueTrackingPickerNav:
 
     def _run(self, monkeypatch, keys):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking
+        from yeaboi.ui.provider_select._phase_issue_tracking import _run_issue_tracking
 
         return _run_issue_tracking(
             _console(),
@@ -559,7 +559,7 @@ class TestNotionPicker:
     def _patch_tty(self, monkeypatch):
         import select as _select
 
-        from scrum_agent.ui.provider_select import _phase_notion as pn
+        from yeaboi.ui.provider_select import _phase_notion as pn
 
         class _FakeStdin:
             def fileno(self):
@@ -576,7 +576,7 @@ class TestNotionPicker:
 
     def test_skip_returns_empty_dict(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+        from yeaboi.ui.provider_select._phase_notion import _run_notion
 
         live = _FakeLive()
         # ↓ moves to "Skip", Enter selects it.
@@ -588,28 +588,28 @@ class TestNotionPicker:
 
     def test_esc_on_picker_returns_none(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+        from yeaboi.ui.provider_select._phase_notion import _run_notion
 
         assert _run_notion(_console(), _KeySequence(["esc"]), None, _FakeLive()) is None
 
     def test_right_arrow_navigates_to_version_control(self, monkeypatch):
         # Docs is step 2 → → jumps to Version Control (step 3).
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+        from yeaboi.ui.provider_select._phase_notion import _run_notion
 
         result = _run_notion(_console(), _KeySequence(["right"]), None, _FakeLive())
         assert result == StepNav(target=3)
 
     def test_left_arrow_navigates_to_issue_tracking(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+        from yeaboi.ui.provider_select._phase_notion import _run_notion
 
         result = _run_notion(_console(), _KeySequence(["left"]), None, _FakeLive())
         assert result == StepNav(target=1)
 
     def test_f_finishes(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_notion import _run_notion
+        from yeaboi.ui.provider_select._phase_notion import _run_notion
 
         result = _run_notion(_console(), _KeySequence(["f"]), None, _FakeLive())
         assert result == StepNav(finish=True)
@@ -702,7 +702,7 @@ class TestConfluencePicker:
     def _patch_tty(self, monkeypatch):
         import select as _select
 
-        from scrum_agent.ui.provider_select import _phase_confluence as pc
+        from yeaboi.ui.provider_select import _phase_confluence as pc
 
         class _FakeStdin:
             def fileno(self):
@@ -719,7 +719,7 @@ class TestConfluencePicker:
 
     def test_skip_returns_empty_dict(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+        from yeaboi.ui.provider_select._phase_confluence import _run_confluence
 
         live = _FakeLive()
         # ↓ moves to "Skip", Enter selects it.
@@ -730,21 +730,21 @@ class TestConfluencePicker:
 
     def test_esc_on_picker_returns_none(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+        from yeaboi.ui.provider_select._phase_confluence import _run_confluence
 
         result = _run_confluence(_console(), _KeySequence(["esc"]), None, _FakeLive(), jira_creds=self._JIRA)
         assert result is None
 
     def test_right_arrow_navigates_to_version_control(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+        from yeaboi.ui.provider_select._phase_confluence import _run_confluence
 
         result = _run_confluence(_console(), _KeySequence(["right"]), None, _FakeLive(), jira_creds=self._JIRA)
         assert result == StepNav(target=3)
 
     def test_f_finishes(self, monkeypatch):
         self._patch_tty(monkeypatch)
-        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+        from yeaboi.ui.provider_select._phase_confluence import _run_confluence
 
         result = _run_confluence(_console(), _KeySequence(["f"]), None, _FakeLive(), jira_creds=self._JIRA)
         assert result == StepNav(finish=True)
@@ -781,8 +781,8 @@ class TestModelDataIntegrity:
 class TestWizardModelPropagation:
     def _patch_config_file(self, monkeypatch, tmp_path):
         config_file = tmp_path / ".env"
-        monkeypatch.setattr("scrum_agent.setup_wizard.get_config_file", lambda: config_file)
-        monkeypatch.setattr("scrum_agent.config.get_config_file", lambda: config_file)
+        monkeypatch.setattr("yeaboi.setup_wizard.get_config_file", lambda: config_file)
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
         return config_file
 
     def test_llm_model_written_to_env(self, monkeypatch, tmp_path):
@@ -790,7 +790,7 @@ class TestWizardModelPropagation:
         result = dict(_PROVIDERS["1"])
         result["api_key"] = "sk-ant-key"
         result["llm_model"] = "claude-opus-4-8"
-        monkeypatch.setattr("scrum_agent.setup_wizard.select_provider", lambda *a, **kw: result)
+        monkeypatch.setattr("yeaboi.setup_wizard.select_provider", lambda *a, **kw: result)
         console = Console(file=StringIO(), highlight=False)
         run_setup_wizard(console)
         content = config_file.read_text()
@@ -800,7 +800,7 @@ class TestWizardModelPropagation:
         config_file = self._patch_config_file(monkeypatch, tmp_path)
         result = dict(_PROVIDERS["1"])
         result["api_key"] = "sk-ant-key"  # no llm_model key
-        monkeypatch.setattr("scrum_agent.setup_wizard.select_provider", lambda *a, **kw: result)
+        monkeypatch.setattr("yeaboi.setup_wizard.select_provider", lambda *a, **kw: result)
         console = Console(file=StringIO(), highlight=False)
         run_setup_wizard(console)
         content = config_file.read_text()

@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import github as _gh_import_check  # noqa: F401 — ensures PyGithub is installed
 
-from scrum_agent.tools import detect_platform, get_tools
-from scrum_agent.tools.github import (
+from yeaboi.tools import detect_platform, get_tools
+from yeaboi.tools.github import (
     _parse_repo,
     github_list_issues,
     github_read_file,
@@ -105,7 +105,7 @@ class TestGithubReadRepo:
         repo.get_languages.return_value = languages or {"Python": 8000, "Shell": 2000}
         return repo
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_normal_tree_returned(self, mock_github):
         items = [
             _make_tree_item("src", "tree"),
@@ -123,7 +123,7 @@ class TestGithubReadRepo:
         assert "README.md" in result
         assert "Python" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_empty_repo(self, mock_github):
         repo = self._make_repo([])
         mock_github.return_value.get_repo.return_value = repo
@@ -134,7 +134,7 @@ class TestGithubReadRepo:
         # No key files found — section absent
         assert "Key files" not in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_rate_limit_error(self, mock_github):
         import github as gh_module
 
@@ -146,7 +146,7 @@ class TestGithubReadRepo:
 
         assert "rate limit" in result.lower()
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_github_exception(self, mock_github):
         import github as gh_module
 
@@ -157,7 +157,7 @@ class TestGithubReadRepo:
         assert "Error" in result
         assert "Not Found" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_generic_exception(self, mock_github):
         mock_github.return_value.get_repo.side_effect = RuntimeError("network error")
 
@@ -172,7 +172,7 @@ class TestGithubReadRepo:
 
 
 class TestGithubReadFile:
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_file_found_and_decoded(self, mock_github):
         content = "name = 'my-project'\nversion = '1.0'\n"
         cf = _make_content_file("pyproject.toml", content)
@@ -184,7 +184,7 @@ class TestGithubReadFile:
         assert "name = 'my-project'" in result
         assert "[Truncated" not in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_file_not_found(self, mock_github):
         import github as gh_module
 
@@ -197,7 +197,7 @@ class TestGithubReadFile:
         assert "Error" in result
         assert "Not Found" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_truncation_at_8000_chars(self, mock_github):
         long_content = "x" * 10_000
         cf = _make_content_file("big.py", long_content)
@@ -210,7 +210,7 @@ class TestGithubReadFile:
         assert "x" * 8000 in result
         assert "x" * 8001 not in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_directory_path(self, mock_github):
         # get_contents on a dir returns a list
         cf1 = MagicMock()
@@ -224,7 +224,7 @@ class TestGithubReadFile:
         assert "directory" in result.lower()
         assert "src/main.py" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_rate_limit_error(self, mock_github):
         import github as gh_module
 
@@ -243,7 +243,7 @@ class TestGithubReadFile:
 
 
 class TestGithubListIssues:
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_issues_returned(self, mock_github):
         issues = [
             _make_issue(1, "Fix login bug", labels=["bug"], body="Users can't log in when using SSO."),
@@ -260,7 +260,7 @@ class TestGithubListIssues:
         assert "#3" in result
         assert "[PR]" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_empty_issues(self, mock_github):
         mock_github.return_value.get_repo.return_value.get_issues.return_value = []
 
@@ -268,7 +268,7 @@ class TestGithubListIssues:
 
         assert "No open issues found" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_max_issues_respected(self, mock_github):
         issues = [_make_issue(i, f"Issue {i}") for i in range(1, 25)]
         mock_github.return_value.get_repo.return_value.get_issues.return_value = issues
@@ -278,7 +278,7 @@ class TestGithubListIssues:
         assert "#5" in result
         assert "#6" not in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_rate_limit_error(self, mock_github):
         import github as gh_module
 
@@ -290,7 +290,7 @@ class TestGithubListIssues:
 
         assert "rate limit" in result.lower()
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_body_preview_truncated(self, mock_github):
         long_body = "A" * 300
         issues = [_make_issue(1, "Big issue", body=long_body)]
@@ -310,7 +310,7 @@ class TestGithubListIssues:
 
 
 class TestGithubReadReadme:
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_readme_only(self, mock_github):
         import github as gh_module
 
@@ -326,7 +326,7 @@ class TestGithubReadReadme:
         assert "My Project" in result
         assert "CONTRIBUTING" not in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_readme_and_contributing(self, mock_github):
         readme_cf = _make_content_file("README.md", "# Project\n\nDocs here.")
         contrib_cf = _make_content_file("CONTRIBUTING.md", "## How to contribute\n\nOpen a PR.")
@@ -342,7 +342,7 @@ class TestGithubReadReadme:
         assert "CONTRIBUTING.md" in result
         assert "How to contribute" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_missing_readme(self, mock_github):
         import github as gh_module
 
@@ -355,7 +355,7 @@ class TestGithubReadReadme:
 
         assert "No README found" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_readme_truncated(self, mock_github):
         import github as gh_module
 
@@ -370,7 +370,7 @@ class TestGithubReadReadme:
 
         assert "[Truncated at 8000 characters]" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_rate_limit_error(self, mock_github):
         import github as gh_module
 
@@ -444,7 +444,7 @@ class TestDetectPlatform:
 
 
 class TestGithubListIssuesRateLimitAndPagination:
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_rate_limit_message_includes_req_hr(self, mock_github):
         import github as gh_module
 
@@ -456,7 +456,7 @@ class TestGithubListIssuesRateLimitAndPagination:
 
         assert "5 000 req/hr" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_max_issues_truncation_note(self, mock_github):
         # Return exactly max_issues issues so the cap is hit
         issues = [_make_issue(i, f"Issue {i}") for i in range(1, 6)]
@@ -466,7 +466,7 @@ class TestGithubListIssuesRateLimitAndPagination:
 
         assert "increase max_issues to see more" in result
 
-    @patch("scrum_agent.tools.github.github.Github")
+    @patch("yeaboi.tools.github.github.Github")
     def test_no_truncation_note_when_under_cap(self, mock_github):
         # Return fewer issues than max_issues — no note expected
         issues = [_make_issue(i, f"Issue {i}") for i in range(1, 4)]

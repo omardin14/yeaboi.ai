@@ -4,7 +4,14 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from scrum_agent.agent.nodes import (
+from tests._node_helpers import (
+    VALID_SPRINTS_JSON,
+    make_dummy_analysis,
+    make_sample_features,
+    make_sample_sprints,
+    make_sample_stories,
+)
+from yeaboi.agent.nodes import (
     _build_fallback_sprints,
     _format_sprints,
     _format_stories_for_sprint_planner,
@@ -13,20 +20,13 @@ from scrum_agent.agent.nodes import (
     _validate_sprint_capacity,
     sprint_planner,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     Priority,
     QuestionnaireState,
     Sprint,
     StoryPointValue,
     Task,
     UserStory,
-)
-from tests._node_helpers import (
-    VALID_SPRINTS_JSON,
-    make_dummy_analysis,
-    make_sample_features,
-    make_sample_sprints,
-    make_sample_stories,
 )
 
 # ── _format_stories_for_sprint_planner tests ──────────────────────────
@@ -560,7 +560,7 @@ class TestSprintPlanner:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = sprint_planner(self._make_state())
         assert "sprints" in result
@@ -576,7 +576,7 @@ class TestSprintPlanner:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = self._make_state()
         story_ids = {s.id for s in state["stories"]}
@@ -589,7 +589,7 @@ class TestSprintPlanner:
         """When the LLM call raises an exception, the fallback should be used."""
         mock_llm = MagicMock()
         mock_llm.invoke.side_effect = RuntimeError("API down")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = sprint_planner(self._make_state())
         assert isinstance(result["sprints"], list)
@@ -602,7 +602,7 @@ class TestSprintPlanner:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = self._make_state(velocity_per_sprint=20)
         result = sprint_planner(state)
@@ -616,7 +616,7 @@ class TestSprintPlanner:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = self._make_state()
         story_ids = {s.id for s in state["stories"]}
@@ -632,7 +632,7 @@ class TestSprintPlanner:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = sprint_planner(self._make_state())
         content = result["messages"][0].content
@@ -644,7 +644,7 @@ class TestSprintPlanner:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         # Remove velocity_per_sprint, set team_size=3 → default velocity = 15
         state = self._make_state()
@@ -716,7 +716,7 @@ class TestCapacityWarning:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         # 8 pts, velocity 20, target 1 → 1 sprint fits (ceil(8/20)=1)
         state = self._make_state(velocity_per_sprint=20, target_sprints=1)
@@ -730,7 +730,7 @@ class TestCapacityWarning:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         # capacity_override_target > 0 means user accepted
         state = self._make_state(capacity_override_target=3)
@@ -744,7 +744,7 @@ class TestCapacityWarning:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         # capacity_override_target = -1 means user rejected
         state = self._make_state(capacity_override_target=-1)
@@ -758,7 +758,7 @@ class TestCapacityWarning:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = self._make_state(target_sprints=0)
         result = sprint_planner(state)
@@ -767,7 +767,7 @@ class TestCapacityWarning:
 
     def test_review_mode_skips_capacity_check(self):
         """During a review re-run (edit/reject), capacity check should be skipped."""
-        from scrum_agent.agent.state import ReviewDecision
+        from yeaboi.agent.state import ReviewDecision
 
         state = self._make_state(
             last_review_decision=ReviewDecision.REJECT,
@@ -807,7 +807,7 @@ class TestCapacityWarning:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         # capacity_override_target = -1, _capacity_team_override = 3
         # Original: velocity 3, team 1 → vel_per_eng = 3
@@ -866,7 +866,7 @@ class TestCapacityWarning:
         fake_response.content = VALID_SPRINTS_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = self._make_state(
             capacity_override_target=-1,

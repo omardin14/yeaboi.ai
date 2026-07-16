@@ -2,8 +2,8 @@
 
 import json
 
-from scrum_agent.agent.state import DeliveredItem, DeliveryReport
-from scrum_agent.reporting import presentation
+from yeaboi.agent.state import DeliveredItem, DeliveryReport
+from yeaboi.reporting import presentation
 
 
 def _report():

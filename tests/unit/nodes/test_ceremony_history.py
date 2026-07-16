@@ -8,7 +8,7 @@ See README: "Session Management" — SQLite persistence.
 import json
 from dataclasses import asdict
 
-from scrum_agent.agent.ceremony_history import (
+from yeaboi.agent.ceremony_history import (
     CeremonyContext,
     _avg_interval_days,
     _confidence_trend,
@@ -18,9 +18,9 @@ from scrum_agent.agent.ceremony_history import (
     format_ceremony_history_md,
     gather_ceremony_context,
 )
-from scrum_agent.agent.state import RetroCard, RetroReport, StandupReport
-from scrum_agent.retro.store import RetroStore
-from scrum_agent.standup.store import StandupStore
+from yeaboi.agent.state import RetroCard, RetroReport, StandupReport
+from yeaboi.retro.store import RetroStore
+from yeaboi.standup.store import StandupStore
 
 # ── Seeding helpers (insert rows with explicit run_at for deterministic cadence) ──
 
@@ -144,7 +144,7 @@ class TestGather:
         return tmp_path / "sessions.db"
 
     def _point_config_at(self, monkeypatch, db):
-        monkeypatch.setattr("scrum_agent.config.get_sessions_db", lambda: db)
+        monkeypatch.setattr("yeaboi.config.get_sessions_db", lambda: db)
 
     def test_missing_db_is_empty(self, tmp_path, monkeypatch):
         self._point_config_at(monkeypatch, self._db(tmp_path))  # file never created

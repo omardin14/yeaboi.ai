@@ -2,8 +2,8 @@
 
 import threading
 
-from scrum_agent.agent.state import RetroCard, RetroReport
-from scrum_agent.retro.board import (
+from yeaboi.agent.state import RetroCard, RetroReport
+from yeaboi.retro.board import (
     RETRO_GRID_LABELS,
     RETRO_GRIDS,
     RetroBoard,
@@ -217,7 +217,7 @@ class TestPresenceAndTyping:
         assert p["avatar"] == "" and b.typing_list() == []
 
     def test_presence_ttl_expiry(self, monkeypatch):
-        import scrum_agent.retro.board as board_mod
+        import yeaboi.retro.board as board_mod
 
         clock = {"t": 1000.0}
         monkeypatch.setattr(board_mod.time, "monotonic", lambda: clock["t"])

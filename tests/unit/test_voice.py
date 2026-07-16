@@ -16,8 +16,8 @@ import wave
 
 import pytest
 
-from scrum_agent import voice
-from scrum_agent.config import get_voice_model
+from yeaboi import voice
+from yeaboi.config import get_voice_model
 
 # ---------------------------------------------------------------------------
 # Fakes for the optional dependencies
@@ -272,7 +272,7 @@ class _KeySequence:
 
 class TestDoubleTapSpace:
     def _d(self, threshold=0.30):
-        from scrum_agent.ui.shared._voice_input import DoubleTapSpace
+        from yeaboi.ui.shared._voice_input import DoubleTapSpace
 
         return DoubleTapSpace(threshold=threshold)
 
@@ -306,7 +306,7 @@ class TestDoubleTapInDescriptionLoop:
     """End-to-end wiring: double-tap Space in the description loop dictates."""
 
     def test_double_tap_space_triggers_dictation(self, monkeypatch):
-        from scrum_agent.ui.session.phases import _phases_intake
+        from yeaboi.ui.session.phases import _phases_intake
 
         monkeypatch.setattr(voice, "is_voice_available", lambda: (True, ""))
 
@@ -334,7 +334,7 @@ class TestDoubleTapInDescriptionLoop:
 
 class TestVoiceIndicator:
     def test_recording_has_red_border_and_stop_hint(self):
-        from scrum_agent.ui.shared._voice_input import voice_indicator
+        from yeaboi.ui.shared._voice_input import voice_indicator
 
         border, line = voice_indicator("recording", 0.0)
         assert border.startswith("rgb(")
@@ -342,19 +342,19 @@ class TestVoiceIndicator:
         assert "any key to stop" in line
 
     def test_transcribing_has_spinner(self):
-        from scrum_agent.ui.shared._voice_input import voice_indicator
+        from yeaboi.ui.shared._voice_input import voice_indicator
 
         border, line = voice_indicator("transcribing", 0.5)
         assert "Transcribing" in line
         assert border  # non-empty style
 
     def test_unknown_status_is_empty(self):
-        from scrum_agent.ui.shared._voice_input import voice_indicator
+        from yeaboi.ui.shared._voice_input import voice_indicator
 
         assert voice_indicator("idle", 0.0) == ("", "")
 
     def test_recording_animates_with_tick(self):
-        from scrum_agent.ui.shared._voice_input import voice_indicator
+        from yeaboi.ui.shared._voice_input import voice_indicator
 
         # Different ticks should vary the pulsing dot/border (animation).
         frames = {voice_indicator("recording", t) for t in (0.0, 0.2, 0.4, 0.6)}
@@ -363,7 +363,7 @@ class TestVoiceIndicator:
 
 class TestRecordVoiceInput:
     def _patch_voice(self, monkeypatch, *, available=(True, ""), transcript="hello", frames_have_audio=True):
-        from scrum_agent.ui.shared import _voice_input
+        from yeaboi.ui.shared import _voice_input
 
         monkeypatch.setattr(voice, "is_voice_available", lambda: available)
 
@@ -400,7 +400,7 @@ class TestRecordVoiceInput:
 
     def test_pauses_and_resumes_music_around_recording(self, monkeypatch):
         # Background music must duck while recording, then come back.
-        from scrum_agent import music
+        from yeaboi import music
 
         events = []
         monkeypatch.setattr(music, "pause_for_voice", lambda: events.append("pause"))
@@ -410,8 +410,8 @@ class TestRecordVoiceInput:
         assert events == ["pause", "resume"]
 
     def test_resumes_music_when_mic_fails(self, monkeypatch):
-        from scrum_agent import music
-        from scrum_agent.ui.shared import _voice_input
+        from yeaboi import music
+        from yeaboi.ui.shared import _voice_input
 
         events = []
         monkeypatch.setattr(music, "pause_for_voice", lambda: events.append("pause"))

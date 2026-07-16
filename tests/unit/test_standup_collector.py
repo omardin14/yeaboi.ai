@@ -1,7 +1,7 @@
 """Unit tests for the standup recent-activity collector."""
 
-from scrum_agent.standup import collector
-from scrum_agent.standup.collector import (
+from yeaboi.standup import collector
+from yeaboi.standup.collector import (
     SOURCE_GITHUB,
     SOURCE_JIRA,
     SOURCE_LOCAL_GIT,
@@ -68,11 +68,11 @@ class TestResolveSources:
 class TestCollect:
     def test_tags_source_and_counts(self, monkeypatch):
         monkeypatch.setattr(
-            "scrum_agent.tools.jira.jira_recent_activity",
+            "yeaboi.tools.jira.jira_recent_activity",
             lambda project, days=1: [{"author": "Alice", "kind": "issue", "title": "t"}],
         )
         monkeypatch.setattr(
-            "scrum_agent.tools.local_git.local_git_recent_commits",
+            "yeaboi.tools.local_git.local_git_recent_commits",
             lambda path, days=1: [{"author": "Bob", "kind": "commit", "title": "c"}],
         )
         bundle = collect_recent_activity(
@@ -89,9 +89,9 @@ class TestCollect:
         def boom(*a, **k):
             raise RuntimeError("network down")
 
-        monkeypatch.setattr("scrum_agent.tools.jira.jira_recent_activity", boom)
+        monkeypatch.setattr("yeaboi.tools.jira.jira_recent_activity", boom)
         monkeypatch.setattr(
-            "scrum_agent.tools.local_git.local_git_recent_commits",
+            "yeaboi.tools.local_git.local_git_recent_commits",
             lambda path, days=1: [{"author": "Bob", "kind": "commit", "title": "c"}],
         )
         bundle = collect_recent_activity(
@@ -105,11 +105,11 @@ class TestCollect:
 
     def test_github_merges_commits_and_prs(self, monkeypatch):
         monkeypatch.setattr(
-            "scrum_agent.tools.github.github_recent_commits",
+            "yeaboi.tools.github.github_recent_commits",
             lambda repo, days=1: [{"author": "A", "kind": "commit", "title": "c"}],
         )
         monkeypatch.setattr(
-            "scrum_agent.tools.github.github_recent_prs",
+            "yeaboi.tools.github.github_recent_prs",
             lambda repo, days=1: [{"author": "A", "kind": "pr", "title": "p"}],
         )
         bundle = collect_recent_activity(sources={SOURCE_GITHUB}, github_repo="owner/repo")
@@ -118,7 +118,7 @@ class TestCollect:
 
     def test_notion_source_collected(self, monkeypatch):
         monkeypatch.setattr(
-            "scrum_agent.tools.notion.notion_recent_pages",
+            "yeaboi.tools.notion.notion_recent_pages",
             lambda root_id, days=1: [{"author": "Alice", "kind": "page", "title": "Doc", "timestamp": "", "key": "1"}],
         )
         bundle = collect_recent_activity(sources={SOURCE_NOTION}, notion_root="root123")
@@ -131,14 +131,14 @@ class TestCollect:
         assert bundle.counts == []
 
     def test_source_auth_error_recorded(self, monkeypatch):
-        from scrum_agent.standup.errors import StandupSourceError
+        from yeaboi.standup.errors import StandupSourceError
 
         def auth_fail(project, days=1):
             raise StandupSourceError("jira", "authentication failed — check token")
 
-        monkeypatch.setattr("scrum_agent.tools.jira.jira_recent_activity", auth_fail)
+        monkeypatch.setattr("yeaboi.tools.jira.jira_recent_activity", auth_fail)
         monkeypatch.setattr(
-            "scrum_agent.tools.local_git.local_git_recent_commits",
+            "yeaboi.tools.local_git.local_git_recent_commits",
             lambda path, days=1: [{"author": "Bob", "kind": "commit", "title": "c"}],
         )
         bundle = collect_recent_activity(

@@ -2,10 +2,10 @@
 
 from rich.panel import Panel
 
-from scrum_agent.agent.state import MemberUpdate, StandupReport
-from scrum_agent.ui.mode_select.screens._screens import _MODE_CARDS
-from scrum_agent.ui.mode_select.screens._screens_secondary import _build_standup_screen
-from scrum_agent.ui.shared._components import STANDUP_THEME, standup_title
+from yeaboi.agent.state import MemberUpdate, StandupReport
+from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS
+from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_screen
+from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
 
 
 def _report() -> StandupReport:
@@ -40,7 +40,7 @@ class TestComponents:
         assert "daily-standup" in keys
 
     def test_color_registered(self):
-        from scrum_agent.ui.shared._animations import COLOR_RGB
+        from yeaboi.ui.shared._animations import COLOR_RGB
 
         assert COLOR_RGB["rgb(200,100,180)"] == (200, 100, 180)
 
@@ -135,7 +135,7 @@ class TestBuildStandupScreen:
 
 class TestBuildStandupInputScreen:
     def test_returns_panel(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
 
         panel = _build_standup_input_screen(
             "Standup time (HH:MM)", "09:5", step="Configure standup  (1/5)", default="09:50", width=80, height=24
@@ -145,7 +145,7 @@ class TestBuildStandupInputScreen:
     def test_shows_prompt_value_and_hint(self):
         from rich.console import Console
 
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
 
         panel = _build_standup_input_screen("Your name", "Ali", step="My update  (1/2)", width=90, height=24)
         console = Console(width=100, file=open("/dev/null", "w"))
@@ -159,7 +159,7 @@ class TestBuildStandupInputScreen:
 
 class TestSettingsMasksStandupSecrets:
     def test_slack_and_smtp_password_masked(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_settings_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
 
         data = {
             "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/SECRET123456",

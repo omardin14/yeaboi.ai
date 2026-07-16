@@ -5,7 +5,7 @@ import io
 from rich.console import Console
 from rich.panel import Panel
 
-from scrum_agent.ui.mode_select.screens._screens_secondary import _build_reporting_screen
+from yeaboi.ui.mode_select.screens._screens_secondary import _build_reporting_screen
 
 
 def _render(panel: Panel) -> str:
@@ -57,7 +57,7 @@ class TestBuildReportingScreen:
         assert "nothing to show" in out.lower()
 
     def test_sprint_select_view_renders_checkboxes(self):
-        from scrum_agent.reporting.sprints import SprintRef
+        from yeaboi.reporting.sprints import SprintRef
 
         sprints = [
             SprintRef("Sprint 5", "2026-06-01", "2026-06-14", "jira", in_quarter=False),

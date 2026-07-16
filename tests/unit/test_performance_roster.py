@@ -1,14 +1,14 @@
 """Unit tests for the Performance roster builder (mocked Jira/AzDO helpers)."""
 
-import scrum_agent.ui.mode_select as mode_select
-from scrum_agent.performance import roster
-from scrum_agent.sessions import SessionStore
+import yeaboi.ui.mode_select as mode_select
+from yeaboi.performance import roster
+from yeaboi.sessions import SessionStore
 
 
 class TestFetchRoster:
     def test_distinct_assignees_merged_and_sorted(self, monkeypatch):
         monkeypatch.setattr(
-            "scrum_agent.tools.jira.jira_recent_activity",
+            "yeaboi.tools.jira.jira_recent_activity",
             lambda project_key, days=1: [
                 {"author": "Bob"},
                 {"author": "Ada"},
@@ -17,7 +17,7 @@ class TestFetchRoster:
             ],
         )
         monkeypatch.setattr(
-            "scrum_agent.tools.azure_devops.azdevops_recent_activity",
+            "yeaboi.tools.azure_devops.azdevops_recent_activity",
             lambda project, days=1: [{"author": "Carol"}, {"author": "Ada"}],
         )
         result = roster.fetch_roster(jira_project="PROJ", azdo_project="AZ")
@@ -28,18 +28,18 @@ class TestFetchRoster:
 
     def test_empty_when_no_projects(self, monkeypatch):
         # No projects and no env config → empty roster, no crash.
-        monkeypatch.setattr("scrum_agent.config.get_jira_project_key", lambda: "")
-        monkeypatch.setattr("scrum_agent.config.get_azure_devops_project", lambda: "")
+        monkeypatch.setattr("yeaboi.config.get_jira_project_key", lambda: "")
+        monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "")
         assert roster.fetch_roster() == []
 
     def test_jira_failure_is_swallowed(self, monkeypatch):
         def boom(*a, **k):
             raise RuntimeError("network")
 
-        monkeypatch.setattr("scrum_agent.tools.jira.jira_recent_activity", boom)
+        monkeypatch.setattr("yeaboi.tools.jira.jira_recent_activity", boom)
         # AzDO still contributes; Jira failure degrades to nothing.
         monkeypatch.setattr(
-            "scrum_agent.tools.azure_devops.azdevops_recent_activity",
+            "yeaboi.tools.azure_devops.azdevops_recent_activity",
             lambda project, days=1: [{"author": "Carol"}],
         )
         result = roster.fetch_roster(jira_project="PROJ", azdo_project="AZ")

@@ -16,7 +16,7 @@ questionnaire (Phase 6). These tests cover the extracted helpers:
 import json
 from unittest.mock import patch
 
-from scrum_agent.agent.nodes import (
+from yeaboi.agent.nodes import (
     _assign_holidays_to_sprints,
     _assign_leave_to_sprints,
     _build_velocity_breakdown,
@@ -30,7 +30,7 @@ from scrum_agent.agent.nodes import (
     _parse_velocity_override,
     _prepare_bank_holiday_choices,
 )
-from scrum_agent.agent.state import QuestionnaireState
+from yeaboi.agent.state import QuestionnaireState
 
 
 class TestComputeNetVelocity:
@@ -280,7 +280,7 @@ class TestBuildVelocityBreakdown:
 class TestFetchJiraVelocity:
     """Tests for _fetch_jira_velocity wrapper — calls jira_fetch_velocity @tool."""
 
-    @patch("scrum_agent.tools.jira.jira_fetch_velocity")
+    @patch("yeaboi.tools.jira.jira_fetch_velocity")
     def test_returns_per_dev_velocity(self, mock_tool):
         """Should parse the tool's JSON response into a dict."""
         mock_tool.invoke.return_value = json.dumps({"team_velocity": 25, "jira_team_size": 5, "per_dev_velocity": 5.0})
@@ -290,14 +290,14 @@ class TestFetchJiraVelocity:
         assert result["jira_team_size"] == 5
         assert result["per_dev_velocity"] == 5.0
 
-    @patch("scrum_agent.tools.jira.jira_fetch_velocity")
+    @patch("yeaboi.tools.jira.jira_fetch_velocity")
     def test_returns_none_when_not_configured(self, mock_tool):
         """Should return None when tool returns an error string."""
         mock_tool.invoke.return_value = "Error: Jira is not configured."
         result = _fetch_jira_velocity()
         assert result is None
 
-    @patch("scrum_agent.tools.jira.jira_fetch_velocity")
+    @patch("yeaboi.tools.jira.jira_fetch_velocity")
     def test_returns_none_on_exception(self, mock_tool):
         """Should return None when tool invocation fails."""
         mock_tool.invoke.side_effect = Exception("fail")
@@ -393,16 +393,16 @@ class TestExtractCapacityDeductions:
 class TestDetectBankHolidaysForWindow:
     """Tests for _detect_bank_holidays_for_window helper."""
 
-    @patch("scrum_agent.tools.calendar_tools._detect_country_from_locale", return_value=None)
+    @patch("yeaboi.tools.calendar_tools._detect_country_from_locale", return_value=None)
     def test_no_locale_returns_zero(self, mock_locale):
         """When locale can't be detected, return 0 holidays."""
         count, summary = _detect_bank_holidays_for_window(None, 2, 4)
         assert count == 0
         assert "not detected" in summary.lower()
 
-    @patch("scrum_agent.tools.calendar_tools._detect_country_from_locale", return_value="GB")
+    @patch("yeaboi.tools.calendar_tools._detect_country_from_locale", return_value="GB")
     @patch(
-        "scrum_agent.tools.calendar_tools.get_bank_holidays_structured",
+        "yeaboi.tools.calendar_tools.get_bank_holidays_structured",
         return_value=[
             {"date": __import__("datetime").date(2026, 4, 3), "name": "Good Friday", "weekday": "Friday"},
             {"date": __import__("datetime").date(2026, 4, 6), "name": "Easter Monday", "weekday": "Monday"},
@@ -415,8 +415,8 @@ class TestDetectBankHolidaysForWindow:
         assert "Good Friday" in summary
         assert "Easter Monday" in summary
 
-    @patch("scrum_agent.tools.calendar_tools._detect_country_from_locale", return_value="GB")
-    @patch("scrum_agent.tools.calendar_tools.get_bank_holidays_structured", return_value=[])
+    @patch("yeaboi.tools.calendar_tools._detect_country_from_locale", return_value="GB")
+    @patch("yeaboi.tools.calendar_tools.get_bank_holidays_structured", return_value=[])
     def test_no_holidays_in_window(self, mock_holidays, mock_locale):
         """Zero holidays returns count=0 with appropriate message."""
         count, summary = _detect_bank_holidays_for_window("2026-03-16", 2, 4)
@@ -427,7 +427,7 @@ class TestDetectBankHolidaysForWindow:
 class TestPrepareBankHolidayChoices:
     """Tests for _prepare_bank_holiday_choices using the @tool."""
 
-    @patch("scrum_agent.tools.calendar_tools.detect_bank_holidays")
+    @patch("yeaboi.tools.calendar_tools.detect_bank_holidays")
     def test_calls_tool_and_populates_choices_with_holidays(self, mock_tool):
         """When holidays are detected, choices include Accept with summary."""
         mock_tool.func.return_value = (
@@ -445,7 +445,7 @@ class TestPrepareBankHolidayChoices:
         assert "Accept" in qs._follow_up_choices[28][0]
         assert "Good Friday" in qs._follow_up_choices[28][0]
 
-    @patch("scrum_agent.tools.calendar_tools.detect_bank_holidays")
+    @patch("yeaboi.tools.calendar_tools.detect_bank_holidays")
     def test_calls_tool_and_populates_choices_no_holidays(self, mock_tool):
         """When no holidays detected, choices show 'No bank holidays'."""
         mock_tool.func.return_value = (
@@ -460,7 +460,7 @@ class TestPrepareBankHolidayChoices:
         assert len(qs._follow_up_choices[28]) == 2
         assert "No bank holidays detected" in qs._follow_up_choices[28][0]
 
-    @patch("scrum_agent.tools.calendar_tools.detect_bank_holidays")
+    @patch("yeaboi.tools.calendar_tools.detect_bank_holidays")
     def test_tool_failure_defaults_to_zero(self, mock_tool):
         """When the tool raises, fall back to 0 holidays."""
         mock_tool.func.side_effect = Exception("holidays lib missing")
@@ -469,7 +469,7 @@ class TestPrepareBankHolidayChoices:
         assert qs._detected_bank_holiday_days == 0
         assert 28 in qs._follow_up_choices
 
-    @patch("scrum_agent.tools.calendar_tools.detect_bank_holidays")
+    @patch("yeaboi.tools.calendar_tools.detect_bank_holidays")
     def test_recalculates_with_updated_sprint_count(self, mock_tool):
         """Calling again with different Q10 should recalculate bank holidays."""
         mock_tool.func.return_value = (

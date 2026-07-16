@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from scrum_agent.agent.nodes import _load_user_context
-from scrum_agent.prompts.analyzer import get_analyzer_prompt
-from scrum_agent.questionnaire_io import build_questionnaire_from_answers, parse_questionnaire_md
+from yeaboi.agent.nodes import _load_user_context
+from yeaboi.prompts.analyzer import get_analyzer_prompt
+from yeaboi.questionnaire_io import build_questionnaire_from_answers, parse_questionnaire_md
 
 # ---------------------------------------------------------------------------
 # Fixture paths
@@ -140,7 +140,7 @@ class TestQuestionnaireFixture:
         assert "fibonacci" in parsed[24].lower() or "story point" in parsed[24].lower()
 
     def test_build_questionnaire_returns_state(self, questionnaire):
-        from scrum_agent.agent.state import QuestionnaireState
+        from yeaboi.agent.state import QuestionnaireState
 
         assert isinstance(questionnaire, QuestionnaireState)
 

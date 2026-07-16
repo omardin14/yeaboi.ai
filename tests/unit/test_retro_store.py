@@ -1,7 +1,7 @@
 """Unit tests for RetroStore persistence + serialization round-trips."""
 
-from scrum_agent.agent.state import RetroCard, RetroReport
-from scrum_agent.retro.store import RetroStore, _dict_to_retro_report, _retro_report_to_json
+from yeaboi.agent.state import RetroCard, RetroReport
+from yeaboi.retro.store import RetroStore, _dict_to_retro_report, _retro_report_to_json
 
 
 def _report(session_id="sess-1"):

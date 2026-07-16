@@ -1,7 +1,7 @@
 """Tests for the rotating welcome-screen tips (ui/shared/_tips.py)."""
 
-from scrum_agent.ui.shared import _tips
-from scrum_agent.ui.shared._tips import (
+from yeaboi.ui.shared import _tips
+from yeaboi.ui.shared._tips import (
     TIP_ROTATE_SECONDS,
     current_tip,
     get_tips,
@@ -17,7 +17,7 @@ def _clear_cache():
 
 def test_get_tips_non_empty(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     tips = get_tips()
     assert len(tips) > 1
     assert all(isinstance(t, str) and t for t in tips)
@@ -26,7 +26,7 @@ def test_get_tips_non_empty(monkeypatch):
 
 def test_voice_tip_when_available(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     voice_tip = get_tips()[0]
     assert "double-tap Space" in voice_tip
     _clear_cache()
@@ -34,7 +34,7 @@ def test_voice_tip_when_available(monkeypatch):
 
 def test_voice_tip_when_unavailable(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (False, "reason"))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (False, "reason"))
     voice_tip = get_tips()[0]
     assert "uv sync --extra voice" in voice_tip
     _clear_cache()
@@ -42,23 +42,23 @@ def test_voice_tip_when_unavailable(monkeypatch):
 
 def test_music_tip_when_available(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
-    monkeypatch.setattr("scrum_agent.music.is_music_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.music.is_music_available", lambda: (True, ""))
     assert any("Ctrl+P" in t for t in get_tips())
     _clear_cache()
 
 
 def test_music_tip_when_unavailable(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
-    monkeypatch.setattr("scrum_agent.music.is_music_available", lambda: (False, "no ffplay"))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.music.is_music_available", lambda: (False, "no ffplay"))
     assert any("brew install" in t and "ffmpeg" in t for t in get_tips())
     _clear_cache()
 
 
 def test_current_tip_advances_with_tick(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     idx0, _ = current_tip(0.0)
     idx1, _ = current_tip(TIP_ROTATE_SECONDS + 0.1)
     assert idx0 == 0
@@ -68,7 +68,7 @@ def test_current_tip_advances_with_tick(monkeypatch):
 
 def test_current_tip_stable_within_window(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     idx_a, text_a = current_tip(0.0)
     idx_b, text_b = current_tip(TIP_ROTATE_SECONDS - 0.01)
     assert idx_a == idx_b
@@ -78,7 +78,7 @@ def test_current_tip_stable_within_window(monkeypatch):
 
 def test_current_tip_wraps_around(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     n = len(get_tips())
     # After a full cycle we return to the first tip.
     idx_first, _ = current_tip(0.0)
@@ -89,7 +89,7 @@ def test_current_tip_wraps_around(monkeypatch):
 
 def test_current_tip_handles_negative_tick(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     idx, text = current_tip(-5.0)
     assert idx == 0
     assert text
@@ -98,7 +98,7 @@ def test_current_tip_handles_negative_tick(monkeypatch):
 
 def test_rotate_seconds_override(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     # With a 1s window, tick=1.5 lands on the second tip.
     idx, _ = current_tip(1.5, rotate_seconds=1.0)
     assert idx == 1
@@ -111,7 +111,7 @@ def test_module_constant_present():
 
 def test_tip_count_matches_get_tips(monkeypatch):
     _clear_cache()
-    monkeypatch.setattr("scrum_agent.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     assert tip_count() == len(get_tips())
     _clear_cache()
 

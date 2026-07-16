@@ -4,9 +4,9 @@ import pytest
 from rich.panel import Panel
 from rich.text import Text
 
-from scrum_agent import music
-from scrum_agent.ui.shared import _music_bar
-from scrum_agent.ui.shared._music_bar import (
+from yeaboi import music
+from yeaboi.ui.shared import _music_bar
+from yeaboi.ui.shared._music_bar import (
     _EQ_CHARS,
     MusicLive,
     _eq_bars,

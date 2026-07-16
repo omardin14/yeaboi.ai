@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import anthropic
 import pytest
 
-from scrum_agent.agent.nodes import (
+from yeaboi.agent.nodes import (
     _extract_answers_from_description,
     _parse_analysis_response,
     _parse_features_response,
@@ -28,7 +28,7 @@ from scrum_agent.agent.nodes import (
     _parse_stories_response,
     _parse_tasks_response,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -38,7 +38,7 @@ from scrum_agent.agent.state import (
     StoryPointValue,
     UserStory,
 )
-from scrum_agent.input_guardrails import check_off_topic
+from yeaboi.input_guardrails import check_off_topic
 
 # ---------------------------------------------------------------------------
 # Shared test data — realistic LLM JSON payloads matching actual schemas
@@ -376,8 +376,8 @@ class TestOffTopicClassifierContract:
         mock_llm.invoke.return_value = mock_response
         return mock_llm
 
-    @patch("scrum_agent.agent.llm.get_llm")
-    @patch("scrum_agent.config.get_llm_provider")
+    @patch("yeaboi.agent.llm.get_llm")
+    @patch("yeaboi.config.get_llm_provider")
     def test_anthropic_haiku_off_topic(self, mock_provider, mock_get_llm):
         """Haiku returns 'OFF_TOPIC' → input blocked with redirect message."""
         mock_provider.return_value = "anthropic"
@@ -387,8 +387,8 @@ class TestOffTopicClassifierContract:
         assert result is not None
         assert "project-related" in result.lower()
 
-    @patch("scrum_agent.agent.llm.get_llm")
-    @patch("scrum_agent.config.get_llm_provider")
+    @patch("yeaboi.agent.llm.get_llm")
+    @patch("yeaboi.config.get_llm_provider")
     def test_openai_mini_off_topic(self, mock_provider, mock_get_llm):
         """gpt-4o-mini returns 'OFF_TOPIC' → blocked."""
         mock_provider.return_value = "openai"
@@ -397,8 +397,8 @@ class TestOffTopicClassifierContract:
         result = check_off_topic("what is love")
         assert result is not None
 
-    @patch("scrum_agent.agent.llm.get_llm")
-    @patch("scrum_agent.config.get_llm_provider")
+    @patch("yeaboi.agent.llm.get_llm")
+    @patch("yeaboi.config.get_llm_provider")
     def test_google_flash_off_topic(self, mock_provider, mock_get_llm):
         """Gemini Flash returns 'OFF_TOPIC' → blocked."""
         mock_provider.return_value = "google"
@@ -407,8 +407,8 @@ class TestOffTopicClassifierContract:
         result = check_off_topic("sing me a song")
         assert result is not None
 
-    @patch("scrum_agent.agent.llm.get_llm")
-    @patch("scrum_agent.config.get_llm_provider")
+    @patch("yeaboi.agent.llm.get_llm")
+    @patch("yeaboi.config.get_llm_provider")
     def test_relevant_input_allowed(self, mock_provider, mock_get_llm):
         """LLM returns 'RELEVANT' → input passes through (None returned)."""
         mock_provider.return_value = "anthropic"
@@ -417,8 +417,8 @@ class TestOffTopicClassifierContract:
         result = check_off_topic("tell me a joke")
         assert result is None
 
-    @patch("scrum_agent.agent.llm.get_llm")
-    @patch("scrum_agent.config.get_llm_provider")
+    @patch("yeaboi.agent.llm.get_llm")
+    @patch("yeaboi.config.get_llm_provider")
     def test_classifier_error_fails_open(self, mock_provider, mock_get_llm):
         """If the classifier LLM raises an exception, input is allowed (fail-open)."""
         mock_provider.return_value = "anthropic"
@@ -481,7 +481,7 @@ class TestLLMErrorResponsesContract:
 class TestExtractAnswersContract:
     """Contract: _extract_answers_from_description parses each provider's JSON format."""
 
-    @patch("scrum_agent.agent.nodes.get_llm")
+    @patch("yeaboi.agent.nodes.get_llm")
     def test_claude_fenced_json_extracted(self, mock_get_llm):
         """Claude returns fenced JSON with extracted answers."""
         mock_response = MagicMock()
@@ -495,7 +495,7 @@ class TestExtractAnswersContract:
         assert result[6] == "5 engineers"
         assert result[11] == "React, Python"
 
-    @patch("scrum_agent.agent.nodes.get_llm")
+    @patch("yeaboi.agent.nodes.get_llm")
     def test_gpt4o_bare_json_extracted(self, mock_get_llm):
         """GPT-4o returns bare JSON."""
         mock_response = MagicMock()
@@ -507,7 +507,7 @@ class TestExtractAnswersContract:
         assert result[1] == "E-commerce site"
         assert result[8] == "2 weeks"
 
-    @patch("scrum_agent.agent.nodes.get_llm")
+    @patch("yeaboi.agent.nodes.get_llm")
     def test_gemini_bare_json_extracted(self, mock_get_llm):
         """Gemini returns bare JSON with trailing whitespace."""
         mock_response = MagicMock()
@@ -519,7 +519,7 @@ class TestExtractAnswersContract:
         assert result[1] == "Mobile banking app"
         assert result[2] == "greenfield"
 
-    @patch("scrum_agent.agent.nodes.get_llm")
+    @patch("yeaboi.agent.nodes.get_llm")
     def test_llm_failure_returns_empty_dict(self, mock_get_llm):
         """If the LLM raises, extraction returns {} gracefully."""
         mock_get_llm.return_value.invoke.side_effect = Exception("API down")

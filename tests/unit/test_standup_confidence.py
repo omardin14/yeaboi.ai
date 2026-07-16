@@ -2,8 +2,8 @@
 
 from datetime import date
 
-from scrum_agent.standup import confidence
-from scrum_agent.standup.confidence import (
+from yeaboi.standup import confidence
+from yeaboi.standup.confidence import (
     LABEL_AT_RISK,
     LABEL_BEHIND,
     LABEL_INSUFFICIENT,

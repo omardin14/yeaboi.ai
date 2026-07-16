@@ -1,6 +1,6 @@
 """Tests for the story writer prompt template."""
 
-from scrum_agent.prompts.story_writer import (
+from yeaboi.prompts.story_writer import (
     _ALLOWED_DISCIPLINES,
     _ALLOWED_PRIORITIES,
     _ALLOWED_STORY_POINTS,
@@ -241,6 +241,6 @@ class TestStoryWriterPromptImports:
     """Verify imports from the expected locations."""
 
     def test_importable_from_story_writer_module(self):
-        from scrum_agent.prompts.story_writer import get_story_writer_prompt as imported_fn
+        from yeaboi.prompts.story_writer import get_story_writer_prompt as imported_fn
 
         assert imported_fn is get_story_writer_prompt

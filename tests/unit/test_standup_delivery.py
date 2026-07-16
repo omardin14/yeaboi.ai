@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 from rich.console import Group
 
-from scrum_agent.agent.state import MemberUpdate, StandupReport
-from scrum_agent.standup import delivery, render
-from scrum_agent.standup.delivery import (
+from yeaboi.agent.state import MemberUpdate, StandupReport
+from yeaboi.standup import delivery, render
+from yeaboi.standup.delivery import (
     DesktopDelivery,
     EmailDelivery,
     SlackDelivery,
@@ -175,7 +175,7 @@ class TestFactoryAndFanOut:
 
     def test_deliver_fans_out_and_reports_partial(self, monkeypatch):
         # terminal succeeds, slack fails (no webhook) → partial.
-        monkeypatch.setattr("scrum_agent.config.get_slack_webhook_url", lambda: "", raising=False)
+        monkeypatch.setattr("yeaboi.config.get_slack_webhook_url", lambda: "", raising=False)
         results = deliver(_report(), ["terminal", "slack"])
         assert results["terminal"] is True
         assert results["slack"] is False

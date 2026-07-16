@@ -2,8 +2,8 @@
 
 import pytest
 
-from scrum_agent.agent.state import MemberUpdate, StandupReport
-from scrum_agent.standup.store import StandupStore
+from yeaboi.agent.state import MemberUpdate, StandupReport
+from yeaboi.standup.store import StandupStore
 
 
 @pytest.fixture
@@ -134,7 +134,7 @@ class TestRunHistory:
 class TestMigrationCreatesTables:
     def test_session_store_v6_creates_standup_tables(self, db_path):
         """Opening a SessionStore should run the v6 migration and create standup tables."""
-        from scrum_agent.sessions import CURRENT_SCHEMA_VERSION, SessionStore
+        from yeaboi.sessions import CURRENT_SCHEMA_VERSION, SessionStore
 
         assert CURRENT_SCHEMA_VERSION >= 6
         with SessionStore(db_path):

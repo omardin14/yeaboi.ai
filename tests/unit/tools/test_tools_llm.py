@@ -9,7 +9,7 @@ All LLM calls are mocked — no real API calls are made. Tests verify:
 
 from unittest.mock import MagicMock
 
-from scrum_agent.tools.llm_tools import (
+from yeaboi.tools.llm_tools import (
     _FIBONACCI_POINTS,
     estimate_complexity,
     generate_acceptance_criteria,
@@ -38,7 +38,7 @@ class TestEstimateComplexity:
     def test_returns_llm_response(self, monkeypatch):
         """Should return the LLM response content as a string."""
         mock_llm = _mock_llm("Story Points: 3\n\nRationale:\n- Small scope\n- Clear requirements")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         result = estimate_complexity.invoke({"description": "Add a logout button"})
 
@@ -48,7 +48,7 @@ class TestEstimateComplexity:
     def test_description_injected_into_prompt(self, monkeypatch):
         """The story description should appear in the LLM prompt."""
         mock_llm = _mock_llm("Story Points: 2\n\nRationale:\n- Trivial")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         estimate_complexity.invoke({"description": "Reset password via email link"})
 
@@ -59,7 +59,7 @@ class TestEstimateComplexity:
     def test_tech_stack_injected_when_provided(self, monkeypatch):
         """Tech stack should appear in the prompt when provided."""
         mock_llm = _mock_llm("Story Points: 5\n\nRationale:\n- Complex")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         estimate_complexity.invoke({"description": "Add auth", "tech_stack": "React, FastAPI"})
 
@@ -70,7 +70,7 @@ class TestEstimateComplexity:
     def test_tech_stack_omitted_when_empty(self, monkeypatch):
         """Tech stack line should be absent when tech_stack is empty."""
         mock_llm = _mock_llm("Story Points: 1\n\nRationale:\n- Trivial")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         estimate_complexity.invoke({"description": "Fix typo in label"})
 
@@ -81,7 +81,7 @@ class TestEstimateComplexity:
     def test_fibonacci_values_in_prompt(self, monkeypatch):
         """All Fibonacci point values should appear in the prompt."""
         mock_llm = _mock_llm("Story Points: 3\n\nRationale:\n- Medium")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         estimate_complexity.invoke({"description": "some story"})
 
@@ -94,7 +94,7 @@ class TestEstimateComplexity:
         """LLM errors should return an 'Error:' prefixed string, not raise."""
         mock_instance = MagicMock()
         mock_instance.invoke.side_effect = RuntimeError("API unavailable")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_instance)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_instance)
 
         result = estimate_complexity.invoke({"description": "some story"})
 
@@ -109,7 +109,7 @@ class TestEstimateComplexity:
             captured.update(kwargs)
             return _mock_llm("Story Points: 2\n\nRationale:\n- Simple")
 
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", mock_get_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", mock_get_llm)
         estimate_complexity.invoke({"description": "small fix"})
 
         assert "temperature" in captured
@@ -132,7 +132,7 @@ class TestGenerateAcceptanceCriteria:
     def test_returns_llm_response(self, monkeypatch):
         """Should return the LLM response content as a string."""
         mock_llm = _mock_llm(self._SAMPLE_ACS)
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         result = generate_acceptance_criteria.invoke(
             {"story": "As a user, I want to log out, so that my session is ended."}
@@ -144,7 +144,7 @@ class TestGenerateAcceptanceCriteria:
     def test_story_injected_into_prompt(self, monkeypatch):
         """The story text should appear in the LLM prompt."""
         mock_llm = _mock_llm(self._SAMPLE_ACS)
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         story = "As a user, I want to reset my password via email."
         generate_acceptance_criteria.invoke({"story": story})
@@ -156,7 +156,7 @@ class TestGenerateAcceptanceCriteria:
     def test_context_injected_when_provided(self, monkeypatch):
         """Additional context should appear in the prompt when provided."""
         mock_llm = _mock_llm(self._SAMPLE_ACS)
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         generate_acceptance_criteria.invoke({"story": "As a user...", "context": "Uses SendGrid for email delivery"})
 
@@ -167,7 +167,7 @@ class TestGenerateAcceptanceCriteria:
     def test_context_omitted_when_empty(self, monkeypatch):
         """Context section should be absent when context is empty."""
         mock_llm = _mock_llm(self._SAMPLE_ACS)
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         generate_acceptance_criteria.invoke({"story": "As a user..."})
 
@@ -178,7 +178,7 @@ class TestGenerateAcceptanceCriteria:
     def test_given_when_then_format_in_prompt(self, monkeypatch):
         """The prompt should instruct Given/When/Then format."""
         mock_llm = _mock_llm(self._SAMPLE_ACS)
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         generate_acceptance_criteria.invoke({"story": "some story"})
 
@@ -192,7 +192,7 @@ class TestGenerateAcceptanceCriteria:
         """LLM errors should return an 'Error:' prefixed string, not raise."""
         mock_instance = MagicMock()
         mock_instance.invoke.side_effect = RuntimeError("timeout")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_instance)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_instance)
 
         result = generate_acceptance_criteria.invoke({"story": "some story"})
 
@@ -207,7 +207,7 @@ class TestGenerateAcceptanceCriteria:
             captured.update(kwargs)
             return _mock_llm(self._SAMPLE_ACS)
 
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", mock_get_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", mock_get_llm)
         generate_acceptance_criteria.invoke({"story": "some story"})
 
         assert "temperature" in captured
@@ -222,7 +222,7 @@ class TestGenerateAcceptanceCriteria:
 class TestLlmToolsRegistered:
     def test_both_tools_in_get_tools(self):
         """estimate_complexity and generate_acceptance_criteria should be in get_tools()."""
-        from scrum_agent.tools import get_tools
+        from yeaboi.tools import get_tools
 
         names = {t.name for t in get_tools()}
         assert "estimate_complexity" in names
@@ -243,7 +243,7 @@ class TestLlmToolsInputValidation:
     def test_estimate_empty_description(self, monkeypatch):
         """Empty description should still invoke the LLM (no crash)."""
         mock_llm = _mock_llm("Story Points: 1\n\nRationale:\n- No info")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         result = estimate_complexity.invoke({"description": ""})
 
@@ -254,7 +254,7 @@ class TestLlmToolsInputValidation:
         """Very long description should still work (no truncation in the tool)."""
         long_desc = "Build a feature that " + "does many things. " * 500
         mock_llm = _mock_llm("Story Points: 8\n\nRationale:\n- Massive scope")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         result = estimate_complexity.invoke({"description": long_desc})
 
@@ -267,7 +267,7 @@ class TestLlmToolsInputValidation:
     def test_generate_ac_empty_story(self, monkeypatch):
         """Empty story text should still invoke the LLM (no crash)."""
         mock_llm = _mock_llm("Acceptance Criteria:\n\n1. Given ...\n   When ...\n   Then ...")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         result = generate_acceptance_criteria.invoke({"story": ""})
 
@@ -276,7 +276,7 @@ class TestLlmToolsInputValidation:
     def test_estimate_whitespace_only_tech_stack(self, monkeypatch):
         """Whitespace-only tech_stack should be treated as empty (no 'Tech stack:' line)."""
         mock_llm = _mock_llm("Story Points: 2\n\nRationale:\n- Simple")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         estimate_complexity.invoke({"description": "Add button", "tech_stack": "   "})
 
@@ -287,7 +287,7 @@ class TestLlmToolsInputValidation:
     def test_generate_ac_whitespace_only_context(self, monkeypatch):
         """Whitespace-only context should be treated as empty (no 'Additional context' section)."""
         mock_llm = _mock_llm("Acceptance Criteria:\n\n1. Given ...\n   When ...\n   Then ...")
-        monkeypatch.setattr("scrum_agent.tools.llm_tools.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.tools.llm_tools.get_llm", lambda **kw: mock_llm)
 
         generate_acceptance_criteria.invoke({"story": "As a user...", "context": "   "})
 

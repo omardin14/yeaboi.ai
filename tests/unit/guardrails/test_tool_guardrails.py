@@ -10,7 +10,7 @@ from io import StringIO
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from rich.console import Console
 
-from scrum_agent.repl import _display_tool_activity
+from yeaboi.repl import _display_tool_activity
 
 
 def _make_console() -> tuple[Console, StringIO]:

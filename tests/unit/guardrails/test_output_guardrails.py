@@ -1,13 +1,13 @@
 """Tests for output guardrails — programmatic validation of generated artifacts."""
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Priority,
     Sprint,
     StoryPointValue,
     UserStory,
 )
-from scrum_agent.output_guardrails import (
+from yeaboi.output_guardrails import (
     validate_ac_coverage,
     validate_output,
     validate_scope_vs_capacity,

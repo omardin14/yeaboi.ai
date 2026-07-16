@@ -22,8 +22,8 @@ from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
-from scrum_agent.agent.graph import create_graph
-from scrum_agent.agent.state import (
+from yeaboi.agent.graph import create_graph
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     AcceptanceCriterion,
     Feature,
@@ -189,7 +189,7 @@ class TestReActSingleTool:
         first = AIMessage(content="", tool_calls=[_tc("echo_tool", {"text": "hello"})])
         final = AIMessage(content="Done: echoed: hello")
         mock_llm, bound = _make_llm_mock(first, final)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="run echo")]
@@ -211,7 +211,7 @@ class TestReActSingleTool:
         first = AIMessage(content="", tool_calls=[_tc("echo_tool", {"text": "specific-value"})])
         final = AIMessage(content="done")
         mock_llm, bound = _make_llm_mock(first, final)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="run")]
@@ -249,7 +249,7 @@ class TestReActMultipleTools:
         )
         final = AIMessage(content="Got both results")
         mock_llm, bound = _make_llm_mock(first, final)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="run both tools")]
@@ -271,7 +271,7 @@ class TestReActMultipleTools:
         # Turn 3: agent is done — final answer
         final = AIMessage(content="Done with both steps")
         mock_llm, bound = _make_llm_mock(turn1, turn2, final)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="run tools sequentially")]
@@ -311,7 +311,7 @@ class TestReActToolError:
         first = AIMessage(content="", tool_calls=[_tc("failing_tool", {"reason": "test"})])
         graceful = AIMessage(content="I encountered an error and will try differently.")
         mock_llm, bound = _make_llm_mock(first, graceful)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="run failing tool")]
@@ -337,7 +337,7 @@ class TestReActToolError:
         first = AIMessage(content="", tool_calls=[_tc("failing_tool", {"reason": "bad input"})])
         graceful = AIMessage(content="Apologies — the tool failed.")
         mock_llm, bound = _make_llm_mock(first, graceful)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="trigger error")]
@@ -381,7 +381,7 @@ class TestHumanReview:
             tool_calls=[_tc("jira_create_epic", {"summary": "Auth Epic", "description": "OAuth2"})],
         )
         mock_llm, bound = _make_llm_mock(first)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="create a Jira epic")]
@@ -410,7 +410,7 @@ class TestHumanReview:
         reintent = AIMessage(content="", tool_calls=[_tc("jira_create_epic", {"summary": "Auth Epic"})])
         final = AIMessage(content="Epic created successfully!")
         mock_llm, bound = _make_llm_mock(intent, reintent, final)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         graph = create_graph(tools=[jira_create_epic])
 
@@ -440,7 +440,7 @@ class TestHumanReview:
         first = AIMessage(content="", tool_calls=[_tc("echo_tool", {"text": "safe"})])
         final = AIMessage(content="done")
         mock_llm, bound = _make_llm_mock(first, final)
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         state = _pipeline_complete_state()
         state["messages"] = [HumanMessage(content="run safe tool")]

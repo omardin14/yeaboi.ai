@@ -1,6 +1,6 @@
 """Tests for the detect_bank_holidays tool and locale auto-detection."""
 
-from scrum_agent.tools.calendar_tools import _detect_country_from_locale, detect_bank_holidays
+from yeaboi.tools.calendar_tools import _detect_country_from_locale, detect_bank_holidays
 
 
 class TestDetectCountryFromLocale:
@@ -36,21 +36,21 @@ class TestDetectCountryFromLocale:
         """A locale like 'C' or 'POSIX' with no country part should return None."""
         monkeypatch.setattr("locale.getlocale", lambda: ("C", None))
         monkeypatch.setenv("LANG", "C")
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.platform.system", lambda: "Linux")
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.platform.system", lambda: "Linux")
         assert _detect_country_from_locale() is None
 
     def test_unsupported_country_returns_none(self, monkeypatch):
         """A locale with an unsupported country code should return None."""
         monkeypatch.setattr("locale.getlocale", lambda: ("en_XX", "UTF-8"))
         monkeypatch.setenv("LANG", "en_XX")
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.platform.system", lambda: "Linux")
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.platform.system", lambda: "Linux")
         assert _detect_country_from_locale() is None
 
     def test_exception_returns_none(self, monkeypatch):
         """If locale functions raise, return None gracefully."""
         monkeypatch.setattr("locale.getlocale", lambda: (_ for _ in ()).throw(ValueError("bad")))
         monkeypatch.setenv("LANG", "C")
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.platform.system", lambda: "Linux")
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.platform.system", lambda: "Linux")
         assert _detect_country_from_locale() is None
 
     def test_lang_env_var_fallback(self, monkeypatch):
@@ -66,10 +66,10 @@ class TestDetectCountryFromLocale:
 
         monkeypatch.setattr("locale.getlocale", lambda: ("C", None))
         monkeypatch.setenv("LANG", "C")
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.platform.system", lambda: "Darwin")
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.platform.system", lambda: "Darwin")
 
         fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="en_GB\n", stderr="")
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.subprocess.run", lambda *a, **kw: fake_result)
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.subprocess.run", lambda *a, **kw: fake_result)
         assert _detect_country_from_locale() == "GB"
 
 
@@ -213,7 +213,7 @@ class TestDetectBankHolidays:
 
     def test_auto_detect_from_locale(self, monkeypatch):
         """When country_code is empty, should auto-detect from system locale."""
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.locale.getlocale", lambda: ("en_GB", "UTF-8"))
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.locale.getlocale", lambda: ("en_GB", "UTF-8"))
         result = detect_bank_holidays.invoke(
             {
                 "sprint_length_weeks": 2,
@@ -239,9 +239,9 @@ class TestDetectBankHolidays:
 
     def test_auto_detect_fails_gracefully(self, monkeypatch):
         """When locale has no country and no code given, return helpful error."""
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.locale.getlocale", lambda: ("C", None))
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.locale.getlocale", lambda: ("C", None))
         monkeypatch.setenv("LANG", "C")
-        monkeypatch.setattr("scrum_agent.tools.calendar_tools.platform.system", lambda: "Linux")
+        monkeypatch.setattr("yeaboi.tools.calendar_tools.platform.system", lambda: "Linux")
         result = detect_bank_holidays.invoke({})
         assert "Error" in result
         assert "could not auto-detect" in result
@@ -252,7 +252,7 @@ class TestDetectBankHolidaysRegistered:
 
     def test_in_get_tools(self):
         """detect_bank_holidays should be in get_tools()."""
-        from scrum_agent.tools import get_tools
+        from yeaboi.tools import get_tools
 
         names = {t.name for t in get_tools()}
         assert "detect_bank_holidays" in names

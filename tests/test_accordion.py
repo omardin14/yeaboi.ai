@@ -2,8 +2,8 @@
 
 from rich.panel import Panel
 
-from scrum_agent.agent.state import TOTAL_QUESTIONS, QuestionnaireState
-from scrum_agent.ui.session.screens._accordion import (
+from yeaboi.agent.state import TOTAL_QUESTIONS, QuestionnaireState
+from yeaboi.ui.session.screens._accordion import (
     _build_accordion_question_screen,
     _compute_accordion_viewport,
     _compute_item_heights,

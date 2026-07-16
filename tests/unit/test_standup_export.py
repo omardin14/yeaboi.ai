@@ -1,8 +1,8 @@
 """Unit tests for Daily Standup Markdown + HTML export."""
 
-from scrum_agent.agent.state import MemberUpdate, StandupReport
-from scrum_agent.standup import export
-from scrum_agent.standup.export import build_standup_html, build_standup_markdown, export_standup
+from yeaboi.agent.state import MemberUpdate, StandupReport
+from yeaboi.standup import export
+from yeaboi.standup.export import build_standup_html, build_standup_markdown, export_standup
 
 
 def _report(**over) -> StandupReport:
@@ -66,7 +66,7 @@ class TestHtml:
 
 class TestExportWrites:
     def test_writes_md_and_html(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("scrum_agent.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
+        monkeypatch.setattr("yeaboi.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
         paths = export_standup(_report(), project_name="My Demo Project")
         assert paths["markdown"].exists() and paths["markdown"].suffix == ".md"
         assert paths["html"].exists() and paths["html"].suffix == ".html"
@@ -76,7 +76,7 @@ class TestExportWrites:
         assert paths["html"].read_text().startswith("<!DOCTYPE html>")
 
     def test_rerun_same_day_overwrites(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("scrum_agent.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
+        monkeypatch.setattr("yeaboi.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
         export_standup(_report(confidence_pct=50), project_name="Demo")
         paths = export_standup(_report(confidence_pct=90), project_name="Demo")
         # one dated file per day, latest wins

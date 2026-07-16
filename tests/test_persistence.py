@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -14,7 +14,7 @@ from scrum_agent.agent.state import (
     StoryPointValue,
     UserStory,
 )
-from scrum_agent.persistence import (
+from yeaboi.persistence import (
     _compute_jira_summary,
     _compute_progress,
     _compute_status,
@@ -33,15 +33,15 @@ from scrum_agent.persistence import (
     migrate_history_file,
     save_project_snapshot,
 )
-from scrum_agent.ui.mode_select import ProjectSummary
+from yeaboi.ui.mode_select import ProjectSummary
 
 
 @pytest.fixture(autouse=True)
 def _isolate_config_dir(monkeypatch, tmp_path):
     """Redirect persistence to a temp directory to avoid touching real ~/.scrum-agent/."""
-    monkeypatch.setattr("scrum_agent.persistence._CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("scrum_agent.persistence._PROJECTS_FILE", tmp_path / "projects.json")
-    monkeypatch.setattr("scrum_agent.persistence._STATES_DIR", tmp_path / "states")
+    monkeypatch.setattr("yeaboi.persistence._CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("yeaboi.persistence._PROJECTS_FILE", tmp_path / "projects.json")
+    monkeypatch.setattr("yeaboi.persistence._STATES_DIR", tmp_path / "states")
     return tmp_path
 
 
@@ -245,19 +245,19 @@ class TestExportProjectHtml:
         # Mock the html exporter to avoid needing real graph state artifacts
         expected_path = tmp_path / "my-cool-app-plan.html"
         monkeypatch.setattr(
-            "scrum_agent.persistence.export_plan_html",
+            "yeaboi.persistence.export_plan_html",
             lambda state, path: path,
             raising=False,
         )
         # The import is deferred, so we need to patch inside the function's import
-        import scrum_agent.persistence as _mod
+        import yeaboi.persistence as _mod
 
         original = _mod.export_project_html
 
         def _patched(project_id, output_dir=None):
-            import scrum_agent.html_exporter
+            import yeaboi.html_exporter
 
-            monkeypatch.setattr(scrum_agent.html_exporter, "export_plan_html", lambda state, path: path)
+            monkeypatch.setattr(yeaboi.html_exporter, "export_plan_html", lambda state, path: path)
             return original(project_id, output_dir)
 
         out_path = _patched("proj-1", output_dir=tmp_path)
@@ -276,7 +276,7 @@ class TestExportProjectMd:
         save_project_snapshot("proj-1", {"messages": ["msg"], "questionnaire": qs})
 
         expected_path = tmp_path / "my-cool-app-plan.md"
-        import scrum_agent.repl._io as _io_mod
+        import yeaboi.repl._io as _io_mod
 
         monkeypatch.setattr(_io_mod, "_export_plan_markdown", lambda state, path: path)
 
@@ -295,8 +295,8 @@ class TestExportProjectPlan:
         qs.answers[1] = "My App"
         save_project_snapshot("proj-1", {"messages": ["msg"], "questionnaire": qs})
 
-        import scrum_agent.html_exporter as _html_mod
-        import scrum_agent.repl._io as _io_mod
+        import yeaboi.html_exporter as _html_mod
+        import yeaboi.repl._io as _io_mod
 
         monkeypatch.setattr(_html_mod, "export_plan_html", lambda state, path: path)
         monkeypatch.setattr(_io_mod, "_export_plan_markdown", lambda state, path: path)

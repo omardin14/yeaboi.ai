@@ -9,7 +9,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from rich.console import Console
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     AcceptanceCriterion,
     Discipline,
@@ -22,7 +22,7 @@ from scrum_agent.agent.state import (
     Task,
     UserStory,
 )
-from scrum_agent.repl import (
+from yeaboi.repl import (
     _RATE_LIMIT_MAX_RETRIES,
     REVIEW_HINT,
     _build_spinner_message,
@@ -56,7 +56,7 @@ from scrum_agent.repl import (
 
 def _make_console() -> tuple[Console, StringIO]:
     """Create a Console that writes to a StringIO buffer with theme support."""
-    from scrum_agent.formatters import build_theme
+    from yeaboi.formatters import build_theme
 
     buf = StringIO()
     return Console(file=buf, force_terminal=True, theme=build_theme("dark")), buf
@@ -150,10 +150,10 @@ def _mock_deps(monkeypatch, tmp_path):
     a real LLM. Individual tests can override the graph by patching
     create_graph again.
     """
-    monkeypatch.setattr("scrum_agent.repl.HISTORY_DIR", tmp_path)
-    monkeypatch.setattr("scrum_agent.repl.FileHistory", lambda path: None)
-    monkeypatch.setattr("scrum_agent.repl.time.sleep", lambda _: None)
-    monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory())
+    monkeypatch.setattr("yeaboi.repl.HISTORY_DIR", tmp_path)
+    monkeypatch.setattr("yeaboi.repl.FileHistory", lambda path: None)
+    monkeypatch.setattr("yeaboi.repl.time.sleep", lambda _: None)
+    monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory())
 
 
 # --- Graceful exit ---
@@ -161,31 +161,31 @@ def _mock_deps(monkeypatch, tmp_path):
 
 class TestGracefulExit:
     def test_exit_command(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert "Goodbye!" in buf.getvalue()
 
     def test_quit_command(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["quit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["quit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert "Goodbye!" in buf.getvalue()
 
     def test_exit_case_insensitive(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["EXIT"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["EXIT"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert "Goodbye!" in buf.getvalue()
 
     def test_ctrl_d_eof(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_with_exception(EOFError))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_with_exception(EOFError))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert "Goodbye!" in buf.getvalue()
 
     def test_ctrl_c_keyboard_interrupt(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_with_exception(KeyboardInterrupt))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_with_exception(KeyboardInterrupt))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert "Goodbye!" in buf.getvalue()
@@ -197,8 +197,8 @@ class TestGracefulExit:
 class TestInputHandling:
     def test_empty_input_skipped(self, monkeypatch):
         mock_graph = _mock_graph_factory()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["", "   ", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["", "   ", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         mock_graph.invoke.assert_not_called()
@@ -206,8 +206,8 @@ class TestInputHandling:
     def test_user_input_sent_to_graph(self, monkeypatch):
         """User input should be wrapped in a HumanMessage and passed to graph.invoke()."""
         mock_graph = _mock_graph_factory()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello world", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello world", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
 
@@ -219,16 +219,16 @@ class TestInputHandling:
 
     def test_ai_response_displayed(self, monkeypatch):
         """The AI response content should appear in the console output."""
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory("Here are your features."))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["plan my project", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory("Here are your features."))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["plan my project", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
         assert "Here are your features." in output
 
     def test_multiple_inputs_before_exit(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory("response"))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["first", "second", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory("response"))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["first", "second", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -236,22 +236,22 @@ class TestInputHandling:
         assert "Goodbye!" in output
 
     def test_help_command(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["help", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["help", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
         assert "Available commands" in output
 
     def test_help_question_mark(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["?", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["?", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
         assert "Available commands" in output
 
     def test_markdown_rendering(self, monkeypatch):
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory("**bold text**"))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["describe project", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory("**bold text**"))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["describe project", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -274,8 +274,8 @@ class TestReplGraphIntegration:
         manually accumulate and pass conversation history (via graph_state dict).
         """
         mock_graph = _mock_graph_factory("ok")
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["first", "second", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["first", "second", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
 
@@ -301,8 +301,8 @@ class TestReplGraphIntegration:
         an error message and continue (not crash)."""
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = RuntimeError("API key invalid")
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -325,9 +325,9 @@ class TestReplGraphIntegration:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke_fail_then_succeed
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession", _mock_session_factory(["fail-input", "retry-input", "exit"])
+            "yeaboi.repl.PromptSession", _mock_session_factory(["fail-input", "retry-input", "exit"])
         )
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -346,8 +346,8 @@ class TestReplGraphIntegration:
             create_call_count += 1
             return _mock_graph_factory()
 
-        monkeypatch.setattr("scrum_agent.repl.create_graph", _counting_factory)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["a", "b", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", _counting_factory)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["a", "b", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert create_call_count == 1
@@ -405,15 +405,15 @@ class TestPhaseHeader:
 class TestSessionSetup:
     def test_history_dir_created(self, monkeypatch, tmp_path):
         history_dir = tmp_path / "custom-history"
-        monkeypatch.setattr("scrum_agent.repl.HISTORY_DIR", history_dir)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["exit"]))
+        monkeypatch.setattr("yeaboi.repl.HISTORY_DIR", history_dir)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert history_dir.exists()
 
     def test_conversational_opener_shown(self, monkeypatch):
         """The REPL should show a conversational opener before the first prompt."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -427,7 +427,7 @@ class TestSessionSetup:
             answers={i: f"Answer {i}" for i in range(1, TOTAL_QUESTIONS + 1)},
             awaiting_confirmation=True,
         )
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["exit"]))
         console, buf = _make_console()
         run_repl(console=console, questionnaire=qs)
         output = _strip_ansi(buf.getvalue())
@@ -446,8 +446,8 @@ class TestQuestionnaireUI:
         """When the graph returns an active questionnaire, the progress percentage is shown."""
         qs = QuestionnaireState(current_question=6, answers={1: "a", 2: "b", 3: "c", 4: "d", 5: "e"})
         mock_graph = _mock_graph_with_questionnaire("Next question?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -458,8 +458,8 @@ class TestQuestionnaireUI:
         """Skip hint is not shown automatically — discoverable via help only."""
         qs = QuestionnaireState(current_question=2, answers={1: "a"})
         mock_graph = _mock_graph_with_questionnaire("Next question?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -469,8 +469,8 @@ class TestQuestionnaireUI:
         """When the questionnaire is completed, no progress bar or skip hint is shown."""
         qs = QuestionnaireState(current_question=26, completed=True, answers={i: "a" for i in range(1, 27)})
         mock_graph = _mock_graph_with_questionnaire("Summary complete!", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -480,8 +480,8 @@ class TestQuestionnaireUI:
     def test_no_ui_in_agent_mode(self, monkeypatch):
         """When the graph returns no questionnaire (main agent mode), no progress UI is shown."""
         # Default mock graph returns no questionnaire key
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory("Agent response"))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory("Agent response"))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -492,8 +492,8 @@ class TestQuestionnaireUI:
         """The first questionnaire response should show the Phase 1 header."""
         qs = QuestionnaireState(current_question=1)
         mock_graph = _mock_graph_with_questionnaire("What is the project?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -518,8 +518,8 @@ class TestQuestionnaireUI:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["first", "second", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["first", "second", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -529,7 +529,7 @@ class TestQuestionnaireUI:
 
     def test_skip_in_help_text(self, monkeypatch):
         """The help output should mention 'skip' as an available command."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["help", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["help", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -541,8 +541,8 @@ class TestQuestionnaireUI:
         qs = QuestionnaireState(current_question=27, answers={i: "a" for i in range(1, 27)})
         qs.awaiting_confirmation = True
         mock_graph = _mock_graph_with_questionnaire("Here is your summary.", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -559,8 +559,8 @@ class TestQuestionnaireUI:
         qs.awaiting_confirmation = True
         qs.editing_question = 6
         mock_graph = _mock_graph_with_questionnaire("Enter your new answer:", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -574,7 +574,7 @@ class TestQuestionnaireUI:
 
     def test_edit_in_help_text(self, monkeypatch):
         """The help output should mention 'edit' as an available command."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["help", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["help", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -597,10 +597,10 @@ class TestQuestionnaireUI:
         # First invoke puts questionnaire at Q2, second records valid answer.
         qs = QuestionnaireState(current_question=2, answers={1: "a"})
         mock_graph = _mock_graph_with_questionnaire("Next question?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # "5" is out of range → rejected, "1" resolves to Greenfield
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["hello", "5", "1", "exit"]),
         )
         console, buf = _make_console()
@@ -622,8 +622,8 @@ class TestExportCommand:
 
     def test_export_writes_file(self, monkeypatch, tmp_path):
         """The `export` command should write a questionnaire .md file."""
-        monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(tmp_path / "scrum-questionnaire.md"))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["export", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.DEFAULT_EXPORT_FILENAME", str(tmp_path / "scrum-questionnaire.md"))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["export", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -634,9 +634,9 @@ class TestExportCommand:
         """Export should include answers from the current questionnaire state."""
         qs = QuestionnaireState(current_question=6, answers={1: "My project", 2: "Greenfield"})
         mock_graph = _mock_graph_with_questionnaire("Next question?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(tmp_path / "export.md"))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "export", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.DEFAULT_EXPORT_FILENAME", str(tmp_path / "export.md"))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "export", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         content = (tmp_path / "export.md").read_text()
@@ -645,7 +645,7 @@ class TestExportCommand:
 
     def test_export_in_help_text(self, monkeypatch):
         """The help output should mention 'export' as an available command."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["help", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["help", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -666,8 +666,8 @@ class TestFilePathImport:
         # Start with an active questionnaire (intake phase)
         qs = QuestionnaireState(current_question=1)
         mock_graph = _mock_graph_with_questionnaire("What is the project?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", str(qfile), "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", str(qfile), "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -683,8 +683,8 @@ class TestFilePathImport:
         # Completed questionnaire — not in intake phase
         qs = QuestionnaireState(current_question=27, completed=True, answers={i: "a" for i in range(1, 27)})
         mock_graph = _mock_graph_with_questionnaire("Got it.", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory([str(qfile), "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory([str(qfile), "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         # The input should be passed to the graph, not intercepted
@@ -694,9 +694,9 @@ class TestFilePathImport:
         """A .md file that doesn't exist should be passed to the graph normally."""
         qs = QuestionnaireState(current_question=1)
         mock_graph = _mock_graph_with_questionnaire("What is the project?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         fake_path = str(tmp_path / "nonexistent.md")
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", fake_path, "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", fake_path, "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         # Should be called twice: once for "hello", once for the nonexistent path
@@ -745,7 +745,7 @@ class TestPreloadedQuestionnaire:
             answers={i: f"Answer {i}" for i in range(1, TOTAL_QUESTIONS + 1)},
             awaiting_confirmation=True,
         )
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["exit"]))
         console, buf = _make_console()
         run_repl(console=console, questionnaire=qs)
         output = _strip_ansi(buf.getvalue())
@@ -762,8 +762,8 @@ class TestPreloadedQuestionnaire:
             awaiting_confirmation=True,
         )
         mock_graph = _mock_graph_factory("Confirmed! Generating plan...")
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["confirm", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["confirm", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, questionnaire=qs)
         # The confirm input should go to graph.invoke
@@ -869,9 +869,9 @@ class TestReviewAcceptFlow:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["start", "accept", "exit"]))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["start", "accept", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -891,10 +891,10 @@ class TestReviewAcceptFlow:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # First input triggers graph, "accept" triggers review, third triggers graph again
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["start", "accept", "exit"]))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["start", "accept", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -917,9 +917,9 @@ class TestReviewAcceptFlow:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["start", "1", "exit"]))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["start", "1", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -946,8 +946,8 @@ class TestReviewAcceptFlow:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["start", "accept", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["start", "accept", "exit"]))
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -981,13 +981,13 @@ class TestReviewRejectFlow:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # "reject: more detail" → goes through EDIT path (Reject removed from menu)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["start", "reject: more detail", "exit"]),
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -1010,12 +1010,12 @@ class TestReviewRejectFlow:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["start", "reject: add security", "exit"]),
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -1041,13 +1041,13 @@ class TestReviewRejectFlow:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # "2" → edit (no feedback), then "more detail" as feedback prompt
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["start", "2", "more detail", "exit"]),
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -1148,7 +1148,7 @@ class TestDefaultsInHelp:
 
     def test_defaults_in_help_text(self, monkeypatch):
         """The help output should mention 'defaults' as an available command."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["help", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["help", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -1334,8 +1334,8 @@ class TestChatAttribution:
 
     def test_user_label_shown(self, monkeypatch):
         """'You:' should appear in output when the user sends a normal message."""
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory("response"))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello world", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory("response"))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello world", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -1344,8 +1344,8 @@ class TestChatAttribution:
 
     def test_ai_label_shown(self, monkeypatch):
         """'Scrum AI:' should appear before the AI response."""
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory("Here are your features."))
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["plan my project", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory("Here are your features."))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["plan my project", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -1353,7 +1353,7 @@ class TestChatAttribution:
 
     def test_no_user_label_for_help(self, monkeypatch):
         """Commands like 'help' should NOT get a 'You:' label — they short-circuit."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["help", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["help", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -1364,8 +1364,8 @@ class TestChatAttribution:
         """'(question)' should appear in the AI label during active intake."""
         qs = QuestionnaireState(current_question=2)
         mock_graph = _mock_graph_with_questionnaire("What is your project type?", qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["describe project", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["describe project", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -1380,10 +1380,10 @@ class TestIntakeSummaryFormatter:
 
     def test_preloaded_questionnaire_uses_formatter(self, monkeypatch):
         """Pre-loaded questionnaire should render phase labels as table titles, not markdown."""
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: _mock_graph_factory())
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: _mock_graph_factory())
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["exit"]))
         # Suppress filesystem writes for history
-        monkeypatch.setattr("scrum_agent.repl.HISTORY_DIR", Path("/tmp/scrum-test-hist"))
+        monkeypatch.setattr("yeaboi.repl.HISTORY_DIR", Path("/tmp/scrum-test-hist"))
 
         qs = QuestionnaireState(
             current_question=26,
@@ -1444,7 +1444,7 @@ class TestIntakeModeMenu:
 
     def test_mode_menu_shown_when_no_flag(self, monkeypatch):
         """Menu text appears when intake_mode=None."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["1", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["1", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
@@ -1454,8 +1454,8 @@ class TestIntakeModeMenu:
     def test_mode_1_selects_smart(self, monkeypatch):
         """Typing '1' at the menu sets smart mode and proceeds to opener."""
         mock_graph = _mock_graph_factory()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["1", "my project", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["1", "my project", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
@@ -1472,8 +1472,8 @@ class TestIntakeModeMenu:
 
         (Option 2 was the retired "standard" mode; offline moved up from 3 to 2.)
         """
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["2", "1", "exit"]))
-        monkeypatch.setattr("scrum_agent.repl.export_questionnaire_md", lambda qs, path: path)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["2", "1", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.export_questionnaire_md", lambda qs, path: path)
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
@@ -1481,7 +1481,7 @@ class TestIntakeModeMenu:
 
     def test_menu_skipped_with_cli_flag(self, monkeypatch):
         """When intake_mode='smart', no menu is shown — straight to opener."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -1490,7 +1490,7 @@ class TestIntakeModeMenu:
 
     def test_invalid_input_reprompts(self, monkeypatch):
         """Invalid input shows 'pick 1 or 2' then accepts a valid choice."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["foo", "7", "1", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["foo", "7", "1", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
@@ -1515,7 +1515,7 @@ class TestIntakeModeMenu:
                 return "exit"
 
         FakeSession._call_count = 0
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", FakeSession)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", FakeSession)
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
@@ -1526,14 +1526,14 @@ class TestIntakeModeMenu:
     def test_mode_3_export_writes_file_and_exits(self, monkeypatch, tmp_path):
         """Picking [2] then [1] exports the questionnaire and exits."""
         export_path = tmp_path / "scrum-questionnaire.md"
-        monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(export_path))
+        monkeypatch.setattr("yeaboi.repl.DEFAULT_EXPORT_FILENAME", str(export_path))
         # "2" selects offline, "1" selects export — should return immediately
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["2", "1"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["2", "1"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
         assert "Questionnaire exported to" in output
-        assert "scrum-agent --questionnaire" in output
+        assert "yeaboi --questionnaire" in output
         # Should NOT show the conversational opener
         assert "Tell me about your project" not in output
 
@@ -1543,7 +1543,7 @@ class TestIntakeModeMenu:
         md_file = tmp_path / "filled.md"
         md_file.write_text("## Q1\nMy project\n\n## Q2\nGreenfield\n")
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "2", str(md_file), "exit"]),
         )
         # Mock _import_questionnaire_file to avoid needing real parse logic
@@ -1557,7 +1557,7 @@ class TestIntakeModeMenu:
             qs.awaiting_confirmation = True
             return {**state, "questionnaire": qs}
 
-        monkeypatch.setattr("scrum_agent.repl._import_questionnaire_file", fake_import)
+        monkeypatch.setattr("yeaboi.repl._import_questionnaire_file", fake_import)
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         assert imported
@@ -1569,10 +1569,10 @@ class TestIntakeModeMenu:
         """Pressing Enter at the import prompt uses DEFAULT_EXPORT_FILENAME."""
         md_file = tmp_path / "scrum-questionnaire.md"
         md_file.write_text("## Q1\nMy project\n")
-        monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(md_file))
+        monkeypatch.setattr("yeaboi.repl.DEFAULT_EXPORT_FILENAME", str(md_file))
         # "2" → offline, "2" → import, "" → press Enter (default path), "exit" → quit
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "2", "", "exit"]),
         )
         imported_path = None
@@ -1584,7 +1584,7 @@ class TestIntakeModeMenu:
             qs.awaiting_confirmation = True
             return {**state, "questionnaire": qs}
 
-        monkeypatch.setattr("scrum_agent.repl._import_questionnaire_file", fake_import)
+        monkeypatch.setattr("yeaboi.repl._import_questionnaire_file", fake_import)
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         assert imported_path == md_file
@@ -1594,7 +1594,7 @@ class TestIntakeModeMenu:
         md_file = tmp_path / "filled.md"
         md_file.write_text("## Q1\nMy project\n")
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "2", "/no/such/file.md", str(md_file), "exit"]),
         )
 
@@ -1603,7 +1603,7 @@ class TestIntakeModeMenu:
             qs.awaiting_confirmation = True
             return {**state, "questionnaire": qs}
 
-        monkeypatch.setattr("scrum_agent.repl._import_questionnaire_file", fake_import)
+        monkeypatch.setattr("yeaboi.repl._import_questionnaire_file", fake_import)
         console, buf = _make_console()
         run_repl(console=console, intake_mode=None)
         output = _strip_ansi(buf.getvalue())
@@ -1612,9 +1612,9 @@ class TestIntakeModeMenu:
     def test_offline_submenu_invalid_input_reprompts(self, monkeypatch, tmp_path):
         """Non-1/2 input at the sub-menu shows 'pick 1 or 2' and re-prompts."""
         export_path = tmp_path / "scrum-questionnaire.md"
-        monkeypatch.setattr("scrum_agent.repl.DEFAULT_EXPORT_FILENAME", str(export_path))
+        monkeypatch.setattr("yeaboi.repl.DEFAULT_EXPORT_FILENAME", str(export_path))
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "foo", "5", "1"]),
         )
         console, buf = _make_console()
@@ -1740,10 +1740,10 @@ class TestSpinnerProgress:
 
         mock_graph.invoke.side_effect = _invoke
 
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # First prompt: "confirm" triggers the confirmation path → graph.invoke
         # Second prompt: EOFError exits the REPL
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["confirm", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["confirm", "exit"]))
 
         # Pre-loaded completed questionnaire → skips mode menu, shows summary
         run_repl(console=console, questionnaire=qs)
@@ -1767,8 +1767,8 @@ class TestSpinnerProgress:
 
         mock_graph.invoke.side_effect = _invoke
 
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["hello", "exit"]))
 
         run_repl(console=console, intake_mode="smart")
 
@@ -1880,13 +1880,13 @@ class TestReviewUnrecognizedInput:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # "accpet" is a typo → reprompt, then "1" → accept, then exit
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["start", "accpet", "1", "exit"]),
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -1914,12 +1914,12 @@ class TestActionableErrors:
         mock_graph.invoke.side_effect = anthropic.AuthenticationError(
             message="Invalid API key", response=resp, body=None
         )
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["hello", "exit"]),
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -1936,12 +1936,12 @@ class TestActionableErrors:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = anthropic.APIConnectionError(request=req)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["hello", "exit"]),
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -1961,12 +1961,12 @@ class TestActionableErrors:
         mock_graph.invoke.side_effect = anthropic.APIStatusError(
             message="Internal server error", response=resp, body=None
         )
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["hello", "exit"]),
         )
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
@@ -1988,7 +1988,7 @@ class TestActionableErrors:
         # First call raises, second succeeds
         success_result = {"messages": [AIMessage(content="ok")]}
         mock_graph.invoke.side_effect = [rate_err, success_result]
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         result = _handle_rate_limit(console, mock_graph, {"messages": []})
         output = _strip_ansi(buf.getvalue())
@@ -2008,7 +2008,7 @@ class TestActionableErrors:
         console, buf = _make_console()
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = rate_err
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         result = _handle_rate_limit(console, mock_graph, {"messages": []})
         output = _strip_ansi(buf.getvalue())
@@ -2106,9 +2106,9 @@ class TestExportOnly:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory([]))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory([]))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, questionnaire=full_state["questionnaire"], intake_mode="quick", export_only=True)
@@ -2128,9 +2128,9 @@ class TestExportOnly:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory([]))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory([]))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, questionnaire=full_state["questionnaire"], intake_mode="quick", export_only=True)
@@ -2205,9 +2205,9 @@ class TestIntakeMessageStyling:
         qs.current_question = 4
         qs.intake_mode = "quick"
         mock_graph = _mock_graph_with_questionnaire(ai_content, qs)
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["cloud", "exit"]))
-        monkeypatch.setattr("scrum_agent.repl.time", MagicMock())
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["cloud", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.time", MagicMock())
 
         console, buf = _make_console()
         run_repl(console=console, intake_mode="quick")
@@ -2267,10 +2267,10 @@ class TestTerminalBell:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl._build_intake_summary", lambda qs: "Summary")
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl._build_intake_summary", lambda qs: "Summary")
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["go", "exit"]),
         )
 
@@ -2318,10 +2318,10 @@ class TestTerminalBell:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl._build_intake_summary", lambda qs: "Summary")
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl._build_intake_summary", lambda qs: "Summary")
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["go", "exit"]),
         )
 
@@ -2335,8 +2335,8 @@ class TestTerminalBell:
     def test_bell_not_called_during_intake(self, monkeypatch):
         """Bell should NOT ring for intake questions (only pipeline steps)."""
         mock_graph = _mock_graph_factory("What is your project?")
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["my project", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["my project", "exit"]))
 
         console, buf = _make_console()
         bell_calls = []
@@ -2355,8 +2355,8 @@ class TestCompactVerboseToggle:
     def test_compact_acknowledged(self, monkeypatch):
         """Typing /compact should print a confirmation and not invoke the graph."""
         mock_graph = _mock_graph_factory()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["/compact", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["/compact", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -2366,8 +2366,8 @@ class TestCompactVerboseToggle:
     def test_verbose_acknowledged(self, monkeypatch):
         """Typing /verbose should print a confirmation and not invoke the graph."""
         mock_graph = _mock_graph_factory()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["/verbose", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["/verbose", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = buf.getvalue()
@@ -2377,8 +2377,8 @@ class TestCompactVerboseToggle:
     def test_compact_case_insensitive(self, monkeypatch):
         """Commands should be case-insensitive."""
         mock_graph = _mock_graph_factory()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["/COMPACT", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["/COMPACT", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         assert "compact" in buf.getvalue().lower()
@@ -2386,7 +2386,7 @@ class TestCompactVerboseToggle:
 
     def test_help_shows_compact_verbose(self, monkeypatch):
         """Help text should document /compact and /verbose."""
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["help", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["help", "exit"]))
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart")
         output = _strip_ansi(buf.getvalue())
@@ -2509,12 +2509,12 @@ class TestEditFlowRepl:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # "2" picks Edit → REPL shows "Which question?" without invoking graph
         # "25" is the question number → should be normalised to "Q25"
         # "exit" cleanly exits
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "25", "exit"]),
         )
         console, _ = _make_console()
@@ -2559,10 +2559,10 @@ class TestEditFlowRepl:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # "2" selects Edit; "6" is question number; "2" is the new answer; "exit" quits
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "6", "2", "exit"]),
         )
         console, buf = _make_console()
@@ -2621,9 +2621,9 @@ class TestExportCheckpoint:
         """Typing '3' (Export) at the confirm gate writes files but stays on the gate."""
         qs = self._make_confirming_questionnaire()
         mock_graph = MagicMock()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # "3" → Export; "exit" to quit
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["3", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["3", "exit"]))
         monkeypatch.chdir(tmp_path)
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart", questionnaire=qs)
@@ -2639,8 +2639,8 @@ class TestExportCheckpoint:
         """Export at the confirm gate creates scrum-plan.html and scrum-plan.md."""
         qs = self._make_confirming_questionnaire()
         mock_graph = MagicMock()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["3", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["3", "exit"]))
         monkeypatch.chdir(tmp_path)
         run_repl(console=_make_console()[0], intake_mode="smart", questionnaire=qs)
 
@@ -2651,8 +2651,8 @@ class TestExportCheckpoint:
         """After export, the confirm hint is re-shown so user can still accept/edit."""
         qs = self._make_confirming_questionnaire()
         mock_graph = MagicMock()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["3", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["3", "exit"]))
         monkeypatch.chdir(tmp_path)
         console, buf = _make_console()
         run_repl(console=console, intake_mode="smart", questionnaire=qs)
@@ -2666,13 +2666,13 @@ class TestExportCheckpoint:
     def test_export_at_review_checkpoint_writes_files(self, monkeypatch, tmp_path):
         """Typing '3' at a review checkpoint writes HTML + Markdown files."""
         mock_graph = self._make_review_graph()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         # First input drives intake → graph returns pending_review
         # "3" → Export (intercepted, no graph invoke)
         # "exit" → quit
         qs = QuestionnaireState()
         qs.completed = True
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["start", "3", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["start", "3", "exit"]))
         monkeypatch.chdir(tmp_path)
         run_repl(console=_make_console()[0], intake_mode="smart")
 
@@ -2681,8 +2681,8 @@ class TestExportCheckpoint:
     def test_export_at_review_does_not_advance_pipeline(self, monkeypatch, tmp_path):
         """Export at a review checkpoint does not invoke the graph again."""
         mock_graph = self._make_review_graph()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["start", "3", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["start", "3", "exit"]))
         monkeypatch.chdir(tmp_path)
         run_repl(console=_make_console()[0], intake_mode="smart")
 
@@ -2692,8 +2692,8 @@ class TestExportCheckpoint:
     def test_export_keyword_works_at_review(self, monkeypatch, tmp_path):
         """Typing 'export' (word) at a review checkpoint also triggers export."""
         mock_graph = self._make_review_graph()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
-        monkeypatch.setattr("scrum_agent.repl.PromptSession", _mock_session_factory(["start", "export", "exit"]))
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.PromptSession", _mock_session_factory(["start", "export", "exit"]))
         monkeypatch.chdir(tmp_path)
         run_repl(console=_make_console()[0], intake_mode="smart")
 
@@ -2717,9 +2717,9 @@ class TestExportCheckpoint:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "3", "exit"]),
         )
         console, buf = _make_console()
@@ -2735,9 +2735,9 @@ class TestExportCheckpoint:
         """Typing '99' after '[2] Edit' should print a warning, not invoke graph."""
         qs = self._make_confirming_questionnaire()
         mock_graph = MagicMock()
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["2", "99", "exit"]),
         )
         console, buf = _make_console()
@@ -2764,9 +2764,9 @@ class TestExportCheckpoint:
 
         mock_graph = MagicMock()
         mock_graph.invoke.side_effect = _invoke
-        monkeypatch.setattr("scrum_agent.repl.create_graph", lambda: mock_graph)
+        monkeypatch.setattr("yeaboi.repl.create_graph", lambda: mock_graph)
         monkeypatch.setattr(
-            "scrum_agent.repl.PromptSession",
+            "yeaboi.repl.PromptSession",
             _mock_session_factory(["Q25", "exit"]),
         )
         console, _ = _make_console()

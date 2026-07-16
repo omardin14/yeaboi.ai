@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from scrum_agent.team_profile import (
+from yeaboi.team_profile import (
     DailyScopeSnapshot,
     DoDSignal,
     EpicPattern,
@@ -294,7 +294,7 @@ class TestTeamProfileStore:
 class TestSessionsMigration:
     def test_v3_migration_creates_team_profiles_table(self, tmp_path):
         db_path = tmp_path / "sessions.db"
-        from scrum_agent.sessions import SessionStore
+        from yeaboi.sessions import SessionStore
 
         with SessionStore(db_path) as store:
             assert store.schema_mismatch is False
@@ -307,7 +307,7 @@ class TestSessionsMigration:
 
     def test_schema_version_is_current(self, tmp_path):
         db_path = tmp_path / "sessions.db"
-        from scrum_agent.sessions import CURRENT_SCHEMA_VERSION, SessionStore
+        from yeaboi.sessions import CURRENT_SCHEMA_VERSION, SessionStore
 
         with SessionStore(db_path):
             pass
@@ -457,7 +457,7 @@ class TestExtendedProfileSerialisation:
 
 class TestParallelAnalysis:
     def test_run_parallel_analysis_basic(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         sprint_data = [
             {
@@ -526,7 +526,7 @@ class TestParallelAnalysis:
         assert isinstance(examples, dict)
 
     def test_run_parallel_analysis_empty(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         profile, examples = _run_parallel_analysis("jira", "EMPTY", [])
         assert profile.sample_sprints == 0
@@ -535,7 +535,7 @@ class TestParallelAnalysis:
         assert isinstance(examples, dict)
 
     def test_sprint_completion_counts(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         def _story(pts=3, carried=False, recurring=False):
             return {
@@ -578,7 +578,7 @@ class TestParallelAnalysis:
         assert profile.sprints_partially_completed == 1
 
     def test_examples_include_calibration_stories(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         sprint_data = [
             {
@@ -726,7 +726,7 @@ class TestNewAnalysisMetrics:
         ]
 
     def test_discipline_calibration(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         _, examples = _run_parallel_analysis("jira", "T", self._make_sprint_data())
         disc_cal = examples.get("discipline_calibration", {})
@@ -734,7 +734,7 @@ class TestNewAnalysisMetrics:
         assert "backend" in disc_cal or "frontend" in disc_cal
 
     def test_spillover_correlation(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         _, examples = _run_parallel_analysis("jira", "T", self._make_sprint_data())
         corr = examples.get("spillover_correlation", {})
@@ -750,7 +750,7 @@ class TestNewAnalysisMetrics:
         assert any(p > 0 for p in all_pcts), "should detect some spillover"
 
     def test_velocity_trend(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         _, examples = _run_parallel_analysis("jira", "T", self._make_sprint_data())
         vt = examples.get("velocity_trend", {})
@@ -760,7 +760,7 @@ class TestNewAnalysisMetrics:
         assert "first_velocity" in vt
 
     def test_confidence_levels(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         _, examples = _run_parallel_analysis("jira", "T", self._make_sprint_data())
         conf = examples.get("confidence_levels", {})
@@ -774,7 +774,7 @@ class TestScopeChangeAnalysis:
     """Tests for mid-sprint scope change detection and metrics."""
 
     def test_analyse_scope_changes_basic(self):
-        from scrum_agent.tools.team_learning import _analyse_scope_changes
+        from yeaboi.tools.team_learning import _analyse_scope_changes
 
         sprint_data = [
             {
@@ -822,7 +822,7 @@ class TestScopeChangeAnalysis:
         assert 2 in result["re_estimation_by_size"] or 3 in result["re_estimation_by_size"]
 
     def test_carry_over_chains(self):
-        from scrum_agent.tools.team_learning import _analyse_scope_changes
+        from yeaboi.tools.team_learning import _analyse_scope_changes
 
         # Story X-1 appears in all 3 sprints → should be a carry-over chain
         sprint_data = [
@@ -845,7 +845,7 @@ class TestScopeChangeAnalysis:
         assert chains[0]["sprint_count"] == 4
 
     def test_scope_changes_in_parallel_analysis(self):
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         sprint_data = [
             {
@@ -936,7 +936,7 @@ class TestDailyScopeTimeline:
 
     def test_analyse_scope_changes_with_timelines(self):
         """_analyse_scope_changes includes timeline data when present."""
-        from scrum_agent.tools.team_learning import _analyse_scope_changes
+        from yeaboi.tools.team_learning import _analyse_scope_changes
 
         timeline = SprintScopeTimeline(
             sprint_name="S1",
@@ -988,7 +988,7 @@ class TestDailyScopeTimeline:
 
     def test_analyse_scope_changes_without_timelines(self):
         """_analyse_scope_changes still works when no timelines are present."""
-        from scrum_agent.tools.team_learning import _analyse_scope_changes
+        from yeaboi.tools.team_learning import _analyse_scope_changes
 
         sprint_data = [
             {
@@ -1008,7 +1008,7 @@ class TestDailyScopeTimeline:
         assert "committed_pts" not in result["per_sprint"][0]
 
     def test_date_range_helper(self):
-        from scrum_agent.tools.team_learning import _date_range, _parse_date
+        from yeaboi.tools.team_learning import _date_range, _parse_date
 
         s = _parse_date("2026-03-01")
         e = _parse_date("2026-03-05")
@@ -1019,7 +1019,7 @@ class TestDailyScopeTimeline:
 
     def test_scope_timeline_in_parallel_analysis(self):
         """Timelines flow through _run_parallel_analysis."""
-        from scrum_agent.tools.team_learning import _run_parallel_analysis
+        from yeaboi.tools.team_learning import _run_parallel_analysis
 
         timeline = SprintScopeTimeline(
             sprint_name="S1",
@@ -1080,7 +1080,7 @@ class TestDailyScopeTimeline:
 
 class TestTeamProfileExporter:
     def test_export_html(self, tmp_path):
-        from scrum_agent.team_profile_exporter import export_team_profile_html
+        from yeaboi.team_profile_exporter import export_team_profile_html
 
         profile = _make_extended_profile()
         path = export_team_profile_html(profile, output_dir=tmp_path)
@@ -1093,7 +1093,7 @@ class TestTeamProfileExporter:
         assert "site-header" in content  # uses proper html_exporter structure
 
     def test_export_md(self, tmp_path):
-        from scrum_agent.team_profile_exporter import export_team_profile_md
+        from yeaboi.team_profile_exporter import export_team_profile_md
 
         profile = _make_extended_profile()
         path = export_team_profile_md(profile, output_dir=tmp_path)
@@ -1105,14 +1105,14 @@ class TestTeamProfileExporter:
         assert "23.5 pts/sprint" in content
 
     def test_export_html_minimal_profile(self, tmp_path):
-        from scrum_agent.team_profile_exporter import export_team_profile_html
+        from yeaboi.team_profile_exporter import export_team_profile_html
 
         profile = TeamProfile(team_id="x", source="jira", project_key="X")
         path = export_team_profile_html(profile, output_dir=tmp_path)
         assert path.exists()
 
     def test_export_md_minimal_profile(self, tmp_path):
-        from scrum_agent.team_profile_exporter import export_team_profile_md
+        from yeaboi.team_profile_exporter import export_team_profile_md
 
         profile = TeamProfile(team_id="x", source="jira", project_key="X")
         path = export_team_profile_md(profile, output_dir=tmp_path)
@@ -1120,7 +1120,7 @@ class TestTeamProfileExporter:
 
     def test_exports_sorted_into_project_subdirectory(self, tmp_path):
         """Exports land in a per-project subdirectory: {base}/{project_key}/."""
-        from scrum_agent.team_profile_exporter import export_team_profile_html, export_team_profile_md
+        from yeaboi.team_profile_exporter import export_team_profile_html, export_team_profile_md
 
         profile = _make_extended_profile()  # project_key="PROJ"
         html_path = export_team_profile_html(profile, output_dir=tmp_path)
@@ -1132,7 +1132,7 @@ class TestTeamProfileExporter:
 
     def test_write_analysis_log(self, tmp_path, monkeypatch):
         """Analysis log written to ~/.scrum-agent/logs/ with structured content."""
-        from scrum_agent.team_profile_exporter import write_analysis_log
+        from yeaboi.team_profile_exporter import write_analysis_log
 
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         profile = _make_extended_profile()
@@ -1161,14 +1161,14 @@ class TestTeamProfileExporter:
 
 class TestTeamAnalysisScreen:
     def test_build_team_analysis_screen_renders(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_team_analysis_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_team_analysis_screen
 
         profile = _make_extended_profile()
         panel = _build_team_analysis_screen(profile, scroll_offset=0, width=80, height=30)
         assert panel is not None
 
     def test_build_team_analysis_screen_scrollable(self):
-        from scrum_agent.ui.mode_select.screens._screens_secondary import _build_team_analysis_screen
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_team_analysis_screen
 
         profile = _make_extended_profile()
         panel1 = _build_team_analysis_screen(profile, scroll_offset=0, width=80, height=30)
@@ -1184,13 +1184,13 @@ class TestTeamAnalysisScreen:
 
 class TestProfileCards:
     def test_new_project_card_no_staleness(self):
-        from scrum_agent.ui.mode_select.screens._project_cards import _build_new_project_card
+        from yeaboi.ui.mode_select.screens._project_cards import _build_new_project_card
 
         card = _build_new_project_card(selected=True, box_w=64)
         assert card is not None
 
     def test_profile_card_renders(self):
-        from scrum_agent.ui.mode_select.screens._project_cards import ProfileSummary, _build_profile_card
+        from yeaboi.ui.mode_select.screens._project_cards import ProfileSummary, _build_profile_card
 
         ps = ProfileSummary(
             team_id="jira-PROJ",
@@ -1206,7 +1206,7 @@ class TestProfileCards:
         assert card is not None
 
     def test_profile_card_stale_shows_hint(self):
-        from scrum_agent.ui.mode_select.screens._project_cards import ProfileSummary, _build_profile_card
+        from yeaboi.ui.mode_select.screens._project_cards import ProfileSummary, _build_profile_card
 
         ps = ProfileSummary(
             team_id="jira-X",
@@ -1219,13 +1219,13 @@ class TestProfileCards:
         assert card is not None
 
     def test_new_analysis_card_renders(self):
-        from scrum_agent.ui.mode_select.screens._project_cards import _build_new_analysis_card
+        from yeaboi.ui.mode_select.screens._project_cards import _build_new_analysis_card
 
         card = _build_new_analysis_card(selected=True, box_w=64)
         assert card is not None
 
     def test_new_analysis_card_custom_label(self):
-        from scrum_agent.ui.mode_select.screens._project_cards import _build_new_analysis_card
+        from yeaboi.ui.mode_select.screens._project_cards import _build_new_analysis_card
 
         card = _build_new_analysis_card(label="+ Analyse Jira Board", selected=False, box_w=64)
         assert card is not None
@@ -1238,7 +1238,7 @@ class TestProfileCards:
 
 class TestMergeProfiles:
     def test_merge_combines_sample_counts(self):
-        from scrum_agent.team_profile import merge_profiles
+        from yeaboi.team_profile import merge_profiles
 
         old = TeamProfile(
             team_id="jira-X",
@@ -1271,7 +1271,7 @@ class TestMergeProfiles:
         assert merged.story_shapes[0].sample_count == 25
 
     def test_merge_new_discipline_added(self):
-        from scrum_agent.team_profile import merge_profiles
+        from yeaboi.team_profile import merge_profiles
 
         old = TeamProfile(
             team_id="jira-X",
@@ -1293,7 +1293,7 @@ class TestMergeProfiles:
         assert "frontend" in disciplines
 
     def test_merge_qualitative_fields_use_new(self):
-        from scrum_agent.team_profile import merge_profiles
+        from yeaboi.team_profile import merge_profiles
 
         old = TeamProfile(
             team_id="jira-X",
@@ -1318,7 +1318,7 @@ class TestMergeProfiles:
 
 class TestProjectListPopup:
     def test_build_with_team_popup_params(self):
-        from scrum_agent.ui.mode_select.screens._project_list_screen import _build_project_list_screen
+        from yeaboi.ui.mode_select.screens._project_list_screen import _build_project_list_screen
 
         panel = _build_project_list_screen(
             [],
@@ -1332,7 +1332,7 @@ class TestProjectListPopup:
         assert panel is not None
 
     def test_build_with_team_popup_visible(self):
-        from scrum_agent.ui.mode_select.screens._project_list_screen import _build_project_list_screen
+        from yeaboi.ui.mode_select.screens._project_list_screen import _build_project_list_screen
 
         panel = _build_project_list_screen(
             [],
@@ -1346,7 +1346,7 @@ class TestProjectListPopup:
         assert panel is not None
 
     def test_build_with_team_popup_skip_selected(self):
-        from scrum_agent.ui.mode_select.screens._project_list_screen import _build_project_list_screen
+        from yeaboi.ui.mode_select.screens._project_list_screen import _build_project_list_screen
 
         panel = _build_project_list_screen(
             [],
@@ -1361,8 +1361,8 @@ class TestProjectListPopup:
 
     def test_build_with_team_popup_trims_body_when_crowded(self):
         """Popup must render even when project list fills the screen."""
-        from scrum_agent.ui.mode_select.screens._project_cards import ProjectSummary
-        from scrum_agent.ui.mode_select.screens._project_list_screen import _build_project_list_screen
+        from yeaboi.ui.mode_select.screens._project_cards import ProjectSummary
+        from yeaboi.ui.mode_select.screens._project_list_screen import _build_project_list_screen
 
         projects = [ProjectSummary(name=f"Project {i}", id=str(i)) for i in range(6)]
         panel = _build_project_list_screen(

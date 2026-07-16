@@ -12,14 +12,15 @@ Comprehensive task list for building the project. Check items off as they're com
 - [x] Setup wizard, export footers (HTML/MD/slides), questionnaire header, package docstring → yeaboi.ai
 - [x] Standup scheduler labels/markers/support-dir → `com.yeaboi.*` / `yeaboi`; binary lookup prefers `yeaboi`, falls back to `scrum-agent`
 - [x] Telemetry env vars accept `YEABOI_TELEMETRY(_URL)` (legacy `SCRUM_AGENT_*` still honoured)
-- [x] README title/hero/tagline/install + run-command examples + config-path references rebranded (PyPI package name stays `scrum-agent`)
+- [x] README title/hero/tagline/install + run-command examples + config-path references rebranded (PyPI package renamed `scrum-agent` → `yeaboi`; a thin `scrum-agent` redirect shim remains one release)
 - [x] Tests updated for new strings/paths/labels; `make test` + `make lint` green
 - [x] Splash wordmark upgraded to a 6-row ANSI Shadow "YEABOI" with a diagonal shine sweep (`ui/splash.py`)
 - [x] Cinematic per-mode intros: entering any mode (Planning/Analysis/Standup/Retro/Performance/Reporting/Usage/Settings) plays a fade-in + shine ANSI Shadow wordmark tinted with the mode's accent, reusing the splash engine (`play_wordmark_intro`); baked art in `ui/shared/_wordmarks.py`, compact-font fallback on narrow terminals (e.g. Performance)
 - [x] Setup-wizard intro: `select_provider` plays a "SETUP" ANSI Shadow + shine on entry (first-run / --setup / Settings→Configure)
 - [x] Pinned screen headers converted to 6-row ANSI Shadow with shimmer via the single `build_ascii_title` chokepoint (fixed `TITLE_ROWS`=6 block, width-aware compact fallback); bumped every `header_h` budget (+4) across mode-select/session/editor screens; provider-select cards intentionally stay compact (long, stacked names)
 - [ ] (Deferred) Regenerate `docs/banner.jpg` hero image; rebrand legacy REPL toolbar (`repl/`) — left as `Scrum AI Agent` to avoid touching the protected `test_repl.py`
-- [ ] (Not done — intentional) Deep rename of the `scrum_agent` Python package / PyPI distribution name and the `scrum-planner` skill dir
+- [x] Deep rename of the Python import package `src/scrum_agent/` → `src/yeaboi/` (all imports + tests) and the PyPI distribution `scrum-agent` → `yeaboi` (redirect shim in `packaging/scrum-agent-shim/`). The `scrum-planner` skill *dir* name is intentionally kept (skill id, not brand).
+- [ ] (Deferred, pre-existing) A handful of hardcoded `~/.scrum-agent/...` runtime paths bypass `paths.py` (e.g. `cli.py` OpenClaw `.env` sync, `ui/mode_select`, `ui/session/_dry_run`, `tools/team_learning`); route them through `paths.py` so they resolve to the migrated `~/.yeaboi/` tree. Latent since the config-dir migration landed.
 
 ---
 
@@ -28,7 +29,7 @@ Comprehensive task list for building the project. Check items off as they're com
 - [x] Initialise Python project structure (`src/`, `tests/`, `pyproject.toml`)
 - [x] Set up virtual environment and dependency management (Poetry or pip)
 - [x] Install core dependencies: `langchain`, `langgraph`, `langchain-anthropic`, `rich`, `prompt_toolkit`
-- [x] Create entry point (`src/main.py` or `scrum_agent/cli.py`)
+- [x] Create entry point (`src/main.py` or `yeaboi/cli.py`)
 - [x] Set up environment variable handling (`.env` for API keys)
 - [x] Configure LangSmith tracing (optional, for development)
 - [x] Set up `pytest` and initial test structure
@@ -167,7 +168,7 @@ Comprehensive task list for building the project. Check items off as they're com
 
 **Problem**: Pipeline output (epics, stories, tasks, sprints) is dumped as raw markdown — hard to scan.
 
-- [x] Create `src/scrum_agent/formatters.py` with Rich `Table`/`Panel` rendering for all artifacts
+- [x] Create `src/yeaboi/formatters.py` with Rich `Table`/`Panel` rendering for all artifacts
 - [x] `render_analysis_panel(analysis)` → Panel with sections
 - [x] `render_epics_table(epics)` → Table: ID, Title, Priority (colour-coded), Description
 - [x] `render_stories_table(stories, epics)` → Table grouped by epic: ID, Story, Points, Priority, Discipline
@@ -342,7 +343,7 @@ Independent doc tool with its own integration token (NOTION_TOKEN) — not share
 
 Replacing inline text prompts with full-screen, block-character dashboard screens using Rich Live + raw terminal input. Rounded borders, consistent padding, arrow-key navigation.
 
-- [x] Create `ui/` package (`src/scrum_agent/ui/__init__.py`)
+- [x] Create `ui/` package (`src/yeaboi/ui/__init__.py`)
 - [x] Create `ui/_logos.py` — block-character ASCII art logos (Claude, Gemini, OpenAI)
 - [x] Create `ui/provider_select.py` — full-screen provider selection (Step 1 of setup wizard)
 - [x] Wire `_collect_provider()` in `setup_wizard.py` to use new full-screen selector
@@ -605,7 +606,7 @@ Catches token expiry, API deprecations, and SDK drift.
 
 **Fix test_repl.py flaky isolation (priority: high):**
 18 tests pass in isolation but fail in the full suite — shared mutable state leaking between tests.
-- [x] Identify the leaking module-level state in `scrum_agent.repl` (likely graph instance, session, or questionnaire)
+- [x] Identify the leaking module-level state in `yeaboi.repl` (likely graph instance, session, or questionnaire)
 - [x] Add `tests/integration/conftest.py` with autouse fixture to reset module-level state before each test
 - [x] Verify all 18 flaky tests pass reliably in full suite after fix
 - [x] Add CI check: `make test` must have zero failures (not just "known flaky" exceptions)
@@ -625,7 +626,7 @@ Catch wiring mistakes when nodes or edges are added/removed.
 - [x] Test: adding a new node without an edge fails at compile time (verify LangGraph enforces this)
 
 **Tool registration sync check (priority: medium):**
-Ensure every `@tool`-decorated function in `src/scrum_agent/tools/` is registered in `get_tools()`.
+Ensure every `@tool`-decorated function in `src/yeaboi/tools/` is registered in `get_tools()`.
 - [x] Scan all modules in the tools package for `@tool`-decorated functions
 - [x] Assert every discovered tool name appears in `get_tools()` result
 - [x] Assert no tool is registered twice (duplicate detection)
@@ -870,7 +871,7 @@ _Ship the CLI as a Homebrew-installable app so anyone can `brew install scrum-ag
 
 #### PyPI release (prerequisite for Homebrew)
 - [x] Finalise `pyproject.toml` metadata (name, version, description, author, license, classifiers, URLs)
-- [x] Add `[project.scripts]` entry point: `scrum-agent = "scrum_agent.cli:main"`
+- [x] Add `[project.scripts]` entry point: `scrum-agent = "yeaboi.cli:main"`
 - [x] Build sdist + wheel with `uv build` / `python -m build`
 - [x] Add MIT LICENSE file
 - [x] Add `make build` and `make publish` targets

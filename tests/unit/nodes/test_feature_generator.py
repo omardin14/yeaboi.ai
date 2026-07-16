@@ -4,19 +4,19 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from scrum_agent.agent.nodes import (
+from tests._node_helpers import VALID_FEATURES_JSON, make_dummy_analysis
+from yeaboi.agent.nodes import (
     _build_fallback_features,
     _format_features,
     _parse_features_response,
     feature_generator,
     feature_skip,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     Feature,
     Priority,
     QuestionnaireState,
 )
-from tests._node_helpers import VALID_FEATURES_JSON, make_dummy_analysis
 
 
 class TestParseFeaturesResponse:
@@ -211,7 +211,7 @@ class TestFeatureGenerator:
         fake_response.content = VALID_FEATURES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = feature_generator(self._make_state())
         assert "features" in result
@@ -224,7 +224,7 @@ class TestFeatureGenerator:
         fake_response.content = VALID_FEATURES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = feature_generator(self._make_state())
         assert "messages" in result
@@ -237,7 +237,7 @@ class TestFeatureGenerator:
         fake_response.content = VALID_FEATURES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = feature_generator(self._make_state())
         content = result["messages"][0].content
@@ -250,7 +250,7 @@ class TestFeatureGenerator:
         fake_response.content = "not valid json at all"
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = feature_generator(self._make_state())
         assert isinstance(result["features"], list)
@@ -260,7 +260,7 @@ class TestFeatureGenerator:
         """When the LLM call raises an exception, the fallback should be used."""
         mock_llm = MagicMock()
         mock_llm.invoke.side_effect = RuntimeError("API down")
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         result = feature_generator(self._make_state())
         assert isinstance(result["features"], list)
@@ -280,7 +280,7 @@ class TestFeatureGenerator:
             captured_kwargs.update(kwargs)
             return mock_llm
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", capture_get_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", capture_get_llm)
 
         feature_generator(self._make_state())
         assert captured_kwargs.get("temperature") == 0.0
@@ -305,7 +305,7 @@ class TestFeatureGeneratorRepoContextIntegration:
         fake_response.content = VALID_FEATURES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         captured: dict = {}
 
@@ -313,7 +313,7 @@ class TestFeatureGeneratorRepoContextIntegration:
             captured.update(kwargs)
             return "mock prompt"
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_feature_generator_prompt", mock_prompt)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_feature_generator_prompt", mock_prompt)
 
         state = self._make_state(repo_context="## File Tree\n- src/")
         feature_generator(state)
@@ -326,7 +326,7 @@ class TestFeatureGeneratorRepoContextIntegration:
         fake_response.content = VALID_FEATURES_JSON
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = fake_response
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
 
         captured: dict = {}
 
@@ -334,7 +334,7 @@ class TestFeatureGeneratorRepoContextIntegration:
             captured.update(kwargs)
             return "mock prompt"
 
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_feature_generator_prompt", mock_prompt)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_feature_generator_prompt", mock_prompt)
 
         state = self._make_state()  # no repo_context key
         feature_generator(state)

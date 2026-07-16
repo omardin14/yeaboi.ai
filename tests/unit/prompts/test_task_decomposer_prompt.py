@@ -1,6 +1,6 @@
 """Tests for the task decomposer prompt template."""
 
-from scrum_agent.prompts.task_decomposer import (
+from yeaboi.prompts.task_decomposer import (
     MAX_TASKS_PER_STORY,
     MIN_TASKS_PER_STORY,
     get_task_decomposer_prompt,
@@ -110,6 +110,6 @@ class TestTaskDecomposerPromptImports:
     """Verify imports from the expected locations."""
 
     def test_importable_from_task_decomposer_module(self):
-        from scrum_agent.prompts.task_decomposer import get_task_decomposer_prompt as imported_fn
+        from yeaboi.prompts.task_decomposer import get_task_decomposer_prompt as imported_fn
 
         assert imported_fn is get_task_decomposer_prompt

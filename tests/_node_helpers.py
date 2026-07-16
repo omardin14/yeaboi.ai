@@ -4,7 +4,7 @@ Extracted from test_nodes.py during the test reorganisation (Phase 12).
 These are plain functions and constants, not pytest fixtures.
 """
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     TOTAL_QUESTIONS,
     AcceptanceCriterion,
     Discipline,

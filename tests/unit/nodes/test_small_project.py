@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from scrum_agent.agent.nodes import (
+from tests._node_helpers import VALID_ANALYSIS_JSON, make_completed_questionnaire
+from yeaboi.agent.nodes import (
     _essentials_for_mode,
     _extract_capacity_deductions,
     _is_small_project_mode,
@@ -18,13 +19,12 @@ from scrum_agent.agent.nodes import (
     apply_epic_switch,
     project_analyzer,
 )
-from scrum_agent.agent.state import ProjectAnalysis, QuestionnaireState
-from scrum_agent.prompts.intake import (
+from yeaboi.agent.state import ProjectAnalysis, QuestionnaireState
+from yeaboi.prompts.intake import (
     QUICK_ESSENTIALS,
     SMALL_PROJECT_ESSENTIALS,
     SMART_ESSENTIALS,
 )
-from tests._node_helpers import VALID_ANALYSIS_JSON, make_completed_questionnaire
 
 
 class TestModeConstants:
@@ -33,7 +33,7 @@ class TestModeConstants:
     def test_tui_cards_are_small_epic_offline(self):
         # The full-screen TUI offers three intake modes; the middle one ("smart"
         # engine, relabelled "Large") reuses the existing smart pipeline.
-        from scrum_agent.ui.mode_select.screens._screens import _INTAKE_CARDS
+        from yeaboi.ui.mode_select.screens._screens import _INTAKE_CARDS
 
         keys = [c["key"] for c in _INTAKE_CARDS]
         assert keys == ["small_project", "smart", "offline"]
@@ -122,7 +122,7 @@ class TestSmallProjectAdvisory:
         fake.content = VALID_ANALYSIS_JSON  # target_sprints=4, skip_features absent
         llm = MagicMock()
         llm.invoke.return_value = fake
-        monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: llm)
 
     def test_oversized_flag_set_when_analyzer_says_bigger(self, monkeypatch):
         self._mock_llm(monkeypatch)

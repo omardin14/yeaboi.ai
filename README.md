@@ -7,14 +7,14 @@
 
 **A team lead's best friend — plans, standups, retros, performance & reporting, right from your terminal. It decomposes projects into epics, stories, tasks, and sprint plans, then helps you run the team around them.**
 
-[![PyPI](https://img.shields.io/pypi/v/scrum-agent?style=for-the-badge&logo=pypi&logoColor=white&color=blue)](https://pypi.org/project/scrum-agent/)
+[![PyPI](https://img.shields.io/pypi/v/yeaboi?style=for-the-badge&logo=pypi&logoColor=white&color=blue)](https://pypi.org/project/yeaboi/)
 [![Python](https://img.shields.io/badge/Python-3.11+-green?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![Powered by Claude](https://img.shields.io/badge/Powered%20by-Claude-ff6600?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com)
 [![Built with LangGraph](https://img.shields.io/badge/Built%20with-LangGraph-00CED1?style=for-the-badge)](https://langchain-ai.github.io/langgraph/)
 
-[![Tests](https://img.shields.io/github/actions/workflow/status/omardin14/scrum-planning-ai-agent/ci.yml?style=for-the-badge&label=Tests&logo=github)](https://github.com/omardin14/scrum-planning-ai-agent/actions)
-[![PyPI](https://img.shields.io/pypi/v/scrum-agent?style=for-the-badge&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/scrum-agent/)
+[![Tests](https://img.shields.io/github/actions/workflow/status/omardin14/yeaboi/ci.yml?style=for-the-badge&label=Tests&logo=github)](https://github.com/omardin14/yeaboi/actions)
+[![PyPI](https://img.shields.io/pypi/v/yeaboi?style=for-the-badge&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/yeaboi/)
 
 </div>
 
@@ -35,19 +35,19 @@
 The most reliable way to install — pulls the full dependency tree from PyPI and isolates it in its own environment:
 
 ```bash
-uv tool install scrum-agent     # or: pipx install scrum-agent  (PyPI package name)
+uv tool install yeaboi          # or: pipx install yeaboi
 yeaboi --setup                  # configure your API key
 yeaboi                          # launch the interactive TUI
 ```
 
-> **Note on names:** the PyPI package is still published as **`scrum-agent`**, but the command it installs is now **`yeaboi`**. The legacy `scrum-agent` command still works as an alias for this release.
+> **Note on names:** the package was previously published as **`yeaboi`**. It is now **`yeaboi`** on PyPI (matching the command). A final `yeaboi` release remains as a thin redirect that installs `yeaboi`, and the legacy `yeaboi` command still works as an alias for this release — but new installs should use `yeaboi`.
 
 Optional extras (voice input, extra LLM providers) can be requested at install time:
 
 ```bash
-uv tool install "scrum-agent[voice]"           # 🎤 dictate answers (double-tap Space) — offline, works with any LLM
-uv tool install "scrum-agent[all-providers]"   # OpenAI, Google, and Bedrock providers
-pipx install "scrum-agent[voice]"              # equivalent with pipx
+uv tool install "yeaboi[voice]"                # 🎤 dictate answers (double-tap Space) — offline, works with any LLM
+uv tool install "yeaboi[all-providers]"        # OpenAI, Google, and Bedrock providers
+pipx install "yeaboi[voice]"                   # equivalent with pipx
 ```
 
 > **Voice input** transcribes on-device with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
@@ -59,14 +59,14 @@ pipx install "scrum-agent[voice]"              # equivalent with pipx
 
 > **Homebrew is not supported.** A required dependency (`sqlite-vec`) ships no
 > source distribution, which Homebrew's source-build model can't handle, so
-> `brew install scrum-agent` is intentionally disabled. Use `uv tool install`
+> `brew install yeaboi` is intentionally disabled. Use `uv tool install`
 > or `pipx install` above instead.
 
 ### From source
 
 ```bash
-git clone https://github.com/omardin14/scrum-planning-ai-agent.git
-cd scrum-planning-ai-agent
+git clone https://github.com/omardin14/yeaboi.git
+cd yeaboi
 make install        # installs uv, creates venv, installs dependencies
 make env            # creates .env from .env.example — add your API key
 make run            # launch the CLI
@@ -214,7 +214,7 @@ GOOGLE_API_KEY=AIza...
 ```
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=lsv2_pt_...
-LANGSMITH_PROJECT=scrum-agent
+LANGSMITH_PROJECT=yeaboi
 ```
 
 </details>
@@ -226,7 +226,7 @@ LANGSMITH_PROJECT=scrum-agent
 
 ## ☁️ Deploy on AWS Lightsail (OpenClaw)
 
-Run scrum-agent as a cloud service via [OpenClaw](https://aws.amazon.com/lightsail/openclaw/) on AWS Lightsail. OpenClaw comes pre-installed on the Lightsail blueprint and uses Amazon Bedrock (Claude Sonnet 4.6) as its model provider.
+Run yeaboi as a cloud service via [OpenClaw](https://aws.amazon.com/lightsail/openclaw/) on AWS Lightsail. OpenClaw comes pre-installed on the Lightsail blueprint and uses Amazon Bedrock (Claude Sonnet 4.6) as its model provider.
 
 ### 1. Create the instance
 
@@ -268,9 +268,9 @@ Replace `OpenClaw-1` with your instance name and `eu-west-2` with your region.
 
 ![OpenClaw dashboard](docs/lightsail-setup/05-dashboard.png)
 
-### 5. Install scrum-agent on the instance
+### 5. Install yeaboi on the instance
 
-SSH into the instance and install scrum-agent with Bedrock support:
+SSH into the instance and install yeaboi with Bedrock support:
 
 ```bash
 # Install pipx if not present
@@ -278,13 +278,13 @@ sudo apt update && sudo apt install -y pipx
 pipx ensurepath
 source ~/.bashrc   # reload PATH so pipx-installed binaries are found
 
-# Install scrum-agent with Bedrock provider
-pipx install "scrum-agent[bedrock]"
+# Install yeaboi with Bedrock provider
+pipx install "yeaboi[bedrock]"
 ```
 
-> **Tip:** If `scrum-agent: command not found` after install, run `source ~/.bashrc` (or start a new SSH session) to pick up the updated PATH.
+> **Tip:** If `yeaboi: command not found` after install, run `source ~/.bashrc` (or start a new SSH session) to pick up the updated PATH.
 
-![Install scrum-agent and verify headless mode](docs/lightsail-setup/06-install-scrum-agent.png)
+![Install yeaboi and verify headless mode](docs/lightsail-setup/06-install-scrum-agent.png)
 
 ### 6. Run the setup wizard
 
@@ -301,7 +301,7 @@ yeaboi --setup
 
 ### 7. Test headless mode
 
-Verify scrum-agent works end-to-end before installing the skill:
+Verify yeaboi works end-to-end before installing the skill:
 
 ```bash
 yeaboi --non-interactive --description "Build a todo app" --output json
@@ -334,7 +334,7 @@ This will:
 [1/5] Skill registry: /usr/lib/node_modules/openclaw/skills/scrum-planner
 [2/5] Sandbox workspace: /home/ubuntu/.openclaw/workspace/skills/scrum-planner
 [3/5] Bedrock config synced: model=global.anthropic.claude-sonnet-4-6, region=eu-west-2
-[4/5] Sandbox disabled — scrum-agent will run on host
+[4/5] Sandbox disabled — yeaboi will run on host
 [5/5] Restart OpenClaw gateway to load the skill? [Y/n]
 ```
 
@@ -364,7 +364,7 @@ You should see:
 1. **Smart extraction** — the skill detects project, tech stack, team size, integrations from your message
 2. **Follow-up questions** — only asks what's missing (project type, definition of done, target sprints)
 3. **Confirmation summary** — your answers + defaults, with option to override
-4. **TUI recommendation** — for complex projects (3+ features, 5+ engineers), the skill suggests installing the full TUI via `uv tool install scrum-agent` or `pipx install scrum-agent` for interactive editing, sprint visualisation, and capacity planning. This is informational only — generation always proceeds.
+4. **TUI recommendation** — for complex projects (3+ features, 5+ engineers), the skill suggests installing the full TUI via `uv tool install yeaboi` or `pipx install yeaboi` for interactive editing, sprint visualisation, and capacity planning. This is informational only — generation always proceeds.
 5. **Background generation** — progress updates as each phase completes (~3-5 minutes)
 6. **Phase-by-phase review** — features, stories, tasks, sprint plan — each with accept/edit/regenerate
 
@@ -835,7 +835,7 @@ After intake, the analysis review screen shows a deterministic quality rating:
 
 ## ☀️ Daily Standup
 
-A first-class TUI mode (peer to Analysis and Planning) that runs your team's daily scrum — detecting what everyone did since the last standup, estimating sprint progress, and delivering a summary. It can run **on a schedule even when scrum-agent is closed**, so a 09:50 standup lands before your 10:00 call.
+A first-class TUI mode (peer to Analysis and Planning) that runs your team's daily scrum — detecting what everyone did since the last standup, estimating sprint progress, and delivering a summary. It can run **on a schedule even when yeaboi is closed**, so a 09:50 standup lands before your 10:00 call.
 
 Open it from the mode-selection screen (the magenta **Standup** card) or run it headlessly with `--standup-run`.
 
@@ -857,7 +857,7 @@ Enabling a schedule installs an **OS-native job** — a `launchd` agent on macOS
 yeaboi --standup-run --standup-interactive --standup-session <id>
 ```
 
-No background daemon is kept alive; the operating system fires the job, so it works even with scrum-agent fully quit and survives reboots.
+No background daemon is kept alive; the operating system fires the job, so it works even with yeaboi fully quit and survives reboots.
 
 ### Delivery configuration
 
@@ -2011,7 +2011,7 @@ make clean                # remove build artifacts and caches
 ### Project Structure
 
 ```
-src/scrum_agent/
+src/yeaboi/
 ├── agent/                      # LangGraph state & graph
 │   ├── graph.py                #   Graph compilation & wiring
 │   ├── llm.py                  #   LLM provider selection (Anthropic/OpenAI/Google)

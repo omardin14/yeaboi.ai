@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from scrum_agent.tools.confluence import (
+from yeaboi.tools.confluence import (
     confluence_create_page,
     confluence_read_page,
     confluence_read_space,

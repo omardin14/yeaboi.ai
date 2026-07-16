@@ -25,14 +25,14 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import HumanMessage
 
-from scrum_agent.agent.nodes import (
+from yeaboi.agent.nodes import (
     feature_generator,
     project_analyzer,
     sprint_planner,
     story_writer,
     task_decomposer,
 )
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Feature,
     Priority,
@@ -73,7 +73,7 @@ def pipeline_state(dataset, monkeypatch):
     # Use garbage LLM — all nodes will fall back to deterministic defaults.
     # This tests that fallback logic produces structurally valid output.
     garbage_llm = _make_simple_llm("Not valid JSON at all!")
-    monkeypatch.setattr("scrum_agent.agent.nodes.get_llm", lambda **kw: garbage_llm)
+    monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: garbage_llm)
 
     qs = build_questionnaire(dataset)
     state: dict = {
@@ -118,9 +118,9 @@ def _make_simple_llm(response_text: str) -> MagicMock:
 
 
 def _patch_external_lookups(monkeypatch):
-    monkeypatch.setattr("scrum_agent.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
-    monkeypatch.setattr("scrum_agent.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
-    monkeypatch.setattr("scrum_agent.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
+    monkeypatch.setattr("yeaboi.agent.nodes._scan_repo_context", lambda *a, **kw: (None, {}))
+    monkeypatch.setattr("yeaboi.agent.nodes._fetch_confluence_context", lambda *a, **kw: (None, {}))
+    monkeypatch.setattr("yeaboi.agent.nodes._load_user_context", lambda *a, **kw: (None, {}))
 
 
 # ---------------------------------------------------------------------------

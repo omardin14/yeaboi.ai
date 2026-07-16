@@ -67,8 +67,8 @@ def _make_answers_block() -> str:
     Uses INTAKE_QUESTIONS so the format exactly matches what nodes.py produces.
     Each answer is a 90-char string representative of a real user response.
     """
-    from scrum_agent.prompts.analyzer import TOTAL_QUESTIONS
-    from scrum_agent.prompts.intake import INTAKE_QUESTIONS
+    from yeaboi.prompts.analyzer import TOTAL_QUESTIONS
+    from yeaboi.prompts.intake import INTAKE_QUESTIONS
 
     answer = (
         "Build a full-stack task management app with authentication, real-time notifications, and team collaboration."
@@ -148,7 +148,7 @@ class TestSystemPromptBudget:
 
     def test_system_prompt_under_budget(self):
         """get_system_prompt() stays under 5 000 chars."""
-        from scrum_agent.prompts.system import get_system_prompt
+        from yeaboi.prompts.system import get_system_prompt
 
         _assert_budget("system_prompt", get_system_prompt(), SYSTEM_PROMPT_CHAR_BUDGET)
 
@@ -162,7 +162,7 @@ class TestAnalyzerPromptBudget:
 
     def test_typical_questionnaire_under_budget(self):
         """Analyzer prompt with a typical 26-question answers_block stays under 20 000 chars."""
-        from scrum_agent.prompts.analyzer import get_analyzer_prompt
+        from yeaboi.prompts.analyzer import get_analyzer_prompt
 
         prompt = get_analyzer_prompt(
             _make_answers_block(),
@@ -177,7 +177,7 @@ class TestAnalyzerPromptBudget:
         Optional contexts can add up to several thousand chars. This test
         ensures the worst-case (all three present) still fits the budget.
         """
-        from scrum_agent.prompts.analyzer import get_analyzer_prompt
+        from yeaboi.prompts.analyzer import get_analyzer_prompt
 
         # Simulate moderately-sized optional contexts (~2 000 chars each)
         repo_ctx = "README.md: TaskFlow — task management app\n" + "src/api/ — FastAPI backend\n" * 50
@@ -203,7 +203,7 @@ class TestFeatureGeneratorPromptBudget:
 
     def test_typical_project_under_budget(self):
         """Feature generator prompt with typical project analysis stays under 15 000 chars."""
-        from scrum_agent.prompts.feature_generator import get_feature_generator_prompt
+        from yeaboi.prompts.feature_generator import get_feature_generator_prompt
 
         prompt = get_feature_generator_prompt(
             project_name=_PROJECT_NAME,
@@ -228,7 +228,7 @@ class TestStoryWriterPromptBudget:
 
     def test_typical_features_under_budget(self):
         """Story writer prompt with 4 typical features stays under 20 000 chars."""
-        from scrum_agent.prompts.story_writer import get_story_writer_prompt
+        from yeaboi.prompts.story_writer import get_story_writer_prompt
 
         prompt = get_story_writer_prompt(
             project_name=_PROJECT_NAME,
@@ -244,7 +244,7 @@ class TestStoryWriterPromptBudget:
 
     def test_max_features_under_budget(self):
         """Story writer prompt with 6 features (the maximum) stays under budget."""
-        from scrum_agent.prompts.story_writer import get_story_writer_prompt
+        from yeaboi.prompts.story_writer import get_story_writer_prompt
 
         # 6 features at ~130 chars each — the maximum allowed by feature_generator rules.
         max_features_block = "".join(
@@ -273,7 +273,7 @@ class TestSprintPlannerPromptBudget:
 
     def test_typical_stories_under_budget(self):
         """Sprint planner prompt with ~16 stories stays under 15 000 chars."""
-        from scrum_agent.prompts.sprint_planner import get_sprint_planner_prompt
+        from yeaboi.prompts.sprint_planner import get_sprint_planner_prompt
 
         prompt = get_sprint_planner_prompt(
             project_name=_PROJECT_NAME,
@@ -290,7 +290,7 @@ class TestSprintPlannerPromptBudget:
         30 stories × 2-3 sprints × 10 pts/sprint is realistic for a 3-month
         project. This ensures the budget holds for larger-than-average backlogs.
         """
-        from scrum_agent.prompts.sprint_planner import get_sprint_planner_prompt
+        from yeaboi.prompts.sprint_planner import get_sprint_planner_prompt
 
         pts = [1, 2, 3, 5]
         prios = ["High", "Medium", "High", "Low"]

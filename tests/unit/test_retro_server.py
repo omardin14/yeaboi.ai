@@ -6,8 +6,8 @@ import urllib.request
 
 import pytest
 
-from scrum_agent.retro.board import RetroBoard
-from scrum_agent.retro.server import (
+from yeaboi.retro.board import RetroBoard
+from yeaboi.retro.server import (
     RetroServer,
     decode_share_code,
     encode_share_code,

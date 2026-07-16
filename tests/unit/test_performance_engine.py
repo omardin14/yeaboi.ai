@@ -5,9 +5,9 @@ from datetime import date
 
 import pytest
 
-from scrum_agent.agent.state import EngineerActivity, EngineerStory
-from scrum_agent.performance import engine
-from scrum_agent.performance.store import PerformanceStore
+from yeaboi.agent.state import EngineerActivity, EngineerStory
+from yeaboi.performance import engine
+from yeaboi.performance.store import PerformanceStore
 
 
 @pytest.fixture
@@ -23,10 +23,10 @@ class _FakeResp:
 
 def _patch_llm(monkeypatch, content):
     """Make the engine's single LLM call return ``content`` and report configured."""
-    monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-    monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+    monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+    monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
     monkeypatch.setattr(
-        "scrum_agent.agent.llm.get_llm",
+        "yeaboi.agent.llm.get_llm",
         lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(content)})(),
     )
 
@@ -44,7 +44,7 @@ def _patch_activity(monkeypatch, stories=()):
 @pytest.fixture(autouse=True)
 def _no_export(monkeypatch):
     # Keep tests off the real ~/.scrum-agent export dir.
-    monkeypatch.setattr("scrum_agent.performance.export.export_artifact", lambda *a, **k: {})
+    monkeypatch.setattr("yeaboi.performance.export.export_artifact", lambda *a, **k: {})
 
 
 class TestOneOnOnePrep:
@@ -74,7 +74,7 @@ class TestOneOnOnePrep:
     def test_carried_actions_always_surface(self, monkeypatch, db_path):
         _patch_activity(monkeypatch)
         # Seed a prior completion with an open action.
-        from scrum_agent.agent.state import OneOnOneRecord
+        from yeaboi.agent.state import OneOnOneRecord
 
         with PerformanceStore(db_path) as store:
             store.record_completion(
@@ -88,7 +88,7 @@ class TestOneOnOnePrep:
 
     def test_llm_not_configured_falls_back(self, monkeypatch, db_path):
         _patch_activity(monkeypatch, stories=[EngineerStory(key="P-1", title="auth")])
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (False, "no key"))
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
         prep = engine.run_one_on_one_prep("Ada", db_path=db_path, today=date(2026, 7, 12))
         assert prep.warnings and "no key" in prep.warnings[0]
         assert prep.talking_points  # deterministic points present
@@ -125,13 +125,13 @@ class TestCompletion:
         assert "No transcript" in record.warnings[0]
 
     def test_llm_failure_keeps_transcript(self, monkeypatch, db_path):
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (True, ""))
-        monkeypatch.setattr("scrum_agent.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
 
         def boom(self, m):
             raise RuntimeError("timeout")
 
-        monkeypatch.setattr("scrum_agent.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
         record = engine.complete_one_on_one(
             "Ada", "notes here", db_path=db_path, deliver=False, today=date(2026, 7, 12)
         )
@@ -162,7 +162,7 @@ class TestReview:
 
     def test_llm_unavailable_falls_back(self, monkeypatch, db_path):
         _patch_activity(monkeypatch)
-        monkeypatch.setattr("scrum_agent.config.is_llm_configured", lambda: (False, "no key"))
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
         review = engine.run_six_month_review("Ada", db_path=db_path, today=date(2026, 7, 12))
         assert review.warnings
         assert review.framework_used == "default"

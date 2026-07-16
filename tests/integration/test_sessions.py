@@ -1,4 +1,4 @@
-"""Tests for scrum_agent.sessions: SessionStore, make_session_id, make_display_name, state serialization."""
+"""Tests for yeaboi.sessions: SessionStore, make_session_id, make_display_name, state serialization."""
 
 import json
 import re
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -20,7 +20,7 @@ from scrum_agent.agent.state import (
     Task,
     UserStory,
 )
-from scrum_agent.sessions import (
+from yeaboi.sessions import (
     CURRENT_SCHEMA_VERSION,
     SessionStore,
     _deserialize_state,

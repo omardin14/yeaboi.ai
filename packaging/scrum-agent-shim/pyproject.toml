@@ -1,0 +1,39 @@
+# Redirect shim for the old PyPI name.
+#
+# The project was renamed `scrum-agent` -> `yeaboi`. This is a code-less
+# package that simply depends on `yeaboi`, so an existing
+# `pip install scrum-agent` / `uv tool install scrum-agent` pulls in the
+# renamed package and keeps working. It ships NO console scripts on purpose —
+# `yeaboi` already provides both the `yeaboi` command and a one-release
+# `scrum-agent` alias, so defining one here would collide.
+#
+# Publish this ONCE, manually, after `yeaboi` is live on PyPI (it is a
+# separate PyPI project from the main package and is not built by the repo's
+# publish.yml). From this directory:
+#
+#     uv build && uv publish
+#
+# Keep the version at or above the last real `scrum-agent` release (2.7.0) so
+# existing installs see it as an upgrade.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scrum-agent"
+version = "2.8.0"
+description = "Deprecated — this project was renamed to 'yeaboi'. Installing 'scrum-agent' now installs 'yeaboi'."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Omar Din" }]
+license = { text = "MIT" }
+dependencies = ["yeaboi>=2.8.0"]
+
+[project.urls]
+Homepage = "https://yeaboi.ai"
+Repository = "https://github.com/omardin14/yeaboi"
+
+# Metadata-only wheel: there is no code to ship, only the dependency on `yeaboi`.
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

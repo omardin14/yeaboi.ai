@@ -1,6 +1,6 @@
 """Tests for the analyzer prompt template."""
 
-from scrum_agent.prompts.analyzer import get_analyzer_prompt
+from yeaboi.prompts.analyzer import get_analyzer_prompt
 
 
 class TestGetAnalyzerPrompt:
@@ -43,8 +43,8 @@ class TestGetAnalyzerPrompt:
         assert "assumptions" in result
 
     def test_importable_from_analyzer_module(self):
-        """get_analyzer_prompt should be importable from scrum_agent.prompts.analyzer."""
-        from scrum_agent.prompts.analyzer import get_analyzer_prompt as imported_fn
+        """get_analyzer_prompt should be importable from yeaboi.prompts.analyzer."""
+        from yeaboi.prompts.analyzer import get_analyzer_prompt as imported_fn
 
         assert imported_fn is get_analyzer_prompt
 

@@ -27,7 +27,7 @@ from azure.devops.v7_1.work_item_tracking.models import (
     WorkItemReference,
 )
 
-from scrum_agent.tools.azure_devops import (
+from yeaboi.tools.azure_devops import (
     azdevops_list_work_items,
     azdevops_read_file,
     azdevops_read_repo,
@@ -106,7 +106,7 @@ def _azdo_env(monkeypatch):
 class TestAzdevopsReadRepoContract:
     """Contract: azdevops_read_repo parses GitItem objects from the SDK."""
 
-    @patch("scrum_agent.tools.azure_devops._make_connection")
+    @patch("yeaboi.tools.azure_devops._make_connection")
     def test_read_repo_tree_and_key_files(self, mock_make_conn):
         """Repo tree returns top-level entries and detected key files."""
         items = [
@@ -146,7 +146,7 @@ class TestAzdevopsReadRepoContract:
 class TestAzdevopsReadFileContract:
     """Contract: azdevops_read_file reads and decodes byte chunks from the SDK."""
 
-    @patch("scrum_agent.tools.azure_devops._make_connection")
+    @patch("yeaboi.tools.azure_devops._make_connection")
     def test_read_file_decodes_content(self, mock_make_conn):
         """Read file joins byte chunks and decodes to UTF-8."""
         content = b'[project]\nname = "test-repo"\nversion = "1.0.0"\n'
@@ -174,7 +174,7 @@ class TestAzdevopsReadFileContract:
 class TestAzdevopsListWorkItemsContract:
     """Contract: azdevops_list_work_items parses WorkItem SDK objects."""
 
-    @patch("scrum_agent.tools.azure_devops._make_connection")
+    @patch("yeaboi.tools.azure_devops._make_connection")
     def test_list_work_items_with_types_and_assignees(self, mock_make_conn):
         """List work items returns IDs, types, titles, states, and assignees."""
         work_items = [
@@ -225,7 +225,7 @@ class TestAzdevopsListWorkItemsContract:
 class TestAzdevopsErrorResponsesContract:
     """Contract: AzDO errors are caught and returned as user-friendly messages."""
 
-    @patch("scrum_agent.tools.azure_devops._make_connection")
+    @patch("yeaboi.tools.azure_devops._make_connection")
     def test_401_bad_pat(self, mock_make_conn):
         """401 Unauthorized → authentication error with token hint."""
         mock_make_conn.return_value.clients.get_git_client.return_value.get_items.side_effect = _FakeAzdoError(
@@ -237,7 +237,7 @@ class TestAzdevopsErrorResponsesContract:
         assert "Authentication failed" in result
         assert "AZURE_DEVOPS_TOKEN" in result
 
-    @patch("scrum_agent.tools.azure_devops._make_connection")
+    @patch("yeaboi.tools.azure_devops._make_connection")
     def test_404_missing_project(self, mock_make_conn):
         """404 Not Found → resource not found with URL verification hint."""
         mock_make_conn.return_value.clients.get_git_client.return_value.get_items.side_effect = _FakeAzdoError(

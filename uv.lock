@@ -1973,102 +1973,6 @@ wheels = [
 ]
 
 [[package]]
-name = "scrum-agent"
-version = "2.2.0"
-source = { editable = "." }
-dependencies = [
-    { name = "atlassian-python-api" },
-    { name = "azure-devops" },
-    { name = "holidays" },
-    { name = "jira" },
-    { name = "langchain" },
-    { name = "langchain-anthropic" },
-    { name = "langgraph" },
-    { name = "langgraph-checkpoint-sqlite" },
-    { name = "notion-client" },
-    { name = "prompt-toolkit" },
-    { name = "pygithub" },
-    { name = "python-dotenv" },
-    { name = "rich" },
-    { name = "segno" },
-]
-
-[package.optional-dependencies]
-all-providers = [
-    { name = "boto3" },
-    { name = "langchain-aws" },
-    { name = "langchain-google-genai" },
-    { name = "langchain-openai" },
-]
-bedrock = [
-    { name = "boto3" },
-    { name = "langchain-aws" },
-]
-dev = [
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-recording" },
-    { name = "ruff" },
-]
-google = [
-    { name = "langchain-google-genai" },
-]
-openai = [
-    { name = "langchain-openai" },
-]
-pdf = [
-    { name = "pymupdf" },
-]
-voice = [
-    { name = "faster-whisper" },
-    { name = "sounddevice" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "syrupy" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "atlassian-python-api" },
-    { name = "azure-devops" },
-    { name = "boto3", marker = "extra == 'all-providers'" },
-    { name = "boto3", marker = "extra == 'bedrock'" },
-    { name = "faster-whisper", marker = "extra == 'voice'" },
-    { name = "holidays" },
-    { name = "jira" },
-    { name = "langchain" },
-    { name = "langchain-anthropic" },
-    { name = "langchain-aws", marker = "extra == 'all-providers'" },
-    { name = "langchain-aws", marker = "extra == 'bedrock'" },
-    { name = "langchain-google-genai", marker = "extra == 'all-providers'" },
-    { name = "langchain-google-genai", marker = "extra == 'google'" },
-    { name = "langchain-openai", marker = "extra == 'all-providers'" },
-    { name = "langchain-openai", marker = "extra == 'openai'" },
-    { name = "langgraph" },
-    { name = "langgraph-checkpoint-sqlite" },
-    { name = "notion-client" },
-    { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "prompt-toolkit" },
-    { name = "pygithub" },
-    { name = "pymupdf", marker = "extra == 'pdf'" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'" },
-    { name = "pytest-recording", marker = "extra == 'dev'" },
-    { name = "python-dotenv" },
-    { name = "rich" },
-    { name = "ruff", marker = "extra == 'dev'" },
-    { name = "segno" },
-    { name = "sounddevice", marker = "extra == 'voice'" },
-]
-provides-extras = ["openai", "google", "pdf", "bedrock", "voice", "all-providers", "dev"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "syrupy", specifier = ">=5.1.0" }]
-
-[[package]]
 name = "segno"
 version = "1.6.6"
 source = { registry = "https://pypi.org/simple" }
@@ -2574,6 +2478,102 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/62/b2/5ac99a041a29e58e95f907876b04f7067a0242cb85b5f39e726153981503/xxhash-3.6.0-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c6dc31591899f5e5666f04cc2e529e69b4072827085c1ef15294d91a004bc1bd", size = 32481, upload-time = "2025-10-02T14:37:05.869Z" },
     { url = "https://files.pythonhosted.org/packages/7b/d9/8d95e906764a386a3d3b596f3c68bb63687dfca806373509f51ce8eea81f/xxhash-3.6.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:15e0dac10eb9309508bfc41f7f9deaa7755c69e35af835db9cb10751adebc35d", size = 31565, upload-time = "2025-10-02T14:37:06.966Z" },
 ]
+
+[[package]]
+name = "yeaboi"
+version = "2.8.0"
+source = { editable = "." }
+dependencies = [
+    { name = "atlassian-python-api" },
+    { name = "azure-devops" },
+    { name = "holidays" },
+    { name = "jira" },
+    { name = "langchain" },
+    { name = "langchain-anthropic" },
+    { name = "langgraph" },
+    { name = "langgraph-checkpoint-sqlite" },
+    { name = "notion-client" },
+    { name = "prompt-toolkit" },
+    { name = "pygithub" },
+    { name = "python-dotenv" },
+    { name = "rich" },
+    { name = "segno" },
+]
+
+[package.optional-dependencies]
+all-providers = [
+    { name = "boto3" },
+    { name = "langchain-aws" },
+    { name = "langchain-google-genai" },
+    { name = "langchain-openai" },
+]
+bedrock = [
+    { name = "boto3" },
+    { name = "langchain-aws" },
+]
+dev = [
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-recording" },
+    { name = "ruff" },
+]
+google = [
+    { name = "langchain-google-genai" },
+]
+openai = [
+    { name = "langchain-openai" },
+]
+pdf = [
+    { name = "pymupdf" },
+]
+voice = [
+    { name = "faster-whisper" },
+    { name = "sounddevice" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "syrupy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "atlassian-python-api" },
+    { name = "azure-devops" },
+    { name = "boto3", marker = "extra == 'all-providers'" },
+    { name = "boto3", marker = "extra == 'bedrock'" },
+    { name = "faster-whisper", marker = "extra == 'voice'" },
+    { name = "holidays" },
+    { name = "jira" },
+    { name = "langchain" },
+    { name = "langchain-anthropic" },
+    { name = "langchain-aws", marker = "extra == 'all-providers'" },
+    { name = "langchain-aws", marker = "extra == 'bedrock'" },
+    { name = "langchain-google-genai", marker = "extra == 'all-providers'" },
+    { name = "langchain-google-genai", marker = "extra == 'google'" },
+    { name = "langchain-openai", marker = "extra == 'all-providers'" },
+    { name = "langchain-openai", marker = "extra == 'openai'" },
+    { name = "langgraph" },
+    { name = "langgraph-checkpoint-sqlite" },
+    { name = "notion-client" },
+    { name = "pre-commit", marker = "extra == 'dev'" },
+    { name = "prompt-toolkit" },
+    { name = "pygithub" },
+    { name = "pymupdf", marker = "extra == 'pdf'" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'" },
+    { name = "pytest-recording", marker = "extra == 'dev'" },
+    { name = "python-dotenv" },
+    { name = "rich" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "segno" },
+    { name = "sounddevice", marker = "extra == 'voice'" },
+]
+provides-extras = ["openai", "google", "pdf", "bedrock", "voice", "all-providers", "dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "syrupy", specifier = ">=5.1.0" }]
 
 [[package]]
 name = "zstandard"

@@ -6,7 +6,7 @@ These tests catch two classes of silent mistakes that are easy to introduce
 when adding or refactoring tools:
 
 1. **Missing registration** — a developer adds a new ``@tool`` function to a
-   module in ``src/scrum_agent/tools/`` but forgets to add it to the ``return``
+   module in ``src/yeaboi/tools/`` but forgets to add it to the ``return``
    list in ``get_tools()``. The function exists, is importable, but is never
    bound to the LLM and can therefore never be called by the agent.
 
@@ -16,7 +16,7 @@ when adding or refactoring tools:
 
 Discovery strategy — AST scanning (no import)
 ----------------------------------------------
-The scanner reads each ``.py`` source file in ``src/scrum_agent/tools/``
+The scanner reads each ``.py`` source file in ``src/yeaboi/tools/``
 (excluding ``__init__.py``) and walks the AST to find ``FunctionDef`` nodes
 whose decorator list contains ``@tool`` or ``@tool(...)`` (decorator-factory
 form). This approach has two advantages over reflection-based discovery:
@@ -39,7 +39,7 @@ import pathlib
 # Helpers
 # ---------------------------------------------------------------------------
 
-_TOOLS_SRC = pathlib.Path(__file__).parent.parent.parent.parent / "src" / "scrum_agent" / "tools"
+_TOOLS_SRC = pathlib.Path(__file__).parent.parent.parent.parent / "src" / "yeaboi" / "tools"
 
 
 def _is_tool_decorator(node: ast.expr) -> bool:
@@ -99,7 +99,7 @@ class TestToolRegistrySync:
 
     def test_every_decorated_tool_is_registered(self):
         """All @tool functions discovered by AST scan appear in get_tools()."""
-        from scrum_agent.tools import get_tools
+        from yeaboi.tools import get_tools
 
         registered_names = {t.name for t in get_tools()}
         discovered = _discover_all_tools()
@@ -114,7 +114,7 @@ class TestToolRegistrySync:
 
     def test_no_tool_registered_twice(self):
         """get_tools() contains no duplicate tool names."""
-        from scrum_agent.tools import get_tools
+        from yeaboi.tools import get_tools
 
         tools = get_tools()
         names = [t.name for t in tools]
@@ -136,7 +136,7 @@ class TestToolRegistrySync:
         get_tools() that references a function imported from *outside* the tools
         package (or that no longer exists after a rename).
         """
-        from scrum_agent.tools import get_tools
+        from yeaboi.tools import get_tools
 
         registered_names = {t.name for t in get_tools()}
         discovered_names = set(_discover_all_tools().keys())
@@ -144,7 +144,7 @@ class TestToolRegistrySync:
         phantom = registered_names - discovered_names
         assert not phantom, (
             "The following names are registered in get_tools() but not found as "
-            "@tool functions in src/scrum_agent/tools/:\n" + "\n".join(f"  - {name}" for name in sorted(phantom))
+            "@tool functions in src/yeaboi/tools/:\n" + "\n".join(f"  - {name}" for name in sorted(phantom))
         )
 
     def test_tool_count_matches_between_scan_and_registry(self):
@@ -154,7 +154,7 @@ class TestToolRegistrySync:
         test_every_decorated_tool_is_registered / test_no_extra_tools_registered
         both pass, the registry is an exact mirror of the source files.
         """
-        from scrum_agent.tools import get_tools
+        from yeaboi.tools import get_tools
 
         registered_count = len(get_tools())
         discovered_count = len(_discover_all_tools())

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from scrum_agent.standup import scheduler
+from yeaboi.standup import scheduler
 
 
 class TestHelpers:
@@ -55,7 +55,7 @@ class TestHelpers:
         args = scheduler._executable_args("sess-1")
         assert args[1:] == [
             "-m",
-            "scrum_agent.cli",
+            "yeaboi.cli",
             "--standup-run",
             "--standup-interactive",
             "--standup-session",

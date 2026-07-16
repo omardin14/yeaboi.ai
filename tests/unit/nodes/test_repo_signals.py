@@ -6,7 +6,7 @@ See README: "Project Intake Questionnaire" — smart intake.
 
 from unittest.mock import MagicMock
 
-from scrum_agent.agent.repo_signals import (
+from yeaboi.agent.repo_signals import (
     INTEGRATION_SDK_MARKERS,
     LOW_CODE_MARKERS,
     RepoSignals,
@@ -17,7 +17,7 @@ from scrum_agent.agent.repo_signals import (
     analyze_context,
     scan_repo_signals,
 )
-from scrum_agent.agent.state import QuestionnaireState
+from yeaboi.agent.state import QuestionnaireState
 
 # A github_read_repo / read_codebase style summary — the two tools share format.
 _GH_SUMMARY = """Repository: acme/storefront
@@ -197,8 +197,8 @@ class TestScanRepoSignals:
         fake_repo.invoke.return_value = _GH_SUMMARY
         fake_file = MagicMock()
         fake_file.invoke.return_value = '{"dependencies": {"stripe": "12"}}'
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", fake_repo)
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_file", fake_file)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", fake_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_file", fake_file)
 
         raw, signals, status = scan_repo_signals(qs)
         assert raw == _GH_SUMMARY
@@ -212,7 +212,7 @@ class TestScanRepoSignals:
         qs.answers[17] = "https://github.com/acme/missing"
         fake_repo = MagicMock()
         fake_repo.invoke.return_value = "Error: 404 Not Found"
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", fake_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", fake_repo)
 
         raw, signals, _status = scan_repo_signals(qs)
         assert raw is None  # error string is not treated as context
@@ -223,7 +223,7 @@ class TestScanRepoSignals:
         qs.answers[17] = "https://github.com/acme/boom"
         fake_repo = MagicMock()
         fake_repo.invoke.side_effect = RuntimeError("network down")
-        monkeypatch.setattr("scrum_agent.tools.github.github_read_repo", fake_repo)
+        monkeypatch.setattr("yeaboi.tools.github.github_read_repo", fake_repo)
 
         raw, signals, status = scan_repo_signals(qs)  # must not raise
         assert raw is None

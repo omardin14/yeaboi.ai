@@ -2,8 +2,8 @@
 
 import pytest
 
-from scrum_agent.agent.state import OneOnOnePrep, OneOnOneRecord, SixMonthReview
-from scrum_agent.performance.store import PerformanceStore
+from yeaboi.agent.state import OneOnOnePrep, OneOnOneRecord, SixMonthReview
+from yeaboi.performance.store import PerformanceStore
 
 
 @pytest.fixture

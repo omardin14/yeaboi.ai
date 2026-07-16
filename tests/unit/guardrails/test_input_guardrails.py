@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from scrum_agent.input_guardrails import (
+from yeaboi.input_guardrails import (
     MAX_INPUT_CHARS,
     _passes_allowlist,
     check_input_length,
@@ -12,8 +12,8 @@ from scrum_agent.input_guardrails import (
     validate_input,
 )
 
-_LLM_PATCH = "scrum_agent.agent.llm.get_llm"
-_PROVIDER_PATCH = "scrum_agent.config.get_llm_provider"
+_LLM_PATCH = "yeaboi.agent.llm.get_llm"
+_PROVIDER_PATCH = "yeaboi.config.get_llm_provider"
 
 
 def _mock_llm_response(content: str) -> MagicMock:
@@ -362,7 +362,7 @@ class TestCheckOffTopic:
 
 class TestValidateInput:
     def test_clean_input_returns_none(self):
-        with patch("scrum_agent.input_guardrails.check_off_topic", return_value=None):
+        with patch("yeaboi.input_guardrails.check_off_topic", return_value=None):
             assert validate_input("Build a todo app") is None
 
     def test_too_long_returns_length_error(self):
@@ -377,7 +377,7 @@ class TestValidateInput:
         result = validate_input("fuck off")
         assert "project planning" in result.lower()
 
-    @patch("scrum_agent.input_guardrails.check_off_topic")
+    @patch("yeaboi.input_guardrails.check_off_topic")
     def test_off_topic_returns_redirect(self, mock_classifier):
         mock_classifier.return_value = "I'm a project planning agent — please enter a project-related response."
         result = validate_input("do you love me")
@@ -389,6 +389,6 @@ class TestValidateInput:
         assert "too long" in result.lower()
 
     def test_profanity_before_llm_call(self):
-        with patch("scrum_agent.input_guardrails.check_off_topic") as mock_classifier:
+        with patch("yeaboi.input_guardrails.check_off_topic") as mock_classifier:
             validate_input("you dirty boii")
             mock_classifier.assert_not_called()

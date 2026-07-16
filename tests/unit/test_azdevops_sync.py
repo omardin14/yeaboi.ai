@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from scrum_agent.agent.state import (
+from yeaboi.agent.state import (
     AcceptanceCriterion,
     Discipline,
     Feature,
@@ -27,7 +27,7 @@ from scrum_agent.agent.state import (
     TaskLabel,
     UserStory,
 )
-from scrum_agent.azdevops_sync import (
+from yeaboi.azdevops_sync import (
     AzDevOpsSyncResult,
     _feature_title_to_tag,
     _format_story_description_html,
@@ -177,21 +177,21 @@ class TestFormatTaskDescriptionHtml:
 
 
 class TestIsAzdevopsBoardConfigured:
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
     def test_all_set(self, *_):
         assert is_azdevops_board_configured() is True
 
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value=None)
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value=None)
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
     def test_missing_token(self, *_):
         assert is_azdevops_board_configured() is False
 
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value=None)
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value=None)
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
     def test_missing_org_url(self, *_):
         assert is_azdevops_board_configured() is False
 
@@ -202,10 +202,10 @@ class TestIsAzdevopsBoardConfigured:
 
 
 class TestSyncStoriesToAzdevops:
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.tools.azure_devops._make_azdo_clients")
     def test_creates_epic_and_story(self, mock_clients, *_):
         mock_wit = MagicMock()
         mock_clients.return_value = (mock_wit, MagicMock())
@@ -227,10 +227,10 @@ class TestSyncStoriesToAzdevops:
         assert new_state["azdevops_story_keys"] == {"story-1": "101"}
         assert mock_wit.create_work_item.call_count == 2
 
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.tools.azure_devops._make_azdo_clients")
     def test_idempotency_skips_existing(self, mock_clients, *_):
         """Already-created stories are skipped."""
         mock_wit = MagicMock()
@@ -246,10 +246,10 @@ class TestSyncStoriesToAzdevops:
         assert result.stories_created == {}
         mock_wit.create_work_item.assert_not_called()
 
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.tools.azure_devops._make_azdo_clients")
     def test_error_accumulation(self, mock_clients, *_):
         """Story creation errors are accumulated, not raised."""
         mock_wit = MagicMock()
@@ -266,10 +266,10 @@ class TestSyncStoriesToAzdevops:
         assert len(result.errors) == 1
         assert "API error" in result.errors[0]
 
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.tools.azure_devops._make_azdo_clients")
     def test_progress_callback(self, mock_clients, *_):
         """Progress callback is called with correct counts."""
         mock_wit = MagicMock()
@@ -291,7 +291,7 @@ class TestSyncStoriesToAzdevops:
 
         assert call_count[0] == 2  # 1 epic + 1 story
 
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="")
     def test_missing_project(self, *_):
         """Returns error when project is not configured."""
         state = _make_graph_state()
@@ -306,10 +306,10 @@ class TestSyncStoriesToAzdevops:
 
 
 class TestSyncTasksToAzdevops:
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.tools.azure_devops._make_azdo_clients")
     def test_creates_task_under_story(self, mock_clients, *_):
         mock_wit = MagicMock()
         mock_clients.return_value = (mock_wit, MagicMock())
@@ -327,10 +327,10 @@ class TestSyncTasksToAzdevops:
         assert result.tasks_created == {"task-1": "200"}
         assert new_state["azdevops_task_keys"] == {"task-1": "200"}
 
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.tools.azure_devops._make_azdo_clients")
     def test_skips_task_without_parent(self, mock_clients, *_):
         """Tasks whose parent story hasn't been created get an error."""
         mock_wit = MagicMock()
@@ -354,12 +354,12 @@ class TestSyncTasksToAzdevops:
 
 
 class TestSyncAllToAzdevops:
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_project", return_value="MyProject")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
-    @patch("scrum_agent.azdevops_sync.get_azure_devops_token", return_value="token")
-    @patch("scrum_agent.tools.azure_devops._make_azdo_clients")
-    @patch("scrum_agent.azdevops_sync._create_iteration_node", return_value="MyProject\\Sprint 1")
-    @patch("scrum_agent.tools.azure_devops.add_work_items_to_iteration")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_project", return_value="MyProject")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_org_url", return_value="https://dev.azure.com/org")
+    @patch("yeaboi.azdevops_sync.get_azure_devops_token", return_value="token")
+    @patch("yeaboi.tools.azure_devops._make_azdo_clients")
+    @patch("yeaboi.azdevops_sync._create_iteration_node", return_value="MyProject\\Sprint 1")
+    @patch("yeaboi.tools.azure_devops.add_work_items_to_iteration")
     def test_full_pipeline(self, mock_assign, mock_iter, mock_clients, *_):
         mock_wit = MagicMock()
         mock_clients.return_value = (mock_wit, MagicMock())

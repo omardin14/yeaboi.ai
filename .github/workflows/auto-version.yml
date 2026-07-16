@@ -67,11 +67,11 @@ jobs:
           esac
 
           # 3) Trivial PR? No shipping code changed -> skip (docs/chore/tests/CI only).
-          if gh pr diff "$PR" --name-only | grep -qE '^src/scrum_agent/'; then
+          if gh pr diff "$PR" --name-only | grep -qE '^src/yeaboi/'; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::no src/scrum_agent changes; skipping version bump."
+            echo "::notice::no src/yeaboi changes; skipping version bump."
           fi
 
       - name: Classify & bump with Claude

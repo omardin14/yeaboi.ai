@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scrum_agent import __version__
-from scrum_agent.agent.state import Feature, Priority, ProjectAnalysis, QuestionnaireState
-from scrum_agent.cli import (
+from yeaboi import __version__
+from yeaboi.agent.state import Feature, Priority, ProjectAnalysis, QuestionnaireState
+from yeaboi.cli import (
     DEFAULT_QUESTIONNAIRE_FILENAME,
     _build_sessions_table,
     _build_welcome_panel,
@@ -16,8 +16,8 @@ from scrum_agent.cli import (
     build_parser,
     main,
 )
-from scrum_agent.repl._ui import _predict_next_node
-from scrum_agent.sessions import SessionStore
+from yeaboi.repl._ui import _predict_next_node
+from yeaboi.sessions import SessionStore
 
 
 @pytest.fixture(autouse=True)
@@ -27,8 +27,8 @@ def _no_wizard_by_default(monkeypatch):
     All test classes that need to test the wizard explicitly override
     is_first_run or run_setup_wizard as needed.
     """
-    monkeypatch.setattr("scrum_agent.cli.is_first_run", lambda: False)
-    monkeypatch.setattr("scrum_agent.cli.load_user_config", lambda: None)
+    monkeypatch.setattr("yeaboi.cli.is_first_run", lambda: False)
+    monkeypatch.setattr("yeaboi.cli.load_user_config", lambda: None)
 
 
 class TestArgParsing:
@@ -177,7 +177,7 @@ class TestNonInteractiveFlags:
             main(argv=["--output", "json", "--mode", "project-planning"])
         assert exc_info.value.code == 1
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_non_interactive_calls_repl_with_params(self, mock_repl, tmp_path, monkeypatch):
         """--non-interactive passes correct params to run_repl."""
         main(argv=["--non-interactive", "--description", "Build a todo app", "--team-size", "5"])
@@ -192,14 +192,14 @@ class TestNonInteractiveFlags:
         assert qs.answers[1] == "Build a todo app"
         assert qs.answers[6] == "5"
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_non_interactive_json_output(self, mock_repl):
         """--non-interactive --output json passes output_format='json'."""
         main(argv=["--non-interactive", "--description", "Test", "--output", "json"])
         call_kwargs = mock_repl.call_args[1]
         assert call_kwargs["output_format"] == "json"
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_non_interactive_loads_scrum_md(self, mock_repl, tmp_path, monkeypatch):
         """--non-interactive picks up SCRUM.md from CWD for keyword extraction."""
         monkeypatch.chdir(tmp_path)
@@ -212,7 +212,7 @@ class TestNonInteractiveFlags:
         assert 2 in qs.answers
         assert "greenfield" in qs.answers[2].lower()
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_non_interactive_cli_args_win_over_scrum_md(self, mock_repl, tmp_path, monkeypatch):
         """CLI args take priority over SCRUM.md extracted answers."""
         monkeypatch.chdir(tmp_path)
@@ -223,7 +223,7 @@ class TestNonInteractiveFlags:
         # CLI --team-size=3 should win over SCRUM.md's "10 engineers"
         assert qs.answers[6] == "3"
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_description_file_resolved(self, mock_repl, tmp_path):
         """--description @file.txt resolves to file contents."""
         desc_file = tmp_path / "desc.txt"
@@ -283,8 +283,8 @@ class TestWelcomePanel:
         plain = panel.renderable.plain
         assert "help" in plain
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli.show_splash")
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli.show_splash")
     def test_welcome_panel_shown_on_startup(self, mock_splash, mock_repl, capsys):
         main(argv=["--mode", "project-planning"])
         # Splash animation replaced the static welcome panel — verify it was called
@@ -297,7 +297,7 @@ class TestWelcomePanel:
 class TestScrumMdBanner:
     """Tests for the SCRUM.md startup hint."""
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_tip_shown_when_no_scrum_md(self, mock_repl, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
         main(argv=["--mode", "project-planning"])
@@ -305,7 +305,7 @@ class TestScrumMdBanner:
         assert "SCRUM.md" in output
         assert "Tip:" in output
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_detected_shown_when_scrum_md_present(self, mock_repl, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "SCRUM.md").write_text("# My project notes")
@@ -316,13 +316,13 @@ class TestScrumMdBanner:
 
 
 class TestMain:
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_main_calls_repl(self, mock_repl):
         main(argv=["--mode", "project-planning"])
         mock_repl.assert_called_once()
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli._resolve_resume")
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli._resolve_resume")
     def test_resume_with_id_calls_repl(self, mock_resolve, mock_repl):
         """--resume <id> resolves the session and calls run_repl with resume_state."""
         mock_resolve.return_value = ({"messages": []}, "test-session")
@@ -333,15 +333,15 @@ class TestMain:
         assert call_kwargs["resume_state"] == {"messages": []}
         assert call_kwargs["resume_session_id"] == "test-session"
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli._resolve_resume", return_value=(None, None))
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli._resolve_resume", return_value=(None, None))
     def test_resume_returns_early_when_no_session(self, mock_resolve, mock_repl):
         """--resume exits early when resolve returns None (cancelled or no sessions)."""
         main(argv=["--resume", "latest"])
         mock_repl.assert_not_called()
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli._resolve_resume")
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli._resolve_resume")
     def test_resume_skips_mode_menu(self, mock_resolve, mock_repl, capsys):
         """--resume should skip the startup mode selection entirely."""
         mock_resolve.return_value = ({"messages": []}, "test-session")
@@ -351,20 +351,20 @@ class TestMain:
         assert "Project Planning" not in output
         mock_repl.assert_called_once()
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_quick_flag_passes_intake_mode(self, mock_repl):
         main(argv=["--quick", "--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
         assert call_kwargs["intake_mode"] == "quick"
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_default_intake_mode_is_none(self, mock_repl):
         """Default intake mode is None — triggers the interactive intake menu in the REPL."""
         main(argv=["--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
         assert call_kwargs["intake_mode"] is None
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_proxy_warning_disables_langsmith(self, mock_repl, monkeypatch, capsys):
         # Enable LangSmith
         monkeypatch.setenv("LANGSMITH_TRACING", "true")
@@ -384,7 +384,7 @@ class TestMain:
 class TestExportQuestionnaireFlag:
     """Tests for --export-questionnaire CLI flag."""
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_creates_file(self, mock_repl, tmp_path, monkeypatch):
         """--export-questionnaire should create a .md file."""
         out = tmp_path / "test-export.md"
@@ -396,7 +396,7 @@ class TestExportQuestionnaireFlag:
         # Should NOT start the REPL
         mock_repl.assert_not_called()
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_default_filename(self, mock_repl, tmp_path, monkeypatch):
         """--export-questionnaire without a path should use the default filename."""
         monkeypatch.chdir(tmp_path)
@@ -404,7 +404,7 @@ class TestExportQuestionnaireFlag:
         # File should exist at the resolved default filename path
         mock_repl.assert_not_called()
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_exits_without_repl(self, mock_repl, tmp_path, monkeypatch):
         """--export-questionnaire should exit without starting the REPL."""
         monkeypatch.chdir(tmp_path)
@@ -415,7 +415,7 @@ class TestExportQuestionnaireFlag:
 class TestQuestionnaireFlag:
     """Tests for --questionnaire CLI flag."""
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_valid_file_passes_questionnaire(self, mock_repl, tmp_path):
         """--questionnaire with a valid file should parse and pass to run_repl."""
         qfile = tmp_path / "intake.md"
@@ -435,7 +435,7 @@ class TestQuestionnaireFlag:
         output = capsys.readouterr().out
         assert "file not found" in output
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_malformed_file_error(self, mock_repl, tmp_path, capsys):
         """--questionnaire with a malformed file should print error and exit."""
         bad = tmp_path / "bad.md"
@@ -447,7 +447,7 @@ class TestQuestionnaireFlag:
         assert "Error" in output
         mock_repl.assert_not_called()
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_loaded_answer_count_shown(self, mock_repl, tmp_path, capsys):
         """--questionnaire should print how many answers were loaded."""
         qfile = tmp_path / "intake.md"
@@ -479,7 +479,7 @@ class TestExportOnlyFlag:
         output = capsys.readouterr().out
         assert "--export-only requires" in output
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_export_only_with_quick_passes_to_repl(self, mock_repl):
         main(argv=["--export-only", "--quick", "--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
@@ -499,13 +499,13 @@ class TestNoBellFlag:
         args = parser.parse_args([])
         assert args.no_bell is False
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_no_bell_passes_bell_false(self, mock_repl):
         main(argv=["--no-bell", "--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
         assert call_kwargs["bell"] is False
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_default_passes_bell_true(self, mock_repl):
         main(argv=["--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
@@ -535,13 +535,13 @@ class TestThemeFlag:
         with pytest.raises(SystemExit):
             parser.parse_args(["--theme", "neon"])
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_theme_passed_to_repl(self, mock_repl):
         main(argv=["--theme", "light", "--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
         assert call_kwargs["theme"] == "light"
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_default_theme_passed(self, mock_repl):
         main(argv=["--mode", "project-planning"])
         call_kwargs = mock_repl.call_args[1]
@@ -552,7 +552,7 @@ class TestStartupModeMenu:
     """Tests for the top-level mode selection screen."""
 
     def test_mode_flag_project_planning_calls_repl(self):
-        with patch("scrum_agent.cli.run_repl") as mock_repl:
+        with patch("yeaboi.cli.run_repl") as mock_repl:
             main(argv=["--mode", "project-planning"])
         mock_repl.assert_called_once()
 
@@ -566,16 +566,16 @@ class TestStartupModeMenu:
         args = parser.parse_args([])
         assert args.mode is None
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli.select_mode", return_value=("project-planning", "smart", None))
-    @patch("scrum_agent.cli.show_splash")
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli.select_mode", return_value=("project-planning", "smart", None))
+    @patch("yeaboi.cli.show_splash")
     def test_interactive_menu_shown_when_no_mode_flag(self, mock_splash, mock_select, mock_repl):
         """Without --mode, the TUI mode selection screen is displayed."""
         main(argv=[])
         mock_select.assert_called_once()
 
-    @patch("scrum_agent.cli.select_mode", return_value=None)
-    @patch("scrum_agent.cli.show_splash")
+    @patch("yeaboi.cli.select_mode", return_value=None)
+    @patch("yeaboi.cli.show_splash")
     def test_select_mode_returns_none_exits_gracefully(self, mock_splash, mock_select):
         """When select_mode returns None (Esc/Ctrl+C), main exits cleanly."""
         main(argv=[])
@@ -591,36 +591,36 @@ class TestStartupModeMenu:
 class TestSetupWizardIntegration:
     """Tests for setup wizard triggering in main()."""
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli.run_setup_wizard", return_value=True)
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli.run_setup_wizard", return_value=True)
     def test_setup_flag_triggers_wizard(self, mock_wizard, mock_repl, monkeypatch):
         """--setup flag always triggers the wizard regardless of config file state."""
-        monkeypatch.setattr("scrum_agent.cli.is_first_run", lambda: False)
+        monkeypatch.setattr("yeaboi.cli.is_first_run", lambda: False)
         main(argv=["--setup", "--mode", "project-planning"])
         mock_wizard.assert_called_once()
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli.run_setup_wizard", return_value=True)
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli.run_setup_wizard", return_value=True)
     def test_first_run_triggers_wizard(self, mock_wizard, mock_repl, monkeypatch):
         """No config file (first run) triggers the wizard automatically."""
-        monkeypatch.setattr("scrum_agent.cli.is_first_run", lambda: True)
+        monkeypatch.setattr("yeaboi.cli.is_first_run", lambda: True)
         main(argv=["--mode", "project-planning"])
         mock_wizard.assert_called_once()
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli.run_setup_wizard", return_value=False)
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli.run_setup_wizard", return_value=False)
     def test_wizard_cancelled_exits_before_repl(self, mock_wizard, mock_repl, monkeypatch):
         """If wizard returns False (user cancelled), main() exits without starting REPL."""
-        monkeypatch.setattr("scrum_agent.cli.is_first_run", lambda: True)
+        monkeypatch.setattr("yeaboi.cli.is_first_run", lambda: True)
         main(argv=["--mode", "project-planning"])
         mock_wizard.assert_called_once()
         mock_repl.assert_not_called()
 
-    @patch("scrum_agent.cli.run_repl")
-    @patch("scrum_agent.cli.run_setup_wizard")
+    @patch("yeaboi.cli.run_repl")
+    @patch("yeaboi.cli.run_setup_wizard")
     def test_normal_run_skips_wizard(self, mock_wizard, mock_repl, monkeypatch):
         """If config file exists and --setup not passed, wizard is skipped."""
-        monkeypatch.setattr("scrum_agent.cli.is_first_run", lambda: False)
+        monkeypatch.setattr("yeaboi.cli.is_first_run", lambda: False)
         main(argv=["--mode", "project-planning"])
         mock_wizard.assert_not_called()
         mock_repl.assert_called_once()
@@ -644,11 +644,11 @@ class TestSetupWizardIntegration:
 class TestListSessionsFlag:
     """Tests for --list-sessions CLI flag."""
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_list_sessions_shows_table(self, mock_repl, tmp_path, monkeypatch, capsys):
         """--list-sessions prints a table and exits without starting REPL."""
         db_path = tmp_path / "sessions.db"
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         with SessionStore(db_path) as store:
             store.create_session("new-aaaa1111-2026-03-06", project_name="TestProject")
             store.update_last_node("new-aaaa1111-2026-03-06", "feature_generator")
@@ -659,10 +659,10 @@ class TestListSessionsFlag:
         assert "feature_generator" in output
         mock_repl.assert_not_called()
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_list_sessions_empty(self, mock_repl, tmp_path, monkeypatch, capsys):
         """--list-sessions with no sessions prints a helpful message."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         main(argv=["--list-sessions"])
         output = capsys.readouterr().out
         assert "No saved sessions" in output
@@ -712,7 +712,7 @@ class TestResolveResume:
 
     def test_latest_no_sessions(self, tmp_path, monkeypatch, capsys):
         """--resume latest with no sessions returns (None, None)."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         console = MagicMock()
         state, sid = _resolve_resume(console, "latest")
         assert state is None
@@ -720,7 +720,7 @@ class TestResolveResume:
 
     def test_latest_with_session(self, tmp_path, monkeypatch):
         """--resume latest returns the most recent session's state."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("new-aaaa1111-2026-03-06")
@@ -733,7 +733,7 @@ class TestResolveResume:
 
     def test_specific_id(self, tmp_path, monkeypatch):
         """--resume <id> returns the specific session's state."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("my-session-id")
@@ -745,7 +745,7 @@ class TestResolveResume:
 
     def test_specific_id_not_found(self, tmp_path, monkeypatch):
         """--resume <id> with nonexistent ID returns (None, None)."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         console = MagicMock()
         state, sid = _resolve_resume(console, "nonexistent")
         assert state is None
@@ -753,7 +753,7 @@ class TestResolveResume:
 
     def test_latest_corrupt_state(self, tmp_path, monkeypatch):
         """--resume latest with corrupt state returns (None, None)."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("new-bbbb2222-2026-03-06")
@@ -766,10 +766,10 @@ class TestResolveResume:
         state, sid = _resolve_resume(console, "latest")
         assert state is None
 
-    @patch("scrum_agent.cli.PromptSession")
+    @patch("yeaboi.cli.PromptSession")
     def test_picker_cancel(self, mock_session_cls, tmp_path, monkeypatch):
         """--resume (picker mode) returns (None, None) when user cancels."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("new-cccc3333-2026-03-06")
@@ -781,10 +781,10 @@ class TestResolveResume:
         state, sid = _resolve_resume(console, "__pick__")
         assert state is None
 
-    @patch("scrum_agent.cli.PromptSession")
+    @patch("yeaboi.cli.PromptSession")
     def test_picker_selects_session(self, mock_session_cls, tmp_path, monkeypatch):
         """--resume (picker mode) loads the selected session."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("new-dddd4444-2026-03-06", project_name="PickMe")
@@ -797,10 +797,10 @@ class TestResolveResume:
         assert sid == "new-dddd4444-2026-03-06"
         assert state["team_size"] == 8
 
-    @patch("scrum_agent.cli.PromptSession")
+    @patch("yeaboi.cli.PromptSession")
     def test_picker_no_sessions(self, mock_session_cls, tmp_path, monkeypatch):
         """--resume (picker mode) with no sessions returns (None, None)."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         console = MagicMock()
         state, sid = _resolve_resume(console, "__pick__")
         assert state is None
@@ -816,7 +816,7 @@ class TestResumeLatestPicksMostRecent:
 
     def test_latest_picks_most_recently_modified(self, tmp_path, monkeypatch):
         """With two sessions, --resume latest returns the one with the newer last_modified."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("session-old", project_name="OldProject")
@@ -832,7 +832,7 @@ class TestResumeLatestPicksMostRecent:
 
     def test_latest_picks_updated_old_session(self, tmp_path, monkeypatch):
         """If an older session is updated more recently, --resume latest picks it."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("session-a", project_name="Alpha")
@@ -869,7 +869,7 @@ class TestResumeSkipsCompletedNodes:
 
     def test_resume_with_features_routes_to_story_writer(self, tmp_path, monkeypatch):
         """Session with questionnaire + analysis + features → next node is story_writer."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         qs = QuestionnaireState(completed=True)
         feature = Feature(id="f-1", title="F1", description="D", priority=Priority.HIGH)
@@ -889,7 +889,7 @@ class TestResumeSkipsCompletedNodes:
 
     def test_resume_with_analysis_only_routes_to_feature_generator(self, tmp_path, monkeypatch):
         """Session with questionnaire + analysis (no features) → next node is feature_generator."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         qs = QuestionnaireState(completed=True)
         state_in = {
@@ -907,7 +907,7 @@ class TestResumeSkipsCompletedNodes:
 
     def test_resume_mid_questionnaire_routes_to_intake(self, tmp_path, monkeypatch):
         """Session with incomplete questionnaire → next node is project_intake."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         qs = QuestionnaireState(current_question=5, completed=False)
         state_in = {"messages": [], "questionnaire": qs}
@@ -925,7 +925,7 @@ class TestStaleCorruptSessionFallback:
 
     def test_empty_state_returns_none(self, tmp_path, monkeypatch):
         """Session created but never saved state → returns (None, None)."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("empty-session")
@@ -936,7 +936,7 @@ class TestStaleCorruptSessionFallback:
 
     def test_corrupt_json_returns_none(self, tmp_path, monkeypatch):
         """Session with corrupt JSON state → returns (None, None)."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("corrupt-session")
@@ -951,7 +951,7 @@ class TestStaleCorruptSessionFallback:
 
     def test_nonexistent_id_returns_none(self, tmp_path, monkeypatch):
         """Resuming a session ID that doesn't exist → returns (None, None)."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         console = MagicMock()
         state, sid = _resolve_resume(console, "does-not-exist")
         assert state is None
@@ -966,16 +966,16 @@ class TestStaleCorruptSessionFallback:
 class TestClearSessions:
     """Tests for --clear-sessions CLI flag and _clear_sessions()."""
 
-    @patch("scrum_agent.cli.run_repl")
+    @patch("yeaboi.cli.run_repl")
     def test_clear_sessions_flag_parsed(self, mock_repl):
         parser = build_parser()
         args = parser.parse_args(["--clear-sessions"])
         assert args.clear_sessions is True
 
-    @patch("scrum_agent.cli.PromptSession")
+    @patch("yeaboi.cli.PromptSession")
     def test_clear_single_session(self, mock_session_cls, tmp_path, monkeypatch):
         """Pick a session number → deletes that session."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("s1", project_name="Alpha")
@@ -990,10 +990,10 @@ class TestClearSessions:
             sessions = store.list_sessions()
         assert len(sessions) == 1
 
-    @patch("scrum_agent.cli.PromptSession")
+    @patch("yeaboi.cli.PromptSession")
     def test_clear_all_sessions(self, mock_session_cls, tmp_path, monkeypatch):
         """Type 'all' → deletes everything."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("s1", project_name="Alpha")
@@ -1006,10 +1006,10 @@ class TestClearSessions:
         with SessionStore(db_path) as store:
             assert store.list_sessions() == []
 
-    @patch("scrum_agent.cli.PromptSession")
+    @patch("yeaboi.cli.PromptSession")
     def test_clear_cancel(self, mock_session_cls, tmp_path, monkeypatch):
         """Type 'q' → nothing deleted."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         db_path = tmp_path / "sessions.db"
         with SessionStore(db_path) as store:
             store.create_session("s1", project_name="Keep")
@@ -1023,7 +1023,7 @@ class TestClearSessions:
 
     def test_clear_empty_db(self, tmp_path, monkeypatch):
         """No sessions → prints hint, no crash."""
-        monkeypatch.setattr("scrum_agent.cli._SESSIONS_DB_DIR", tmp_path)
+        monkeypatch.setattr("yeaboi.cli._SESSIONS_DB_DIR", tmp_path)
         console = MagicMock()
         _clear_sessions(console)
         console.print.assert_called_with("[hint]No saved sessions found.[/hint]")
@@ -1052,24 +1052,24 @@ class TestStandupCLI:
             parser.parse_args(["--standup-output", "carrier-pigeon"])
 
     def test_run_standup_no_session_returns_2(self, tmp_path, monkeypatch):
-        from scrum_agent import cli
+        from yeaboi import cli
 
-        monkeypatch.setattr("scrum_agent.paths.get_db_path", lambda: tmp_path / "sessions.db")
-        monkeypatch.setattr("scrum_agent.paths.get_standup_log_dir", lambda: tmp_path)
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
+        monkeypatch.setattr("yeaboi.paths.get_standup_log_dir", lambda: tmp_path)
         parser = build_parser()
         args = parser.parse_args(["--standup-run"])
         assert cli._run_standup(args) == 2
 
     def test_run_standup_invokes_engine(self, tmp_path, monkeypatch):
-        from scrum_agent import cli
-        from scrum_agent.agent.state import StandupReport
-        from scrum_agent.sessions import SessionStore
+        from yeaboi import cli
+        from yeaboi.agent.state import StandupReport
+        from yeaboi.sessions import SessionStore
 
         db = tmp_path / "sessions.db"
         with SessionStore(db) as store:
             store.create_session("s1", project_name="Demo")
-        monkeypatch.setattr("scrum_agent.paths.get_db_path", lambda: db)
-        monkeypatch.setattr("scrum_agent.paths.get_standup_log_dir", lambda: tmp_path)
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+        monkeypatch.setattr("yeaboi.paths.get_standup_log_dir", lambda: tmp_path)
 
         calls = {}
 
@@ -1078,7 +1078,7 @@ class TestStandupCLI:
             calls["channels"] = channels
             return StandupReport(session_id=session_id, sprint_day=2, sprint_total_days=10)
 
-        monkeypatch.setattr("scrum_agent.standup.engine.run_standup", fake_run)
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", fake_run)
         parser = build_parser()
         args = parser.parse_args(["--standup-run", "--standup-session", "s1", "--standup-output", "all"])
         rc = cli._run_standup(args)

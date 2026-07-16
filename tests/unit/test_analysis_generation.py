@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from scrum_agent.tools.team_learning import (
+from yeaboi.tools.team_learning import (
     generate_sample_epic,
     generate_sample_sprint,
     generate_sample_stories,
@@ -104,7 +104,7 @@ def _mock_llm_response(content: str) -> MagicMock:
 class TestGenerateSampleEpic:
     """Test sample epic generation with mocked LLM and fallback."""
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_successful_generation(self, mock_get_llm):
         epic_json = json.dumps(_SAMPLE_EPIC)
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(epic_json)
@@ -116,7 +116,7 @@ class TestGenerateSampleEpic:
         assert result["priority"] == "high"
         assert result["stories_estimate"] == 5
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_json_with_code_fences(self, mock_get_llm):
         """LLM wraps JSON in markdown code fences — should still parse."""
         epic_json = f"```json\n{json.dumps(_SAMPLE_EPIC)}\n```"
@@ -126,7 +126,7 @@ class TestGenerateSampleEpic:
         assert isinstance(result, dict)
         assert "title" in result
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_llm_error(self, mock_get_llm):
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("API error")
 
@@ -137,7 +137,7 @@ class TestGenerateSampleEpic:
         assert "rationale" in result
         assert "Fallback" in result["rationale"]
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_invalid_json(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response("not valid json {{{")
 
@@ -147,13 +147,13 @@ class TestGenerateSampleEpic:
 
     def test_fallback_uses_epic_examples(self):
         """When LLM unavailable, fallback should use first epic example if available."""
-        with patch("scrum_agent.agent.llm.get_llm", side_effect=RuntimeError("unavailable")):
+        with patch("yeaboi.agent.llm.get_llm", side_effect=RuntimeError("unavailable")):
             result = generate_sample_epic(_CALIBRATION, _EXAMPLES)
             assert isinstance(result, dict)
             # Should use first example title from naming_conventions
             assert result["title"] == "Q4|2025|High Region Outage DR"
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_no_examples(self, mock_get_llm):
         epic_json = json.dumps(_SAMPLE_EPIC)
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(epic_json)
@@ -161,7 +161,7 @@ class TestGenerateSampleEpic:
         result = generate_sample_epic(_CALIBRATION, None)
         assert isinstance(result, dict)
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_empty_examples(self, mock_get_llm):
         epic_json = json.dumps(_SAMPLE_EPIC)
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(epic_json)
@@ -178,7 +178,7 @@ class TestGenerateSampleEpic:
 class TestGenerateSampleStories:
     """Test sample stories generation with mocked LLM and fallback."""
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_successful_generation(self, mock_get_llm):
         stories_json = json.dumps(_SAMPLE_STORIES)
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(stories_json)
@@ -190,7 +190,7 @@ class TestGenerateSampleStories:
         assert result[0]["id"] == "S1"
         assert result[0]["story_points"] == 5
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_json_with_code_fences(self, mock_get_llm):
         stories_json = f"```json\n{json.dumps(_SAMPLE_STORIES)}\n```"
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(stories_json)
@@ -199,7 +199,7 @@ class TestGenerateSampleStories:
         assert isinstance(result, list)
         assert len(result) >= 1
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_llm_error(self, mock_get_llm):
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("API error")
 
@@ -209,7 +209,7 @@ class TestGenerateSampleStories:
         assert len(result) >= 1
         assert "Fallback" in result[0]["rationale"]
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_invalid_json(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response("broken")
 
@@ -217,7 +217,7 @@ class TestGenerateSampleStories:
         assert isinstance(result, list)
         assert len(result) >= 1
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_stories_count_capped_at_3(self, mock_get_llm):
         """Even if epic estimates 10 stories, generate at most 3."""
         big_epic = {**_SAMPLE_EPIC, "stories_estimate": 10}
@@ -227,13 +227,13 @@ class TestGenerateSampleStories:
         result = generate_sample_stories(_CALIBRATION, big_epic)
         assert len(result) <= 3
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_no_examples(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_SAMPLE_STORIES))
         result = generate_sample_stories(_CALIBRATION, _SAMPLE_EPIC, None)
         assert isinstance(result, list)
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_epic_with_zero_stories_estimate(self, mock_get_llm):
         """Epic with stories_estimate=0 should still generate at least 2."""
         epic = {**_SAMPLE_EPIC, "stories_estimate": 0}
@@ -250,7 +250,7 @@ class TestGenerateSampleStories:
 class TestGenerateSampleTasks:
     """Test sample tasks generation with mocked LLM and fallback."""
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_successful_generation(self, mock_get_llm):
         tasks_json = json.dumps(_SAMPLE_TASKS)
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(tasks_json)
@@ -261,7 +261,7 @@ class TestGenerateSampleTasks:
         assert len(result) == 3
         assert result[0]["id"] == "T-S1-01"
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_json_with_code_fences(self, mock_get_llm):
         tasks_json = f"```\n{json.dumps(_SAMPLE_TASKS)}\n```"
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(tasks_json)
@@ -269,7 +269,7 @@ class TestGenerateSampleTasks:
         result = generate_sample_tasks(_CALIBRATION, _SAMPLE_STORIES)
         assert isinstance(result, list)
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_llm_error(self, mock_get_llm):
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("API error")
 
@@ -281,7 +281,7 @@ class TestGenerateSampleTasks:
         story_ids = {t["story_id"] for t in result}
         assert "S1" in story_ids
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_invalid_json(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response("{invalid")
 
@@ -289,7 +289,7 @@ class TestGenerateSampleTasks:
         assert isinstance(result, list)
         assert len(result) >= 1
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_creates_task_per_story(self, mock_get_llm):
         """Fallback should create at least one task per story."""
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("fail")
@@ -299,19 +299,19 @@ class TestGenerateSampleTasks:
         input_story_ids = {s["id"] for s in _SAMPLE_STORIES}
         assert fallback_story_ids == input_story_ids
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_no_examples(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_SAMPLE_TASKS))
         result = generate_sample_tasks(_CALIBRATION, _SAMPLE_STORIES, None)
         assert isinstance(result, list)
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_empty_stories(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response("[]")
         result = generate_sample_tasks(_CALIBRATION, [])
         assert isinstance(result, list)
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_task_decomposition_context_injected(self, mock_get_llm):
         """When examples include task_decomposition, it should be in the prompt."""
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_SAMPLE_TASKS))
@@ -342,7 +342,7 @@ class TestGenerateSampleSprint:
         "rationale": "Conservative allocation.",
     }
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_successful_generation(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(self._SPRINT_RESULT))
 
@@ -353,7 +353,7 @@ class TestGenerateSampleSprint:
         assert result["velocity_target"] == 20
         assert result["total_points"] == 8
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_json_with_code_fences(self, mock_get_llm):
         sprint_json = f"```json\n{json.dumps(self._SPRINT_RESULT)}\n```"
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(sprint_json)
@@ -362,7 +362,7 @@ class TestGenerateSampleSprint:
         assert isinstance(result, dict)
         assert "sprint_name" in result
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_llm_error(self, mock_get_llm):
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("API error")
 
@@ -372,7 +372,7 @@ class TestGenerateSampleSprint:
         assert "Fallback" in result["rationale"]
         assert result["velocity_target"] == 25.9  # avg_delivered_velocity from examples
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_on_invalid_json(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response("not json")
 
@@ -380,14 +380,14 @@ class TestGenerateSampleSprint:
         assert isinstance(result, dict)
         assert "Fallback" in result["rationale"]
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_includes_all_story_ids(self, mock_get_llm):
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("fail")
 
         result = generate_sample_sprint(_CALIBRATION, _SAMPLE_STORIES, _SAMPLE_TASKS)
         assert set(result["stories_included"]) == {"S1", "S2"}
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_total_points_matches_stories(self, mock_get_llm):
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("fail")
 
@@ -395,7 +395,7 @@ class TestGenerateSampleSprint:
         expected_pts = sum(s.get("story_points", 0) for s in _SAMPLE_STORIES)
         assert result["total_points"] == expected_pts
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_fallback_without_examples(self, mock_get_llm):
         """Without examples, fallback velocity_target should be 20."""
         mock_get_llm.return_value.invoke.side_effect = RuntimeError("fail")
@@ -403,13 +403,13 @@ class TestGenerateSampleSprint:
         result = generate_sample_sprint(_CALIBRATION, _SAMPLE_STORIES, _SAMPLE_TASKS, None)
         assert result["velocity_target"] == 20  # default fallback
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_no_examples(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(self._SPRINT_RESULT))
         result = generate_sample_sprint(_CALIBRATION, _SAMPLE_STORIES, _SAMPLE_TASKS, None)
         assert isinstance(result, dict)
 
-    @patch("scrum_agent.agent.llm.get_llm")
+    @patch("yeaboi.agent.llm.get_llm")
     def test_empty_stories_and_tasks(self, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response(
             json.dumps({**self._SPRINT_RESULT, "stories_included": [], "total_points": 0})
