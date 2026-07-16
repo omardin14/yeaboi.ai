@@ -101,7 +101,7 @@ def record_voice_input(live: Live, console: Console, _key, render_status=None) -
     background thread while animating, and returns the transcript. Returns None
     on cancel, no speech, or error (errors are logged and shown briefly).
     """
-    from yeaboi.voice import Recorder, is_model_loaded, is_voice_available, transcribe
+    from yeaboi.voice import Recorder, is_model_loaded, is_voice_available, transcribe, voice_install_command
 
     def _paint(status: str, tick: float) -> None:
         if render_status is not None:
@@ -183,7 +183,7 @@ def record_voice_input(live: Live, console: Console, _key, render_status=None) -
 
     if error[0] is not None:
         logger.warning("Transcription failed", exc_info=error[0])
-        _flash(live, console, _key, "Transcription failed — see logs (try: uv sync --extra voice)", _ERR_BORDER)
+        _flash(live, console, _key, f"Transcription failed — see logs (try: {voice_install_command()})", _ERR_BORDER)
         return None
 
     text = result[0] or ""

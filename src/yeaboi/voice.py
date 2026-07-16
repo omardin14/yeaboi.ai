@@ -16,8 +16,10 @@ Design notes / architectural decisions:
 - **Lazy imports.** Both heavy dependencies (`sounddevice` for mic capture and
   `faster_whisper` for transcription) are imported *inside* functions, mirroring
   the optional-provider pattern in `agent/llm.py`. Importing this module never
-  fails; the deps are only needed when voice is actually used. Install with:
-  ``uv sync --extra voice``. The sounddevice wheels bundle PortAudio on macOS
+  fails; the deps are only needed when voice is actually used. The install
+  command is install-method-aware — see :func:`voice_install_command` (a source
+  checkout uses ``uv sync --extra voice``; PyPI users get the matching
+  ``uv tool``/``pipx``/``pip`` form). The sounddevice wheels bundle PortAudio on macOS
   and Windows (nothing else to install); on Linux the wheel is pure-Python and
   needs the system library too (e.g. ``sudo apt install libportaudio2``).
 - **Cheap availability probe.** :func:`is_voice_available` uses
@@ -37,6 +39,9 @@ from __future__ import annotations
 import importlib.util
 import io
 import logging
+import os
+import pathlib
+import sys
 import wave
 
 from yeaboi.config import get_voice_model
@@ -52,6 +57,32 @@ _SAMPLE_WIDTH_BYTES = 2  # int16
 # Loaded WhisperModel instances keyed by size (e.g. "base"). Populated lazily on
 # first transcription so the (potentially large) model download happens once.
 _MODEL_CACHE: dict = {}
+
+
+def voice_install_command() -> str:
+    """Return the install command that will actually work for *this* install.
+
+    The voice deps live in the ``voice`` extra, but *how* to add an extra depends
+    on how yeaboi was installed. A source checkout uses ``uv sync``; PyPI users
+    (uv tool / pipx / pip) must reinstall the distribution with the extra. There
+    is no single command that fits all, so detect and branch. Detection is
+    path-based (not ``importlib.metadata``) because the legacy install may be
+    registered under the old distribution name ``scrum-agent``; the package name
+    in the returned command is pinned to ``yeaboi`` — the canonical distribution
+    that actually publishes the extra.
+    """
+    # Source checkout (incl. editable / `make install`): pyproject at the repo
+    # root two levels above this package. `uv sync --extra voice` is valid there.
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    if (repo_root / "pyproject.toml").exists() and (repo_root / "src" / "yeaboi").is_dir():
+        return "uv sync --extra voice"
+
+    exe = sys.executable.replace("\\", "/")
+    if "/uv/tools/" in exe:
+        return "uv tool install 'yeaboi[voice]'"
+    if "pipx" in exe or os.environ.get("PIPX_HOME") or os.environ.get("PIPX_BIN_DIR"):
+        return "pipx install 'yeaboi[voice]'"
+    return "pip install 'yeaboi[voice]'"
 
 
 def _installed(module_name: str) -> bool:
@@ -75,9 +106,10 @@ def is_voice_available() -> tuple[bool, str]:
     available, otherwise a short human-readable explanation for the UI.
     """
     if not _installed("sounddevice"):
-        return False, "Install voice extra: uv sync --extra voice (Linux also: apt install libportaudio2)"
+        # Linux wheels need the system PortAudio lib too.
+        return False, f"Install voice extra: {voice_install_command()} (Linux also: apt install libportaudio2)"
     if not _installed("faster_whisper"):
-        return False, "Install voice extra: uv sync --extra voice"
+        return False, f"Install voice extra: {voice_install_command()}"
     return True, ""
 
 
