@@ -1,18 +1,20 @@
-"""Notion (Docs) phase of the provider selection wizard.
+"""Confluence (Docs) phase of the provider selection wizard.
 
-# See README: "Architecture" — this module handles the standalone Notion
-# credential step. Unlike Confluence (which rides on Jira's Atlassian auth in the
-# Issue Tracking form), Notion is an independent doc tool with its own integration
-# token, so it gets its own optional wizard step.
+# See README: "Architecture" — this module handles the Confluence sub-step of the
+# Docs wizard step. Unlike Notion (an independent doc tool with its own token),
+# Confluence rides on Jira's Atlassian auth (JIRA_BASE_URL/EMAIL/API_TOKEN — see
+# tools/confluence.py); the only extra credential is the space key. The wizard
+# therefore only runs this phase when Jira was configured in the Issue Tracking
+# step and passes those creds in for live verification.
 #
-# It reuses the generic multi-field form renderer (_build_issue_tracking_screen,
-# which accepts `fields=` and `subtitle=`) and the same pulsing verify/confirm
-# animation as the Jira/AzDO form — just with _NOTION_FIELDS and a live
-# _verify_notion check.
+# It reuses the generic multi-field form renderer (_build_issue_tracking_screen)
+# and the same pulsing verify/confirm animation as the Notion/Jira forms — just
+# with _CONFLUENCE_FIELDS and a live _verify_confluence check.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import sys
 import termios
@@ -23,8 +25,8 @@ from rich.console import Console
 from rich.live import Live
 
 from scrum_agent.ui.provider_select._config import _save_progress
-from scrum_agent.ui.provider_select._constants import _NOTION_FIELDS
-from scrum_agent.ui.provider_select._verification import _verify_notion
+from scrum_agent.ui.provider_select._constants import _CONFLUENCE_FIELDS
+from scrum_agent.ui.provider_select._verification import _verify_confluence
 from scrum_agent.ui.provider_select.screens._screens import (
     _ACCENT,
     _build_provider_row,
@@ -33,36 +35,48 @@ from scrum_agent.ui.provider_select.screens._screens import (
 from scrum_agent.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
 from scrum_agent.ui.shared._animations import FRAME_TIME_30FPS
 
-_TITLE = "Notion"
+logger = logging.getLogger(__name__)
+
+_TITLE = "Confluence"
 _SUBTITLE = "Docs"
+_DOCS_STEP = 2  # _STEPS[2] == "Docs"
 
 
-def _run_notion(
+def _run_confluence(
     console: Console,
     read_key,
     existing_config: dict[str, str] | None,
     live: Live,
+    *,
+    jira_creds: dict[str, str],
 ) -> dict[str, str] | None:
-    """Show the optional Notion credential form and verify the token.
+    """Show the optional Confluence space-key form and verify it.
 
-    Shows a Notion / Skip picker first (matching the Issue Tracking & Version
-    Control steps), then the credential form. Returns a dict of collected Notion
-    env vars, an empty dict when the user picks Skip (or submits an empty token),
-    or None when the user presses Esc to go back. Notion is optional — the step
-    never blocks users who don't use it.
+    Shows a Confluence / Skip picker first (matching the Notion & Issue Tracking
+    steps), then the space-key form. ``jira_creds`` supplies the shared Atlassian
+    credentials (JIRA_BASE_URL/EMAIL/API_TOKEN) used to verify the space. Returns a
+    dict of collected Confluence env vars, an empty dict when the user picks Skip
+    (or submits an empty space key), or None when the user presses Esc to go back.
+    Confluence is optional — the step never blocks users who don't use it.
     """
     import threading
 
     from rich.align import Align
     from rich.text import Text
 
-    fields = _NOTION_FIELDS
+    logger.info("Entering Confluence setup sub-step")
+
+    fields = _CONFLUENCE_FIELDS
     n = len(fields)
     _cfg = existing_config or {}
     values: dict[int, str] = {i: _cfg.get(field["env_var"], "") for i, field in enumerate(fields)}
     errors: dict[int, str] = {}
     verified: dict[int, bool] = {}
     selected = 0
+
+    base_url = jira_creds.get("JIRA_BASE_URL", "")
+    email = jira_creds.get("JIRA_EMAIL", "")
+    token = jira_creds.get("JIRA_API_TOKEN", "")
 
     def _drain() -> None:
         """Drain buffered stdin so a held key from the previous screen doesn't leak in."""
@@ -77,12 +91,12 @@ def _run_notion(
         finally:
             termios.tcsetattr(_drain_fd, termios.TCSADRAIN, _drain_old)
 
-    # --- Step 1: Notion / Skip picker (matches the Issue Tracking & Version
-    # Control steps, which both offer an explicit Skip rather than making the user
-    # guess that an empty submit skips the step). ---
-    def _run_notion_selection() -> str | None:
-        """Show the Notion / Skip picker. Returns "notion", "skip", or None (Esc)."""
-        cards = [{"name": "Notion", "color": _ACCENT}, {"name": "Skip", "color": _ACCENT}]
+    # --- Step 1: Confluence / Skip picker (matches the Notion & Issue Tracking
+    # steps, which both offer an explicit Skip rather than making the user guess
+    # that an empty submit skips the step). ---
+    def _run_confluence_selection() -> str | None:
+        """Show the Confluence / Skip picker. Returns "confluence", "skip", or None (Esc)."""
+        cards = [{"name": "Confluence", "color": _ACCENT}, {"name": "Skip", "color": _ACCENT}]
         pick = 0
 
         def _render_menu() -> None:
@@ -95,7 +109,7 @@ def _run_notion(
             live.update(
                 _build_screen_frame(
                     subtitle="Docs  ·  ↑↓ choose  ·  Enter select",
-                    step=2,
+                    step=_DOCS_STEP,
                     body_items=body,
                     body_height=body_h,
                     width=w,
@@ -113,15 +127,17 @@ def _run_notion(
             elif key in ("down", "scroll_down"):
                 pick = (pick + 1) % len(cards)
             elif key == "enter":
-                return "notion" if pick == 0 else "skip"
+                return "confluence" if pick == 0 else "skip"
             elif key == "esc":
                 return None
             _render_menu()
 
-    choice = _run_notion_selection()
+    choice = _run_confluence_selection()
     if choice is None:
+        logger.info("Confluence sub-step: user pressed Esc (back)")
         return None
     if choice == "skip":
+        logger.info("Confluence sub-step: skipped")
         return {}
 
     _drain()
@@ -137,7 +153,7 @@ def _run_notion(
                 fields=fields,
                 subtitle=_SUBTITLE,
                 title_text=_TITLE,
-                step=2,  # Docs chip (_STEPS[2]); shared form defaults to Issue Tracking
+                step=_DOCS_STEP,
                 **kw,
             )
         )
@@ -152,17 +168,18 @@ def _run_notion(
         elif key in ("down", "scroll_down"):
             selected = (selected + 1) % n
         elif key == "enter":
-            token = values.get(0, "").strip()
+            space_key = values.get(0, "").strip()
 
-            # Empty token → skip Notion entirely (it's optional).
-            if not token:
+            # Empty space key → skip Confluence entirely (it's optional).
+            if not space_key:
+                logger.info("Confluence sub-step: empty space key, skipping")
                 return {}
 
-            # Verify the token with a pulsing border while the API call runs.
+            # Verify the space with a pulsing border while the API call runs.
             verify_result: list[tuple[bool, str]] = []
 
             def _do_verify():
-                verify_result.append(_verify_notion(token))
+                verify_result.append(_verify_confluence(base_url, email, token, space_key))
 
             thread = threading.Thread(target=_do_verify, daemon=True)
             thread.start()
@@ -179,7 +196,7 @@ def _run_notion(
             ok, msg = verify_result[0]
 
             if ok:
-                # Green success flash, matching the Jira/VC verify animation.
+                # Green success flash, matching the Notion/Jira verify animation.
                 green_r, green_g, green_b = 80, 220, 120
                 for frame in range(10):
                     t = frame / 9
@@ -195,21 +212,23 @@ def _run_notion(
                 _render(verified={i: True for i in range(n)})
                 time.sleep(0.6)
 
-                notion_data = {}
+                confluence_data = {}
                 for i, field in enumerate(fields):
                     val = values.get(i, "").strip()
                     if val:
-                        notion_data[field["env_var"]] = val
-                _save_progress(notion_data)
-                return notion_data
+                        confluence_data[field["env_var"]] = val
+                _save_progress(confluence_data)
+                logger.info("Confluence sub-step: saved space key")
+                return confluence_data
 
-            # Verification failed — surface the error on the token field.
+            # Verification failed — surface the error on the space-key field.
             errors[0] = msg
             selected = 0
             _render(errors=errors)
             continue
 
         elif key == "esc":
+            logger.info("Confluence sub-step: user pressed Esc (back)")
             return None
         elif key == "clear":
             values[selected] = ""

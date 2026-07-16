@@ -63,7 +63,7 @@ def _build_vc_select_screen(
 
     return _build_screen_frame(
         subtitle="Version Control",
-        step=1,
+        step=3,
         body_items=body,
         body_height=body_h,
         width=width,
@@ -144,7 +144,7 @@ def _build_vc_input_screen(
 
     return _build_screen_frame(
         subtitle="Enter your PAT token",
-        step=1,
+        step=3,
         body_items=body,
         body_height=body_h,
         width=width,
@@ -237,6 +237,7 @@ def _build_issue_tracking_screen(
     fields: list[dict[str, Any]] | None = None,
     subtitle: str = "Issue tracking",
     title_text: str = "",
+    step: int = 1,
 ) -> Panel:
     """Build the issue tracking multi-field form screen with viewport scrolling.
 
@@ -246,6 +247,9 @@ def _build_issue_tracking_screen(
     fields: optional field definitions to use instead of the default Jira fields.
     subtitle: context line shown under the title (e.g. "Issue tracking", "Docs").
     title_text: tall ANSI-Shadow title (e.g. "Jira", "Notion"). Defaults to "Setup".
+    step: progress-bar step index into ``_STEPS``. This generic form renders both
+        the Issue Tracking step (1) and the Docs step (2, Notion/Confluence), so the
+        active chip is caller-driven rather than hardcoded. Defaults to 1.
     """
     errors = errors or {}
     verified = verified or {}
@@ -320,7 +324,7 @@ def _build_issue_tracking_screen(
 
     return _build_screen_frame(
         subtitle=subtitle,
-        step=2,
+        step=step,
         body_items=body,
         body_height=body_h,
         width=width,

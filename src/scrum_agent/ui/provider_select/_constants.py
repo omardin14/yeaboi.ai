@@ -142,13 +142,6 @@ _ISSUE_TRACKING_FIELDS: list[dict[str, Any]] = [
         "masked": False,
         "required": True,
     },
-    {
-        "env_var": "CONFLUENCE_SPACE_KEY",
-        "label": "Confluence Space Key",
-        "placeholder": "MYSPACE",
-        "masked": False,
-        "required": False,
-    },
 ]
 
 # Issue tracking fields — Azure DevOps Boards
@@ -190,10 +183,15 @@ _ISSUE_TRACKING_OPTIONS: list[dict[str, Any]] = [
     {"name": "Skip", "fields": []},
 ]
 
-# Notion doc-tool fields — a standalone wizard step (step 3). Unlike Confluence
-# (which rides on Jira's Atlassian auth), Notion has its own integration token and
-# no "space key"; the optional root page/database ID scopes page creation and the
-# standup activity feed. Both fields are optional so users without Notion skip past.
+# ── Docs step (Notion + Confluence) ──────────────────────────────────────────
+# Both doc tools live under the "Docs" progress chip (_STEPS[2]). Notion has its
+# own integration token; Confluence rides on Jira's Atlassian auth (JIRA_BASE_URL/
+# EMAIL/API_TOKEN — see tools/confluence.py) and only adds a space key, so its
+# sub-step is only offered when Jira was configured in the Issue Tracking step.
+
+# Notion doc-tool fields. Unlike Confluence, Notion has its own integration token
+# and no "space key"; the optional root page/database ID scopes page creation and
+# the standup activity feed. Both fields are optional so users without Notion skip past.
 _NOTION_FIELDS: list[dict[str, Any]] = [
     {
         "env_var": "NOTION_TOKEN",
@@ -206,6 +204,20 @@ _NOTION_FIELDS: list[dict[str, Any]] = [
         "env_var": "NOTION_ROOT_PAGE_ID",
         "label": "Root Page/Database ID (optional)",
         "placeholder": "",
+        "masked": False,
+        "required": False,
+    },
+]
+
+# Confluence fields — the Docs step's second sub-tool. Confluence reuses the Jira
+# Atlassian credentials (JIRA_BASE_URL/EMAIL/API_TOKEN) collected in the Issue
+# Tracking step, so the only field here is the space key. The sub-step is gated on
+# Jira being configured (see _phase_confluence / the wizard flow in __init__.py).
+_CONFLUENCE_FIELDS: list[dict[str, Any]] = [
+    {
+        "env_var": "CONFLUENCE_SPACE_KEY",
+        "label": "Confluence Space Key",
+        "placeholder": "MYSPACE",
         "masked": False,
         "required": False,
     },

@@ -23,7 +23,7 @@ from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
 # Rendering helpers
 # ---------------------------------------------------------------------------
 
-_STEPS = ["LLM Provider", "Issue Tracking", "Version Control"]
+_STEPS = ["LLM Provider", "Issue Tracking", "Docs", "Version Control"]
 
 # Brand blue accent — the same rgb the app's project cards / action buttons and
 # the setup intro wordmark use. Applied to the frame border, title, idle input

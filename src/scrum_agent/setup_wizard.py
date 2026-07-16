@@ -241,9 +241,13 @@ def run_setup_wizard(console: Console) -> bool:
     issue_tracking = result.get("issue_tracking", {})
     collected.update(issue_tracking)
 
-    # ── Notion (optional doc tool, collected in full-screen UI) ─────────
+    # ── Docs (optional, collected in full-screen UI) ────────────────────
+    # Notion has its own token; Confluence adds only CONFLUENCE_SPACE_KEY on top of
+    # the Jira Atlassian creds already merged from `issue_tracking` above.
     notion = result.get("notion", {})
     collected.update(notion)
+    confluence = result.get("confluence", {})
+    collected.update(confluence)
 
     # ── Bedrock: auto-detect model from OpenClaw if available ───────────────
     # OpenClaw's models.json has the exact Bedrock model ID (e.g.

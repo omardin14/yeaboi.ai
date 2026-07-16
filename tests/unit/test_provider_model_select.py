@@ -16,11 +16,17 @@ from rich.panel import Panel
 from scrum_agent.agent.llm import _PROVIDER_DEFAULTS
 from scrum_agent.setup_wizard import _PROVIDERS, run_setup_wizard
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS
-from scrum_agent.ui.provider_select._verification import _verify_model, fetch_available_models
+from scrum_agent.ui.provider_select._verification import (
+    _verify_confluence,
+    _verify_model,
+    fetch_available_models,
+)
 from scrum_agent.ui.provider_select.screens._screens import (
+    _STEPS,
     _build_model_input_screen,
     _build_model_loading_screen,
     _build_model_select_screen,
+    _build_progress,
     _build_screen_frame,
 )
 from scrum_agent.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
@@ -347,6 +353,16 @@ class TestIssueTrackingHint:
         )
         assert "Enter to verify" not in out
 
+    def test_docs_step_renders_docs_chip(self):
+        # The shared form is reused for the Docs step (Notion/Confluence); step=2
+        # must surface the "Docs" progress chip in the footer.
+        out = _render(
+            _build_issue_tracking_screen(
+                0, {0: ""}, width=100, height=30, title_text="Confluence", subtitle="Docs", step=2
+            )
+        )
+        assert "Docs" in out
+
 
 class TestNotionPicker:
     """The Notion step offers an explicit Notion / Skip picker (like Issue Tracking)."""
@@ -386,6 +402,127 @@ class TestNotionPicker:
         from scrum_agent.ui.provider_select._phase_notion import _run_notion
 
         assert _run_notion(_console(), _KeySequence(["esc"]), None, _FakeLive()) is None
+
+
+def _active_progress_label(step: int) -> str | None:
+    """Return the label of the chip _build_progress marks active for *step*.
+
+    The active chip is styled ``bold white on <accent>`` (see _build_progress);
+    the done chips use a green bg and future chips a dim grey bg, so the accent
+    background uniquely identifies the active step. This lets the test assert the
+    full step→chip mapping without depending on exact colour constants.
+    """
+    text = _build_progress(step)
+    for span in text.spans:
+        if "on rgb(70,100,180)" in str(span.style):
+            return text.plain[span.start : span.end].strip()
+    return None
+
+
+class TestProgressSteps:
+    """The setup wizard's progress bar has a dedicated 'Docs' chip, correctly indexed."""
+
+    def test_steps_order(self):
+        assert _STEPS == ["LLM Provider", "Issue Tracking", "Docs", "Version Control"]
+
+    @pytest.mark.parametrize(
+        "step,label",
+        [
+            (0, "LLM Provider"),
+            (1, "Issue Tracking"),
+            (2, "Docs"),
+            (3, "Version Control"),
+        ],
+    )
+    def test_active_chip_matches_step(self, step, label):
+        # Regression guard for the step re-indexing: the Notion/Confluence (Docs)
+        # step must highlight "Docs", not "Version Control" (the original bug).
+        assert _active_progress_label(step) == label
+
+
+class TestConfluenceVerify:
+    """_verify_confluence checks a space is reachable with the shared Jira Atlassian auth."""
+
+    def test_success(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200))
+        ok, msg = _verify_confluence("https://org.atlassian.net", "u@x.com", "tok", "SPACE")
+        assert ok is True
+        assert "verified" in msg.lower()
+
+    def test_bad_credentials(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(401))
+        ok, msg = _verify_confluence("https://org.atlassian.net", "u@x.com", "bad", "SPACE")
+        assert ok is False
+        assert "credentials" in msg.lower()
+
+    def test_space_not_found(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(404))
+        ok, msg = _verify_confluence("https://org.atlassian.net", "u@x.com", "tok", "NOPE")
+        assert ok is False
+        assert "NOPE" in msg
+
+    def test_connection_error(self, monkeypatch):
+        import httpx
+
+        def _boom(*a, **kw):
+            raise RuntimeError("network down")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        ok, msg = _verify_confluence("https://org.atlassian.net", "u@x.com", "tok", "SPACE")
+        assert ok is False
+        assert "Connection error" in msg
+
+
+class TestConfluencePicker:
+    """The Docs step's Confluence sub-step offers an explicit Confluence / Skip picker."""
+
+    _JIRA = {
+        "JIRA_BASE_URL": "https://org.atlassian.net",
+        "JIRA_EMAIL": "u@x.com",
+        "JIRA_API_TOKEN": "tok",
+    }
+
+    def _patch_tty(self, monkeypatch):
+        import select as _select
+
+        from scrum_agent.ui.provider_select import _phase_confluence as pc
+
+        class _FakeStdin:
+            def fileno(self):
+                return 0
+
+            def read(self, n):
+                return ""
+
+        monkeypatch.setattr(pc.sys, "stdin", _FakeStdin())
+        monkeypatch.setattr(pc.termios, "tcgetattr", lambda fd: None)
+        monkeypatch.setattr(pc.termios, "tcsetattr", lambda fd, when, attrs: None)
+        monkeypatch.setattr(pc.tty, "setcbreak", lambda fd: None)
+        monkeypatch.setattr(_select, "select", lambda r, w, x, t: ([], [], []))
+
+    def test_skip_returns_empty_dict(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+
+        live = _FakeLive()
+        # ↓ moves to "Skip", Enter selects it.
+        result = _run_confluence(_console(), _KeySequence(["down", "enter"]), None, live, jira_creds=self._JIRA)
+        assert result == {}
+        rendered = "".join(_render(f) for f in live.frames)
+        assert "█" in rendered and "choose" in rendered
+
+    def test_esc_on_picker_returns_none(self, monkeypatch):
+        self._patch_tty(monkeypatch)
+        from scrum_agent.ui.provider_select._phase_confluence import _run_confluence
+
+        result = _run_confluence(_console(), _KeySequence(["esc"]), None, _FakeLive(), jira_creds=self._JIRA)
+        assert result is None
 
 
 class TestShadowWordmarks:

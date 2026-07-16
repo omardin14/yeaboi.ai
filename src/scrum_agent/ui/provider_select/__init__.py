@@ -20,6 +20,7 @@ from rich.console import Console
 
 from scrum_agent.ui.provider_select._config import _save_progress  # noqa: F401
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIONS
+from scrum_agent.ui.provider_select._phase_confluence import _run_confluence  # noqa: F401
 from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking  # noqa: F401
 from scrum_agent.ui.provider_select._phase_notion import _run_notion  # noqa: F401
 from scrum_agent.ui.provider_select._transitions import _transition_to_input  # noqa: F401
@@ -110,7 +111,8 @@ def select_provider(
     Organized as a step-based loop so Esc navigates back between steps:
     Step 0: LLM Provider selection + API key verification
     Step 1: Issue Tracking (Jira / Azure DevOps Boards / Skip)
-    Step 2: Docs / Notion (optional integration token)
+    Step 2: Docs — Notion (own token) then Confluence (shares Jira's Atlassian
+            auth, so only shown when Jira was configured). Both optional.
     Step 3: Version Control (GitHub PAT)
 
     Returns a dict compatible with setup_wizard._PROVIDERS values (with an
@@ -543,7 +545,7 @@ def select_provider(
                 continue
 
             # ══════════════════════════════════════════════════════════════
-            # Step 2: Docs / Notion (optional integration token)
+            # Step 2: Docs (Notion + Confluence, both optional)
             # ══════════════════════════════════════════════════════════════
             elif step == 2:
                 # Fade out the previous screen into the Notion form.
@@ -553,12 +555,28 @@ def select_provider(
                     time.sleep(FRAME_TIME_30FPS)
 
                 notion_result = _run_notion(console, read_key, existing_config, live)
-                if notion_result is not None:
-                    # Empty dict = user skipped (optional). Either way, record and advance.
-                    _issue_tracking_result["notion"] = notion_result
-                    step = 3
-                else:
+                if notion_result is None:
                     step = 1  # Esc → go back to issue tracking
+                    continue
+                # Empty dict = user skipped (optional). Either way, record.
+                _issue_tracking_result["notion"] = notion_result
+
+                # Confluence rides on Jira's Atlassian auth, so its sub-step is only
+                # offered when Jira was configured in the Issue Tracking step (the
+                # same "only when Jira configured" invariant Confluence has always
+                # had). If Jira was skipped or Azure DevOps was chosen, skip past.
+                _jira_creds = _issue_tracking_result.get("issue_tracking", {})
+                _jira_configured = all(_jira_creds.get(k) for k in ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"))
+                if _jira_configured:
+                    confluence_result = _run_confluence(
+                        console, read_key, existing_config, live, jira_creds=_jira_creds
+                    )
+                    if confluence_result is None:
+                        # Esc from Confluence → re-run the Docs step from the Notion picker.
+                        continue
+                    _issue_tracking_result["confluence"] = confluence_result
+
+                step = 3
                 continue
 
             # ══════════════════════════════════════════════════════════════
