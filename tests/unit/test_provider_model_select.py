@@ -35,7 +35,7 @@ from scrum_agent.ui.provider_select.screens._screens import (
     _build_progress,
     _build_screen_frame,
 )
-from scrum_agent.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
+from scrum_agent.ui.provider_select.screens._screens_vc import _build_hint_text, _build_issue_tracking_screen
 from scrum_agent.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
@@ -420,6 +420,38 @@ class TestConnectionFieldHints:
     def test_all_fields_have_hints(self, fields):
         for field in fields:
             assert field.get("hint"), f"{field['env_var']} is missing a where-to-get-it hint"
+
+
+class TestHintStyling:
+    """`_build_hint_text` renders the info glyph + emphasized URL treatment."""
+
+    def test_glyph_prefixes_the_line(self):
+        t = _build_hint_text("Create at: id.atlassian.com/x/api-tokens")
+        assert t.plain.startswith("ⓘ")
+
+    def test_url_is_emphasized_and_underlined(self):
+        t = _build_hint_text("Create at: id.atlassian.com/x/api-tokens")
+        # The URL token keeps its plain text intact...
+        assert "id.atlassian.com/x/api-tokens" in t.plain
+        # ...and is rendered underlined (emphasis) via a dedicated span.
+        assert any("underline" in str(s.style) for s in t.spans)
+
+    def test_https_url_emphasized(self):
+        t = _build_hint_text("Your org — https://dev.azure.com/<your-org>")
+        assert any("underline" in str(s.style) and "dev.azure.com" in t.plain[s.start : s.end] for s in t.spans)
+
+    def test_trailing_prose_not_swallowed_by_url(self):
+        # "notion.so/my-integrations, then share …" — the comma bounds the URL so
+        # the trailing instruction stays in the muted (non-underlined) style.
+        t = _build_hint_text("Create at: notion.so/my-integrations, then share your pages with it")
+        underlined = [t.plain[s.start : s.end] for s in t.spans if "underline" in str(s.style)]
+        assert underlined == ["notion.so/my-integrations"]
+
+    def test_no_url_renders_without_underline(self):
+        t = _build_hint_text("The email you sign in to Atlassian with")
+        assert "ⓘ" in t.plain
+        assert "Atlassian" in t.plain
+        assert not any("underline" in str(s.style) for s in t.spans)
 
 
 class TestNotionPicker:
