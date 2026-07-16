@@ -20,6 +20,7 @@ from rich.console import Console
 
 from scrum_agent.ui.provider_select._config import _save_progress  # noqa: F401
 from scrum_agent.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIONS
+from scrum_agent.ui.provider_select._nav import StepNav, nav_for_key
 from scrum_agent.ui.provider_select._phase_confluence import _run_confluence  # noqa: F401
 from scrum_agent.ui.provider_select._phase_issue_tracking import _run_issue_tracking  # noqa: F401
 from scrum_agent.ui.provider_select._phase_notion import _run_notion  # noqa: F401
@@ -108,12 +109,19 @@ def select_provider(
 ) -> dict[str, str] | None:
     """Show full-screen provider selection, then API key input with verification.
 
-    Organized as a step-based loop so Esc navigates back between steps:
+    Organized as a step-based loop:
     Step 0: LLM Provider selection + API key verification
     Step 1: Issue Tracking (Jira / Azure DevOps Boards / Skip)
     Step 2: Docs — Notion (own token) then Confluence (shares Jira's Atlassian
             auth, so only shown when Jira was configured). Both optional.
     Step 3: Version Control (GitHub PAT)
+
+    Navigation: Enter advances / confirms and Esc steps back, as before. Step 0
+    (LLM) is a required gate — the returned config dict is seeded from the chosen
+    provider + key. Once past it, the section chips act as a tab bar: on any
+    section's picker, ← / → jump between Issue Tracking, Docs and Version Control
+    (and back to LLM) in any order, and F finishes the wizard from anywhere.
+    Choices are accumulated in a single dict so jumping around never loses them.
 
     Returns a dict compatible with setup_wizard._PROVIDERS values (with an
     added 'api_key' field), or None if the user cancelled.
@@ -137,6 +145,16 @@ def select_provider(
     vc = None
     vc_token = ""
     step = 0
+
+    # The single accumulator for everything the wizard collects. Seeded once the
+    # LLM step completes (see step 0) and then updated slice-by-slice by each
+    # section, so the user can visit Issue Tracking / Docs / Version Control in
+    # any order (← / → between chips) and finish (F) from anywhere without losing
+    # what earlier sections gathered. Returned to setup_wizard as the result.
+    _collected: dict[str, str] = {}
+    # Set when a StepNav jump lands us on a section, so that section skips its
+    # cinematic fade-in transition (which assumes we arrived from the prior step).
+    _via_nav = False
 
     w, h = console.size
     with make_live(
@@ -509,7 +527,24 @@ def select_provider(
                     )
 
                 if _step0_done:
+                    # Seed the accumulator from the LLM choice. setdefault keeps any
+                    # slices (issue_tracking/notion/confluence/vc) already gathered on
+                    # a prior visit, so re-doing the LLM step to change providers never
+                    # wipes the other sections' data.
+                    _collected.update(
+                        {
+                            "name": provider["full_name"],
+                            "env_var": provider["env_var"],
+                            "provider_val": provider["provider_val"],
+                            "prefix": provider["prefix"],
+                            "instructions": provider["instructions"],
+                            "api_key": api_key,
+                            "llm_model": llm_model,
+                        }
+                    )
+                    _collected.setdefault("issue_tracking", {})
                     step = 1
+                    _via_nav = False
                 # else: Esc pressed → loop restarts step 0
                 continue
 
@@ -517,11 +552,15 @@ def select_provider(
             # Step 1: Issue Tracking (Jira / Azure DevOps Boards / Skip)
             # ══════════════════════════════════════════════════════════════
             elif step == 1:
-                # Fade out LLM input, fade in issue tracking
-                for grey in FADE_OUT_LEVELS:
-                    w, h = console.size
-                    live.update(_build_input_screen(provider, api_key, width=w, height=h, input_fade=grey))
-                    time.sleep(FRAME_TIME_30FPS)
+                _arrived_nav = _via_nav
+                _via_nav = False
+                # Fade out LLM input, fade in issue tracking. Skipped when we
+                # arrived via a ←/→ jump (there's no LLM input to fade from).
+                if not _arrived_nav:
+                    for grey in FADE_OUT_LEVELS:
+                        w, h = console.size
+                        live.update(_build_input_screen(provider, api_key, width=w, height=h, input_fade=grey))
+                        time.sleep(FRAME_TIME_30FPS)
 
                 # vc/vc_token not known yet — pass placeholders
                 _dummy_vc = {"env_var": "", "name": ""}
@@ -537,8 +576,14 @@ def select_provider(
                     llm_model=llm_model,
                 )
 
-                if result is not None:
-                    _issue_tracking_result = result
+                if isinstance(result, StepNav):
+                    if result.finish:
+                        disable_bracketed_paste()
+                        return _collected
+                    step = result.target
+                    _via_nav = True
+                elif result is not None:
+                    _collected.update(result)
                     step = 2
                 else:
                     step = 0  # Esc → go back to LLM provider
@@ -548,33 +593,51 @@ def select_provider(
             # Step 2: Docs (Notion + Confluence, both optional)
             # ══════════════════════════════════════════════════════════════
             elif step == 2:
-                # Fade out the previous screen into the Notion form.
-                for grey in FADE_OUT_LEVELS:
-                    w, h = console.size
-                    live.update(_build_input_screen(provider, api_key, width=w, height=h, input_fade=grey))
-                    time.sleep(FRAME_TIME_30FPS)
+                _arrived_nav = _via_nav
+                _via_nav = False
+                # Fade out the previous screen into the Notion form. Skipped on a
+                # ←/→ jump (there's no prior input screen to fade from).
+                if not _arrived_nav:
+                    for grey in FADE_OUT_LEVELS:
+                        w, h = console.size
+                        live.update(_build_input_screen(provider, api_key, width=w, height=h, input_fade=grey))
+                        time.sleep(FRAME_TIME_30FPS)
 
                 notion_result = _run_notion(console, read_key, existing_config, live)
+                if isinstance(notion_result, StepNav):
+                    if notion_result.finish:
+                        disable_bracketed_paste()
+                        return _collected
+                    step = notion_result.target
+                    _via_nav = True
+                    continue
                 if notion_result is None:
                     step = 1  # Esc → go back to issue tracking
                     continue
                 # Empty dict = user skipped (optional). Either way, record.
-                _issue_tracking_result["notion"] = notion_result
+                _collected["notion"] = notion_result
 
                 # Confluence rides on Jira's Atlassian auth, so its sub-step is only
                 # offered when Jira was configured in the Issue Tracking step (the
                 # same "only when Jira configured" invariant Confluence has always
                 # had). If Jira was skipped or Azure DevOps was chosen, skip past.
-                _jira_creds = _issue_tracking_result.get("issue_tracking", {})
+                _jira_creds = _collected.get("issue_tracking", {})
                 _jira_configured = all(_jira_creds.get(k) for k in ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"))
                 if _jira_configured:
                     confluence_result = _run_confluence(
                         console, read_key, existing_config, live, jira_creds=_jira_creds
                     )
+                    if isinstance(confluence_result, StepNav):
+                        if confluence_result.finish:
+                            disable_bracketed_paste()
+                            return _collected
+                        step = confluence_result.target
+                        _via_nav = True
+                        continue
                     if confluence_result is None:
                         # Esc from Confluence → re-run the Docs step from the Notion picker.
                         continue
-                    _issue_tracking_result["confluence"] = confluence_result
+                    _collected["confluence"] = confluence_result
 
                 step = 3
                 continue
@@ -583,27 +646,37 @@ def select_provider(
             # Step 3: Version Control (GitHub PAT)
             # ══════════════════════════════════════════════════════════════
             elif step == 3:
+                _arrived_nav = _via_nav
+                _via_nav = False
                 vc_selected = 0
                 vc_n = len(_VC_OPTIONS)
                 vc_start = time.monotonic()
 
-                for grey in FADE_IN_LEVELS:
-                    w, h = console.size
-                    live.update(
-                        _build_vc_select_screen(
-                            vc_selected,
-                            width=w,
-                            height=h,
-                            fade_style=grey,
-                            fade_indices=list(range(vc_n)),
+                if not _arrived_nav:
+                    for grey in FADE_IN_LEVELS:
+                        w, h = console.size
+                        live.update(
+                            _build_vc_select_screen(
+                                vc_selected,
+                                width=w,
+                                height=h,
+                                fade_style=grey,
+                                fade_indices=list(range(vc_n)),
+                            )
                         )
-                    )
-                    time.sleep(FRAME_TIME_30FPS)
+                        time.sleep(FRAME_TIME_30FPS)
 
                 # VC selection loop
                 _step2_selected = False
+                _vc_nav: StepNav | None = None
                 while True:
                     key = read_key(timeout=FRAME_TIME_30FPS) if _supports_timeout else read_key()
+                    # Section navigation (←/→ between chips, F to finish) short-circuits
+                    # the picker just like the other sections.
+                    nav = nav_for_key(key, 3)
+                    if nav is not None:
+                        _vc_nav = nav
+                        break
                     if key in ("up", "scroll_up"):
                         vc_selected = (vc_selected - 1) % vc_n
                     elif key in ("down", "scroll_down"):
@@ -617,6 +690,14 @@ def select_provider(
                     tick = time.monotonic() - vc_start
                     live.update(_build_vc_select_screen(vc_selected, width=w, height=h, shimmer_tick=tick))
 
+                if _vc_nav is not None:
+                    if _vc_nav.finish:
+                        disable_bracketed_paste()
+                        return _collected
+                    step = _vc_nav.target
+                    _via_nav = True
+                    continue
+
                 if not _step2_selected:
                     step = 1
                     continue
@@ -625,10 +706,10 @@ def select_provider(
 
                 # Skip selected — no PAT needed, finish wizard
                 if not vc["env_var"]:
-                    _issue_tracking_result["vc_env_var"] = ""
-                    _issue_tracking_result["vc_token"] = ""
+                    _collected["vc_env_var"] = ""
+                    _collected["vc_token"] = ""
                     disable_bracketed_paste()
-                    return _issue_tracking_result
+                    return _collected
 
                 # Transition: pulse selected, fade others, crossfade to input
                 all_vc = list(range(vc_n))
@@ -800,10 +881,10 @@ def select_provider(
 
                 if _step2_done:
                     # Build final result — merge issue tracking data with VC
-                    _issue_tracking_result["vc_env_var"] = vc["env_var"]
-                    _issue_tracking_result["vc_token"] = vc_token
+                    _collected["vc_env_var"] = vc["env_var"]
+                    _collected["vc_token"] = vc_token
                     disable_bracketed_paste()
-                    return _issue_tracking_result
+                    return _collected
                 else:
                     step = 2  # Esc → go back to Notion
                     continue

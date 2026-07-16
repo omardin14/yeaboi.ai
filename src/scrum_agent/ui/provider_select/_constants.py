@@ -113,6 +113,8 @@ _VC_OPTIONS: list[dict[str, Any]] = [
 ]
 
 # Issue tracking fields — step 4 (Jira)
+# Each field carries a "hint": a one-line "where to get it" note shown under the
+# focused field, mirroring the LLM/GitHub steps' "Get yours at: …" line.
 _ISSUE_TRACKING_FIELDS: list[dict[str, Any]] = [
     {
         "env_var": "JIRA_BASE_URL",
@@ -120,6 +122,7 @@ _ISSUE_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "https://org.atlassian.net",
         "masked": False,
         "required": True,
+        "hint": "Your Atlassian site — https://<your-org>.atlassian.net",
     },
     {
         "env_var": "JIRA_EMAIL",
@@ -127,6 +130,7 @@ _ISSUE_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "you@company.com",
         "masked": False,
         "required": True,
+        "hint": "The email you sign in to Atlassian with",
     },
     {
         "env_var": "JIRA_API_TOKEN",
@@ -134,6 +138,7 @@ _ISSUE_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "",
         "masked": True,
         "required": True,
+        "hint": "Create at: id.atlassian.com/manage-profile/security/api-tokens",
     },
     {
         "env_var": "JIRA_PROJECT_KEY",
@@ -141,6 +146,7 @@ _ISSUE_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "MYPROJ",
         "masked": False,
         "required": True,
+        "hint": "The prefix on issue keys — e.g. MYPROJ in MYPROJ-123",
     },
 ]
 
@@ -152,6 +158,7 @@ _AZDEVOPS_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "https://dev.azure.com/myorg",
         "masked": False,
         "required": True,
+        "hint": "Your org — https://dev.azure.com/<your-org>",
     },
     {
         "env_var": "AZURE_DEVOPS_PROJECT",
@@ -159,6 +166,7 @@ _AZDEVOPS_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "MyProject",
         "masked": False,
         "required": True,
+        "hint": "The project name as it appears in the Azure DevOps URL",
     },
     {
         "env_var": "AZURE_DEVOPS_TOKEN",
@@ -166,6 +174,7 @@ _AZDEVOPS_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "",
         "masked": True,
         "required": True,
+        "hint": "Create at: dev.azure.com → User settings → Personal access tokens",
     },
     {
         "env_var": "AZURE_DEVOPS_TEAM",
@@ -173,6 +182,7 @@ _AZDEVOPS_TRACKING_FIELDS: list[dict[str, Any]] = [
         "placeholder": "MyProject Team",
         "masked": False,
         "required": False,
+        "hint": "Optional — defaults to '<Project> Team' if left blank",
     },
 ]
 
@@ -199,6 +209,7 @@ _NOTION_FIELDS: list[dict[str, Any]] = [
         "placeholder": "ntn_… / secret_…",
         "masked": True,
         "required": False,
+        "hint": "Create at: notion.so/my-integrations, then share your pages with it",
     },
     {
         "env_var": "NOTION_ROOT_PAGE_ID",
@@ -206,6 +217,7 @@ _NOTION_FIELDS: list[dict[str, Any]] = [
         "placeholder": "",
         "masked": False,
         "required": False,
+        "hint": "The 32-char id at the end of the page's Notion URL",
     },
 ]
 
@@ -220,5 +232,6 @@ _CONFLUENCE_FIELDS: list[dict[str, Any]] = [
         "placeholder": "MYSPACE",
         "masked": False,
         "required": False,
+        "hint": "The <KEY> in your space URL /wiki/spaces/<KEY> — reuses your Jira login",
     },
 ]

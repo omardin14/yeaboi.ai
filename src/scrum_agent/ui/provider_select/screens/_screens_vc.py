@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from rich.align import Align
@@ -21,6 +22,40 @@ from scrum_agent.ui.provider_select.screens._screens import (
     _build_provider_row,
     _build_screen_frame,
 )
+
+# Field-hint palette. The where-to-get-it line is styled as *help*, distinct from
+# the pure-dim keyboard footer and the red error line: an accent-blue info glyph,
+# soft blue-grey lead-in text, and a brighter/underlined URL so the eye lands on
+# the actionable part.
+_HINT_MUTED = "rgb(120,130,150)"
+_HINT_URL = "rgb(140,170,235)"
+
+# Matches the first URL / domain-path token in a hint (the actionable bit): a
+# full http(s) URL, or a lowercase domain (any 2+ letter TLD — .com, .so, .net…)
+# with an optional path. Bounded by whitespace/commas so trailing prose
+# ("…, then share …") isn't swallowed, and lowercase-only so uppercase prose like
+# "MYPROJ-123" never false-matches.
+_HINT_URL_RE = re.compile(r"https?://[^\s,]+|[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:/[^\s,]*)?")
+
+
+def _build_hint_text(hint: str) -> Text:
+    """Render a where-to-get-it hint with an info glyph and emphasized URL.
+
+    The leading ``ⓘ`` glyph (accent blue) flags the line as help; the lead-in
+    prose is soft blue-grey; any URL/domain token is brightened + underlined so
+    the actionable part stands out. Hints without a URL render entirely in the
+    muted style. Pure rendering — returns a centered Rich ``Text``.
+    """
+    text = Text(justify="center")
+    text.append("ⓘ  ", style=_ACCENT)  # ⓘ info glyph
+    match = _HINT_URL_RE.search(hint)
+    if match:
+        text.append(hint[: match.start()], style=_HINT_MUTED)
+        text.append(match.group(0), style=f"{_HINT_URL} underline")
+        text.append(hint[match.end() :], style=_HINT_MUTED)
+    else:
+        text.append(hint, style=_HINT_MUTED)
+    return text
 
 
 def _build_vc_select_screen(
@@ -306,6 +341,16 @@ def _build_issue_tracking_screen(
         # Error text
         if err and is_active:
             body.append(Text(f"  {err}", style="bright_red", justify="center"))
+            body_h += 1
+
+        # Where-to-get-it hint for the focused field — mirrors the LLM and
+        # GitHub steps, which show a "Get yours at: …" line. Only the active
+        # field's hint is shown (keeps the stack uncluttered); it's suppressed
+        # while an error is on screen or the verify animation is running
+        # (border_overrides) so those states read cleanly.
+        hint = field.get("hint", "")
+        if hint and is_active and not err and not border_overrides:
+            body.append(_build_hint_text(hint))
             body_h += 1
 
     # Keyboard hint — makes editing/clearing/skipping discoverable, matching the

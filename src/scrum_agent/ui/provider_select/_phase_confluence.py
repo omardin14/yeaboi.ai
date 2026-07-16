@@ -26,6 +26,7 @@ from rich.live import Live
 
 from scrum_agent.ui.provider_select._config import _save_progress
 from scrum_agent.ui.provider_select._constants import _CONFLUENCE_FIELDS
+from scrum_agent.ui.provider_select._nav import StepNav, nav_for_key
 from scrum_agent.ui.provider_select._verification import _verify_confluence
 from scrum_agent.ui.provider_select.screens._screens import (
     _ACCENT,
@@ -49,7 +50,7 @@ def _run_confluence(
     live: Live,
     *,
     jira_creds: dict[str, str],
-) -> dict[str, str] | None:
+) -> dict[str, str] | StepNav | None:
     """Show the optional Confluence space-key form and verify it.
 
     Shows a Confluence / Skip picker first (matching the Notion & Issue Tracking
@@ -94,8 +95,8 @@ def _run_confluence(
     # --- Step 1: Confluence / Skip picker (matches the Notion & Issue Tracking
     # steps, which both offer an explicit Skip rather than making the user guess
     # that an empty submit skips the step). ---
-    def _run_confluence_selection() -> str | None:
-        """Show the Confluence / Skip picker. Returns "confluence", "skip", or None (Esc)."""
+    def _run_confluence_selection() -> str | StepNav | None:
+        """Show the Confluence / Skip picker. Returns "confluence"/"skip", a StepNav (←/→/F), or None (Esc)."""
         cards = [{"name": "Confluence", "color": _ACCENT}, {"name": "Skip", "color": _ACCENT}]
         pick = 0
 
@@ -108,7 +109,7 @@ def _run_confluence(
             w, h = console.size
             live.update(
                 _build_screen_frame(
-                    subtitle="Docs  ·  ↑↓ choose  ·  Enter select",
+                    subtitle="Docs · ↑↓ choose · Enter select · ←→ section · F finish",
                     step=_DOCS_STEP,
                     body_items=body,
                     body_height=body_h,
@@ -122,6 +123,11 @@ def _run_confluence(
         _render_menu()
         while True:
             key = read_key()
+            # Section navigation (←/→ between chips, F to finish) short-circuits
+            # the picker so the user can leave the Docs step without choosing.
+            nav = nav_for_key(key, _DOCS_STEP)
+            if nav is not None:
+                return nav
             if key in ("up", "scroll_up"):
                 pick = (pick - 1) % len(cards)
             elif key in ("down", "scroll_down"):
@@ -133,6 +139,9 @@ def _run_confluence(
             _render_menu()
 
     choice = _run_confluence_selection()
+    if isinstance(choice, StepNav):
+        logger.info("Confluence sub-step: section navigation (%r)", choice)
+        return choice
     if choice is None:
         logger.info("Confluence sub-step: user pressed Esc (back)")
         return None
