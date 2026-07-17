@@ -13,11 +13,26 @@ import sys
 import termios
 import tty
 
+# Keys read ahead while coalescing a fast scroll burst but not consumed (a
+# non-scroll key drained past the end of the burst) are stashed here and returned
+# by the next read_key() call, so no keypress is ever lost. Single-threaded input,
+# so a plain module list is safe. See coalesce_scroll() in _scroll.py.
+_pushback: list[str] = []
+
+
+def push_back_key(key: str) -> None:
+    """Return a key to the front of the input stream (LIFO with the buffer)."""
+    _pushback.append(key)
+
 
 def read_key(stdin=None, timeout: float | None = None) -> str:
     """Read a single keypress from the terminal in raw mode.
 
     If timeout is given, returns "" if no key is pressed within that time.
+
+    A key stashed by push_back_key() is returned first (immediately, ignoring
+    timeout) — this is how a coalesced scroll burst hands back the non-scroll key
+    that ended it.
 
     Returns standardised key names:
       - "up", "down", "left", "right" — arrow keys
@@ -32,6 +47,9 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
     invisible to select(), causing escape-sequence detection to fail.
     """
     import select as _select
+
+    if _pushback:
+        return _pushback.pop()
 
     fd = (stdin or sys.stdin).fileno()
     old_settings = termios.tcgetattr(fd)
@@ -108,6 +126,8 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
                 # CSI u (kitty keyboard protocol): \x1b[13;2u = Shift+Enter
                 if ch3 == "1":
                     rest = _read_available(0.05)
+                    if rest == "~":
+                        return "home"  # \x1b[1~ — Home on vt-style terminals
                     if rest.startswith("3;2u"):
                         return "alt+enter"
                     if rest.startswith(";2D"):
@@ -138,6 +158,22 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
                         rest = _read_available(0.05)
                         if rest.startswith("2~"):
                             return "word_delete"
+                    _read_available()
+                    return ""
+                # Page / Home / End as CSI-tilde sequences (vt-style, used by
+                # many terminals for the navigation cluster). Scroll loops handle
+                # these via apply_scroll(). \x1b[5~ PageUp, \x1b[6~ PageDown,
+                # \x1b[1~/\x1b[7~ Home, \x1b[4~/\x1b[8~ End.
+                if ch3 in ("5", "6", "4", "7", "8"):
+                    ch4 = _read1()
+                    if ch4 == "~":
+                        return {
+                            "5": "pageup",
+                            "6": "pagedown",
+                            "4": "end",
+                            "7": "home",
+                            "8": "end",
+                        }[ch3]
                     _read_available()
                     return ""
                 if ch3 == "H":
@@ -256,6 +292,50 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
         return ch
     finally:
         termios.tcsetattr(fd, termios.TCSANOW, old_settings)
+
+
+# Terminal settings saved by enter_raw_mode(), restored by exit_raw_mode().
+_saved_term_settings = None
+
+
+def enter_raw_mode(stdin=None) -> None:
+    """Hold the terminal in cbreak + no-echo for the whole full-screen TUI.
+
+    read_key() flips to cbreak per call but restores the *prior* settings in its
+    finally, so between keypresses the terminal reverts to cooked + echo. During
+    a fast mouse-wheel scroll, mouse-tracking report bytes (``\\x1b[<64;…M``)
+    arrive in that between-reads window, get echoed to the screen as garbage, and
+    tear the view — and the terminal (e.g. iTerm2) flags "mouse reporting left
+    on". Holding cbreak for the entire session closes that window: read_key's
+    per-call save/restore now captures and restores cbreak, so echo stays off the
+    whole time. Idempotent-safe; a no-op if the fd isn't a real terminal.
+    """
+    global _saved_term_settings
+    try:
+        fd = (stdin or sys.stdin).fileno()
+        _saved_term_settings = termios.tcgetattr(fd)
+        tty.setcbreak(fd)  # disables ICANON + ECHO
+        # Mirror read_key: drop IXON/IEXTEN so Ctrl+S / Ctrl+O reach the app.
+        m = termios.tcgetattr(fd)
+        m[0] &= ~termios.IXON
+        m[3] &= ~termios.IEXTEN
+        termios.tcsetattr(fd, termios.TCSANOW, m)
+    except Exception:  # noqa: BLE001 - not a tty (pipe, redirect, CI); leave as-is
+        _saved_term_settings = None
+
+
+def exit_raw_mode(stdin=None) -> None:
+    """Restore the terminal mode saved by :func:`enter_raw_mode`."""
+    global _saved_term_settings
+    if _saved_term_settings is None:
+        return
+    try:
+        fd = (stdin or sys.stdin).fileno()
+        termios.tcsetattr(fd, termios.TCSANOW, _saved_term_settings)
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        _saved_term_settings = None
 
 
 def enable_bracketed_paste() -> None:

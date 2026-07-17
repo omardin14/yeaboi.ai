@@ -41,8 +41,14 @@ from yeaboi.ui.session.phases._phases_review import (  # noqa: F401
 )
 from yeaboi.ui.session.screens._screens_pipeline import _build_chat_screen, _build_pipeline_screen
 from yeaboi.ui.shared._animations import FRAME_TIME_30FPS
+from yeaboi.ui.shared._scroll import SCROLL_KEYS, coalesce_scroll
 
 logger = logging.getLogger(__name__)
+
+# Sentinel scroll offset meaning "pin to the last line". Any screen builder
+# clamps it down to its real maximum for display and publishes that maximum via
+# scroll_meta, which the loop then adopts. Larger than any realistic line count.
+_SCROLL_BOTTOM = 1_000_000_000
 
 # ---------------------------------------------------------------------------
 # Story-level auto-scroll helper
@@ -827,6 +833,7 @@ def _phase_pipeline(
 
                 _ep_lines = _render_to_lines(console, _ep_renderable, _rw)
                 _ep_scroll, _ep_sel = 0, 0
+                _ep_scroll_meta: dict = {}
                 _ep_actions = ["Accept", "Edit", "Export"]
 
                 # Add tracker sync buttons (dynamic based on configured boards)
@@ -874,16 +881,15 @@ def _phase_pipeline(
                             step=1,
                             total=6,
                             shimmer_tick=time.monotonic() - _epv_anim0,
+                            scroll_meta=_ep_scroll_meta,
                         )
                     )
                     key = _key()
                     if key in ("esc", "q"):
                         logger.info("Epic review: user pressed Esc — exiting planning")
                         return graph_state
-                    elif key in ("up", "scroll_up"):
-                        _ep_scroll = max(0, _ep_scroll - 1)
-                    elif key in ("down", "scroll_down"):
-                        _ep_scroll += 1
+                    elif key in SCROLL_KEYS:
+                        _ep_scroll = coalesce_scroll(_ep_scroll, key, _ep_scroll_meta, _key)
                     elif key == "left":
                         _ep_sel = max(0, _ep_sel - 1)
                     elif key == "right":
@@ -1161,6 +1167,7 @@ def _phase_pipeline(
         scroll_offset = 0
         menu_selected = 0
         status_msg = ""
+        _scroll_meta: dict = {}  # geometry published by _build_pipeline_screen
 
         # Action buttons differ by stage:
         # story_writer/task_decomposer/sprint_planner: Accept | Edit | Regenerate | Export [| Jira]
@@ -1221,6 +1228,7 @@ def _phase_pipeline(
                 sticky_headers=sticky_headers,
                 actions=actions,
                 warning_text=cap_warning_text if is_sprint_stage else "",
+                scroll_meta=_scroll_meta,
             )
         )
 
@@ -1230,17 +1238,12 @@ def _phase_pipeline(
 
             if key == "esc":
                 return None
-            elif key in ("up", "scroll_up"):
-                scroll_offset = max(0, scroll_offset - 1)
+            elif key in SCROLL_KEYS:
+                _ns = coalesce_scroll(scroll_offset, key, _scroll_meta, _key)
+                if _ns == scroll_offset:
+                    continue  # boundary — skip the repaint so the title shimmer stays put
+                scroll_offset = _ns
                 # Track which story is closest to viewport center (for Edit action)
-                if is_story_stage and story_panel_ranges:
-                    _, viewport_h = console.size
-                    vp_h = max(3, viewport_h - 14)
-                    new_sel = _story_index_at_scroll(story_panel_ranges, scroll_offset, vp_h)
-                    if new_sel != selected_story:
-                        selected_story = new_sel
-            elif key in ("down", "scroll_down"):
-                scroll_offset += 1
                 if is_story_stage and story_panel_ranges:
                     _, viewport_h = console.size
                     vp_h = max(3, viewport_h - 14)
@@ -1493,6 +1496,7 @@ def _phase_pipeline(
                             sticky_headers=sticky_headers,
                             actions=actions,
                             warning_text=cap_warning_text if is_sprint_stage else "",
+                            scroll_meta=_scroll_meta,
                         )
                     )
                 elif action in ("Jira", "Azure DevOps"):
@@ -1547,6 +1551,7 @@ def _phase_pipeline(
                     actions=actions,
                     warning_text=cap_warning_text if is_sprint_stage else "",
                     shimmer_tick=time.monotonic() - _pl_anim0,
+                    scroll_meta=_scroll_meta,
                 )
             )
 
@@ -1580,9 +1585,18 @@ def _phase_chat(
     messages: list[tuple[str, str]] = []
     input_value = ""
     scroll_offset = 0
+    _chat_scroll_meta: dict = {}
+    # Follow the newest message until the user scrolls up; new messages re-pin to
+    # the bottom only while following. Manual scroll keys break the follow.
+    _chat_follow = True
+
+    def _chat_bottom() -> int:
+        return _chat_scroll_meta.get("max_offset", 0)
 
     w, h = console.size
-    live.update(_build_chat_screen(messages, input_value, scroll_offset, width=w, height=h))
+    live.update(
+        _build_chat_screen(messages, input_value, scroll_offset, width=w, height=h, scroll_meta=_chat_scroll_meta)
+    )
 
     _chat_anim0 = time.monotonic()  # shimmer title clock
     while True:
@@ -1601,9 +1615,17 @@ def _phase_chat(
                 _export_checkpoint(console, graph_state, stage="complete")
                 messages.append(("ai", "Plan exported successfully."))
                 input_value = ""
-                scroll_offset = max(0, len(messages) * 2 - 5)
+                # Pin to the newest line: request past-the-end, the builder clamps
+                # for display AND publishes the true bottom, which we then adopt.
+                scroll_offset = _SCROLL_BOTTOM
                 w, h = console.size
-                live.update(_build_chat_screen(messages, input_value, scroll_offset, width=w, height=h))
+                live.update(
+                    _build_chat_screen(
+                        messages, input_value, scroll_offset, width=w, height=h, scroll_meta=_chat_scroll_meta
+                    )
+                )
+                scroll_offset = _chat_bottom()
+                _chat_follow = True
                 continue
 
             if text.lower() in {"exit", "quit"}:
@@ -1640,6 +1662,7 @@ def _phase_chat(
                         processing=True,
                         tick=tick,
                         shimmer_tick=tick,
+                        scroll_meta=_chat_scroll_meta,
                     )
                 )
                 time.sleep(FRAME_TIME_30FPS)
@@ -1657,8 +1680,25 @@ def _phase_chat(
                 logger.error("Chat graph invoke failed: %s", result_box[1])
                 messages.append(("ai", f"Error: {result_box[1]}"))
 
-            scroll_offset = max(0, len(messages) * 2 - 5)
+            # New reply — pin to the bottom (adopted after the render below).
+            scroll_offset = _SCROLL_BOTTOM
+            _chat_follow = True
 
+        elif key in ("up", "scroll_up", "pageup", "home"):
+            _ns = coalesce_scroll(scroll_offset, key, _chat_scroll_meta, _key)
+            if _ns == scroll_offset:
+                continue  # already at the top — skip the repaint (no shimmer flicker)
+            # Any upward scroll stops following the newest message.
+            _chat_follow = False
+            scroll_offset = _ns
+        elif key in ("down", "scroll_down", "pagedown", "end"):
+            _ns = coalesce_scroll(scroll_offset, key, _chat_scroll_meta, _key)
+            if _ns == scroll_offset:
+                continue  # already at the bottom — skip the repaint
+            scroll_offset = _ns
+            # Re-pin to follow mode once the user scrolls back to the bottom.
+            if scroll_offset >= _chat_scroll_meta.get("max_offset", 0):
+                _chat_follow = True
         elif key == "backspace":
             input_value = input_value[:-1]
         elif key == "clear":
@@ -1681,5 +1721,10 @@ def _phase_chat(
                 width=w,
                 height=h,
                 shimmer_tick=time.monotonic() - _chat_anim0,
+                scroll_meta=_chat_scroll_meta,
             )
         )
+        # Adopt the builder's clamped bottom when following or when we requested
+        # past-the-end, so the loop counter matches what's displayed.
+        if _chat_follow or scroll_offset == _SCROLL_BOTTOM:
+            scroll_offset = _chat_bottom()

@@ -64,6 +64,7 @@ from yeaboi.ui.shared._animations import (
 )
 from yeaboi.ui.shared._input import read_key as _read_key
 from yeaboi.ui.shared._music_bar import make_live
+from yeaboi.ui.shared._scroll import SCROLL_KEYS, coalesce_scroll, coalesce_steps
 from yeaboi.ui.splash import play_wordmark_intro
 
 logger = logging.getLogger(__name__)
@@ -156,7 +157,9 @@ def _run_preview_flow(
         _build_sample_tasks_screen,
     )
 
-    _rk = lambda: read_key(timeout=frame_time) if supports_timeout else read_key()  # noqa: E731
+    # Accepts an optional timeout so coalesce_scroll() can poll non-blocking
+    # (timeout=0.0); a bare _rk() keeps the original per-frame/blocking behaviour.
+    _rk = lambda timeout=(frame_time if supports_timeout else None): read_key(timeout=timeout)  # noqa: E731
 
     # ── Inline editor helpers for dict-based artifacts ────────────
     def _dict_editable_start(line: str) -> int | None:
@@ -526,16 +529,21 @@ def _run_preview_flow(
     _stories = (resume_state or {}).get("sample_stories")
     _tasks = (resume_state or {}).get("sample_tasks")
 
+    # Scroll geometry published by each page's screen builder; reused across the
+    # sequential pages (repopulated on every render before any key is handled).
+    _scroll_meta: dict = {}
+
     # ── Page 1: Instructions ──────────────────────────────────────
     logger.info("Preview: entering Instructions page")
     if last_page not in ("epic", "stories", "tasks", "sprint"):
         scroll, sel = 0, 0
         while True:
             k = _rk()
-            if k in ("up", "scroll_up"):
-                scroll = max(0, scroll - 1)
-            elif k in ("down", "scroll_down"):
-                scroll += 1
+            if k in SCROLL_KEYS:
+                _ns = coalesce_scroll(scroll, k, _scroll_meta, _rk)
+                if _ns == scroll:
+                    continue
+                scroll = _ns
             elif k == "left":
                 sel = max(0, sel - 1)
             elif k == "right":
@@ -588,6 +596,7 @@ def _run_preview_flow(
                 _build_instructions_review_screen(
                     _instr,
                     scroll_offset=scroll,
+                    scroll_meta=_scroll_meta,
                     width=w,
                     height=h,
                     action_sel=sel,
@@ -619,10 +628,11 @@ def _run_preview_flow(
         scroll, sel = 0, 0
         while True:
             k = _rk()
-            if k in ("up", "scroll_up"):
-                scroll = max(0, scroll - 1)
-            elif k in ("down", "scroll_down"):
-                scroll += 1
+            if k in SCROLL_KEYS:
+                _ns = coalesce_scroll(scroll, k, _scroll_meta, _rk)
+                if _ns == scroll:
+                    continue
+                scroll = _ns
             elif k == "left":
                 sel = max(0, sel - 1)
             elif k == "right":
@@ -650,6 +660,7 @@ def _run_preview_flow(
                 _build_sample_epic_screen(
                     _epic,
                     scroll_offset=scroll,
+                    scroll_meta=_scroll_meta,
                     width=w,
                     height=h,
                     action_sel=sel,
@@ -682,10 +693,11 @@ def _run_preview_flow(
         scroll, sel = 0, 0
         while True:
             k = _rk()
-            if k in ("up", "scroll_up"):
-                scroll = max(0, scroll - 1)
-            elif k in ("down", "scroll_down"):
-                scroll += 1
+            if k in SCROLL_KEYS:
+                _ns = coalesce_scroll(scroll, k, _scroll_meta, _rk)
+                if _ns == scroll:
+                    continue
+                scroll = _ns
             elif k == "left":
                 sel = max(0, sel - 1)
             elif k == "right":
@@ -725,6 +737,7 @@ def _run_preview_flow(
                 _build_sample_stories_screen(
                     _stories,
                     scroll_offset=scroll,
+                    scroll_meta=_scroll_meta,
                     width=w,
                     height=h,
                     action_sel=sel,
@@ -758,10 +771,11 @@ def _run_preview_flow(
         scroll, sel = 0, 0
         while True:
             k = _rk()
-            if k in ("up", "scroll_up"):
-                scroll = max(0, scroll - 1)
-            elif k in ("down", "scroll_down"):
-                scroll += 1
+            if k in SCROLL_KEYS:
+                _ns = coalesce_scroll(scroll, k, _scroll_meta, _rk)
+                if _ns == scroll:
+                    continue
+                scroll = _ns
             elif k == "left":
                 sel = max(0, sel - 1)
             elif k == "right":
@@ -816,6 +830,7 @@ def _run_preview_flow(
                 _build_sample_tasks_screen(
                     _tasks,
                     scroll_offset=scroll,
+                    scroll_meta=_scroll_meta,
                     width=w,
                     height=h,
                     action_sel=sel,
@@ -912,12 +927,14 @@ def _run_sprint_review(
     }
     scroll = 0
     sel = 0
+    _scroll_meta: dict = {}
     while True:
         k = read_key(timeout=frame_time) if supports_timeout else read_key()
-        if k in ("up", "scroll_up"):
-            scroll = max(0, scroll - 1)
-        elif k in ("down", "scroll_down"):
-            scroll += 1
+        if k in SCROLL_KEYS:
+            _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
+            if _ns == scroll:
+                continue
+            scroll = _ns
         elif k == "left":
             sel = max(0, sel - 1)
         elif k == "right":
@@ -939,6 +956,7 @@ def _run_sprint_review(
                 sprint,
                 sample_stories,
                 scroll_offset=scroll,
+                scroll_meta=_scroll_meta,
                 width=w,
                 height=h,
                 action_sel=sel,
@@ -1410,6 +1428,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
 
     data = _collect_standup_data()
     scroll, sel = 0, 0
+    _scroll_meta: dict = {}
     n_buttons = 5  # Generate, My Update, Configure, Export, Back
     anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
 
@@ -1422,6 +1441,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
             _build_standup_screen(
                 data,
                 scroll_offset=scroll,
+                scroll_meta=_scroll_meta,
                 width=w,
                 height=max(10, h - 1),
                 action_sel=sel,
@@ -1433,10 +1453,11 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
     _render()
     while True:
         k = read_key(timeout=frame_time) if supports_timeout else read_key()
-        if k in ("up", "scroll_up"):
-            scroll = max(0, scroll - 1)
-        elif k in ("down", "scroll_down"):
-            scroll += 1
+        if k in SCROLL_KEYS:
+            _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
+            if _ns == scroll:
+                continue
+            scroll = _ns
         elif k == "left":
             sel = max(0, sel - 1)
         elif k == "right":
@@ -1662,6 +1683,7 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
         "view": "roster",
         "selected": 0,
         "scroll": 0,
+        "scroll_meta": {},
         "sel": 0,
         "message": "",
         "detail_lines": [],
@@ -1701,6 +1723,7 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
             _build_performance_screen(
                 _data(),
                 scroll_offset=state["scroll"],
+                scroll_meta=state["scroll_meta"],
                 width=w,
                 height=max(10, h - 1),
                 action_sel=state["sel"],
@@ -1798,10 +1821,11 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
             elif k in ("esc", "q"):
                 break
         else:  # detail view
-            if k in ("up", "scroll_up"):
-                state["scroll"] = max(0, state["scroll"] - 1)
-            elif k in ("down", "scroll_down"):
-                state["scroll"] += 1
+            if k in SCROLL_KEYS:
+                _ns = coalesce_scroll(state["scroll"], k, state["scroll_meta"], read_key)
+                if _ns == state["scroll"]:
+                    continue  # at a boundary — don't repaint (avoids title-shimmer flicker)
+                state["scroll"] = _ns
             elif k == "left":
                 state["sel"] = max(0, state["sel"] - 1)
             elif k == "right":
@@ -1884,6 +1908,7 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
         "view": "picker",
         "selected": 0,  # period index
         "scroll": 0,
+        "scroll_meta": {},
         "sel": 0,  # action button index
         "message": "",
         "theme": "midnight",
@@ -1933,6 +1958,7 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
             _build_reporting_screen(
                 _data(),
                 scroll_offset=state["scroll"],
+                scroll_meta=state["scroll_meta"],
                 width=w,
                 height=max(10, h - 1),
                 action_sel=state["sel"],
@@ -2103,10 +2129,11 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
                 state["view"] = "picker"
                 state["sel"], state["scroll"], state["message"] = 0, 0, ""
         else:  # detail view
-            if k in ("up", "scroll_up"):
-                state["scroll"] = max(0, state["scroll"] - 1)
-            elif k in ("down", "scroll_down"):
-                state["scroll"] += 1
+            if k in SCROLL_KEYS:
+                _ns = coalesce_scroll(state["scroll"], k, state["scroll_meta"], read_key)
+                if _ns == state["scroll"]:
+                    continue  # at a boundary — don't repaint (avoids title-shimmer flicker)
+                state["scroll"] = _ns
             elif k == "left":
                 state["sel"] = max(0, state["sel"] - 1)
             elif k == "right":
@@ -2167,6 +2194,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_retro_screen
 
     anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
+    _scroll_meta: dict = {}  # scroll geometry published by _build_retro_screen
 
     def _render(data: dict, scroll: int, sel: int) -> None:
         w, h = console.size
@@ -2176,6 +2204,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
             _build_retro_screen(
                 data,
                 scroll_offset=scroll,
+                scroll_meta=_scroll_meta,
                 width=w,
                 height=max(10, h - 1),
                 action_sel=sel,
@@ -2308,10 +2337,11 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
         _render(_data(), scroll, sel)
         while True:
             k = read_key(timeout=frame_time) if supports_timeout else read_key()
-            if k in ("up", "scroll_up"):
-                scroll = max(0, scroll - 1)
-            elif k in ("down", "scroll_down"):
-                scroll += 1
+            if k in SCROLL_KEYS:
+                _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
+                if _ns == scroll:
+                    continue
+                scroll = _ns
             elif k == "left":
                 sel = max(0, sel - 1)
             elif k == "right":
@@ -2445,12 +2475,20 @@ def select_mode(
             while True:
                 key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
 
-                if key in ("up", "left", "scroll_up"):
-                    selected = (selected - 1) % n
-                    select_time = time.monotonic()
-                elif key in ("down", "right", "scroll_down"):
-                    selected = (selected + 1) % n
-                    select_time = time.monotonic()
+                if key in ("up", "left", "scroll_up", "down", "right", "scroll_down"):
+                    # Coalesce a fast wheel/held-key burst into one net move + one
+                    # repaint, so the animated mode carousel doesn't stutter.
+                    _delta = coalesce_steps(
+                        key,
+                        read_key,
+                        down=("down", "right", "scroll_down"),
+                        up=("up", "left", "scroll_up"),
+                    )
+                    if _delta:
+                        selected = (selected + _delta) % n
+                        select_time = time.monotonic()
+                    else:
+                        continue  # net-zero burst — nothing moved, skip the repaint
                 elif key == "enter":
                     mode = _MODE_CARDS[selected]
                     if mode["available"]:
@@ -2820,18 +2858,11 @@ def select_mode(
                             _ana_del_popup_name = ""
                             _ana_del_pending = False
 
-                        if key in ("up", "scroll_up"):
-                            _ana_selected = (_ana_selected - 1) % _ana_n
-                            _ana_focus = 0
-                            _ana_action_btns = 0.0
-                            _is_profile = _ana_selected < len(_profiles_for_analysis)
-                            _ana_action_btns_target = 2.0 if _is_profile else 0.0
-                            _ana_del_fade = 0.0
-                            _ana_exp_fade = 0.0
-                            _ana_export_submenu = False
-                            _ana_sub_visible_target = 0.0
-                        elif key in ("down", "scroll_down"):
-                            _ana_selected = (_ana_selected + 1) % _ana_n
+                        if key in ("up", "scroll_up", "down", "scroll_down"):
+                            _delta = coalesce_steps(key, read_key, down=("down", "scroll_down"), up=("up", "scroll_up"))
+                            if not _delta:
+                                continue
+                            _ana_selected = (_ana_selected + _delta) % _ana_n
                             _ana_focus = 0
                             _ana_action_btns = 0.0
                             _is_profile = _ana_selected < len(_profiles_for_analysis)
@@ -2870,6 +2901,7 @@ def select_mode(
                                     )
 
                                     _scr = 0
+                                    _scr_meta: dict = {}
                                     _esel = 1  # default to "Next" on page 1
                                     _vp = 1  # current page
                                     _ta_anim0 = time.monotonic()  # shimmer title clock
@@ -2887,6 +2919,7 @@ def select_mode(
                                             _build_team_analysis_screen(
                                                 _full,
                                                 scroll_offset=_scr,
+                                                scroll_meta=_scr_meta,
                                                 width=w,
                                                 height=h,
                                                 export_sel=_esel,
@@ -2896,10 +2929,8 @@ def select_mode(
                                             )
                                         )
                                         kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                        if kk in ("up", "scroll_up"):
-                                            _scr = max(0, _scr - 1)
-                                        elif kk in ("down", "scroll_down"):
-                                            _scr += 1
+                                        if kk in SCROLL_KEYS:
+                                            _scr = coalesce_scroll(_scr, kk, _scr_meta, read_key)
                                         elif kk == "left":
                                             _esel = max(0, _esel - 1)
                                         elif kk == "right":
@@ -3301,6 +3332,7 @@ def select_mode(
                             )
 
                             _ta_scroll = 0
+                            _ta_scroll_meta: dict = {}
                             _ta_page = 1
                             _ta_export_sel = 1  # default to "Next"
                             _ta_examples = _ta_examples_box[0] or {}
@@ -3319,6 +3351,7 @@ def select_mode(
                                     _build_team_analysis_screen(
                                         _ta_profile,
                                         scroll_offset=_ta_scroll,
+                                        scroll_meta=_ta_scroll_meta,
                                         width=w,
                                         height=h,
                                         export_sel=_ta_export_sel,
@@ -3330,10 +3363,8 @@ def select_mode(
                                     )
                                 )
                                 kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                if kk in ("up", "scroll_up"):
-                                    _ta_scroll = max(0, _ta_scroll - 1)
-                                elif kk in ("down", "scroll_down"):
-                                    _ta_scroll += 1
+                                if kk in SCROLL_KEYS:
+                                    _ta_scroll = coalesce_scroll(_ta_scroll, kk, _ta_scroll_meta, read_key)
                                 elif kk == "left":
                                     _ta_export_sel = max(0, _ta_export_sel - 1)
                                 elif kk == "right":
@@ -3583,12 +3614,14 @@ def select_mode(
 
                 _usage_data = _collect_usage_data()
                 _u_scroll, _u_sel = 0, 0
+                _u_scroll_meta: dict = {}
                 _u_anim_start = time.monotonic()  # shimmer title + typewriter subtitle
                 w, h = console.size
                 live.update(
                     _build_usage_screen(
                         _usage_data,
                         scroll_offset=_u_scroll,
+                        scroll_meta=_u_scroll_meta,
                         width=w,
                         height=h,
                         action_sel=_u_sel,
@@ -3598,10 +3631,11 @@ def select_mode(
                 )
                 while True:
                     k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                    if k in ("up", "scroll_up"):
-                        _u_scroll = max(0, _u_scroll - 1)
-                    elif k in ("down", "scroll_down"):
-                        _u_scroll += 1
+                    if k in SCROLL_KEYS:
+                        _ns = coalesce_scroll(_u_scroll, k, _u_scroll_meta, read_key)
+                        if _ns == _u_scroll:
+                            continue
+                        _u_scroll = _ns
                     elif k in ("enter", " ", "esc", "q"):
                         break
                     w, h = console.size
@@ -3610,6 +3644,7 @@ def select_mode(
                         _build_usage_screen(
                             _usage_data,
                             scroll_offset=_u_scroll,
+                            scroll_meta=_u_scroll_meta,
                             width=w,
                             height=h,
                             action_sel=_u_sel,
@@ -3629,12 +3664,14 @@ def select_mode(
 
                 _settings_data = _collect_settings_data()
                 _s_scroll, _s_sel = 0, 0
+                _s_scroll_meta: dict = {}
                 _s_anim_start = time.monotonic()  # shimmer title + typewriter subtitle
                 w, h = console.size
                 live.update(
                     _build_settings_screen(
                         _settings_data,
                         scroll_offset=_s_scroll,
+                        scroll_meta=_s_scroll_meta,
                         width=w,
                         height=h,
                         action_sel=_s_sel,
@@ -3644,10 +3681,11 @@ def select_mode(
                 )
                 while True:
                     sk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                    if sk in ("up", "scroll_up"):
-                        _s_scroll = max(0, _s_scroll - 1)
-                    elif sk in ("down", "scroll_down"):
-                        _s_scroll += 1
+                    if sk in SCROLL_KEYS:
+                        _ns = coalesce_scroll(_s_scroll, sk, _s_scroll_meta, read_key)
+                        if _ns == _s_scroll:
+                            continue
+                        _s_scroll = _ns
                     elif sk == "left":
                         _s_sel = max(0, _s_sel - 1)
                     elif sk == "right":
@@ -3679,6 +3717,7 @@ def select_mode(
                         _build_settings_screen(
                             _settings_data,
                             scroll_offset=_s_scroll,
+                            scroll_meta=_s_scroll_meta,
                             width=w,
                             height=h,
                             action_sel=_s_sel,
@@ -4026,17 +4065,12 @@ def select_mode(
                             delete_popup_target = 0.0
 
                     # ── Normal project list mode ───────────────────────────────
-                    elif key in ("up", "scroll_up"):
-                        proj_selected = (proj_selected - 1) % proj_n
-                        focus = 0
-                        del_fade_target = 0.0
-                        exp_fade_target = 0.0
-                        card_fade = 0.0
-                        card_fade_target = 1.0
-                        action_btns_visible = 0.0
-                        action_btns_visible_target = 2.0 if _is_project_row() else 0.0
-                    elif key in ("down", "scroll_down"):
-                        proj_selected = (proj_selected + 1) % proj_n
+                    elif key in ("up", "scroll_up", "down", "scroll_down"):
+                        # Coalesce a fast wheel/held-key burst into one net move.
+                        _delta = coalesce_steps(key, read_key, down=("down", "scroll_down"), up=("up", "scroll_up"))
+                        if not _delta:
+                            continue
+                        proj_selected = (proj_selected + _delta) % proj_n
                         focus = 0
                         del_fade_target = 0.0
                         exp_fade_target = 0.0
@@ -4565,6 +4599,7 @@ def select_mode(
                         )
 
                         _ta_scroll = 0
+                        _ta_scroll_meta: dict = {}
                         _ta_page = 1
                         _ta_export_sel = 1  # default to "Next" on page 1
 
@@ -4618,6 +4653,7 @@ def select_mode(
                                 _build_team_analysis_screen(
                                     _ta_profile,
                                     scroll_offset=_ta_scroll,
+                                    scroll_meta=_ta_scroll_meta,
                                     width=w,
                                     height=h,
                                     export_sel=_ta_export_sel,
@@ -4631,10 +4667,8 @@ def select_mode(
 
                             key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
 
-                            if key in ("up", "scroll_up"):
-                                _ta_scroll = max(0, _ta_scroll - 1)
-                            elif key in ("down", "scroll_down"):
-                                _ta_scroll += 1
+                            if key in SCROLL_KEYS:
+                                _ta_scroll = coalesce_scroll(_ta_scroll, key, _ta_scroll_meta, read_key)
                             elif key == "left":
                                 _ta_export_sel = max(0, _ta_export_sel - 1)
                             elif key == "right":
@@ -4707,11 +4741,16 @@ def select_mode(
                 while True:
                     key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
 
-                    if key in ("up", "left", "scroll_up"):
-                        intake_selected = (intake_selected - 1) % intake_n
-                        intake_start = time.monotonic()
-                    elif key in ("down", "right", "scroll_down"):
-                        intake_selected = (intake_selected + 1) % intake_n
+                    if key in ("up", "left", "scroll_up", "down", "right", "scroll_down"):
+                        _delta = coalesce_steps(
+                            key,
+                            read_key,
+                            down=("down", "right", "scroll_down"),
+                            up=("up", "left", "scroll_up"),
+                        )
+                        if not _delta:
+                            continue
+                        intake_selected = (intake_selected + _delta) % intake_n
                         intake_start = time.monotonic()
                     elif key == "enter":
                         chosen_intake = _INTAKE_CARDS[intake_selected]["key"]
@@ -4849,11 +4888,16 @@ def select_mode(
                 while True:
                     key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
 
-                    if key in ("up", "left", "scroll_up"):
-                        offline_selected = (offline_selected - 1) % offline_n
-                        offline_start = time.monotonic()
-                    elif key in ("down", "right", "scroll_down"):
-                        offline_selected = (offline_selected + 1) % offline_n
+                    if key in ("up", "left", "scroll_up", "down", "right", "scroll_down"):
+                        _delta = coalesce_steps(
+                            key,
+                            read_key,
+                            down=("down", "right", "scroll_down"),
+                            up=("up", "left", "scroll_up"),
+                        )
+                        if not _delta:
+                            continue
+                        offline_selected = (offline_selected + _delta) % offline_n
                         offline_start = time.monotonic()
                     elif key == "enter":
                         break  # → Phase 5b (export or import)

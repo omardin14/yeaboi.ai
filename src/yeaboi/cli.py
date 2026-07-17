@@ -1235,7 +1235,12 @@ def main(argv: list[str] | None = None) -> None:
         # the app instead of the terminal's own scrollback buffer.
         import atexit
 
-        from yeaboi.ui.shared._input import disable_mouse_tracking, enable_mouse_tracking
+        from yeaboi.ui.shared._input import (
+            disable_mouse_tracking,
+            enable_mouse_tracking,
+            enter_raw_mode,
+            exit_raw_mode,
+        )
 
         def _terminal_cleanup() -> None:
             """Safety net — ensure terminal is restored even on unhandled crash."""
@@ -1243,8 +1248,15 @@ def main(argv: list[str] | None = None) -> None:
                 disable_mouse_tracking()
             except Exception:
                 pass
+            try:
+                exit_raw_mode()
+            except Exception:
+                pass
 
         atexit.register(_terminal_cleanup)
+        # Hold cbreak+no-echo for the whole TUI so mouse-report bytes arriving
+        # between key reads can't echo as garbage during a fast wheel scroll.
+        enter_raw_mode()
         enable_mouse_tracking()
         _tui_error: Exception | None = None
         try:
@@ -1257,6 +1269,7 @@ def main(argv: list[str] | None = None) -> None:
             mode_result = None
         finally:
             disable_mouse_tracking()
+            exit_raw_mode()
             # Stop any background music daemon so it doesn't outlive the app.
             from yeaboi import music
 
