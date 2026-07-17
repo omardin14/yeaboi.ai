@@ -291,3 +291,67 @@ class TestMigrationV3ToV4:
             # None should show up as analysis sessions
             analysis = store.list_analysis_sessions()
             assert len(analysis) == 0
+
+
+# ---------------------------------------------------------------------------
+# Resume contract — save-on-generation persists each step, resumable until
+# the flow is marked complete. Backs the immediate-save behaviour in
+# ui/mode_select/__init__.py (_save_ana / _load_ana_session).
+# ---------------------------------------------------------------------------
+
+
+class TestAnalysisResumeContract:
+    def test_sample_artifacts_round_trip(self, store: SessionStore):
+        """Every preview artifact (incl. the sprint) survives save/load verbatim."""
+        sid = make_session_id()
+        store.create_session(sid, project_name="Platform", mode="analysis")
+        state = {
+            "messages": [],
+            "instructions": "Team velocity is 23.5",
+            "sample_epic": {"title": "Checkout revamp"},
+            "sample_stories": [{"id": "S1", "story_points": 3}],
+            "sample_tasks": [{"id": "T1"}],
+            "sample_sprint": {"sprint_name": "Sprint 1", "total_points": 3},
+            "last_page": "sprint",
+        }
+        store.save_state(sid, state)
+
+        loaded = store.load_state(sid)
+        assert loaded is not None
+        assert loaded["last_page"] == "sprint"
+        assert loaded["sample_epic"] == {"title": "Checkout revamp"}
+        assert loaded["sample_sprint"] == {"sprint_name": "Sprint 1", "total_points": 3}
+
+    def test_load_ana_session_resumes_incomplete(self, tmp_path: Path, monkeypatch):
+        """A session saved mid-flow (last_page != complete) is returned for resume."""
+        from yeaboi.ui import mode_select
+
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr(mode_select, "_ana_dbp", db)
+        monkeypatch.setattr(mode_select, "_ana_sid", "")
+
+        sid = make_session_id()
+        with SessionStore(db) as store:
+            store.create_session(sid, project_name="Platform", mode="analysis")
+            store.save_state(sid, {"messages": [], "sample_epic": {"title": "E"}, "last_page": "epic"})
+
+        resumed = mode_select._load_ana_session("Platform")
+        assert resumed is not None
+        assert resumed["last_page"] == "epic"
+        # The resume target is latched so subsequent _save_ana calls hit the same row.
+        assert mode_select._ana_sid == sid
+
+    def test_load_ana_session_skips_complete(self, tmp_path: Path, monkeypatch):
+        """A finished session (last_page == complete) is not offered for resume."""
+        from yeaboi.ui import mode_select
+
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr(mode_select, "_ana_dbp", db)
+        monkeypatch.setattr(mode_select, "_ana_sid", "")
+
+        sid = make_session_id()
+        with SessionStore(db) as store:
+            store.create_session(sid, project_name="Platform", mode="analysis")
+            store.save_state(sid, {"messages": [], "last_page": "complete"})
+
+        assert mode_select._load_ana_session("Platform") is None

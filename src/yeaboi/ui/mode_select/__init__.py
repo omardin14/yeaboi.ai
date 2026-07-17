@@ -528,6 +528,7 @@ def _run_preview_flow(
     _epic = (resume_state or {}).get("sample_epic")
     _stories = (resume_state or {}).get("sample_stories")
     _tasks = (resume_state or {}).get("sample_tasks")
+    _sprint = (resume_state or {}).get("sample_sprint")
 
     # Scroll geometry published by each page's screen builder; reused across the
     # sequential pages (repopulated on every render before any key is handled).
@@ -623,6 +624,10 @@ def _run_preview_flow(
         if result is not None:
             _epic = result
         logger.info("Preview: sample epic generated: %s", _epic.get("title", "?"))
+        # Persist the moment generation completes — not only on the Accept/next
+        # keypress — so quitting here still leaves a resumable session (matches the
+        # Accept-handler save dict below).
+        _save_ana({"instructions": _instr, "sample_epic": _epic, "last_page": "epic"}, "epic")
 
     if last_page not in ("stories", "tasks", "sprint"):
         scroll, sel = 0, 0
@@ -688,6 +693,16 @@ def _run_preview_flow(
         if result is not None:
             _stories = result
         logger.info("Preview: %d sample stories generated", len(_stories))
+        # Persist on generation (see Epic page) so a mid-flow quit stays resumable.
+        _save_ana(
+            {
+                "instructions": _instr,
+                "sample_epic": _epic,
+                "sample_stories": _stories,
+                "last_page": "stories",
+            },
+            "stories",
+        )
 
     if last_page not in ("tasks", "sprint"):
         scroll, sel = 0, 0
@@ -766,6 +781,17 @@ def _run_preview_flow(
         if result is not None:
             _tasks = result
         logger.info("Preview: %d sample tasks generated", len(_tasks))
+        # Persist on generation (see Epic page) so a mid-flow quit stays resumable.
+        _save_ana(
+            {
+                "instructions": _instr,
+                "sample_epic": _epic,
+                "sample_stories": _stories,
+                "sample_tasks": _tasks,
+                "last_page": "tasks",
+            },
+            "tasks",
+        )
 
     if last_page != "sprint":
         scroll, sel = 0, 0
@@ -843,19 +869,24 @@ def _run_preview_flow(
         "Preview: entering Sprint page (%.1fs elapsed)",
         time.monotonic() - _flow_start,
     )
-    _run_sprint_review(
+    _finished = _run_sprint_review(
         live,
         console,
         read_key,
         frame_time,
         supports_timeout,
         _instr,
+        _epic,
         _stories,
         _tasks,
         ta_examples,
+        resume_sprint=_sprint,
     )
-    # Clear session so next run starts fresh (not resuming from sprint)
-    _save_ana({"last_page": "complete"}, "complete")
+    # Only mark the session complete (non-resumable) when the user actually
+    # finished the Sprint page. On a quit, _run_sprint_review has already saved
+    # the sprint with last_page="sprint", so the analysis resumes straight here.
+    if _finished:
+        _save_ana({"last_page": "complete"}, "complete")
     logger.info(
         "Preview flow completed in %.1fs",
         time.monotonic() - _flow_start,
@@ -869,11 +900,17 @@ def _run_sprint_review(
     frame_time,
     supports_timeout,
     instr_text,
+    sample_epic,
     sample_stories,
     sample_tasks,
     ta_examples,
+    resume_sprint=None,
 ):
-    """Run the sample sprint review loop (extracted to reduce nesting depth)."""
+    """Run the sample sprint review loop (extracted to reduce nesting depth).
+
+    Returns True if the user finished the page (chose "Done"), False if they quit
+    (Esc). The caller uses this to decide whether to mark the session complete.
+    """
     logger.info("Sprint review: generating sample sprint via LLM")
     import threading as _threading
 
@@ -882,6 +919,21 @@ def _run_sprint_review(
         _build_analysis_progress_screen,
         _build_sample_sprint_screen,
     )
+
+    def _save_sprint(sprint_obj: dict) -> None:
+        # Persist the sprint the moment it is generated (see the Epic page), with
+        # last_page="sprint" so a quit here resumes to this page without a re-run.
+        _save_ana(
+            {
+                "instructions": instr_text,
+                "sample_epic": sample_epic,
+                "sample_stories": sample_stories,
+                "sample_tasks": sample_tasks,
+                "sample_sprint": sprint_obj,
+                "last_page": "sprint",
+            },
+            "sprint",
+        )
 
     def _regen_sprint():
         result_box: list = [None, None]
@@ -916,15 +968,20 @@ def _run_sprint_review(
             return None
         return result_box[0]
 
-    sprint = _regen_sprint() or {
-        "sprint_name": "Sprint 1",
-        "velocity_target": 20,
-        "stories_included": [s.get("id", "") for s in sample_stories],
-        "total_points": sum(s.get("story_points", 0) for s in sample_stories),
-        "capacity_notes": "Fallback — generation failed.",
-        "risks": [],
-        "rationale": "Fallback sprint plan.",
-    }
+    if resume_sprint:
+        # Resumed session — reuse the saved sprint, skip the (expensive) LLM call.
+        sprint = resume_sprint
+    else:
+        sprint = _regen_sprint() or {
+            "sprint_name": "Sprint 1",
+            "velocity_target": 20,
+            "stories_included": [s.get("id", "") for s in sample_stories],
+            "total_points": sum(s.get("story_points", 0) for s in sample_stories),
+            "capacity_notes": "Fallback — generation failed.",
+            "risks": [],
+            "rationale": "Fallback sprint plan.",
+        }
+        _save_sprint(sprint)
     scroll = 0
     sel = 0
     _scroll_meta: dict = {}
@@ -941,15 +998,16 @@ def _run_sprint_review(
             sel = min(2, sel + 1)
         elif k in ("enter", " "):
             if sel == 0:
-                break  # Done
+                return True  # Done — caller marks the session complete
             elif sel == 1:
                 result = _regen_sprint()
                 if result is not None:
                     sprint = result
+                    _save_sprint(sprint)
             elif sel == 2:
                 pass  # Export (handled at report level)
         elif k in ("esc", "q"):
-            break
+            return False  # Quit — keep last_page="sprint" so it stays resumable
         w, h = console.size
         live.update(
             _build_sample_sprint_screen(
