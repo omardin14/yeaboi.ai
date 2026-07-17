@@ -56,6 +56,18 @@ def _eq_bars(count: int = 4) -> str:
     )
 
 
+def _connecting_dots() -> str:
+    """Return an animated ``connecting`` ellipsis (``   `` → ``.  `` → ``.. `` → ``...``).
+
+    Driven by ``time.monotonic()`` like :func:`_eq_bars`, so it advances on the same
+    render frames with no timer of its own. Shown while the stream is buffering (see
+    :func:`yeaboi.music.is_connecting`) so the silent gap before audio starts looks
+    like progress, not a broken player.
+    """
+    n = int(time.monotonic() * 2.5) % 4  # ~2.5 Hz cycle through 0..3 dots
+    return ("." * n).ljust(3)
+
+
 def build_music_subtitle(theme: Theme = PLANNING_THEME) -> Text:
     """Return the compact music status line for a Panel's bottom border.
 
@@ -83,8 +95,15 @@ def build_music_subtitle(theme: Theme = PLANNING_THEME) -> Text:
         line.append(music.current_channel_name(), style=theme.accent_bright)
         line.append(" · ", style=theme.muted)
         if status == "playing":
-            line.append("playing ", style=theme.value)
-            line.append(_eq_bars(), style=theme.accent_bright)  # animated equalizer
+            # A freshly-started stream is "playing" but not yet audible while it
+            # connects/buffers; show a progress ellipsis instead of the equalizer so
+            # the silent gap doesn't read as broken (see music.is_connecting).
+            if music.is_connecting():
+                line.append("connecting", style=theme.value)
+                line.append(_connecting_dots(), style=theme.accent_bright)
+            else:
+                line.append("playing ", style=theme.value)
+                line.append(_eq_bars(), style=theme.accent_bright)  # animated equalizer
             toggle_hint = "^P pause"
         else:
             line.append("paused", style=theme.value)
