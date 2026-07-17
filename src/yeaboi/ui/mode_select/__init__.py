@@ -2859,9 +2859,7 @@ def select_mode(
                             _ana_del_pending = False
 
                         if key in ("up", "scroll_up", "down", "scroll_down"):
-                            _delta = coalesce_steps(
-                                key, read_key, down=("down", "scroll_down"), up=("up", "scroll_up")
-                            )
+                            _delta = coalesce_steps(key, read_key, down=("down", "scroll_down"), up=("up", "scroll_up"))
                             if not _delta:
                                 continue
                             _ana_selected = (_ana_selected + _delta) % _ana_n
@@ -4069,9 +4067,7 @@ def select_mode(
                     # ── Normal project list mode ───────────────────────────────
                     elif key in ("up", "scroll_up", "down", "scroll_down"):
                         # Coalesce a fast wheel/held-key burst into one net move.
-                        _delta = coalesce_steps(
-                            key, read_key, down=("down", "scroll_down"), up=("up", "scroll_up")
-                        )
+                        _delta = coalesce_steps(key, read_key, down=("down", "scroll_down"), up=("up", "scroll_up"))
                         if not _delta:
                             continue
                         proj_selected = (proj_selected + _delta) % proj_n

@@ -146,11 +146,13 @@ class TestCoalesceScroll:
         # A reader that pops from `queue` when polled non-blocking; "" when empty.
         def read(timeout=None):
             return queue.pop(0) if queue else ""
+
         return read
 
     def test_applies_first_key_plus_buffered_burst(self):
         # first_key + 4 buffered scroll_downs, wheel_step 3 → 5*3 = 15, clamped to 80.
         from yeaboi.ui.shared._scroll import coalesce_scroll
+
         q = ["scroll_down", "scroll_down", "scroll_down", "scroll_down"]
         out = coalesce_scroll(0, "scroll_down", {"max_offset": 80, "viewport_h": 20}, self._reader(q))
         assert out == 15
@@ -159,6 +161,7 @@ class TestCoalesceScroll:
     def test_stops_and_pushes_back_non_scroll_key(self):
         from yeaboi.ui.shared import _input
         from yeaboi.ui.shared._scroll import coalesce_scroll
+
         _input._pushback.clear()
         q = ["scroll_down", "enter"]
         out = coalesce_scroll(0, "scroll_down", {"max_offset": 80, "viewport_h": 20}, self._reader(q))
@@ -170,16 +173,20 @@ class TestCoalesceScroll:
 
     def test_stops_when_input_drained(self):
         from yeaboi.ui.shared._scroll import coalesce_scroll
+
         out = coalesce_scroll(10, "up", {"max_offset": 80, "viewport_h": 20}, self._reader([]))
         assert out == 9  # just the first key; nothing buffered
 
     def test_falls_back_to_single_apply_without_timeout_support(self):
         # A no-arg reader (like the test stubs) → TypeError → single apply, no drain.
         from yeaboi.ui.shared._scroll import coalesce_scroll
+
         calls = {"n": 0}
+
         def noarg_reader():
             calls["n"] += 1
             return "scroll_down"
+
         out = coalesce_scroll(0, "scroll_down", {"max_offset": 80, "viewport_h": 20}, noarg_reader)
         assert out == 3  # single wheel step
         assert calls["n"] == 0  # reader never successfully polled
@@ -187,6 +194,7 @@ class TestCoalesceScroll:
     def test_boundary_burst_is_noop(self):
         # Bursting down at the bottom stays put (so the caller can skip the repaint).
         from yeaboi.ui.shared._scroll import coalesce_scroll
+
         q = ["scroll_down", "scroll_down"]
         out = coalesce_scroll(80, "scroll_down", {"max_offset": 80, "viewport_h": 20}, self._reader(q))
         assert out == 80
@@ -201,26 +209,31 @@ class TestCoalesceSteps:
     def _reader(self, queue):
         def read(timeout=None):
             return queue.pop(0) if queue else ""
+
         return read
 
     def test_single_key_no_buffer(self):
         from yeaboi.ui.shared._scroll import coalesce_steps
+
         assert coalesce_steps("scroll_down", self._reader([]), down=self.DOWN, up=self.UP) == 1
         assert coalesce_steps("scroll_up", self._reader([]), down=self.DOWN, up=self.UP) == -1
 
     def test_sums_a_same_direction_burst(self):
         from yeaboi.ui.shared._scroll import coalesce_steps
+
         q = ["scroll_down", "scroll_down", "scroll_down"]  # + first = 4
         assert coalesce_steps("scroll_down", self._reader(q), down=self.DOWN, up=self.UP) == 4
 
     def test_mixed_directions_net_out(self):
         from yeaboi.ui.shared._scroll import coalesce_steps
+
         q = ["scroll_up", "scroll_up"]  # first down(+1) then two up(-2) = -1
         assert coalesce_steps("scroll_down", self._reader(q), down=self.DOWN, up=self.UP) == -1
 
     def test_pushes_back_non_nav_key(self):
         from yeaboi.ui.shared import _input
         from yeaboi.ui.shared._scroll import coalesce_steps
+
         _input._pushback.clear()
         q = ["scroll_down", "enter"]
         out = coalesce_steps("scroll_down", self._reader(q), down=self.DOWN, up=self.UP)
@@ -230,4 +243,5 @@ class TestCoalesceSteps:
 
     def test_no_timeout_reader_falls_back_to_first_key(self):
         from yeaboi.ui.shared._scroll import coalesce_steps
+
         assert coalesce_steps("scroll_down", lambda: "scroll_down", down=self.DOWN, up=self.UP) == 1
