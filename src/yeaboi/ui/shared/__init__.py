@@ -41,3 +41,13 @@ from yeaboi.ui.shared._input import (  # noqa: F401
     enable_mouse_tracking,
     read_key,
 )
+from yeaboi.ui.shared._scroll import (  # noqa: F401
+    SCROLL_KEYS,
+    WHEEL_STEP,
+    apply_scroll,
+    clamp_scroll,
+    coalesce_scroll,
+    coalesce_steps,
+    max_scroll,
+    publish_geometry,
+)

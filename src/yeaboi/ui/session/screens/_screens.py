@@ -15,6 +15,7 @@ from rich.text import Text
 from yeaboi.ui.shared._animations import lerp_color as _shared_lerp_color
 from yeaboi.ui.shared._animations import scrollbar_column
 from yeaboi.ui.shared._components import PAD, planning_title
+from yeaboi.ui.shared._scroll import publish_geometry
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -130,6 +131,7 @@ def _build_summary_screen(
     status_msg: str = "",
     btn_fades: list[float] | None = None,
     shimmer_tick: float | None = None,
+    scroll_meta: dict | None = None,
 ) -> Panel:
     """Build the scrollable intake summary screen with Accept/Edit/Export action bar.
 
@@ -150,6 +152,7 @@ def _build_summary_screen(
     # Clamp scroll offset
     max_scroll = max(0, len(summary_lines) - viewport_h)
     scroll_offset = max(0, min(scroll_offset, max_scroll))
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
 
     body: list = []
 

@@ -16,6 +16,7 @@ from yeaboi.ui.session._utils import _invoke_with_animation, _render_to_lines, _
 from yeaboi.ui.session.screens._accordion import _build_accordion_question_screen
 from yeaboi.ui.session.screens._screens import _build_summary_screen
 from yeaboi.ui.session.screens._screens_pipeline import _build_edit_prompt_screen
+from yeaboi.ui.shared._scroll import SCROLL_KEYS, coalesce_scroll
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,9 @@ def _phase_intake_review(
         scroll_offset = 0
         menu_selected = 0  # 0=Accept, 1=Edit, 2=Export
         status_msg = ""
+        # The screen builder publishes its true scroll geometry here each render;
+        # coalesce_scroll() below clamps to it so the offset never runs past the end.
+        _scroll_meta: dict = {}
 
         # Button fade animation state — mirrors project dashboard pattern.
         # Each button has a current fade (0.0–1.0) and a target.
@@ -89,6 +93,7 @@ def _phase_intake_review(
                 width=w,
                 height=h,
                 btn_fades=btn_fades,
+                scroll_meta=_scroll_meta,
             )
         )
 
@@ -98,10 +103,11 @@ def _phase_intake_review(
 
             if key == "esc":
                 return None
-            elif key in ("up", "scroll_up"):
-                scroll_offset = max(0, scroll_offset - 1)
-            elif key in ("down", "scroll_down"):
-                scroll_offset += 1
+            elif key in SCROLL_KEYS:
+                _ns = coalesce_scroll(scroll_offset, key, _scroll_meta, _key)
+                if _ns == scroll_offset:
+                    continue  # boundary — skip the repaint so the title shimmer stays put
+                scroll_offset = _ns
             elif key == "left":
                 menu_selected = (menu_selected - 1) % 3
                 btn_targets = [1.0 if i == menu_selected else 0.0 for i in range(3)]
@@ -160,6 +166,7 @@ def _phase_intake_review(
                     status_msg=status_msg,
                     btn_fades=btn_fades,
                     shimmer_tick=time.monotonic() - _anim0,
+                    scroll_meta=_scroll_meta,
                 )
             )
 

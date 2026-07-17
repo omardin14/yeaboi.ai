@@ -18,6 +18,7 @@ from yeaboi.ui.session._utils import _pad_left, _wrap_text
 from yeaboi.ui.session.screens._screens import _build_action_bar, _planning_title
 from yeaboi.ui.shared._animations import scrollbar_column
 from yeaboi.ui.shared._components import PAD
+from yeaboi.ui.shared._scroll import publish_geometry
 
 _PAD = PAD
 
@@ -54,6 +55,7 @@ def _build_pipeline_screen(
     popup_t: float = 0.0,
     popup_pulse: float = 0.0,
     shimmer_tick: float | None = None,
+    scroll_meta: dict | None = None,
 ) -> Panel:
     """Build the pipeline stage screen (processing + result).
 
@@ -129,6 +131,9 @@ def _build_pipeline_screen(
         effective_h = viewport_h - 2 if has_sticky_headers else viewport_h
         max_scroll = max(0, len(content_lines) - effective_h)
         scroll_offset = max(0, min(scroll_offset, max_scroll))
+        # Hand the real geometry back to the scroll loop so its counter clamps to
+        # exactly what's displayed (see yeaboi.ui.shared._scroll.publish_geometry).
+        publish_geometry(scroll_meta, max_scroll, effective_h)
         has_above = scroll_offset > 0
 
         # Determine sticky header — find the most recent group header above viewport.
@@ -382,6 +387,7 @@ def _build_chat_screen(
     processing: bool = False,
     tick: float = 0.0,
     shimmer_tick: float | None = None,
+    scroll_meta: dict | None = None,
 ) -> Panel:
     """Build the post-pipeline chat screen.
 
@@ -412,6 +418,9 @@ def _build_chat_screen(
 
     max_scroll = max(0, len(msg_lines) - viewport_h)
     scroll_offset = max(0, min(scroll_offset, max_scroll))
+    # Hand the real geometry (msg_lines is built here, not in the loop) back so
+    # the chat loop can clamp/jump-to-bottom exactly. See _scroll.publish_geometry.
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
     has_above = scroll_offset > 0
     has_below = scroll_offset + viewport_h < len(msg_lines)
 

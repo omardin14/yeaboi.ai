@@ -98,6 +98,15 @@ class MusicLive(Live):
     """A Rich ``Live`` that stamps the music status onto every Panel it renders."""
 
     def __init__(self, *args, **kwargs) -> None:
+        # Default vertical_overflow to "crop". The TUI is a hand-rolled scroller:
+        # every screen builds a Panel sized to the terminal height and does its
+        # own line-slicing. If a Panel ever renders even one row too tall (small
+        # terminal, an ASCII title whose height differs from the assumed
+        # constant, or line-wrapping), Rich's default "ellipsis" overflow pushes
+        # the real terminal into scrolling and corrupts the frame — the "breaks
+        # the view" symptom. "crop" silently trims the overflow instead of
+        # scrolling; unlike "ellipsis" it also avoids a stray "…" on the last row.
+        kwargs.setdefault("vertical_overflow", "crop")
         super().__init__(*args, **kwargs)
         self._last_renderable = None
         self._stamped = False

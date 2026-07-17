@@ -24,6 +24,7 @@ from yeaboi.ui.shared._components import (
     calc_viewport,
     planning_title,
 )
+from yeaboi.ui.shared._scroll import publish_geometry
 
 # ---------------------------------------------------------------------------
 # Shared analysis review screen builder (mirrors planning mode layout)
@@ -37,6 +38,7 @@ def _build_analysis_review_screen(
     *,
     stage_index: int = 0,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -79,6 +81,7 @@ def _build_analysis_review_screen(
     else:
         max_scroll = 0
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
 
     # Collect visible items
     visible: list = []
@@ -149,6 +152,7 @@ def _build_team_analysis_screen(
     profile,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     export_sel: int = 2,
@@ -1849,6 +1853,7 @@ def _build_team_analysis_screen(
 
     max_scroll = max(0, _rendered_lines - body_h)
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, body_h)
 
     _vis_items: list = []
     _vis_h = 0
@@ -1910,6 +1915,7 @@ def _build_instructions_review_screen(
     instructions_text: str,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -2050,6 +2056,7 @@ def _build_instructions_review_screen(
         body_lines,
         stage_index=0,
         scroll_offset=scroll_offset,
+        scroll_meta=scroll_meta,
         width=width,
         height=height,
         action_sel=action_sel,
@@ -2062,6 +2069,7 @@ def _build_sample_epic_screen(
     epic: dict,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -2189,6 +2197,7 @@ def _build_sample_epic_screen(
         body_lines,
         stage_index=1,
         scroll_offset=scroll_offset,
+        scroll_meta=scroll_meta,
         width=width,
         height=height,
         action_sel=action_sel,
@@ -2200,6 +2209,7 @@ def _build_sample_stories_screen(
     stories: list[dict],
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -2323,6 +2333,7 @@ def _build_sample_stories_screen(
         body_lines,
         stage_index=2,
         scroll_offset=scroll_offset,
+        scroll_meta=scroll_meta,
         width=width,
         height=height,
         action_sel=action_sel,
@@ -2334,6 +2345,7 @@ def _build_sample_tasks_screen(
     tasks: list[dict],
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -2464,6 +2476,7 @@ def _build_sample_tasks_screen(
         body_lines,
         stage_index=3,
         scroll_offset=scroll_offset,
+        scroll_meta=scroll_meta,
         width=width,
         height=height,
         action_sel=action_sel,
@@ -2476,6 +2489,7 @@ def _build_sample_sprint_screen(
     stories: list[dict],
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -2596,6 +2610,7 @@ def _build_sample_sprint_screen(
         body_lines,
         stage_index=4,
         scroll_offset=scroll_offset,
+        scroll_meta=scroll_meta,
         width=width,
         height=height,
         action_sel=action_sel,
@@ -3029,6 +3044,7 @@ def _build_usage_screen(
     usage_data: dict,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -3141,6 +3157,7 @@ def _build_usage_screen(
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
     visible = body_lines[actual_scroll : actual_scroll + viewport_h]
 
     _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
@@ -3195,6 +3212,7 @@ def _build_standup_screen(
     standup_data: dict,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -3331,6 +3349,7 @@ def _build_standup_screen(
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
     visible = body_lines[actual_scroll : actual_scroll + viewport_h]
 
     _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
@@ -3413,6 +3432,7 @@ def _build_performance_screen(
     performance_data: dict,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -3546,6 +3566,7 @@ def _build_performance_screen(
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
     visible = body_lines[actual_scroll : actual_scroll + viewport_h]
 
     _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
@@ -3591,6 +3612,7 @@ def _build_reporting_screen(
     reporting_data: dict,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -3781,6 +3803,7 @@ def _build_reporting_screen(
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
     visible = body_lines[actual_scroll : actual_scroll + viewport_h]
 
     _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
@@ -3825,6 +3848,7 @@ def _build_retro_screen(
     retro_data: dict,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -3925,6 +3949,7 @@ def _build_retro_screen(
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
     visible = body_lines[actual_scroll : actual_scroll + viewport_h]
 
     _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
@@ -4205,6 +4230,7 @@ def _build_settings_screen(
     config_data: dict,
     *,
     scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
     width: int = 80,
     height: int = 24,
     action_sel: int = 0,
@@ -4323,6 +4349,7 @@ def _build_settings_screen(
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
     actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
     visible = body_lines[actual_scroll : actual_scroll + viewport_h]
 
     _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
