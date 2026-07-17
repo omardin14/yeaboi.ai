@@ -38,24 +38,107 @@ _TITLE = "Notion"
 _SUBTITLE = "Docs"
 
 
+def _drain() -> None:
+    """Drain buffered stdin so a held key from the previous screen doesn't leak in."""
+    import select as _sel
+
+    _drain_fd = sys.stdin.fileno()
+    _drain_old = termios.tcgetattr(_drain_fd)
+    try:
+        tty.setcbreak(_drain_fd)
+        while _sel.select([_drain_fd], [], [], 0.05)[0]:
+            sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(_drain_fd, termios.TCSADRAIN, _drain_old)
+
+
+def _run_notion_selection(console: Console, read_key, live: Live) -> str | StepNav | None:
+    """Show the Notion / Skip picker. Returns "notion"/"skip", a StepNav (←/→/F), or None (Esc).
+
+    Kept for backward compatibility; the unified Docs picker (_phase_docs._run_docs)
+    now owns provider selection and calls _run_notion_form directly.
+    """
+    from rich.align import Align
+    from rich.text import Text
+
+    cards = [{"name": "Notion", "color": _ACCENT}, {"name": "Skip", "color": _ACCENT}]
+    pick = 0
+
+    def _render_menu() -> None:
+        rows = [_build_provider_row(c, selected=(i == pick)) for i, c in enumerate(cards)]
+        body = [item for row in rows for item in (Align.center(row), Text(""))]
+        if body:
+            body = body[:-1]
+        body_h = len(rows) * 3 - 1 if rows else 0
+        w, h = console.size
+        live.update(
+            _build_screen_frame(
+                subtitle="Docs · ↑↓ choose · Enter select · ←→ section · F finish",
+                step=2,
+                body_items=body,
+                body_height=body_h,
+                width=w,
+                height=h,
+                title_text=_TITLE,
+            )
+        )
+
+    _drain()
+    _render_menu()
+    while True:
+        key = read_key()
+        # Section navigation (←/→ between chips, F to finish) short-circuits
+        # the picker so the user can leave the Docs step without choosing.
+        nav = nav_for_key(key, 2)
+        if nav is not None:
+            return nav
+        if key in ("up", "scroll_up"):
+            pick = (pick - 1) % len(cards)
+        elif key in ("down", "scroll_down"):
+            pick = (pick + 1) % len(cards)
+        elif key == "enter":
+            return "notion" if pick == 0 else "skip"
+        elif key == "esc":
+            return None
+        _render_menu()
+
+
 def _run_notion(
     console: Console,
     read_key,
     existing_config: dict[str, str] | None,
     live: Live,
 ) -> dict[str, str] | StepNav | None:
-    """Show the optional Notion credential form and verify the token.
+    """Show the optional Notion / Skip picker then the credential form.
 
-    Shows a Notion / Skip picker first (matching the Issue Tracking & Version
-    Control steps), then the credential form. Returns a dict of collected Notion
+    Backward-compatible standalone entry point. Returns a dict of collected Notion
     env vars, an empty dict when the user picks Skip (or submits an empty token),
-    or None when the user presses Esc to go back. Notion is optional — the step
-    never blocks users who don't use it.
+    a StepNav for section navigation, or None when the user presses Esc to go back.
+    """
+    choice = _run_notion_selection(console, read_key, live)
+    if isinstance(choice, StepNav):
+        return choice
+    if choice is None:
+        return None
+    if choice == "skip":
+        return {}
+    return _run_notion_form(console, read_key, existing_config, live)
+
+
+def _run_notion_form(
+    console: Console,
+    read_key,
+    existing_config: dict[str, str] | None,
+    live: Live,
+) -> dict[str, str] | None:
+    """Render the Notion credential form and verify the token.
+
+    The Notion/Skip choice is the caller's responsibility (the unified Docs picker or
+    _run_notion). Returns a dict of collected Notion env vars, an empty dict when the
+    token is left blank (optional), or None when the user presses Esc to go back to
+    the picker. Notion is optional — the step never blocks users who don't use it.
     """
     import threading
-
-    from rich.align import Align
-    from rich.text import Text
 
     fields = _NOTION_FIELDS
     n = len(fields)
@@ -64,73 +147,6 @@ def _run_notion(
     errors: dict[int, str] = {}
     verified: dict[int, bool] = {}
     selected = 0
-
-    def _drain() -> None:
-        """Drain buffered stdin so a held key from the previous screen doesn't leak in."""
-        import select as _sel
-
-        _drain_fd = sys.stdin.fileno()
-        _drain_old = termios.tcgetattr(_drain_fd)
-        try:
-            tty.setcbreak(_drain_fd)
-            while _sel.select([_drain_fd], [], [], 0.05)[0]:
-                sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(_drain_fd, termios.TCSADRAIN, _drain_old)
-
-    # --- Step 1: Notion / Skip picker (matches the Issue Tracking & Version
-    # Control steps, which both offer an explicit Skip rather than making the user
-    # guess that an empty submit skips the step). ---
-    def _run_notion_selection() -> str | StepNav | None:
-        """Show the Notion / Skip picker. Returns "notion"/"skip", a StepNav (←/→/F), or None (Esc)."""
-        cards = [{"name": "Notion", "color": _ACCENT}, {"name": "Skip", "color": _ACCENT}]
-        pick = 0
-
-        def _render_menu() -> None:
-            rows = [_build_provider_row(c, selected=(i == pick)) for i, c in enumerate(cards)]
-            body = [item for row in rows for item in (Align.center(row), Text(""))]
-            if body:
-                body = body[:-1]
-            body_h = len(rows) * 3 - 1 if rows else 0
-            w, h = console.size
-            live.update(
-                _build_screen_frame(
-                    subtitle="Docs · ↑↓ choose · Enter select · ←→ section · F finish",
-                    step=2,
-                    body_items=body,
-                    body_height=body_h,
-                    width=w,
-                    height=h,
-                    title_text=_TITLE,
-                )
-            )
-
-        _drain()
-        _render_menu()
-        while True:
-            key = read_key()
-            # Section navigation (←/→ between chips, F to finish) short-circuits
-            # the picker so the user can leave the Docs step without choosing.
-            nav = nav_for_key(key, 2)
-            if nav is not None:
-                return nav
-            if key in ("up", "scroll_up"):
-                pick = (pick - 1) % len(cards)
-            elif key in ("down", "scroll_down"):
-                pick = (pick + 1) % len(cards)
-            elif key == "enter":
-                return "notion" if pick == 0 else "skip"
-            elif key == "esc":
-                return None
-            _render_menu()
-
-    choice = _run_notion_selection()
-    if isinstance(choice, StepNav):
-        return choice
-    if choice is None:
-        return None
-    if choice == "skip":
-        return {}
 
     _drain()
 

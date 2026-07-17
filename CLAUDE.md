@@ -437,7 +437,8 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - `GITHUB_TOKEN`, `AZURE_DEVOPS_TOKEN` — optional, for repo context tools
 - `AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TEAM` — optional, for Azure DevOps board sync
 - `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` — optional, for Jira integration
-- `CONFLUENCE_SPACE_KEY` — optional, shares Atlassian auth with Jira
+- `CONFLUENCE_SPACE_KEY` — optional, the space to scope searches to
+- `CONFLUENCE_BASE_URL` / `CONFLUENCE_EMAIL` / `CONFLUENCE_API_TOKEN` — optional standalone Atlassian login for Confluence. Confluence reuses the Jira creds by default; these let it be configured **without** Jira (they win over `JIRA_*` when set — see `config.get_confluence_base_url`). The Docs setup step collects them inline when Jira wasn't configured.
 - `NOTION_TOKEN` — optional, Notion integration token (independent doc tool; its own auth, not shared with Jira/Confluence). Enables the 5 `notion_*` tools + analysis/standup context.
 - `NOTION_ROOT_PAGE_ID` — optional, default parent for created Notion pages; also gates the Notion source in the Daily Standup activity feed (the Confluence-space-key analog)
 - `STANDUP_USER_NAME` — optional, your display name for your own standup update (default: "Me")

@@ -14,9 +14,11 @@
 # email, and API token). This keeps the auth model consistent and avoids
 # writing raw REST calls.
 #
-# Auth: Confluence Cloud uses the same HTTP Basic Auth as Jira Cloud —
-# JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN are reused. The only new
-# env var is CONFLUENCE_SPACE_KEY (the short space identifier, e.g. "MYSPACE").
+# Auth: Confluence Cloud uses the same HTTP Basic Auth as Jira Cloud. When Jira is
+# configured, its creds (JIRA_BASE_URL/EMAIL/API_TOKEN) are reused automatically.
+# Confluence can also be set up standalone via CONFLUENCE_BASE_URL/EMAIL/API_TOKEN
+# (see config.get_confluence_base_url — the CONFLUENCE_* vars win, else Jira's).
+# CONFLUENCE_SPACE_KEY (the short space identifier, e.g. "MYSPACE") scopes searches.
 """
 
 import logging
@@ -26,14 +28,22 @@ from atlassian import Confluence
 from langchain_core.tools import tool
 from requests.exceptions import HTTPError
 
-from yeaboi.config import get_confluence_space_key, get_jira_base_url, get_jira_email, get_jira_token
+from yeaboi.config import (
+    get_confluence_base_url,
+    get_confluence_email,
+    get_confluence_space_key,
+    get_confluence_token,
+)
 
 logger = logging.getLogger(__name__)
 
 # Shown whenever Confluence env vars are missing — single source of truth for the message.
+# Confluence reuses the Jira Atlassian creds when present, but can also be configured
+# standalone via the CONFLUENCE_* vars (see config.get_confluence_base_url).
 _MISSING_CONFIG_MSG = (
-    "Error: Confluence is not configured. Ensure JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, "
-    "and CONFLUENCE_SPACE_KEY are set in your .env file."
+    "Error: Confluence is not configured. Ensure CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, "
+    "CONFLUENCE_API_TOKEN (or the equivalent JIRA_* creds), and CONFLUENCE_SPACE_KEY are "
+    "set in your .env file."
 )
 
 # Truncate page content at this many characters to avoid flooding the LLM context.
@@ -48,7 +58,7 @@ def _make_confluence_client() -> Confluence | None:
     credentials as Jira (both services share the Atlassian identity platform).
     cloud=True enables the Confluence Cloud REST API endpoint path (/wiki/rest/api/).
     """
-    base_url, email, token = get_jira_base_url(), get_jira_email(), get_jira_token()
+    base_url, email, token = get_confluence_base_url(), get_confluence_email(), get_confluence_token()
     if not all([base_url, email, token]):
         logger.warning("Confluence client not created — missing config")
         return None
@@ -137,7 +147,7 @@ def confluence_search_docs(query: str, space_key: str = "", limit: int = 10) -> 
             scope = f" in space '{key}'" if key else ""
             return f"No Confluence pages found for '{query}'{scope}."
 
-        base_url = (get_jira_base_url() or "").rstrip("/")
+        base_url = (get_confluence_base_url() or "").rstrip("/")
         lines: list[str] = [f"Confluence search results for '{query}':", ""]
 
         for page in pages:
@@ -209,7 +219,7 @@ def confluence_read_page(page_id: str = "", page_title: str = "", space_key: str
             content = content[:_MAX_CONTENT_CHARS]
             truncated = True
 
-        base_url = (get_jira_base_url() or "").rstrip("/")
+        base_url = (get_confluence_base_url() or "").rstrip("/")
         pid = page.get("id", page_id)
         web_ui = page.get("_links", {}).get("webui", f"/wiki/pages/{pid}")
         url = f"{base_url}{web_ui}"
@@ -252,7 +262,7 @@ def confluence_read_space(space_key: str = "", limit: int = 25) -> str:
         if not pages:
             return f"No pages found in Confluence space '{key}'."
 
-        base_url = (get_jira_base_url() or "").rstrip("/")
+        base_url = (get_confluence_base_url() or "").rstrip("/")
         lines: list[str] = [f"Pages in Confluence space '{key}':", ""]
 
         for page in pages:
@@ -316,7 +326,7 @@ def confluence_create_page(
 
         page_id = page.get("id", "")
         logger.debug("Created Confluence page %s (ID: %s)", title, page_id)
-        base_url = (get_jira_base_url() or "").rstrip("/")
+        base_url = (get_confluence_base_url() or "").rstrip("/")
         web_ui = page.get("_links", {}).get("webui", f"/wiki/pages/{page_id}")
         url = f"{base_url}{web_ui}"
         return f"Created Confluence page: '{title}'\nID: {page_id}\nURL: {url}"
@@ -369,7 +379,7 @@ def confluence_update_page(
         )
 
         logger.debug("Updated Confluence page %s (ID: %s)", effective_title, page_id)
-        base_url = (get_jira_base_url() or "").rstrip("/")
+        base_url = (get_confluence_base_url() or "").rstrip("/")
         web_ui = existing.get("_links", {}).get("webui", f"/wiki/pages/{page_id}")
         url = f"{base_url}{web_ui}"
         return f"Updated Confluence page: '{effective_title}'\nID: {page_id}\nURL: {url}"

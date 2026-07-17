@@ -299,6 +299,59 @@ class TestStandupConfig:
         assert "ANTHROPIC_API_KEY" in msg
 
 
+class TestConfluenceConfig:
+    """Confluence reuses the Jira Atlassian creds, but the CONFLUENCE_* vars win when set
+    so it can be configured standalone (see get_confluence_base_url)."""
+
+    _KEYS = (
+        "CONFLUENCE_BASE_URL",
+        "CONFLUENCE_EMAIL",
+        "CONFLUENCE_API_TOKEN",
+        "JIRA_BASE_URL",
+        "JIRA_EMAIL",
+        "JIRA_API_TOKEN",
+    )
+
+    def _clear(self, monkeypatch):
+        for k in self._KEYS:
+            monkeypatch.delenv(k, raising=False)
+
+    def test_prefers_confluence_vars(self, monkeypatch):
+        from yeaboi.config import get_confluence_base_url, get_confluence_email, get_confluence_token
+
+        self._clear(monkeypatch)
+        # Both sets present — CONFLUENCE_* must win over JIRA_*.
+        monkeypatch.setenv("JIRA_BASE_URL", "https://jira.atlassian.net")
+        monkeypatch.setenv("JIRA_EMAIL", "jira@x.com")
+        monkeypatch.setenv("JIRA_API_TOKEN", "jira-tok")
+        monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://conf.atlassian.net")
+        monkeypatch.setenv("CONFLUENCE_EMAIL", "conf@x.com")
+        monkeypatch.setenv("CONFLUENCE_API_TOKEN", "conf-tok")
+        assert get_confluence_base_url() == "https://conf.atlassian.net"
+        assert get_confluence_email() == "conf@x.com"
+        assert get_confluence_token() == "conf-tok"
+
+    def test_falls_back_to_jira(self, monkeypatch):
+        from yeaboi.config import get_confluence_base_url, get_confluence_email, get_confluence_token
+
+        self._clear(monkeypatch)
+        # Only Jira set — Confluence getters fall back to it (existing setups).
+        monkeypatch.setenv("JIRA_BASE_URL", "https://jira.atlassian.net")
+        monkeypatch.setenv("JIRA_EMAIL", "jira@x.com")
+        monkeypatch.setenv("JIRA_API_TOKEN", "jira-tok")
+        assert get_confluence_base_url() == "https://jira.atlassian.net"
+        assert get_confluence_email() == "jira@x.com"
+        assert get_confluence_token() == "jira-tok"
+
+    def test_none_when_neither_set(self, monkeypatch):
+        from yeaboi.config import get_confluence_base_url, get_confluence_email, get_confluence_token
+
+        self._clear(monkeypatch)
+        assert get_confluence_base_url() is None
+        assert get_confluence_email() is None
+        assert get_confluence_token() is None
+
+
 class TestNotionConfig:
     """Notion has its own integration token (no shared Atlassian auth)."""
 

@@ -235,3 +235,46 @@ _CONFLUENCE_FIELDS: list[dict[str, Any]] = [
         "hint": "The <KEY> in your space URL /wiki/spaces/<KEY> — reuses your Jira login",
     },
 ]
+
+# Standalone Confluence fields — used when Jira was NOT configured in the Issue
+# Tracking step, so the shared Atlassian creds aren't available to reuse. Confluence
+# Cloud shares Atlassian identity with Jira; these CONFLUENCE_* vars win over JIRA_*
+# in config.get_confluence_* (with a Jira fallback), so a Confluence-only setup works
+# without touching the Jira tools. The space key stays optional (search spans all
+# accessible spaces when blank); the login fields are required to build a client.
+_CONFLUENCE_STANDALONE_FIELDS: list[dict[str, Any]] = [
+    {
+        "env_var": "CONFLUENCE_BASE_URL",
+        "label": "Atlassian Base URL",
+        "placeholder": "https://your-org.atlassian.net",
+        "masked": False,
+        "required": True,
+        "hint": "Your Atlassian site — https://<your-org>.atlassian.net (no trailing slash)",
+    },
+    {
+        "env_var": "CONFLUENCE_EMAIL",
+        "label": "Atlassian Email",
+        "placeholder": "you@example.com",
+        "masked": False,
+        "required": True,
+        "hint": "The Atlassian account email used for API basic auth",
+    },
+    {
+        "env_var": "CONFLUENCE_API_TOKEN",
+        "label": "Atlassian API Token",
+        "placeholder": "",
+        "masked": True,
+        "required": True,
+        "hint": "Create at: id.atlassian.com → Security → API tokens",
+    },
+    {
+        # The shared form renderer appends "(optional)" for non-required fields, so the
+        # label stays bare (mirrors _CONFLUENCE_FIELDS' space-key label).
+        "env_var": "CONFLUENCE_SPACE_KEY",
+        "label": "Confluence Space Key",
+        "placeholder": "MYSPACE",
+        "masked": False,
+        "required": False,
+        "hint": "The <KEY> in your space URL /wiki/spaces/<KEY> — blank searches all spaces",
+    },
+]
