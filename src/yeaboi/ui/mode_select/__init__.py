@@ -3087,18 +3087,19 @@ def select_mode(
                                                     # Skip the confirmation when resuming a
                                                     # ticket session already mid-generation —
                                                     # the user confirmed on the first pass.
-                                                    _resuming = bool(_si_resume) and _si_resume.get(
-                                                        "last_page"
-                                                    ) in ("epic", "stories", "tasks", "sprint")
+                                                    _resuming = bool(_si_resume) and _si_resume.get("last_page") in (
+                                                        "epic",
+                                                        "stories",
+                                                        "tasks",
+                                                        "sprint",
+                                                    )
                                                     if _resuming or _confirm_ticket_generation(
                                                         live,
                                                         console,
                                                         read_key,
                                                         _FRAME_TIME,
                                                         _supports_timeout,
-                                                        subtitle=f"{_full.source}/{_full.project_key}"
-                                                        if _full
-                                                        else "",
+                                                        subtitle=f"{_full.source}/{_full.project_key}" if _full else "",
                                                     ):
                                                         _run_preview_flow(
                                                             live,
