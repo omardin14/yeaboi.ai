@@ -127,6 +127,71 @@ class TestConfluenceErrorMsg:
 
 
 # ---------------------------------------------------------------------------
+# _make_confluence_client — credential resolution (standalone + Jira fallback)
+# ---------------------------------------------------------------------------
+
+
+class TestMakeConfluenceClient:
+    _CREDS = (
+        "CONFLUENCE_BASE_URL",
+        "CONFLUENCE_EMAIL",
+        "CONFLUENCE_API_TOKEN",
+        "JIRA_BASE_URL",
+        "JIRA_EMAIL",
+        "JIRA_API_TOKEN",
+    )
+
+    def _clear(self, monkeypatch):
+        for k in self._CREDS:
+            monkeypatch.delenv(k, raising=False)
+
+    def _spy_confluence(self, monkeypatch):
+        """Replace the Confluence class with a spy so no client is really built."""
+        calls = {}
+
+        def _fake(**kwargs):
+            calls.update(kwargs)
+            return MagicMock()
+
+        monkeypatch.setattr("yeaboi.tools.confluence.Confluence", _fake)
+        return calls
+
+    def test_builds_from_standalone_confluence_vars(self, monkeypatch):
+        from yeaboi.tools.confluence import _make_confluence_client
+
+        self._clear(monkeypatch)
+        calls = self._spy_confluence(monkeypatch)
+        monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://conf.atlassian.net")
+        monkeypatch.setenv("CONFLUENCE_EMAIL", "conf@x.com")
+        monkeypatch.setenv("CONFLUENCE_API_TOKEN", "conf-tok")
+        client = _make_confluence_client()
+        assert client is not None
+        assert calls["url"] == "https://conf.atlassian.net"
+        assert calls["username"] == "conf@x.com"
+        assert calls["password"] == "conf-tok"
+
+    def test_builds_from_jira_fallback(self, monkeypatch):
+        from yeaboi.tools.confluence import _make_confluence_client
+
+        self._clear(monkeypatch)
+        calls = self._spy_confluence(monkeypatch)
+        monkeypatch.setenv("JIRA_BASE_URL", "https://jira.atlassian.net")
+        monkeypatch.setenv("JIRA_EMAIL", "jira@x.com")
+        monkeypatch.setenv("JIRA_API_TOKEN", "jira-tok")
+        client = _make_confluence_client()
+        assert client is not None
+        assert calls["url"] == "https://jira.atlassian.net"
+        assert calls["username"] == "jira@x.com"
+
+    def test_none_when_no_creds(self, monkeypatch):
+        from yeaboi.tools.confluence import _make_confluence_client
+
+        self._clear(monkeypatch)
+        self._spy_confluence(monkeypatch)
+        assert _make_confluence_client() is None
+
+
+# ---------------------------------------------------------------------------
 # confluence_search_docs
 # ---------------------------------------------------------------------------
 

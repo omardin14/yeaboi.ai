@@ -702,7 +702,8 @@ class TestConfluencePicker:
     def _patch_tty(self, monkeypatch):
         import select as _select
 
-        from yeaboi.ui.provider_select import _phase_confluence as pc
+        # _drain (stdin flush) is shared from _phase_notion, so patch that module.
+        from yeaboi.ui.provider_select import _phase_notion as pn
 
         class _FakeStdin:
             def fileno(self):
@@ -711,10 +712,10 @@ class TestConfluencePicker:
             def read(self, n):
                 return ""
 
-        monkeypatch.setattr(pc.sys, "stdin", _FakeStdin())
-        monkeypatch.setattr(pc.termios, "tcgetattr", lambda fd: None)
-        monkeypatch.setattr(pc.termios, "tcsetattr", lambda fd, when, attrs: None)
-        monkeypatch.setattr(pc.tty, "setcbreak", lambda fd: None)
+        monkeypatch.setattr(pn.sys, "stdin", _FakeStdin())
+        monkeypatch.setattr(pn.termios, "tcgetattr", lambda fd: None)
+        monkeypatch.setattr(pn.termios, "tcsetattr", lambda fd, when, attrs: None)
+        monkeypatch.setattr(pn.tty, "setcbreak", lambda fd: None)
         monkeypatch.setattr(_select, "select", lambda r, w, x, t: ([], [], []))
 
     def test_skip_returns_empty_dict(self, monkeypatch):
@@ -750,8 +751,119 @@ class TestConfluencePicker:
         assert result == StepNav(finish=True)
 
 
+class TestDocsPicker:
+    """The Docs step is one unified Notion / Confluence / Skip picker (like Issue Tracking)."""
+
+    _JIRA = {
+        "JIRA_BASE_URL": "https://org.atlassian.net",
+        "JIRA_EMAIL": "u@x.com",
+        "JIRA_API_TOKEN": "tok",
+    }
+
+    def _patch_tty(self, monkeypatch):
+        import select as _select
+
+        # _run_docs and both forms share _drain from _phase_notion.
+        from yeaboi.ui.provider_select import _phase_notion as pn
+
+        class _FakeStdin:
+            def fileno(self):
+                return 0
+
+            def read(self, n):
+                return ""
+
+        monkeypatch.setattr(pn.sys, "stdin", _FakeStdin())
+        monkeypatch.setattr(pn.termios, "tcgetattr", lambda fd: None)
+        monkeypatch.setattr(pn.termios, "tcsetattr", lambda fd, when, attrs: None)
+        monkeypatch.setattr(pn.tty, "setcbreak", lambda fd: None)
+        monkeypatch.setattr(_select, "select", lambda r, w, x, t: ([], [], []))
+
+    def _run(self, monkeypatch, keys, *, jira_creds=None, existing=None):
+        self._patch_tty(monkeypatch)
+        from yeaboi.ui.provider_select._phase_docs import _run_docs
+
+        live = _FakeLive()
+        result = _run_docs(_console(), _KeySequence(keys), existing, live, jira_creds=jira_creds)
+        return result, live
+
+    def test_picker_renders_three_cards(self, monkeypatch):
+        # ↓↓ then Enter picks Skip (the 3rd card), proving there are three options.
+        result, live = self._run(monkeypatch, ["down", "down", "enter"])
+        assert result == {"notion": {}, "confluence": {}}
+        # Card names render as ASCII art (block chars), with the picker affordance line.
+        rendered = "".join(_render(f) for f in live.frames)
+        assert "█" in rendered and "choose" in rendered
+
+    def test_has_jira_creds_boundary(self):
+        from yeaboi.ui.provider_select._phase_confluence import _has_jira_creds
+
+        assert _has_jira_creds(self._JIRA) is True
+        assert _has_jira_creds(None) is False
+        assert _has_jira_creds({}) is False
+        # A partial set (missing token) is not enough to reuse.
+        assert _has_jira_creds({"JIRA_BASE_URL": "x", "JIRA_EMAIL": "y"}) is False
+
+    def test_esc_returns_none(self, monkeypatch):
+        result, _ = self._run(monkeypatch, ["esc"])
+        assert result is None
+
+    def test_right_arrow_navigates_to_version_control(self, monkeypatch):
+        result, _ = self._run(monkeypatch, ["right"])
+        assert result == StepNav(target=3)
+
+    def test_left_arrow_navigates_to_issue_tracking(self, monkeypatch):
+        result, _ = self._run(monkeypatch, ["left"])
+        assert result == StepNav(target=1)
+
+    def test_f_finishes(self, monkeypatch):
+        result, _ = self._run(monkeypatch, ["f"])
+        assert result == StepNav(finish=True)
+
+    def test_notion_empty_token_records_empty(self, monkeypatch):
+        # Enter selects Notion (pick 0); Enter again submits an empty token → skip.
+        result, _ = self._run(monkeypatch, ["enter", "enter"])
+        assert result == {"notion": {}, "confluence": {}}
+
+    def test_confluence_reuse_empty_space_records_empty(self, monkeypatch):
+        # ↓ + Enter selects Confluence; with Jira creds present, an empty space key skips.
+        result, live = self._run(monkeypatch, ["down", "enter", "enter"], jira_creds=self._JIRA)
+        assert result == {"notion": {}, "confluence": {}}
+        # Reuse mode shows only the space-key field (not a full Atlassian login).
+        rendered = "".join(_render(f) for f in live.frames)
+        assert "Space Key" in rendered and "Base URL" not in rendered
+
+    def test_confluence_standalone_nothing_entered_skips(self, monkeypatch):
+        # No Jira creds → standalone form; submitting an empty form skips (optional).
+        result, _ = self._run(monkeypatch, ["down", "enter", "enter"], jira_creds=None)
+        assert result == {"notion": {}, "confluence": {}}
+
+    def test_confluence_standalone_happy_path(self, monkeypatch):
+        import httpx
+
+        from yeaboi.ui.provider_select import _phase_confluence as pc
+
+        # Pre-seed the form via existing config, mock verify + persistence + sleeps.
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200))
+        monkeypatch.setattr(pc, "_save_progress", lambda data: None)
+        monkeypatch.setattr(pc.time, "sleep", lambda *a, **kw: None)
+        existing = {
+            "CONFLUENCE_BASE_URL": "https://standalone.atlassian.net",
+            "CONFLUENCE_EMAIL": "solo@x.com",
+            "CONFLUENCE_API_TOKEN": "solo-tok",
+            "CONFLUENCE_SPACE_KEY": "SOLO",
+        }
+        # ↓ + Enter selects Confluence; Enter submits the pre-filled login.
+        result, _ = self._run(monkeypatch, ["down", "enter", "enter"], jira_creds=None, existing=existing)
+        assert result["notion"] == {}
+        assert result["confluence"] == existing
+
+
 class TestShadowWordmarks:
-    @pytest.mark.parametrize("word", ["ANTHROPIC", "OPENAI", "GEMINI", "BEDROCK", "GITHUB", "NOTION", "JIRA", "SETUP"])
+    @pytest.mark.parametrize(
+        "word",
+        ["ANTHROPIC", "OPENAI", "GEMINI", "BEDROCK", "GITHUB", "NOTION", "JIRA", "CONFLUENCE", "DOCS", "SETUP"],
+    )
     def test_baked_wordmark_rows_equal_width(self, word):
         rows = get_shadow_wordmark(word)
         assert rows is not None and len(rows) == 6

@@ -22,6 +22,7 @@ from yeaboi.ui.provider_select._config import _save_progress  # noqa: F401
 from yeaboi.ui.provider_select._constants import _PROVIDER_CARDS, _VC_OPTIONS
 from yeaboi.ui.provider_select._nav import StepNav, nav_for_key
 from yeaboi.ui.provider_select._phase_confluence import _run_confluence  # noqa: F401
+from yeaboi.ui.provider_select._phase_docs import _run_docs
 from yeaboi.ui.provider_select._phase_issue_tracking import _run_issue_tracking  # noqa: F401
 from yeaboi.ui.provider_select._phase_notion import _run_notion  # noqa: F401
 from yeaboi.ui.provider_select._transitions import _transition_to_input  # noqa: F401
@@ -603,41 +604,25 @@ def select_provider(
                         live.update(_build_input_screen(provider, api_key, width=w, height=h, input_fade=grey))
                         time.sleep(FRAME_TIME_30FPS)
 
-                notion_result = _run_notion(console, read_key, existing_config, live)
-                if isinstance(notion_result, StepNav):
-                    if notion_result.finish:
+                # One unified Docs picker (Notion / Confluence / Skip), mirroring the
+                # Issue Tracking step. Confluence is a first-class option here: it
+                # reuses the Jira Atlassian creds when they were collected in step 1,
+                # otherwise its form collects a standalone Atlassian login inline.
+                _jira_creds = _collected.get("issue_tracking", {})
+                docs_result = _run_docs(console, read_key, existing_config, live, jira_creds=_jira_creds)
+                if isinstance(docs_result, StepNav):
+                    if docs_result.finish:
                         disable_bracketed_paste()
                         return _collected
-                    step = notion_result.target
+                    step = docs_result.target
                     _via_nav = True
                     continue
-                if notion_result is None:
+                if docs_result is None:
                     step = 1  # Esc → go back to issue tracking
                     continue
-                # Empty dict = user skipped (optional). Either way, record.
-                _collected["notion"] = notion_result
-
-                # Confluence rides on Jira's Atlassian auth, so its sub-step is only
-                # offered when Jira was configured in the Issue Tracking step (the
-                # same "only when Jira configured" invariant Confluence has always
-                # had). If Jira was skipped or Azure DevOps was chosen, skip past.
-                _jira_creds = _collected.get("issue_tracking", {})
-                _jira_configured = all(_jira_creds.get(k) for k in ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"))
-                if _jira_configured:
-                    confluence_result = _run_confluence(
-                        console, read_key, existing_config, live, jira_creds=_jira_creds
-                    )
-                    if isinstance(confluence_result, StepNav):
-                        if confluence_result.finish:
-                            disable_bracketed_paste()
-                            return _collected
-                        step = confluence_result.target
-                        _via_nav = True
-                        continue
-                    if confluence_result is None:
-                        # Esc from Confluence → re-run the Docs step from the Notion picker.
-                        continue
-                    _collected["confluence"] = confluence_result
+                # Empty dicts = user skipped (optional). Either way, record both slices.
+                _collected["notion"] = docs_result["notion"]
+                _collected["confluence"] = docs_result["confluence"]
 
                 step = 3
                 continue

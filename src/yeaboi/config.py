@@ -213,6 +213,33 @@ def get_jira_project_key() -> str | None:
     return os.getenv("JIRA_PROJECT_KEY") or None
 
 
+def get_confluence_base_url() -> str | None:
+    """Return the Confluence Cloud base URL, or None if not set.
+
+    Confluence shares Atlassian identity with Jira, so it historically reused the
+    Jira creds. To let Confluence be configured standalone (without Jira issue
+    tracking), a dedicated CONFLUENCE_BASE_URL may be set; it falls back to
+    JIRA_BASE_URL so existing Jira+Confluence setups keep working unchanged.
+    """
+    return os.getenv("CONFLUENCE_BASE_URL") or get_jira_base_url()
+
+
+def get_confluence_email() -> str | None:
+    """Return the Atlassian email for Confluence basic auth, or None if not set.
+
+    Falls back to JIRA_EMAIL (same Atlassian account) — see get_confluence_base_url.
+    """
+    return os.getenv("CONFLUENCE_EMAIL") or get_jira_email()
+
+
+def get_confluence_token() -> str | None:
+    """Return the Atlassian API token for Confluence, or None if not set.
+
+    Falls back to JIRA_API_TOKEN (same Atlassian account) — see get_confluence_base_url.
+    """
+    return os.getenv("CONFLUENCE_API_TOKEN") or get_jira_token()
+
+
 def get_confluence_space_key() -> str | None:
     """Return the default Confluence space key (e.g. 'MYSPACE'), or None if not set."""
     return os.getenv("CONFLUENCE_SPACE_KEY") or None
