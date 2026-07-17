@@ -3368,9 +3368,10 @@ def select_mode(
                                 from dataclasses import replace as _dc_replace
 
                                 _ta_profile = _dc_replace(_ta_profile, team_name=_ta_team_name)
-                            db_dir = Path.home() / ".scrum-agent"
-                            db_dir.mkdir(parents=True, exist_ok=True)
-                            with TeamProfileStore(db_dir / "sessions.db") as store:
+                            # Save to the same DB every list/resume path reads from
+                            # (_ana_dbp = ~/.yeaboi/data/sessions.db) so a just-finished
+                            # analysis is visible immediately, not only after a restart.
+                            with TeamProfileStore(_ana_dbp) as store:
                                 store.save(_ta_profile, examples=_ta_examples_box[0])
                             try:
                                 from yeaboi.team_profile_exporter import write_analysis_log
@@ -4630,12 +4631,12 @@ def select_mode(
 
                             _ta_profile = _dc_replace(_ta_profile, team_name=_ta_team_name)
 
-                        # Save the fresh profile
-                        db_dir = Path.home() / ".scrum-agent"
-                        db_dir.mkdir(parents=True, exist_ok=True)
-                        with TeamProfileStore(db_dir / "sessions.db") as store:
+                        # Save the fresh profile to the same DB every list/resume path
+                        # reads from (_ana_dbp = ~/.yeaboi/data/sessions.db) so it's
+                        # visible immediately, not only after a restart.
+                        with TeamProfileStore(_ana_dbp) as store:
                             store.save(_ta_profile, examples=_ta_examples_box[0])
-                        logger.info("Profile saved to %s/sessions.db", db_dir)
+                        logger.info("Profile saved to %s", _ana_dbp)
 
                         # Write structured analysis log to ~/.scrum-agent/logs/
                         try:
