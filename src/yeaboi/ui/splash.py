@@ -18,11 +18,11 @@ import time
 
 import rich.box
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 from yeaboi.ui.shared._ascii_font import render_ascii_text
-from yeaboi.ui.shared._music_bar import make_live
 from yeaboi.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
@@ -273,11 +273,16 @@ def show_splash(console: Console) -> None:
     console.set_alt_screen(True)
     console.clear()
 
-    with make_live(
+    # Use a plain Live (not make_live/MusicLive) here: the splash is a
+    # non-interactive intro with no music key controls, so the persistent music
+    # bar must NOT be stamped onto its border. It first appears on the next
+    # fullscreen screen (setup wizard / mode-select), which owns the ^P/^O chords.
+    with Live(
         _build_splash_frame(text_lines, width=w, height=h, opacity=0.0),
         console=console,
         refresh_per_second=60,
         screen=False,
+        vertical_overflow="crop",
     ) as live:
         _run_wordmark_animation(
             console,

@@ -83,13 +83,15 @@ class TestShowSplash:
     """Tests for the full show_splash() animation."""
 
     @patch("yeaboi.ui.splash.time.sleep")
-    @patch("yeaboi.ui.splash.make_live")
-    def test_completes_without_error(self, mock_make_live, mock_sleep):
+    @patch("yeaboi.ui.splash.Live")
+    def test_completes_without_error(self, mock_live_cls, mock_sleep):
         """show_splash runs the full animation loop and exits cleanly."""
+        # The splash uses a plain Live (not the MusicLive from make_live) so the
+        # persistent music bar is never stamped onto the intro's border.
         mock_live = MagicMock()
         mock_live.__enter__ = MagicMock(return_value=mock_live)
         mock_live.__exit__ = MagicMock(return_value=False)
-        mock_make_live.return_value = mock_live
+        mock_live_cls.return_value = mock_live
 
         console = MagicMock()
         console.size = (80, 24)
@@ -99,3 +101,20 @@ class TestShowSplash:
         mock_live.__enter__.assert_called_once()
         mock_live.__exit__.assert_called_once()
         assert mock_live.update.call_count > 0
+
+    def test_uses_plain_live_not_music_live(self):
+        """The splash must use a plain Live, not MusicLive.
+
+        MusicLive stamps the persistent music bar (^P/^O controls) onto every
+        Panel's border. Those controls belong to the interactive screens, so the
+        bar should first appear on the mode-select menu — never on the intro. If
+        the splash ever switches back to make_live/MusicLive, the bar reappears
+        on the animation border; this guards against that regression.
+        """
+        from rich.live import Live as RichLive
+
+        from yeaboi.ui import splash as splash_mod
+        from yeaboi.ui.shared._music_bar import MusicLive
+
+        assert splash_mod.Live is RichLive
+        assert not issubclass(splash_mod.Live, MusicLive)
