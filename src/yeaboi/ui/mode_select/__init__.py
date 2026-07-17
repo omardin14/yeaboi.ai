@@ -128,6 +128,49 @@ def _save_ana(state: dict, node: str) -> None:
         logger.debug("Analysis session save failed", exc_info=True)
 
 
+def _confirm_ticket_generation(
+    live,
+    console,
+    read_key,
+    frame_time,
+    supports_timeout,
+    *,
+    subtitle: str = "",
+) -> bool:
+    """Ask the user whether to generate sample tickets from the team analysis.
+
+    Renders a dedicated confirmation screen (separating "analyse the team/board"
+    from "create sample tickets") and drives a thin frame loop. Returns True if
+    the user chooses to generate, False if they decline (Not now / Esc).
+    """
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_generate_confirm_screen
+
+    logger.info("Analysis: showing ticket-generation confirmation")
+    sel = 0  # 0 = Generate tickets, 1 = Not now
+    while True:
+        w, h = console.size
+        live.update(
+            _build_generate_confirm_screen(
+                width=w,
+                height=h,
+                action_sel=sel,
+                subtitle=subtitle,
+            )
+        )
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if k == "left":
+            sel = max(0, sel - 1)
+        elif k == "right":
+            sel = min(1, sel + 1)
+        elif k in ("enter", " "):
+            proceed = sel == 0
+            logger.info("Analysis: ticket generation %s", "confirmed" if proceed else "declined")
+            return proceed
+        elif k in ("esc", "q"):
+            logger.info("Analysis: ticket generation declined (esc)")
+            return False
+
+
 def _run_preview_flow(
     live,
     console,
@@ -3041,17 +3084,33 @@ def select_mode(
                                                     _si_resume = _load_ana_session(
                                                         _full.project_key if _full else "",
                                                     )
-                                                    _run_preview_flow(
+                                                    # Skip the confirmation when resuming a
+                                                    # ticket session already mid-generation —
+                                                    # the user confirmed on the first pass.
+                                                    _resuming = bool(_si_resume) and _si_resume.get(
+                                                        "last_page"
+                                                    ) in ("epic", "stories", "tasks", "sprint")
+                                                    if _resuming or _confirm_ticket_generation(
                                                         live,
                                                         console,
                                                         read_key,
                                                         _FRAME_TIME,
                                                         _supports_timeout,
-                                                        _si_text,
-                                                        _full,
-                                                        _stored_ex,
-                                                        resume_state=_si_resume,
-                                                    )
+                                                        subtitle=f"{_full.source}/{_full.project_key}"
+                                                        if _full
+                                                        else "",
+                                                    ):
+                                                        _run_preview_flow(
+                                                            live,
+                                                            console,
+                                                            read_key,
+                                                            _FRAME_TIME,
+                                                            _supports_timeout,
+                                                            _si_text,
+                                                            _full,
+                                                            _stored_ex,
+                                                            resume_state=_si_resume,
+                                                        )
                                                 break
                                         elif kk in ("esc", "q"):
                                             break
@@ -3472,37 +3531,49 @@ def select_mode(
                                     elif _act == "Continue":
                                         global _ana_sid  # noqa: PLW0603
 
-                                        from yeaboi.agent.nodes import _format_team_calibration
-                                        from yeaboi.sessions import SessionStore as _AStore
-                                        from yeaboi.sessions import make_session_id
+                                        # Ask before generating tickets — separate the
+                                        # team/board analysis from ticket creation.
+                                        if _confirm_ticket_generation(
+                                            live,
+                                            console,
+                                            read_key,
+                                            _FRAME_TIME,
+                                            _supports_timeout,
+                                            subtitle=f"{_ta_profile.source}/{_ta_profile.project_key}"
+                                            if _ta_profile
+                                            else "",
+                                        ):
+                                            from yeaboi.agent.nodes import _format_team_calibration
+                                            from yeaboi.sessions import SessionStore as _AStore
+                                            from yeaboi.sessions import make_session_id
 
-                                        _ana_sid = make_session_id()
-                                        try:
-                                            with _AStore(_ana_dbp) as _as:
-                                                _as.create_session(
-                                                    _ana_sid,
-                                                    _ta_profile.project_key if _ta_profile else "",
-                                                    mode="analysis",
-                                                )
-                                        except Exception:
-                                            pass
+                                            _ana_sid = make_session_id()
+                                            try:
+                                                with _AStore(_ana_dbp) as _as:
+                                                    _as.create_session(
+                                                        _ana_sid,
+                                                        _ta_profile.project_key if _ta_profile else "",
+                                                        mode="analysis",
+                                                    )
+                                            except Exception:
+                                                pass
 
-                                        _instr_text = _format_team_calibration(
-                                            _ta_profile,
-                                            examples=_ta_examples,
-                                        )
-                                        if _instr_text.strip():
-                                            _run_preview_flow(
-                                                live,
-                                                console,
-                                                read_key,
-                                                _FRAME_TIME,
-                                                _supports_timeout,
-                                                _instr_text,
+                                            _instr_text = _format_team_calibration(
                                                 _ta_profile,
-                                                _ta_examples,
-                                                resume_state=None,
+                                                examples=_ta_examples,
                                             )
+                                            if _instr_text.strip():
+                                                _run_preview_flow(
+                                                    live,
+                                                    console,
+                                                    read_key,
+                                                    _FRAME_TIME,
+                                                    _supports_timeout,
+                                                    _instr_text,
+                                                    _ta_profile,
+                                                    _ta_examples,
+                                                    resume_state=None,
+                                                )
                                         break
                                 elif kk in ("esc", "q"):
                                     break
