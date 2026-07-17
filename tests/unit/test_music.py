@@ -120,6 +120,45 @@ def test_toggle_resumes_when_paused(mock_music):
     assert any(sig == signal.SIGCONT for _pid, sig in mock_music["kill"])
 
 
+# ── Connect/buffer grace window ───────────────────────────────────────────────
+
+
+def test_connecting_true_right_after_start(mock_music, monkeypatch):
+    monkeypatch.setattr(music.time, "monotonic", lambda: 1000.0)
+    music.toggle()  # stopped -> playing, started_at = 1000.0
+    # Still within the buffer window: audibly silent, so we report "connecting".
+    assert music.is_connecting() is True
+    assert music.status() == "playing"  # status() stays canonical
+
+
+def test_connecting_false_after_grace_elapses(mock_music, monkeypatch):
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(music.time, "monotonic", lambda: clock["t"])
+    music.toggle()  # started_at = 1000.0
+    clock["t"] = 1000.0 + music._CONNECT_GRACE_SECONDS + 0.1  # window elapsed
+    assert music.is_connecting() is False
+    assert music.is_playing() is True  # now genuinely playing (equalizer)
+
+
+def test_connecting_false_when_paused_or_stopped(mock_music, monkeypatch):
+    monkeypatch.setattr(music.time, "monotonic", lambda: 1000.0)
+    # Stopped: nothing spawned, nothing buffering.
+    assert music.is_connecting() is False
+    music.toggle()  # playing
+    music.toggle()  # paused — is_connecting requires status "playing"
+    assert music.is_connecting() is False
+
+
+def test_resume_from_pause_does_not_reenter_connecting(mock_music, monkeypatch):
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(music.time, "monotonic", lambda: clock["t"])
+    music.toggle()  # playing, started_at = 1000.0
+    clock["t"] = 2000.0  # long past the grace window
+    music.toggle()  # pause
+    music.toggle()  # resume — SIGCONT resumes buffered audio instantly
+    assert music.is_connecting() is False  # started_at untouched by resume
+
+
 # ── Channel switching ─────────────────────────────────────────────────────────
 
 

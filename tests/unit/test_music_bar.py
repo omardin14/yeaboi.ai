@@ -9,6 +9,7 @@ from yeaboi.ui.shared import _music_bar
 from yeaboi.ui.shared._music_bar import (
     _EQ_CHARS,
     MusicLive,
+    _connecting_dots,
     _eq_bars,
     build_music_subtitle,
     make_live,
@@ -74,6 +75,26 @@ def test_playing_subtitle_includes_equalizer():
     music._state.status = "playing"
     text = build_music_subtitle().plain
     assert any(c in _EQ_CHARS for c in text)
+
+
+def test_subtitle_when_connecting():
+    # A freshly-spawned stream is "playing" but still buffering — the bar shows a
+    # progress ellipsis, not the equalizer, so the silent gap doesn't look broken.
+    music._state.status = "playing"
+    music._state.started_at = music.time.monotonic()  # spawn just happened
+    text = build_music_subtitle().plain
+    assert "connecting" in text
+    assert not any(c in _EQ_CHARS for c in text)  # no equalizer while buffering
+    assert "^P pause" in text
+
+
+def test_connecting_dots_shape(monkeypatch):
+    # Always width 3 (padded), cycling 0..3 dots by the wall clock.
+    monkeypatch.setattr(_music_bar.time, "monotonic", lambda: 0.0)
+    assert _connecting_dots() == "   "
+    monkeypatch.setattr(_music_bar.time, "monotonic", lambda: 1.2)  # ~3 dots
+    dots = _connecting_dots()
+    assert len(dots) == 3 and set(dots) <= {".", " "}
 
 
 # ── MusicLive stamping ────────────────────────────────────────────────────────

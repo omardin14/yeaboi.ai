@@ -42,12 +42,23 @@ import os
 import shutil
 import signal
 import subprocess
+import time
 
 logger = logging.getLogger(__name__)
 
 # The headless player we drive. ffplay ships with ffmpeg and, with -nodisp, plays
 # a stream URL with no window and no terminal of its own.
 _PLAYER = "ffplay"
+
+# ffplay is spawned instantly but a remote radio stream takes a moment to connect
+# and buffer before any audio actually comes out. During that gap the status bar
+# would otherwise animate a full equalizer with silence, which reads as "broken".
+# For this grace window after a fresh spawn we report a "connecting" display state
+# (see :func:`is_connecting`) so the bar shows a buffering indicator instead. It's a
+# time-based heuristic — ffplay exposes no IPC to signal first-audio — tuned to the
+# typical somafm/stream connect time. Pause→resume (SIGCONT) resumes already-buffered
+# audio instantly and deliberately does NOT re-enter this state.
+_CONNECT_GRACE_SECONDS = 2.5
 
 # SIGSTOP/SIGCONT give us a true pause without any player-side IPC. They are
 # POSIX-only; on a platform without them (Windows) pause degrades to stop.
@@ -82,6 +93,9 @@ class _State:
         self.channel_idx: int = 0
         # Handle to the running ``ffplay`` subprocess, or None.
         self.daemon: subprocess.Popen | None = None
+        # ``time.monotonic()`` at the last fresh spawn, for the connect/buffer grace
+        # window (see :data:`_CONNECT_GRACE_SECONDS` and :func:`is_connecting`).
+        self.started_at: float = 0.0
         # True while playback is suspended for a voice recording, so we only auto
         # resume music that *we* paused (not music the user paused themselves).
         self._paused_for_voice: bool = False
@@ -155,6 +169,21 @@ def status() -> str:
 def is_playing() -> bool:
     """Return True when audio is actively playing (not paused/stopped)."""
     return status() == "playing"
+
+
+def is_connecting() -> bool:
+    """Return True during the brief connect/buffer window after a fresh start.
+
+    ffplay is spawned and marked "playing" instantly, but a remote stream needs a
+    moment to connect and buffer before audio is audible. For
+    :data:`_CONNECT_GRACE_SECONDS` after a fresh spawn we're "playing" but not yet
+    audible; the status bar shows a buffering indicator over this window instead of
+    the equalizer so the silence doesn't look broken. Returns False once the window
+    elapses, when paused/stopped, or if the player has already died (reconciled to
+    "stopped"). This is a derived *display* state — :func:`status` stays canonical
+    ("stopped"/"playing"/"paused").
+    """
+    return status() == "playing" and (time.monotonic() - _state.started_at) < _CONNECT_GRACE_SECONDS
 
 
 def last_error() -> str:
@@ -235,6 +264,7 @@ def _start_channel() -> bool:
             stdin=subprocess.DEVNULL,
         )
         _state.status = "playing"
+        _state.started_at = time.monotonic()  # begin the connect/buffer grace window
         _state.last_error = ""  # a fresh start clears any prior crash notice
         logger.info("Music playing channel %s", channel["name"])
         return True
