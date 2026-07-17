@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yeaboi"
-version = "2.8.2"
+version = "2.8.3"
 description = "yeaboi.ai — a team lead's best friend. A terminal AI agent that decomposes projects into epics, user stories, tasks, and sprint plans."
 readme = "README.md"
 requires-python = ">=3.11"
