@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.13.0",
+      "date": "2026-07-18",
+      "summary": "yeaboi now keeps you up to date and tells you what's new. The welcome screen shows the version you're running in the bottom-left corner and quietly checks PyPI in the background — when a newer release exists, it shows the exact upgrade command for how you installed. Press c to open the new Changelog page: an AI-written summary of every release, with each change tagged by the feature it touches in that feature's colour.",
+      "highlights": [
+        {"text": "Version indicator with automatic update check and installer-aware upgrade hint", "areas": ["general"]},
+        {"text": "In-app Changelog page (press c on the welcome screen) with colour-coded feature tags", "areas": ["general"]},
+        {"text": "Releases now ship their changelog entry automatically alongside each version bump", "areas": ["general"]}
+      ]
+    },
+    {
       "version": "2.12.1",
       "date": "2026-07-18",
       "summary": "A security hardening release: stricter validation and safer defaults across the retro server, remote tunnel, and external integrations, plus automated dependency and security scanning that keeps the project patched continuously.",
