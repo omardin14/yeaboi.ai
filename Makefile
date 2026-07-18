@@ -90,11 +90,11 @@ define need-name
 	@test -n "$(NAME)" || { echo "usage: make $@ NAME=<slug>  (e.g. NAME=standup-fix)"; exit 1; }
 endef
 
-wt-new: ## Create worktree .claude/worktrees/NAME (branch + .env + venv)
+wt-new: ## Create worktree .claude/worktrees/NAME (branch + .env + venv) + open in VS Code with claude auto-running
 	$(need-name)
-	bash scripts/wt.sh "$(NAME)"
+	CODE="$(CODE)" bash scripts/wt.sh "$(NAME)" open
 
-wt-open: ## Create worktree (if needed) + open a NEW VS Code window with claude auto-running
+wt-open: ## Open worktree in a NEW VS Code window with claude auto-running (creates it first if needed)
 	$(need-name)
 	CODE="$(CODE)" bash scripts/wt.sh "$(NAME)" open
 
