@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# scripts/wt.sh <name> [open|rm] — git-worktree lifecycle for parallel Claude sessions.
+#
+#   bash scripts/wt.sh my-feature        -> create .claude/worktrees/my-feature + provision
+#   bash scripts/wt.sh my-feature open   -> create (if needed) + open a new VS Code window
+#                                           (claude auto-starts in the integrated terminal)
+#   bash scripts/wt.sh my-feature rm     -> remove worktree dir + git branch
+#
+# Provisioning per worktree: copy the main checkout's .env, create a uv venv with
+# the package installed editable (same as `make install`), and write .vscode/
+# auto-launch files so opening the folder starts a claude session.
+#
+# Backs `make wt-new` / `make wt-open` / `make wt-rm`. Editor CLI comes from
+# $CODE (default: code) — e.g. `CODE=cursor make wt-open NAME=my-feature`.
+
+set -euo pipefail
+
+NAME="${1:?usage: wt.sh <name> [open|rm]}"
+ACTION="${2:-create}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+# Always operate against the MAIN checkout, even when invoked from inside a
+# worktree (the main worktree is the first `git worktree list` entry).
+ROOT="$(git -C "$ROOT" worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+TARGET="$ROOT/.claude/worktrees/$NAME"
+
+# Same uv fallback as the Makefile's UV := $(or ...) resolution.
+UV="$(command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv")"
+
+if [ "$ACTION" = "rm" ]; then
+  git -C "$ROOT" worktree remove --force "$TARGET" 2>/dev/null || true
+  rm -rf "$TARGET"
+  git -C "$ROOT" worktree prune
+  git -C "$ROOT" branch -D "$NAME" 2>/dev/null || true
+  echo "[wt] removed worktree '$NAME' (dir + branch)"
+  exit 0
+fi
+
+if [ ! -d "$TARGET" ]; then
+  mkdir -p "$ROOT/.claude/worktrees"
+  # New branch by default; reuse the branch if it already exists.
+  if git -C "$ROOT" show-ref --verify --quiet "refs/heads/$NAME"; then
+    git -C "$ROOT" worktree add "$TARGET" "$NAME"
+  else
+    git -C "$ROOT" worktree add "$TARGET" -b "$NAME"
+  fi
+
+  # --- .env: carry API keys over from the main checkout ------------------------
+  if [ -f "$ROOT/.env" ]; then
+    cp "$ROOT/.env" "$TARGET/.env"
+    echo "[wt] copied .env from main checkout"
+  else
+    echo "[wt] note: no $ROOT/.env — run \`make env\` in the main checkout, then re-create this worktree"
+  fi
+
+  # --- venv: editable install so make test / make run work immediately --------
+  echo "[wt] creating venv + installing deps (uv)…"
+  (cd "$TARGET" && "$UV" venv >/dev/null && "$UV" pip install -q -e ".[dev]")
+
+  # --- .vscode/: auto-launch claude in the integrated terminal on folder open --
+  # `runOn: folderOpen` + workspace-scoped `task.allowAutomaticTasks: on` skips
+  # VS Code's "allow automatic tasks?" prompt. The Workspace Trust prompt is
+  # unavoidable on first open of any folder; trust once and it sticks.
+  mkdir -p "$TARGET/.vscode"
+  cat > "$TARGET/.vscode/settings.json" <<'EOF'
+{
+  "task.allowAutomaticTasks": "on"
+}
+EOF
+  # Add --dangerously-skip-permissions to the command for unattended fan-out runs.
+  cat > "$TARGET/.vscode/tasks.json" <<'EOF'
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "claude",
+      "type": "shell",
+      "command": "claude",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true,
+        "clear": true,
+        "showReuseMessage": false
+      },
+      "runOptions": { "runOn": "folderOpen" },
+      "problemMatcher": []
+    }
+  ]
+}
+EOF
+fi
+
+echo "[wt] worktree ready: $TARGET"
+
+if [ "$ACTION" = "open" ]; then
+  CODE="${CODE:-code}"
+  if ! command -v "$CODE" >/dev/null 2>&1; then
+    echo "[wt] '$CODE' CLI not found on PATH." >&2
+    echo "     In VS Code: Cmd-Shift-P → \"Shell Command: Install 'code' command in PATH\"" >&2
+    echo "     Or override the editor: CODE=cursor make wt-open NAME=$NAME" >&2
+    exit 1
+  fi
+  "$CODE" -n "$TARGET"
+  echo "[wt] opened $NAME in $CODE; claude auto-starts in the integrated terminal"
+fi

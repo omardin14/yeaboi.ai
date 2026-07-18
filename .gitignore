@@ -22,6 +22,9 @@ ENV/
 .env.local
 .env.*.local
 
+# Git worktrees (make wt-new / wt-open)
+.claude/worktrees/
+
 # IDE
 .vscode/
 .idea/
