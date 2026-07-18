@@ -711,9 +711,15 @@ def _run_preview_flow(
                     if edited is not None:
                         _epic = edited
                 elif sel == 2:
-                    result = _regenerate(lambda: generate_sample_epic(_instr, ta_examples), "epic")
-                    if result is not None:
-                        _epic = result
+                    # Ask what should change first (Esc cancels, empty Enter = plain regenerate).
+                    fb = _ask_regen_feedback(console, live, read_key, frame_time, supports_timeout, "epic")
+                    if fb is not None:
+                        result = _regenerate(
+                            lambda: generate_sample_epic(_instr, ta_examples, feedback=fb or None, previous=_epic),
+                            "epic",
+                        )
+                        if result is not None:
+                            _epic = result
                 elif sel == 3:
                     _do_export()
             elif k in ("esc", "q"):
@@ -795,9 +801,16 @@ def _run_preview_flow(
                         else:
                             break  # Esc cancels remaining edits
                 elif sel == 2:
-                    result = _regenerate(lambda: generate_sample_stories(_instr, _epic, ta_examples), "stories")
-                    if result is not None:
-                        _stories = result
+                    fb = _ask_regen_feedback(console, live, read_key, frame_time, supports_timeout, "stories")
+                    if fb is not None:
+                        result = _regenerate(
+                            lambda: generate_sample_stories(
+                                _instr, _epic, ta_examples, feedback=fb or None, previous=_stories
+                            ),
+                            "stories",
+                        )
+                        if result is not None:
+                            _stories = result
                 elif sel == 3:
                     _do_export()
             elif k in ("esc", "q"):
@@ -893,9 +906,16 @@ def _run_preview_flow(
                         for (ti, _), et in zip(group, edited_group):
                             _tasks[ti] = et
                 elif sel == 2:
-                    result = _regenerate(lambda: generate_sample_tasks(_instr, _stories, ta_examples), "tasks")
-                    if result is not None:
-                        _tasks = result
+                    fb = _ask_regen_feedback(console, live, read_key, frame_time, supports_timeout, "tasks")
+                    if fb is not None:
+                        result = _regenerate(
+                            lambda: generate_sample_tasks(
+                                _instr, _stories, ta_examples, feedback=fb or None, previous=_tasks
+                            ),
+                            "tasks",
+                        )
+                        if result is not None:
+                            _tasks = result
                 elif sel == 3:
                     _do_export()
             elif k in ("esc", "q"):
@@ -994,12 +1014,14 @@ def _run_sprint_review(
             "sprint",
         )
 
-    def _regen_sprint():
+    def _regen_sprint(feedback=None, previous=None):
         result_box: list = [None, None]
 
         def _worker():
             try:
-                result_box[0] = generate_sample_sprint(instr_text, sample_stories, sample_tasks, ta_examples)
+                result_box[0] = generate_sample_sprint(
+                    instr_text, sample_stories, sample_tasks, ta_examples, feedback=feedback, previous=previous
+                )
             except Exception as exc:
                 result_box[1] = exc
 
@@ -1059,10 +1081,13 @@ def _run_sprint_review(
             if sel == 0:
                 return True  # Done — caller marks the session complete
             elif sel == 1:
-                result = _regen_sprint()
-                if result is not None:
-                    sprint = result
-                    _save_sprint(sprint)
+                # Ask what should change first (Esc cancels, empty Enter = plain regenerate).
+                fb = _ask_regen_feedback(console, live, read_key, frame_time, supports_timeout, "sprint")
+                if fb is not None:
+                    result = _regen_sprint(feedback=fb or None, previous=sprint)
+                    if result is not None:
+                        sprint = result
+                        _save_sprint(sprint)
             elif sel == 2:
                 pass  # Export (handled at report level)
         elif k in ("esc", "q"):
@@ -1373,6 +1398,36 @@ def _standup_generate_flow(
     return _standup_generate(session_id)
 
 
+def _ask_regen_feedback(console: Console, live, read_key, frame_time, supports_timeout, label: str) -> str | None:
+    """Prompt for feedback before regenerating a sample artifact.
+
+    Returns the feedback text, "" when the user just pressed Enter (regenerate
+    as-is, same prompt as today), or None when they pressed Esc (cancel the
+    regenerate entirely — no LLM call).
+    """
+    from yeaboi.ui.shared._components import ANALYSIS_THEME, analysis_title
+
+    fb = _standup_read_line(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        prompt="What should change? (Enter to regenerate as-is)",
+        step=f"Regenerate {label} — feedback",
+        default="",
+        theme=ANALYSIS_THEME,
+        title=analysis_title(),
+    )
+    if fb is None:
+        logger.info("Regenerate %s: cancelled at feedback prompt", label)
+    elif fb:
+        logger.info("Regenerate %s: feedback given (%d chars)", label, len(fb))
+    else:
+        logger.info("Regenerate %s: no feedback, regenerating as-is", label)
+    return fb
+
+
 def _standup_read_line(
     console: Console,
     live,
@@ -1383,6 +1438,8 @@ def _standup_read_line(
     prompt: str,
     step: str,
     default: str = "",
+    theme=None,
+    title=None,
 ) -> str | None:
     """Collect a single line of input inside the Live display (themed, read_key-driven).
 
@@ -1394,6 +1451,9 @@ def _standup_read_line(
     Voice dictation (double-tap Space) works here just like the artifact editors:
     the transcript is inserted at the cursor and the recording indicator renders
     inline on this same screen.
+
+    ``theme``/``title`` re-brand the screen for non-standup pages (e.g. the
+    analysis regenerate-feedback prompt); defaults keep the standup look.
     """
     import time as _time
 
@@ -1415,6 +1475,8 @@ def _standup_read_line(
                 height=max(10, h - 1),
                 border_style=border_style,
                 status=status,
+                theme=theme,
+                title=title,
             )
         )
 
@@ -1425,7 +1487,16 @@ def _standup_read_line(
         w, h = console.size
         border, line = voice_indicator(status_name, tick)
         return _build_standup_input_screen(
-            prompt, value, step=step, default=default, width=w, height=max(10, h - 1), border_style=border, status=line
+            prompt,
+            value,
+            step=step,
+            default=default,
+            width=w,
+            height=max(10, h - 1),
+            border_style=border,
+            status=line,
+            theme=theme,
+            title=title,
         )
 
     _render()
@@ -1796,6 +1867,118 @@ def _performance_export(engineer: str) -> str:
     except Exception as e:  # noqa: BLE001
         logger.error("performance export failed: %s", e, exc_info=True)
         return f"Export failed: {e}"
+
+
+def _run_team_analysis_results(
+    live,
+    console: Console,
+    read_key,
+    frame_time: float,
+    supports_timeout: bool,
+    profile,
+    examples: dict | None,
+    *,
+    sprint_names: list[str] | None = None,
+    team_name: str = "",
+) -> str:
+    """Event loop for the team-analysis results screen (overview + section cards).
+
+    Starts on the overview (headline stats, AI executive summary, section list):
+    Up/Down choose a section card, Enter on "Open" shows that card's detail view
+    (metrics + AI "What this means" + glossary), Back/Esc returns to the
+    overview. Export writes HTML + MD from any view. Returns ``"continue"``
+    when the user chose Continue (ticket generation) and ``"back"`` on Esc from
+    the overview — the callers own what happens next.
+    """
+    from yeaboi.ui.mode_select.screens._analysis_sections import _TA_CARD_ORDER
+
+    view = "overview"
+    card_idx = 0
+    scroll = 0
+    scroll_meta: dict = {}
+    sel = 0
+    anim0 = time.monotonic()  # shimmer title clock
+    logger.info("Analysis results: showing overview for %s/%s", profile.source, profile.project_key)
+
+    while True:
+        actions = ["Open", "Export", "Continue"] if view == "overview" else ["Back", "Export", "Continue"]
+
+        w, h = console.size
+        live.update(
+            _build_team_analysis_screen(
+                profile,
+                scroll_offset=scroll,
+                scroll_meta=scroll_meta,
+                width=w,
+                height=h,
+                export_sel=sel,
+                examples=examples,
+                sprint_names=sprint_names,
+                team_name=team_name,
+                view=view,
+                selected_card=card_idx,
+                actions=actions,
+                shimmer_tick=time.monotonic() - anim0,
+            )
+        )
+
+        kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if view == "overview" and kk in SCROLL_KEYS:
+            # On the overview, Up/Down moves the card selection (the screen
+            # auto-scrolls the selected row into view).
+            card_idx += 1 if kk in ("down", "scroll_down", "pagedown") else -1
+            card_idx %= len(_TA_CARD_ORDER)
+        elif kk in SCROLL_KEYS:
+            scroll = coalesce_scroll(scroll, kk, scroll_meta, read_key)
+        elif kk == "left":
+            sel = max(0, sel - 1)
+        elif kk == "right":
+            sel = min(len(actions) - 1, sel + 1)
+        elif kk in ("enter", " "):
+            act = actions[sel]
+            if act == "Open":
+                view = _TA_CARD_ORDER[card_idx]
+                scroll = 0
+                sel = 0
+                logger.info("Analysis results: opened section %s", view)
+            elif act == "Back":
+                view = "overview"
+                scroll = 0
+                sel = 0
+            elif act == "Export":
+                from yeaboi.team_profile_exporter import (
+                    export_team_profile_html,
+                    export_team_profile_md,
+                )
+
+                export_team_profile_html(profile, examples=examples, sprint_names=sprint_names)
+                exp_path = export_team_profile_md(profile, examples=examples, sprint_names=sprint_names)
+                logger.info("Analysis results: exported profile to %s", exp_path)
+                w, h = console.size
+                live.update(
+                    _build_project_export_success_screen(
+                        str(exp_path),
+                        width=w,
+                        height=h,
+                        subtitle="Team profile exported",
+                        mode="analysis",
+                    )
+                )
+                exp_t0 = time.monotonic()
+                while True:
+                    ek = read_key(timeout=frame_time) if supports_timeout else read_key()
+                    if time.monotonic() - exp_t0 > 1.5 and ek:
+                        break
+            elif act == "Continue":
+                logger.info("Analysis results: continue to ticket generation")
+                return "continue"
+        elif kk in ("esc", "q"):
+            if view == "overview":
+                logger.info("Analysis results: closed")
+                return "back"
+            view = "overview"
+            scroll = 0
+            sel = 0
 
 
 def _run_performance_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
@@ -3082,124 +3265,54 @@ def select_mode(
                                             _sel_p.team_id,
                                         )
                                 if _full:
-                                    from yeaboi.ui.mode_select.screens._screens_secondary import (
-                                        _build_team_analysis_screen,
+                                    _res = _run_team_analysis_results(
+                                        live,
+                                        console,
+                                        read_key,
+                                        _FRAME_TIME,
+                                        _supports_timeout,
+                                        _full,
+                                        _stored_ex,
                                     )
+                                    if _res == "continue":
+                                        from yeaboi.agent.nodes import _format_team_calibration
 
-                                    _scr = 0
-                                    _scr_meta: dict = {}
-                                    _esel = 1  # default to "Next" on page 1
-                                    _vp = 1  # current page
-                                    _ta_anim0 = time.monotonic()  # shimmer title clock
-                                    while True:
-                                        # Page-specific actions
-                                        if _vp == 1:
-                                            _va = ["Export", "Next"]
-                                        elif _vp == 2:
-                                            _va = ["Back", "Next"]
-                                        else:
-                                            _va = ["Back", "Export", "Continue"]
-
-                                        w, h = console.size
-                                        live.update(
-                                            _build_team_analysis_screen(
-                                                _full,
-                                                scroll_offset=_scr,
-                                                scroll_meta=_scr_meta,
-                                                width=w,
-                                                height=h,
-                                                export_sel=_esel,
-                                                examples=_stored_ex,
-                                                page=_vp,
-                                                shimmer_tick=time.monotonic() - _ta_anim0,
-                                            )
+                                        _si_text = _format_team_calibration(
+                                            _full,
+                                            examples=_stored_ex,
                                         )
-                                        kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                        if kk in SCROLL_KEYS:
-                                            _scr = coalesce_scroll(_scr, kk, _scr_meta, read_key)
-                                        elif kk == "left":
-                                            _esel = max(0, _esel - 1)
-                                        elif kk == "right":
-                                            _esel = min(len(_va) - 1, _esel + 1)
-                                        elif kk in ("enter", " "):
-                                            _vact = _va[_esel]
-                                            if _vact == "Next":
-                                                _vp = min(3, _vp + 1)
-                                                _scr = 0
-                                                _esel = 0
-                                            elif _vact == "Back":
-                                                _vp = max(1, _vp - 1)
-                                                _scr = 0
-                                                _esel = 1
-                                            elif _vact == "Export":
-                                                from yeaboi.team_profile_exporter import (
-                                                    export_team_profile_html,
-                                                    export_team_profile_md,
-                                                )
-
-                                                export_team_profile_html(_full, examples=_stored_ex)
-                                                _ep = export_team_profile_md(_full, examples=_stored_ex)
-                                                w, h = console.size
-                                                live.update(
-                                                    _build_project_export_success_screen(
-                                                        str(_ep),
-                                                        width=w,
-                                                        height=h,
-                                                        subtitle="Team profile exported",
-                                                        mode="analysis",
-                                                    )
-                                                )
-                                                _et = time.monotonic()
-                                                while True:
-                                                    ek = (
-                                                        read_key(timeout=_FRAME_TIME)
-                                                        if _supports_timeout
-                                                        else read_key()
-                                                    )
-                                                    if time.monotonic() - _et > 1.5 and ek:
-                                                        break
-                                            elif _vact == "Continue":
-                                                from yeaboi.agent.nodes import _format_team_calibration
-
-                                                _si_text = _format_team_calibration(
+                                        if _si_text.strip():
+                                            _si_resume = _load_ana_session(
+                                                _full.project_key if _full else "",
+                                            )
+                                            # Skip the confirmation when resuming a
+                                            # ticket session already mid-generation —
+                                            # the user confirmed on the first pass.
+                                            _resuming = bool(_si_resume) and _si_resume.get("last_page") in (
+                                                "epic",
+                                                "stories",
+                                                "tasks",
+                                                "sprint",
+                                            )
+                                            if _resuming or _confirm_ticket_generation(
+                                                live,
+                                                console,
+                                                read_key,
+                                                _FRAME_TIME,
+                                                _supports_timeout,
+                                                subtitle=f"{_full.source}/{_full.project_key}" if _full else "",
+                                            ):
+                                                _run_preview_flow(
+                                                    live,
+                                                    console,
+                                                    read_key,
+                                                    _FRAME_TIME,
+                                                    _supports_timeout,
+                                                    _si_text,
                                                     _full,
-                                                    examples=_stored_ex,
+                                                    _stored_ex,
+                                                    resume_state=_si_resume,
                                                 )
-                                                if _si_text.strip():
-                                                    _si_resume = _load_ana_session(
-                                                        _full.project_key if _full else "",
-                                                    )
-                                                    # Skip the confirmation when resuming a
-                                                    # ticket session already mid-generation —
-                                                    # the user confirmed on the first pass.
-                                                    _resuming = bool(_si_resume) and _si_resume.get("last_page") in (
-                                                        "epic",
-                                                        "stories",
-                                                        "tasks",
-                                                        "sprint",
-                                                    )
-                                                    if _resuming or _confirm_ticket_generation(
-                                                        live,
-                                                        console,
-                                                        read_key,
-                                                        _FRAME_TIME,
-                                                        _supports_timeout,
-                                                        subtitle=f"{_full.source}/{_full.project_key}" if _full else "",
-                                                    ):
-                                                        _run_preview_flow(
-                                                            live,
-                                                            console,
-                                                            read_key,
-                                                            _FRAME_TIME,
-                                                            _supports_timeout,
-                                                            _si_text,
-                                                            _full,
-                                                            _stored_ex,
-                                                            resume_state=_si_resume,
-                                                        )
-                                                break
-                                        elif kk in ("esc", "q"):
-                                            break
                                 continue
                             elif _is_profile and _ana_focus == 1:
                                 # Delete profile — open confirmation popup
@@ -3530,139 +3643,64 @@ def select_mode(
                             except Exception:
                                 pass
 
-                            # Show results
-                            from yeaboi.ui.mode_select.screens._screens_secondary import (
-                                _build_team_analysis_screen,
-                            )
-
-                            _ta_scroll = 0
-                            _ta_scroll_meta: dict = {}
-                            _ta_page = 1
-                            _ta_export_sel = 1  # default to "Next"
+                            # Show results (overview + section cards)
                             _ta_examples = _ta_examples_box[0] or {}
                             _ta_sprint_names = _ta_sprint_names_box[0]
-                            _ta_anim0 = time.monotonic()  # shimmer title clock
-                            while True:
-                                if _ta_page == 1:
-                                    _ta_actions = ["Export", "Next"]
-                                elif _ta_page == 2:
-                                    _ta_actions = ["Back", "Next"]
-                                else:
-                                    _ta_actions = ["Back", "Export", "Continue"]
+                            _res = _run_team_analysis_results(
+                                live,
+                                console,
+                                read_key,
+                                _FRAME_TIME,
+                                _supports_timeout,
+                                _ta_profile,
+                                _ta_examples,
+                                sprint_names=_ta_sprint_names,
+                                team_name=_ta_team_name,
+                            )
+                            if _res == "continue":
+                                global _ana_sid  # noqa: PLW0603
 
-                                w, h = console.size
-                                live.update(
-                                    _build_team_analysis_screen(
-                                        _ta_profile,
-                                        scroll_offset=_ta_scroll,
-                                        scroll_meta=_ta_scroll_meta,
-                                        width=w,
-                                        height=h,
-                                        export_sel=_ta_export_sel,
-                                        examples=_ta_examples,
-                                        sprint_names=_ta_sprint_names,
-                                        team_name=_ta_team_name,
-                                        page=_ta_page,
-                                        shimmer_tick=time.monotonic() - _ta_anim0,
-                                    )
-                                )
-                                kk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                if kk in SCROLL_KEYS:
-                                    _ta_scroll = coalesce_scroll(_ta_scroll, kk, _ta_scroll_meta, read_key)
-                                elif kk == "left":
-                                    _ta_export_sel = max(0, _ta_export_sel - 1)
-                                elif kk == "right":
-                                    _ta_export_sel = min(len(_ta_actions) - 1, _ta_export_sel + 1)
-                                elif kk in ("enter", " "):
-                                    _act = _ta_actions[_ta_export_sel]
-                                    if _act == "Next":
-                                        _ta_page = min(3, _ta_page + 1)
-                                        _ta_scroll = 0
-                                        _ta_export_sel = 0
-                                    elif _act == "Back":
-                                        _ta_page = max(1, _ta_page - 1)
-                                        _ta_scroll = 0
-                                        _ta_export_sel = 1
-                                    elif _act == "Export":
-                                        from yeaboi.team_profile_exporter import (
-                                            export_team_profile_html,
-                                            export_team_profile_md,
-                                        )
+                                # Ask before generating tickets — separate the
+                                # team/board analysis from ticket creation.
+                                if _confirm_ticket_generation(
+                                    live,
+                                    console,
+                                    read_key,
+                                    _FRAME_TIME,
+                                    _supports_timeout,
+                                    subtitle=f"{_ta_profile.source}/{_ta_profile.project_key}" if _ta_profile else "",
+                                ):
+                                    from yeaboi.agent.nodes import _format_team_calibration
+                                    from yeaboi.sessions import SessionStore as _AStore
+                                    from yeaboi.sessions import make_session_id
 
-                                        export_team_profile_html(
-                                            _ta_profile,
-                                            examples=_ta_examples,
-                                            sprint_names=_ta_sprint_names,
-                                        )
-                                        _ep = export_team_profile_md(
-                                            _ta_profile,
-                                            examples=_ta_examples,
-                                            sprint_names=_ta_sprint_names,
-                                        )
-                                        w, h = console.size
-                                        live.update(
-                                            _build_project_export_success_screen(
-                                                str(_ep),
-                                                width=w,
-                                                height=h,
-                                                subtitle="Team profile exported",
+                                    _ana_sid = make_session_id()
+                                    try:
+                                        with _AStore(_ana_dbp) as _as:
+                                            _as.create_session(
+                                                _ana_sid,
+                                                _ta_profile.project_key if _ta_profile else "",
                                                 mode="analysis",
                                             )
-                                        )
-                                        _et = time.monotonic()
-                                        while True:
-                                            ek = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                            if time.monotonic() - _et > 1.5 and ek:
-                                                break
-                                    elif _act == "Continue":
-                                        global _ana_sid  # noqa: PLW0603
+                                    except Exception:
+                                        pass
 
-                                        # Ask before generating tickets — separate the
-                                        # team/board analysis from ticket creation.
-                                        if _confirm_ticket_generation(
+                                    _instr_text = _format_team_calibration(
+                                        _ta_profile,
+                                        examples=_ta_examples,
+                                    )
+                                    if _instr_text.strip():
+                                        _run_preview_flow(
                                             live,
                                             console,
                                             read_key,
                                             _FRAME_TIME,
                                             _supports_timeout,
-                                            subtitle=f"{_ta_profile.source}/{_ta_profile.project_key}"
-                                            if _ta_profile
-                                            else "",
-                                        ):
-                                            from yeaboi.agent.nodes import _format_team_calibration
-                                            from yeaboi.sessions import SessionStore as _AStore
-                                            from yeaboi.sessions import make_session_id
-
-                                            _ana_sid = make_session_id()
-                                            try:
-                                                with _AStore(_ana_dbp) as _as:
-                                                    _as.create_session(
-                                                        _ana_sid,
-                                                        _ta_profile.project_key if _ta_profile else "",
-                                                        mode="analysis",
-                                                    )
-                                            except Exception:
-                                                pass
-
-                                            _instr_text = _format_team_calibration(
-                                                _ta_profile,
-                                                examples=_ta_examples,
-                                            )
-                                            if _instr_text.strip():
-                                                _run_preview_flow(
-                                                    live,
-                                                    console,
-                                                    read_key,
-                                                    _FRAME_TIME,
-                                                    _supports_timeout,
-                                                    _instr_text,
-                                                    _ta_profile,
-                                                    _ta_examples,
-                                                    resume_state=None,
-                                                )
-                                        break
-                                elif kk in ("esc", "q"):
-                                    break
+                                            _instr_text,
+                                            _ta_profile,
+                                            _ta_examples,
+                                            resume_state=None,
+                                        )
                         elif _ta_error_box[0]:
                             w, h = console.size
                             live.update(
@@ -4827,102 +4865,21 @@ def select_mode(
                         except Exception as _log_exc:
                             logger.warning("Failed to write analysis log: %s", _log_exc)
 
-                        # Show results screen
-                        from yeaboi.ui.mode_select.screens._screens_secondary import (
-                            _build_team_analysis_screen,
-                        )
-
-                        _ta_scroll = 0
-                        _ta_scroll_meta: dict = {}
-                        _ta_page = 1
-                        _ta_export_sel = 1  # default to "Next" on page 1
-
+                        # Show results screen (overview + section cards).
+                        # Continue and Esc both fall through to intake below.
                         _ta_examples = _ta_examples_box[0] or {}
                         _ta_sprint_names = _ta_sprint_names_box[0]
-
-                        def _ta_do_export():
-                            from yeaboi.team_profile_exporter import (
-                                export_team_profile_html,
-                                export_team_profile_md,
-                            )
-
-                            export_team_profile_html(
-                                _ta_profile,
-                                examples=_ta_examples,
-                                sprint_names=_ta_sprint_names,
-                            )
-                            _exp_path = export_team_profile_md(
-                                _ta_profile,
-                                examples=_ta_examples,
-                                sprint_names=_ta_sprint_names,
-                            )
-                            w, h = console.size
-                            live.update(
-                                _build_project_export_success_screen(
-                                    str(_exp_path),
-                                    width=w,
-                                    height=h,
-                                    subtitle="Team profile exported (HTML + MD)",
-                                )
-                            )
-                            _exp_t0 = time.monotonic()
-                            while True:
-                                k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                if time.monotonic() - _exp_t0 > 1.5 and k:
-                                    break
-
-                        _ta_anim0 = time.monotonic()  # shimmer title clock
-                        while True:
-                            # Page-specific actions
-                            if _ta_page == 1:
-                                _ta_actions = ["Export", "Next"]
-                            elif _ta_page == 2:
-                                _ta_actions = ["Back", "Next"]
-                            else:
-                                _ta_actions = ["Back", "Export", "Continue"]
-                            _ta_max_sel = len(_ta_actions) - 1
-
-                            w, h = console.size
-                            live.update(
-                                _build_team_analysis_screen(
-                                    _ta_profile,
-                                    scroll_offset=_ta_scroll,
-                                    scroll_meta=_ta_scroll_meta,
-                                    width=w,
-                                    height=h,
-                                    export_sel=_ta_export_sel,
-                                    examples=_ta_examples,
-                                    sprint_names=_ta_sprint_names,
-                                    team_name=_ta_team_name,
-                                    page=_ta_page,
-                                    shimmer_tick=time.monotonic() - _ta_anim0,
-                                )
-                            )
-
-                            key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-
-                            if key in SCROLL_KEYS:
-                                _ta_scroll = coalesce_scroll(_ta_scroll, key, _ta_scroll_meta, read_key)
-                            elif key == "left":
-                                _ta_export_sel = max(0, _ta_export_sel - 1)
-                            elif key == "right":
-                                _ta_export_sel = min(_ta_max_sel, _ta_export_sel + 1)
-                            elif key in ("enter", " "):
-                                _act = _ta_actions[_ta_export_sel]
-                                if _act == "Next":
-                                    _ta_page = min(3, _ta_page + 1)
-                                    _ta_scroll = 0
-                                    _ta_export_sel = 0
-                                elif _act == "Back":
-                                    _ta_page = max(1, _ta_page - 1)
-                                    _ta_scroll = 0
-                                    _ta_export_sel = min(1, len(["Export", "Next"]) - 1)
-                                elif _act == "Export":
-                                    _ta_do_export()
-                                elif _act == "Continue":
-                                    break  # → intake
-                            elif key in ("esc", "q"):
-                                break
+                        _run_team_analysis_results(
+                            live,
+                            console,
+                            read_key,
+                            _FRAME_TIME,
+                            _supports_timeout,
+                            _ta_profile,
+                            _ta_examples,
+                            sprint_names=_ta_sprint_names,
+                            team_name=_ta_team_name,
+                        )
                     elif _ta_error_box[0]:
                         w, h = console.size
                         live.update(
