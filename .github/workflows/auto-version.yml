@@ -52,11 +52,22 @@ jobs:
           HEAD_V=$(ver < pyproject.toml)
           echo "base=$BASE_V head=$HEAD_V labels=[$LABELS]"
 
-          # 1) Already bumped in this PR (manual, or a prior auto run) -> skip.
-          #    Keeps re-runs on `synchronize` idempotent and respects manual bumps.
+          # 1) Already bumped in this PR (manual, or a prior auto run)?
+          #    If the changelog already has an entry for the new version too ->
+          #    skip (keeps re-runs on `synchronize` idempotent). If the entry is
+          #    missing (e.g. a manual bump), run Claude in changelog-only mode so
+          #    every release still ships its notes. Known limitation: commits
+          #    pushed after the bump+entry land won't refresh the entry — same
+          #    acceptance class as the dual-PR version race documented below.
           if [ "$HEAD_V" != "$BASE_V" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::version already changed in this PR ($BASE_V -> $HEAD_V); skipping."
+            if grep -q "\"version\": \"$HEAD_V\"" src/yeaboi/changelog_data.json; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::version already changed in this PR ($BASE_V -> $HEAD_V) and changelog entry exists; skipping."
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "changelog_only=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::version already bumped ($BASE_V -> $HEAD_V) but changelog entry missing; running changelog-only."
+            fi
             exit 0
           fi
 
@@ -67,7 +78,9 @@ jobs:
           esac
 
           # 3) Trivial PR? No shipping code changed -> skip (docs/chore/tests/CI only).
-          if gh pr diff "$PR" --name-only | grep -qE '^src/yeaboi/'; then
+          #    The changelog data file is excluded: an entry-only edit (e.g. a
+          #    wording fix) must not trigger a new release by itself.
+          if gh pr diff "$PR" --name-only | grep -E '^src/yeaboi/' | grep -vE '^src/yeaboi/changelog_data\.json$' | grep -q .; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -81,11 +94,13 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: '--allowedTools "Bash,Read,Edit,Write"'
           prompt: |
-            You are the release-versioning bot for this repository. Pull request #${{ github.event.pull_request.number }} is open; decide whether and how to bump the project version. The version lives only in pyproject.toml.
+            You are the release-versioning bot for this repository. Pull request #${{ github.event.pull_request.number }} is open; decide whether and how to bump the project version. The version lives only in pyproject.toml. Changelog-only mode: ${{ steps.guard.outputs.changelog_only || 'false' }}.
 
             Follow these steps exactly:
 
-            1. Choose a semver level, in this priority order:
+            1. If changelog-only mode is "true": the version was already bumped in this PR — do NOT bump again. Read the current version from pyproject.toml and skip straight to step 4 to write its changelog entry.
+
+            2. Otherwise choose a semver level, in this priority order:
                a. Labels win. If the PR has label `semver:major`, `semver:minor`, or `semver:patch`, use that level. If it has `release:skip` or `semver:none`, treat the level as "none".
                b. Otherwise classify this PR's diff:
                   - "major": a backward-incompatible change (removed/renamed CLI flags, changed output formats, breaking behavior or public API).
@@ -93,15 +108,22 @@ jobs:
                   - "patch": a bug fix, performance, or internal refactor with no new user-facing surface.
                   - "none": the diff only touches docs, comments, tests, or CI/workflow files.
 
-            2. If the level is "none": do NOT modify any file. Post one short PR comment: "🏷️ auto-version: no release-worthy change — skipping bump." Then stop.
-
-            3. Otherwise run exactly this command (it rewrites pyproject.toml and prints the NEW version):
+            3. If the level is "none": do NOT modify any file. Post one short PR comment: "🏷️ auto-version: no release-worthy change — skipping bump." Then stop.
+               Otherwise run exactly this command (it rewrites pyproject.toml and prints the NEW version):
                  python scripts/bump_version.py <level>
-               Commit ONLY the pyproject.toml change to this PR branch and push it. Use commit message:
+
+            4. Write the new version's changelog entry in src/yeaboi/changelog_data.json (this file ships inside the package and powers the in-app Changelog page). Prepend a new object at the TOP of the "entries" array (entries are newest-first):
+               - "version": the new version (no leading "v")
+               - "date": today's UTC date, YYYY-MM-DD
+               - "summary": one user-friendly paragraph describing what this PR changes for a user of the app — plain English, no code or file names
+               - "highlights": 1-5 objects of {"text": "...", "areas": [...]} — each a short user-facing change, tagged ONLY with areas from this fixed vocabulary: analysis, planning, standup, retro, performance, reporting, usage, settings, general
+               If an entry for that version already exists, update it in place instead. Keep the JSON valid (validate by running: python -c "import json; json.load(open('src/yeaboi/changelog_data.json'))").
+
+            5. Commit the pyproject.toml and changelog_data.json changes together (changelog-only mode: just changelog_data.json) to this PR branch and push. Use commit message:
                  chore: bump version to <new-version> [auto]
                with trailer:
                  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 
-            4. Post one short PR comment naming the level, the new version, and a one-sentence reason.
+            6. Post one short PR comment naming the level, the new version, and a one-sentence reason.
 
-            Rules: only ever edit pyproject.toml; never bump more than once; keep the comment to one or two lines.
+            Rules: only ever edit pyproject.toml and src/yeaboi/changelog_data.json; never bump more than once; keep the comment to one or two lines.

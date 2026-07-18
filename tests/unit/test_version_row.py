@@ -1,0 +1,106 @@
+"""Tests for the mode-select bottom-left version hint row (_build_version_row)."""
+
+from __future__ import annotations
+
+import io
+
+import pytest
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+from yeaboi.ui.mode_select.screens import _screens
+
+
+def _status(**overrides) -> dict:
+    base = {
+        "current": "2.12.0",
+        "latest": "",
+        "update_available": False,
+        "upgrade_command": "uv tool upgrade yeaboi",
+        "is_dev": False,
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.fixture
+def _patch_status(monkeypatch):
+    def _apply(**overrides):
+        monkeypatch.setattr("yeaboi.update_check.get_update_status", lambda: _status(**overrides))
+
+    return _apply
+
+
+def _render(text: Text, width: int = 100) -> str:
+    console = Console(file=io.StringIO(), width=width, legacy_windows=False)
+    console.print(text)
+    return console.file.getvalue()
+
+
+class TestVersionRow:
+    def test_shows_version_and_changelog_hint(self, _patch_status):
+        _patch_status()
+        out = _render(_screens._build_version_row(80))
+        assert "v2.12.0" in out
+        assert "c changelog" in out
+
+    def test_no_upgrade_segment_when_current(self, _patch_status):
+        _patch_status()
+        out = _render(_screens._build_version_row(80))
+        assert "→" not in out
+        assert "upgrade" not in out.replace("c changelog", "")
+
+    def test_outdated_shows_new_version_and_command(self, _patch_status):
+        _patch_status(latest="2.13.0", update_available=True)
+        out = _render(_screens._build_version_row(80))
+        assert "v2.12.0" in out
+        assert "→" in out
+        assert "v2.13.0" in out
+        assert "uv tool upgrade yeaboi" in out
+
+    def test_narrow_width_drops_command(self, _patch_status):
+        _patch_status(latest="2.13.0", update_available=True)
+        out = _render(_screens._build_version_row(60))
+        assert "v2.13.0" in out  # new version still shown
+        assert "uv tool upgrade yeaboi" not in out
+        assert "c changelog" in out
+
+    def test_dev_version_renders_plain(self, _patch_status):
+        _patch_status(current="0.0.0+dev", is_dev=True)
+        out = _render(_screens._build_version_row(80))
+        assert "v0.0.0+dev" in out
+        assert "→" not in out
+
+    def test_left_justified(self, _patch_status):
+        _patch_status()
+        assert _screens._build_version_row(80).justify == "left"
+
+
+class TestModeScreenWithVersionRow:
+    def test_mode_screen_still_renders(self, _patch_status, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+        _patch_status()
+        result = _screens._build_mode_screen(0, width=80, height=24, shimmer_tick=0.0)
+        assert isinstance(result, Panel)
+
+    def test_mode_screen_height_exact(self, _patch_status, monkeypatch):
+        """The extra row must not push the panel past its fixed height."""
+        monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+        _patch_status(latest="2.13.0", update_available=True)
+        panel = _screens._build_mode_screen(0, width=80, height=24, shimmer_tick=0.0)
+        console = Console(file=io.StringIO(), width=80, height=30, legacy_windows=False)
+        console.print(panel)
+        lines = console.file.getvalue().splitlines()
+        assert len(lines) == 24
+
+    def test_version_row_visible_in_mode_screen(self, _patch_status, monkeypatch):
+        # Tall enough that the mode grid doesn't crop the bottom rows.
+        monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: False)
+        _patch_status()
+        panel = _screens._build_mode_screen(0, width=80, height=40, shimmer_tick=0.0)
+        console = Console(file=io.StringIO(), width=80, height=45, legacy_windows=False)
+        console.print(panel)
+        out = console.file.getvalue()
+        assert "v2.12.0" in out
+        assert "changelog" in out

@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "version": "2.12.1",
+      "date": "2026-07-18",
+      "summary": "A security hardening release: stricter validation and safer defaults across the retro server, remote tunnel, and external integrations, plus automated dependency and security scanning that keeps the project patched continuously.",
+      "highlights": [
+        {"text": "Hardened retro board server and remote tunnel handling", "areas": ["retro"]},
+        {"text": "Safer credential and config handling across integrations", "areas": ["settings", "general"]},
+        {"text": "Automated dependency updates and scheduled security scans", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.12.0",
+      "date": "2026-07-18",
+      "summary": "Analysis results got a full redesign: instead of one long wall of text you now land on an overview with section cards, each with an AI-written explanation of what the finding means for your team. Giving feedback when regenerating is also nicer with a proper multi-row text box.",
+      "highlights": [
+        {"text": "Analysis results redesigned into an overview plus section cards with AI explanations", "areas": ["analysis"]},
+        {"text": "Regenerate-feedback prompt is now a large multi-row text box", "areas": ["analysis"]}
+      ]
+    },
+    {
+      "version": "2.11.0",
+      "date": "2026-07-18",
+      "summary": "A unified logging system: every mode now writes its own log file under ~/.yeaboi/logs, and you can change the log level live from the Settings page without restarting.",
+      "highlights": [
+        {"text": "Per-mode log files for standup, retro, performance, reporting, and analysis", "areas": ["standup", "retro", "performance", "reporting", "analysis"]},
+        {"text": "Live log-level control from the Settings page", "areas": ["settings"]}
+      ]
+    },
+    {
+      "version": "2.10.1",
+      "date": "2026-07-18",
+      "summary": "Small visual fix: the animated wordmark intros for Standup and the setup wizard no longer show misaligned rows.",
+      "highlights": [
+        {"text": "Fixed wordmark intro row misalignment on Standup and setup intros", "areas": ["standup", "settings"]}
+      ]
+    },
+    {
+      "version": "2.10.0",
+      "date": "2026-07-18",
+      "summary": "Analysis polish and a safety net for ticket creation: the patterns page no longer crops its buttons, and generating tickets now asks for confirmation before anything is created.",
+      "highlights": [
+        {"text": "Fixed button cropping on the analysis patterns page", "areas": ["analysis"]},
+        {"text": "Ticket generation now shows a confirmation gate before creating anything", "areas": ["analysis", "planning"]}
+      ]
+    },
+    {
+      "version": "2.9.1",
+      "date": "2026-07-17",
+      "summary": "Music player polish: the bar stays hidden during the startup splash and shows a connecting indicator while a stream buffers.",
+      "highlights": [
+        {"text": "Music bar hidden during the startup splash", "areas": ["general"]},
+        {"text": "Connecting indicator while the music stream buffers", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.9.0",
+      "date": "2026-07-17",
+      "summary": "Confluence is now a first-class option in the Docs setup step, with its own standalone login so you can use it without configuring Jira.",
+      "highlights": [
+        {"text": "Confluence selectable directly in the Docs setup step, no Jira required", "areas": ["settings", "analysis", "planning"]}
+      ]
+    },
+    {
+      "version": "2.8.3",
+      "date": "2026-07-17",
+      "summary": "Analysis reliability fixes: finished team profiles save to the right database, and each preview step is saved the moment it generates so nothing is lost mid-run.",
+      "highlights": [
+        {"text": "Team profiles save to the active database instead of a legacy path", "areas": ["analysis"]},
+        {"text": "Each analysis preview step saves as soon as it generates", "areas": ["analysis"]}
+      ]
+    },
+    {
+      "version": "2.8.2",
+      "date": "2026-07-17",
+      "summary": "Scrolling across the app is now smooth — fast wheel bursts no longer stutter or tear the view.",
+      "highlights": [
+        {"text": "Smooth scrolling with no view tearing across all pages", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.8.1",
+      "date": "2026-07-16",
+      "summary": "The voice-input install hint now shows the right command for how you installed yeaboi (uv, pipx, or source).",
+      "highlights": [
+        {"text": "Voice install hint adapts to your install method", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.8.0",
+      "date": "2026-07-16",
+      "summary": "The big rebrand: scrum-agent is now yeaboi. The package renamed on PyPI (existing installs migrate via a shim), the repo moved to yeaboi.ai, and the project got its own landing page.",
+      "highlights": [
+        {"text": "Package renamed scrum-agent → yeaboi on PyPI with a migration shim", "areas": ["general"]},
+        {"text": "New yeaboi.ai landing page", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.7.0",
+      "date": "2026-07-16",
+      "summary": "Setup wizard navigation upgrades: jump between sections with ←/→, press F to finish, and every connection field now shows a hint telling you where to get that token or URL.",
+      "highlights": [
+        {"text": "←/→ jump between wizard sections; F finishes setup", "areas": ["settings"]},
+        {"text": "Where-to-get-it hints on every connection setup field", "areas": ["settings"]}
+      ]
+    },
+    {
+      "version": "2.6.0",
+      "date": "2026-07-16",
+      "summary": "The setup wizard gained a Docs section so you can connect Notion or Confluence during first-time setup instead of editing environment variables by hand.",
+      "highlights": [
+        {"text": "Docs setup step for Notion and Confluence in the wizard", "areas": ["settings"]}
+      ]
+    },
+    {
+      "version": "2.5.0",
+      "date": "2026-07-16",
+      "summary": "Retro boards got social: teammates can react to cards with emojis, the join flow has a clear accent-colored share-code gate, and the in-app music player now has a real multi-channel library.",
+      "highlights": [
+        {"text": "Emoji reactions on retro cards", "areas": ["retro"]},
+        {"text": "Clearer share-code join gate for teammates", "areas": ["retro"]},
+        {"text": "Expanded in-app music library", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.4.2",
+      "date": "2026-07-16",
+      "summary": "Music playback is more reliable: the backend switched to ffplay for headless playback and the app now notices when the audio daemon dies on its own.",
+      "highlights": [
+        {"text": "Music backend switched to ffplay; dead-daemon detection", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.4.1",
+      "date": "2026-07-15",
+      "summary": "Animation consistency pass: planning and analysis page titles (including project-list and status screens) all shimmer like the rest of the app.",
+      "highlights": [
+        {"text": "Shimmer animation on planning and analysis titles and status screens", "areas": ["planning", "analysis"]}
+      ]
+    },
+    {
+      "version": "2.4.0",
+      "date": "2026-07-15",
+      "summary": "Choosing an AI model is much nicer: the setup wizard discovers available models live from your provider, shows them as cards, and no longer offers retired models. The wizard itself got a visual polish with themed titles and threaded discovery so it never freezes.",
+      "highlights": [
+        {"text": "Live model discovery with a card-based picker in the setup wizard", "areas": ["settings"]},
+        {"text": "Retired models removed from the choices", "areas": ["settings"]}
+      ]
+    },
+    {
+      "version": "2.3.0",
+      "date": "2026-07-15",
+      "summary": "Notion joined the toolbox: connect an integration token and yeaboi can search, read, and write Notion pages during analysis and planning, and include recent Notion activity in the daily standup.",
+      "highlights": [
+        {"text": "Notion search/read/write tools for analysis and planning", "areas": ["analysis", "planning"]},
+        {"text": "Recent Notion pages feed the Daily Standup activity", "areas": ["standup"]}
+      ]
+    },
+    {
+      "version": "2.2.0",
+      "date": "2026-07-14",
+      "summary": "Reporting mode arrived: generate a business-friendly delivery report of what shipped last sprint or last month, ready to send to stakeholders. The app also rebranded to yeaboi.ai with cinematic ANSI-shadow intros and a glinting splash wordmark.",
+      "highlights": [
+        {"text": "New Reporting mode — stakeholder-ready delivery summaries", "areas": ["reporting"]},
+        {"text": "Rebrand to yeaboi.ai with cinematic per-mode intros", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "2.1.0",
+      "date": "2026-07-13",
+      "summary": "Performance mode arrived: per-engineer 1:1 prep, 1:1 completion with tracked action items, and a 6-month review builder — all fed by real Jira/Azure DevOps activity. You can also pick the exact LLM model in the setup wizard and settings.",
+      "highlights": [
+        {"text": "New Performance mode — 1:1 prep, 1:1 completion, 6-month reviews", "areas": ["performance"]},
+        {"text": "LLM model selection in setup wizard and settings", "areas": ["settings"]}
+      ]
+    },
+    {
+      "version": "2.0.0",
+      "date": "2026-07-11",
+      "summary": "The planner got a lot smarter: choose an intake depth (Quick to Large), let the analyzer read your actual repository to inform the tech stack (including low-code detection), and past ceremony history now shapes new plans.",
+      "highlights": [
+        {"text": "Selectable intake modes from Quick to Large", "areas": ["planning"]},
+        {"text": "Repo-informed stack detection, including low-code platforms", "areas": ["planning"]},
+        {"text": "Ceremony history (standups, retros) feeds new sprint plans", "areas": ["planning"]}
+      ]
+    },
+    {
+      "version": "1.7.0",
+      "date": "2026-07-10",
+      "summary": "Retro mode arrived: host a collaborative sprint retrospective where teammates join from their browser on the LAN, add sticky cards to four grids, and let the AI propose action items from the feedback.",
+      "highlights": [
+        {"text": "New Retro mode — collaborative LAN browser board with AI action items", "areas": ["retro"]}
+      ]
+    },
+    {
+      "version": "1.6.0",
+      "date": "2026-07-10",
+      "summary": "Daily Standup mode arrived: yeaboi collects recent activity from your trackers and repos, scores sprint confidence, writes a summary, and delivers it to terminal, desktop, Slack, or email — with Markdown and HTML exports.",
+      "highlights": [
+        {"text": "New Daily Standup mode with multi-channel delivery", "areas": ["standup"]},
+        {"text": "Standup exports to Markdown and HTML", "areas": ["standup"]}
+      ]
+    },
+    {
+      "version": "1.5.0",
+      "date": "2026-07-10",
+      "summary": "Quality-of-life release: an optional lofi music player embedded in the TUI (with an animated equalizer), rotating welcome-screen tips you can dismiss, and releases now version themselves automatically.",
+      "highlights": [
+        {"text": "Embedded music player with channels and animated equalizer", "areas": ["general"]},
+        {"text": "Rotating, dismissible welcome-screen tips", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "date": "2026-07-10",
+      "summary": "Offline voice input landed — dictate answers instead of typing — plus graceful handling of API auth and billing errors, and fully automated PyPI releases on every version bump.",
+      "highlights": [
+        {"text": "Offline voice input for answering questions", "areas": ["planning", "general"]},
+        {"text": "Graceful API auth/billing error handling", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-04-01",
+      "summary": "Analysis mode arrived: yeaboi studies your team's delivery history to build a team profile, then uses it to calibrate sprint plans to how your team actually works. The TUI also picked up assorted improvements.",
+      "highlights": [
+        {"text": "New Analysis mode — team learning from delivery history", "areas": ["analysis"]},
+        {"text": "Calibrated planning informed by the team profile", "areas": ["planning"]}
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-03-25",
+      "summary": "Azure DevOps reached full parity with Jira — boards, velocity, and batch work-item creation — and the app gained opt-in anonymous telemetry.",
+      "highlights": [
+        {"text": "Azure DevOps board parity with Jira", "areas": ["planning"]},
+        {"text": "Opt-in anonymous telemetry", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-03-22",
+      "summary": "AWS Bedrock joined the provider list — run yeaboi on IAM credentials with no API key — alongside a full guide for deploying on AWS Lightsail.",
+      "highlights": [
+        {"text": "AWS Bedrock provider (IAM credentials, no API key)", "areas": ["settings", "general"]},
+        {"text": "AWS Lightsail deployment guide", "areas": ["general"]}
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-03-20",
+      "summary": "The first release of the AI Scrum Master: describe your project, answer a smart adaptive intake, and get epics, user stories, tasks, and sprint plans — reviewable step by step, exportable, and syncable to Jira in one batch. Includes a full-screen TUI and a headless CLI mode.",
+      "highlights": [
+        {"text": "Smart adaptive intake with keyword extraction and follow-ups", "areas": ["planning"]},
+        {"text": "Epics, stories, tasks, and sprint plans with human review checkpoints", "areas": ["planning"]},
+        {"text": "One-shot Jira batch sync", "areas": ["planning"]},
+        {"text": "Headless mode for CI and scripting", "areas": ["general"]}
+      ]
+    }
+  ]
+}

@@ -1845,6 +1845,146 @@ def _build_standup_screen(
     )
 
 
+def _build_changelog_screen(
+    entries: list,
+    *,
+    update_status: dict | None = None,
+    scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
+) -> Panel:
+    """Build the Changelog page: per-version AI-written notes with area tags.
+
+    ``entries`` is ``changelog.load_changelog()`` output (newest-first). Each
+    highlight's feature-area tags render in that mode's accent colour
+    (``changelog.AREA_COLORS``) so a change reads as the feature the user already
+    knows by colour. ``update_status`` (``update_check.get_update_status()``)
+    drives an upgrade banner at the top when a newer PyPI release is known.
+    """
+    import textwrap
+
+    from yeaboi.changelog import AREA_COLORS
+    from yeaboi.ui.shared._components import CHANGELOG_THEME, build_reveal_subtitle, changelog_title
+
+    theme = CHANGELOG_THEME
+    title = changelog_title(shimmer_tick, width=width)
+    sub = build_reveal_subtitle("What's new in yeaboi", sub_reveal, pad=PAD)
+
+    body_lines: list = []
+    wrap_w = max(24, width - len(PAD) - 12)
+
+    def _wrapped(text: str, style: str, *, indent: str = "    ") -> None:
+        for chunk in textwrap.wrap(text, width=wrap_w) or [""]:
+            body_lines.append(Text(PAD + indent + chunk, style=style, justify="left"))
+
+    # ── Upgrade banner — newer release known from the background PyPI check ──
+    status = update_status or {}
+    if status.get("update_available"):
+        banner = Text(PAD + "  ", justify="left")
+        banner.append("⬆ ", style=theme.warn)
+        banner.append(f"v{status.get('latest', '')} is available", style=f"bold {theme.warn}")
+        banner.append("  —  run: ", style=theme.muted)
+        banner.append(status.get("upgrade_command", ""), style=theme.warn)
+        body_lines.append(banner)
+        body_lines.append(Text(PAD + "  " + "─" * min(wrap_w, 40), style=theme.sep, justify="left"))
+
+    if not entries:
+        body_lines.append(Text(""))
+        body_lines.append(Text(PAD + "    No changelog data available.", style=theme.muted, justify="left"))
+
+    for entry in entries:
+        body_lines.append(Text(""))
+        heading = Text(PAD + "  ", justify="left")
+        heading.append(f"v{entry.version}", style=f"bold {theme.accent_bright}")
+        if entry.date:
+            heading.append("  ·  ", style=theme.sep)
+            heading.append(entry.date, style=theme.muted)
+        body_lines.append(heading)
+        body_lines.append(Text(PAD + "  " + "─" * min(wrap_w, 40), style=theme.sep, justify="left"))
+        if entry.summary:
+            _wrapped(entry.summary, theme.desc)
+        for hl in entry.highlights:
+            # Reserve room on the bullet's last line for the coloured area tags.
+            tags_len = sum(len(a) + 2 for a in hl.areas)
+            chunks = textwrap.wrap(hl.text, width=max(24, wrap_w - 3)) or [""]
+            for i, chunk in enumerate(chunks):
+                prefix = "    •  " if i == 0 else "       "
+                line = Text(PAD + prefix + chunk, style=theme.value, justify="left")
+                if i == len(chunks) - 1 and len(prefix) + len(chunk) + tags_len <= wrap_w + 8:
+                    for area in hl.areas:
+                        line.append("  ")
+                        line.append(area, style=f"bold {AREA_COLORS.get(area, theme.muted)}")
+                    body_lines.append(line)
+                elif i == len(chunks) - 1:
+                    body_lines.append(line)
+                    tag_line = Text(PAD + "       ", justify="left")
+                    for area in hl.areas:
+                        tag_line.append(area, style=f"bold {AREA_COLORS.get(area, theme.muted)}")
+                        tag_line.append("  ")
+                    body_lines.append(tag_line)
+                else:
+                    body_lines.append(line)
+
+    # ── Layout using shared components ────────────────────────────
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    btn_top, btn_mid, btn_bot = build_action_buttons(["Back"], action_sel)
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(
+            show_header=False,
+            show_edge=False,
+            box=None,
+            padding=0,
+            pad_edge=False,
+            expand=True,
+        )
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _performance_roster_window(selected: int, n: int, budget: int) -> tuple[int, int]:
     """Return the [start, end) engineer window that fits ``budget`` visual lines.
 
