@@ -491,8 +491,8 @@ Workflows in `.github/workflows/`:
 | `auto-version.yml` | PR | Claude classifies the diff and commits a `chore: bump version…` to the PR branch (skips docs/chore-only PRs; `semver:*` / `release:skip` labels override) |
 | `publish.yml` | Push to `main` | if `pyproject.toml` version has no tag yet: test → build → PyPI publish (OIDC) → tag + GitHub Release (else no-op) |
 | `smoke.yml` | Weekly cron | Live API smoke tests |
-| `claude.yml` | PR | Claude Code review |
-| `claude-code-review.yml` | PR | Claude Code review (alternate) |
+| `security-scan.yml` | PR + weekly cron | SAST + dependency CVE audit |
+| `claude.yml` | `@claude` mention in an issue/PR comment | On-demand Claude Code assistance (the auto-run per-PR review workflow was removed — it was too slow) |
 
 There is no Homebrew tap auto-update: the `omardin14/homebrew-tap` formula is disabled (see Version Management) and `publish.yml` no longer dispatches to it.
 
