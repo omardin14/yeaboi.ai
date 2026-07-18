@@ -79,11 +79,7 @@ class DesktopDelivery(NotificationDelivery):
                 # break out of the quoted literal and AppleScript can `do shell script`. Instead we
                 # pass them as runtime arguments via `on run argv`; AppleScript treats argv items as
                 # opaque data, never code, so no escaping is needed and injection is impossible.
-                script = (
-                    "on run argv\n"
-                    "  display notification (item 1 of argv) with title (item 2 of argv)\n"
-                    "end run"
-                )
+                script = "on run argv\n  display notification (item 1 of argv) with title (item 2 of argv)\nend run"
                 subprocess.run(
                     ["osascript", "-e", script, body, title],
                     check=True,

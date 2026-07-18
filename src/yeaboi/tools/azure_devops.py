@@ -61,6 +61,7 @@ def _normalize_work_item_state(state: str) -> str:
         return _DEFAULT_WORK_ITEM_STATE
     return canonical
 
+
 # Key config/manifest files to highlight in the repo tree summary.
 # See README: "Tools" — scoping tool output for LLM relevance
 _KEY_FILES = {
