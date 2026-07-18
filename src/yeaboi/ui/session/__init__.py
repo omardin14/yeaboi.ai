@@ -133,6 +133,7 @@ def run_session(
     # See README: "Memory & State" — each session gets a UUID so snapshots
     # can be upserted by ID across save points.
     project_id = resume_project_id or create_project_id()
+    logger.info("Session %s: project_id=%s", "resumed" if resume_project_id else "started", project_id)
 
     # Attach a per-session log file so each session's diagnostics are isolated.
     # The log lives at ~/.scrum-agent/logs/{project_id}.log and is cleaned up
@@ -156,6 +157,7 @@ def run_session(
             analysis_profile_id=analysis_profile_id,
         )
     finally:
+        logger.info("Session ended: project_id=%s", project_id)
         remove_session_logger()
 
 
@@ -289,6 +291,7 @@ def _run_session_body(
                     from yeaboi.ui.session._utils import _classify_api_error
 
                     error_msg = _classify_api_error(err)
+                    logger.warning("Description processing failed: %s", error_msg)
                     from rich.panel import Panel
                     from rich.text import Text as RichText
 
@@ -376,7 +379,9 @@ def _run_session_body(
     if export_only and graph_state is not None:
         from yeaboi.repl._io import _export_plan_markdown
 
-        _export_plan_markdown(graph_state)
+        logger.info("Auto-export triggered (export_only)")
+        _md_path = _export_plan_markdown(graph_state)
+        logger.info("Auto-export complete: %s", _md_path)
 
     # Auto-generate SCRUM.md from the completed project so the user can
     # review, tweak, and re-use it as input for future runs.
@@ -384,6 +389,7 @@ def _run_session_body(
         from yeaboi.persistence import generate_scrum_md
 
         generate_scrum_md(project_id)
+        logger.info("SCRUM.md generated: project_id=%s", project_id)
 
     logger.info("Session complete")
     # Pipeline complete — return to project dashboard

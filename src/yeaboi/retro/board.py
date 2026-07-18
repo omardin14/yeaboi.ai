@@ -22,6 +22,7 @@ object and the board → report snapshot.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
@@ -29,6 +30,10 @@ from datetime import UTC, date, datetime
 from uuid import uuid4
 
 from yeaboi.agent.state import RetroCard, RetroReport
+
+# Mutations fire from the HTTP server threads as well as the TUI thread — stdlib
+# logging is thread-safe, so plain logger calls need no extra locking.
+logger = logging.getLogger(__name__)
 
 # The four canonical grids. Keys are stable identifiers used by the store, the
 # browser page, and the exporter; labels are the human-facing headings.
@@ -133,11 +138,14 @@ class RetroBoard:
         )
         with self._lock:
             if len(self._cards) >= _MAX_CARDS:
+                logger.warning("retro board: card rejected — board full (%d cards)", _MAX_CARDS)
                 return None
             self._cards.append(card)
             if pid:
                 self._card_owner[card.id] = pid
             self._revision += 1
+        # Never log card text — only grid/author/id (LAN peers submit free text).
+        logger.info("retro board: card added — grid=%s author=%s id=%s origin=%s", grid, author, card.id, origin)
         return card
 
     def add_ai_cards(self, texts: list[str]) -> int:
@@ -160,6 +168,7 @@ class RetroBoard:
                 )
                 self._revision += 1
                 added += 1
+        logger.info("retro board: %d AI card(s) added to action_items", added)
         return added
 
     def snapshot(self) -> tuple[int, list[RetroCard]]:
@@ -211,8 +220,10 @@ class RetroBoard:
             if i < 0:
                 return False
             self._cards[i] = replace(self._cards[i], text=text)
+            author = self._cards[i].author
             self._revision += 1
-            return True
+        logger.info("retro board: card edited — id=%s author=%s", card_id, author)
+        return True
 
     def delete_card(self, card_id: str, pid: str) -> bool:
         """Delete a card (and its reactions/owner). Author-only. Returns True on success."""
@@ -222,11 +233,13 @@ class RetroBoard:
             i = self._index_of_locked(card_id)
             if i < 0:
                 return False
+            author = self._cards[i].author
             del self._cards[i]
             self._reactions.pop(card_id, None)
             self._card_owner.pop(card_id, None)
             self._revision += 1
-            return True
+        logger.info("retro board: card deleted — id=%s author=%s", card_id, author)
+        return True
 
     def move_card(self, card_id: str, to_grid: str, to_index: int, pid: str = "") -> bool:
         """Move a card to ``to_grid`` at grid-local position ``to_index``. Open to anyone.
@@ -258,7 +271,8 @@ class RetroBoard:
                     seen += 1
             self._cards.insert(flat_pos, card)
             self._revision += 1
-            return True
+        logger.info("retro board: card moved — id=%s to_grid=%s index=%d", card_id, to_grid, to_index)
+        return True
 
     # ── Reactions ─────────────────────────────────────────────────────────
     #
@@ -294,7 +308,8 @@ class RetroBoard:
             if not pids:  # keep the map tidy
                 by_emoji.pop(emoji, None)
             self._revision += 1
-            return now_set
+        logger.debug("retro board: reaction toggled — card=%s emoji=%s set=%s", card_id, emoji, now_set)
+        return now_set
 
     def _reaction_counts_locked(self, card_id: str) -> dict[str, int]:
         by_emoji = self._reactions.get(card_id, {})
@@ -318,13 +333,20 @@ class RetroBoard:
             return
         avatar = avatar if avatar in AVATARS else ""
         typing_grid = typing_grid if typing_grid in RETRO_GRIDS else ""
+        clean_name = (name or "anon").strip()[:_MAX_AUTHOR] or "anon"
         with self._lock:
+            prev = self._presence.get(pid)
             self._presence[pid] = {
-                "name": (name or "anon").strip()[:_MAX_AUTHOR] or "anon",
+                "name": clean_name,
                 "avatar": avatar,
                 "typing_grid": typing_grid,
                 "last_seen": time.monotonic(),
             }
+        # Heartbeats fire ~1/s per participant — only log the interesting transitions.
+        if prev is None:
+            logger.info("retro board: participant joined — name=%s", clean_name)
+        elif prev["name"] != clean_name:
+            logger.info("retro board: participant renamed — %s -> %s", prev["name"], clean_name)
 
     def _active_presence_locked(self) -> list[dict]:
         cutoff = time.monotonic() - _PRESENCE_TTL
@@ -352,12 +374,14 @@ class RetroBoard:
         with self._lock:
             self._timer = {"running": True, "end_epoch": time.time() + seconds, "duration": seconds}
             self._revision += 1
+        logger.info("retro board: timer started — %d s", seconds)
 
     def stop_timer(self) -> None:
         """Stop/clear the shared countdown."""
         with self._lock:
             self._timer = {"running": False, "end_epoch": None, "duration": 0}
             self._revision += 1
+        logger.info("retro board: timer stopped")
 
     def _timer_locked(self) -> dict:
         # Include the server clock so clients can compute an offset and tick locally.

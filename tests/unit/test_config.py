@@ -5,15 +5,18 @@ import os
 import pytest
 
 from yeaboi.config import (
+    VALID_LOG_LEVELS,
     detect_proxy,
     disable_langsmith_tracing,
     get_anthropic_api_key,
     get_config_dir,
     get_config_file,
+    get_log_level,
     get_session_prune_days,
     is_langsmith_enabled,
     is_tips_enabled,
     load_user_config,
+    set_log_level,
     set_tips_enabled,
 )
 
@@ -81,6 +84,53 @@ def test_set_tips_enabled_round_trips(monkeypatch, tmp_path):
     set_tips_enabled(True)
     assert os.environ["TIPS_ENABLED"] == "true"
     assert is_tips_enabled() is True
+
+
+class TestSetLogLevel:
+    def test_round_trips(self, monkeypatch, tmp_path):
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+
+        set_log_level("INFO")
+        assert os.environ["LOG_LEVEL"] == "INFO"
+        assert "LOG_LEVEL" in config_file.read_text()
+        assert get_log_level() == "INFO"
+
+    def test_lowercase_normalized(self, monkeypatch, tmp_path):
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+
+        set_log_level("debug")
+        assert get_log_level() == "DEBUG"
+
+    def test_invalid_level_raises_and_writes_nothing(self, monkeypatch, tmp_path):
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+
+        with pytest.raises(ValueError, match="invalid log level"):
+            set_log_level("VERBOSE")
+        assert not config_file.exists()
+
+    def test_critical_not_settable_from_cycle(self, monkeypatch, tmp_path):
+        # CRITICAL stays readable from .env but is not in the settable cycle.
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+
+        assert "CRITICAL" not in VALID_LOG_LEVELS
+        with pytest.raises(ValueError):
+            set_log_level("CRITICAL")
+
+    def test_preserves_other_keys(self, monkeypatch, tmp_path):
+        config_file = tmp_path / ".env"
+        config_file.write_text("ANTHROPIC_API_KEY=sk-existing\n")
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+
+        set_log_level("ERROR")
+
+        contents = config_file.read_text()
+        assert "ANTHROPIC_API_KEY=sk-existing" in contents
+        assert "LOG_LEVEL" in contents
 
 
 def test_set_tips_enabled_preserves_other_keys(monkeypatch, tmp_path):

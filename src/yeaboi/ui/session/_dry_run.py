@@ -44,10 +44,12 @@ def load_dry_run_state() -> dict[str, Any] | None:
     try:
         data = json.loads(_PROJECTS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
+        logger.warning("load_dry_run_state: failed to read projects file")
         return None
 
     projects = data.get("projects", [])
     if not projects:
+        logger.warning("load_dry_run_state: no saved projects")
         return None
 
     # Find the most complete project (all pipeline stages done, most artifacts)

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 
@@ -15,6 +16,8 @@ from rich.live import Live
 
 from yeaboi.agent.state import Feature, Priority, ProjectAnalysis, Sprint, Task
 from yeaboi.ui.session.editor._editor_core import edit_buffer_loop, render_editor_panel
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Valid priority values (shared by feature + story editors)
@@ -97,6 +100,7 @@ def edit_task(
     buffer = text.split("\n")
     cursor_row, cursor_col = _find_first_editable(buffer, _task_editable_start)
     display_id = story_id or (task_list[0].story_id if task_list else "")
+    logger.info("editor: task editor opened: story=%s count=%d", display_id, len(task_list))
 
     _ed_anim0 = time.monotonic()  # shimmer title clock
 
@@ -123,7 +127,9 @@ def edit_task(
         render_fn=_render,
     )
     if result is None:
+        logger.info("editor: task edit cancelled: story=%s", display_id)
         return None
+    logger.info("editor: task edit saved: story=%s", display_id)
     return _parse_edited_tasks("\n".join(result), task_list)
 
 
@@ -191,6 +197,7 @@ def edit_sprint(
     text = _sprint_to_text(sprint)
     buffer = text.split("\n")
     cursor_row, cursor_col = _find_first_editable(buffer, _sprint_editable_start)
+    logger.info("editor: sprint editor opened: %s", sprint.id)
 
     _ed_anim0 = time.monotonic()  # shimmer title clock
 
@@ -217,7 +224,9 @@ def edit_sprint(
         render_fn=_render,
     )
     if result is None:
+        logger.info("editor: sprint edit cancelled: %s", sprint.id)
         return None
+    logger.info("editor: sprint edit saved: %s", sprint.id)
     return _parse_edited_sprint("\n".join(result), sprint)
 
 
@@ -354,6 +363,7 @@ def edit_analysis(
     text = _analysis_to_text(analysis)
     buffer = text.split("\n")
     cursor_row, cursor_col = _find_first_editable(buffer, _analysis_editable_start)
+    logger.info("editor: analysis editor opened")
 
     _ed_anim0 = time.monotonic()  # shimmer title clock
 
@@ -380,7 +390,9 @@ def edit_analysis(
         render_fn=_render,
     )
     if result is None:
+        logger.info("editor: analysis edit cancelled")
         return None
+    logger.info("editor: analysis edit saved")
     return _parse_edited_analysis("\n".join(result), analysis)
 
 
@@ -457,6 +469,7 @@ def edit_feature(
     text = _features_to_text(features)
     buffer = text.split("\n")
     cursor_row, cursor_col = _find_first_editable(buffer, _feature_editable_start)
+    logger.info("editor: feature editor opened: count=%d", len(features))
 
     _ed_anim0 = time.monotonic()  # shimmer title clock
 
@@ -483,7 +496,9 @@ def edit_feature(
         render_fn=_render,
     )
     if result is None:
+        logger.info("editor: feature edit cancelled")
         return None
+    logger.info("editor: feature edit saved: count=%d", len(features))
     return _parse_edited_features("\n".join(result), features)
 
 

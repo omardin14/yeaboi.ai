@@ -1,5 +1,6 @@
 """UI helpers — spinner messages, toolbar, streaming, phase header."""
 
+import logging
 import time
 from collections.abc import Iterator
 
@@ -9,6 +10,8 @@ from rich.live import Live
 from rich.markdown import Markdown
 
 from yeaboi.agent.state import QuestionnaireState
+
+logger = logging.getLogger(__name__)
 
 # See README: "Architecture" — each node maps to a user-facing status message.
 _SPINNER_MESSAGES: dict[str, str] = {
@@ -130,6 +133,7 @@ def print_phase_header(console: Console, title: str, style: str = "blue") -> Non
         title: The section title (e.g. "Phase 1: Project Context").
         style: Rich colour/style for the rule. Defaults to "blue".
     """
+    logger.info("repl: phase header shown: %s", title)
     console.print()
     console.rule(f"[bold]{title}[/bold]", style=style)
     console.print()
@@ -150,6 +154,7 @@ def stream_response(console: Console, tokens: Iterator[str]) -> str:
         for token in tokens:
             accumulated += token
             live.update(Markdown(accumulated))
+    logger.info("repl: stream completed (%d chars)", len(accumulated))
     return accumulated
 
 

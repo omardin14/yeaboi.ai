@@ -129,16 +129,19 @@ def _handle_rate_limit(console: Console, graph, invoke_state: dict) -> dict | No
     """
     for attempt in range(1, _RATE_LIMIT_MAX_RETRIES + 1):
         delay = _RATE_LIMIT_BASE_DELAY * (2 ** (attempt - 1))
+        logger.warning("repl: rate limited — retry %d/%d in %ds", attempt, _RATE_LIMIT_MAX_RETRIES, delay)
         console.print(f"[warning]Rate limited — retry {attempt}/{_RATE_LIMIT_MAX_RETRIES} in {delay}s...[/warning]")
         for remaining in range(delay, 0, -1):
             console.print(f"[hint]  {remaining}s...[/hint]")
             time.sleep(1)
         try:
             result = graph.invoke(invoke_state)
+            logger.info("repl: rate-limit retry succeeded (attempt %d)", attempt)
             console.print("[success]Retry succeeded.[/success]")
             return result
         except anthropic.RateLimitError:
             continue
+    logger.error("repl: rate-limit retries exhausted after %d attempts", _RATE_LIMIT_MAX_RETRIES)
     console.print("[error]Rate-limit retries exhausted. Please wait and try again.[/error]")
     return None
 

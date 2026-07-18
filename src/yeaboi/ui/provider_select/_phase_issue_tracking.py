@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import sys
 import termios
@@ -24,6 +25,8 @@ from yeaboi.ui.provider_select._verification import _verify_azdevops, _verify_ji
 from yeaboi.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
 from yeaboi.ui.shared._animations import FRAME_TIME_30FPS
 from yeaboi.ui.shared._music_bar import make_live
+
+logger = logging.getLogger(__name__)
 
 
 def _run_issue_tracking(
@@ -104,14 +107,17 @@ def _run_issue_tracking(
             # over the menu's own ↑/↓/Enter so the user can jump straight out.
             nav = nav_for_key(key, 1)
             if nav is not None:
+                logger.info("issue tracking: section navigation (%r)", nav)
                 return nav
             if key in ("up", "scroll_up"):
                 tracker_selected = (tracker_selected - 1) % len(tracker_options)
             elif key in ("down", "scroll_down"):
                 tracker_selected = (tracker_selected + 1) % len(tracker_options)
             elif key == "enter":
+                logger.info("issue tracking: tracker chosen: %s", tracker_options[tracker_selected]["name"])
                 return tracker_selected
             elif key == "esc":
+                logger.info("issue tracking: user pressed Esc (back)")
                 return None
             _live.update(_render_tracker_menu())
 
@@ -120,6 +126,7 @@ def _run_issue_tracking(
         chosen = tracker_options[tracker_idx]
         if not chosen["fields"]:
             # "Skip" selected — return minimal result
+            logger.info("issue tracking: skipped")
             _save_progress({})
             return {
                 "name": provider["full_name"],
@@ -222,6 +229,7 @@ def _run_issue_tracking(
                     def _do_verify():
                         verify_result.append(_verify_jira(jira_url, jira_email, jira_token_val))
 
+                logger.info("issue tracking: verifying %s credentials", tracker_name)
                 thread = threading.Thread(target=_do_verify, daemon=True)
                 thread.start()
 
@@ -248,6 +256,10 @@ def _run_issue_tracking(
 
                 thread.join()
                 ok, msg = verify_result[0]
+                if ok:
+                    logger.info("issue tracking: %s credentials verified", tracker_name)
+                else:
+                    logger.warning("issue tracking: %s verification failed — %s", tracker_name, msg)
 
                 if ok:
                     green_r, green_g, green_b = 80, 220, 120
@@ -296,6 +308,7 @@ def _run_issue_tracking(
                             issue_data[field["env_var"]] = val
 
                     _save_progress(issue_data)
+                    logger.info("issue tracking: %s configured (%d keys)", tracker_name, len(issue_data))
                     return {
                         "name": provider["full_name"],
                         "env_var": provider["env_var"],
@@ -328,6 +341,7 @@ def _run_issue_tracking(
                     continue
 
             elif key == "esc":
+                logger.info("issue tracking: form cancelled (Esc)")
                 return None
             elif key == "clear":
                 it_values[it_selected] = ""

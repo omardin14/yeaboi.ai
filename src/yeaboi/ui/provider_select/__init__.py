@@ -209,6 +209,7 @@ def select_provider(
                     time.sleep(FRAME_TIME_30FPS)
                 thread.join()
                 discovered = discovered_box[0] if discovered_box else []
+                logger.debug("provider_select: discovered %d models for %s", len(discovered), provider["provider_val"])
                 if discovered:
                     presets = discovered[:_MAX_LIVE_MODELS]
 
@@ -381,6 +382,7 @@ def select_provider(
                     elif key == "enter":
                         break
                     elif key in ("q", "esc"):
+                        logger.info("provider_select: cancelled at LLM provider selection")
                         disable_bracketed_paste()
                         return None
                     w, h = console.size
@@ -389,6 +391,7 @@ def select_provider(
 
                 # Transition animation
                 provider = _PROVIDER_CARDS[selected]
+                logger.info("provider_select: LLM provider chosen: %s", provider["full_name"])
                 _transition_to_input(live, console, selected, provider)
 
                 # Phase 2: API key input
@@ -418,6 +421,7 @@ def select_provider(
                         def _do_verify():
                             verify_result.append(_verify_api_key(provider, input_value.strip()))
 
+                        logger.info("provider_select: verifying %s credentials", provider["full_name"])
                         thread = threading.Thread(target=_do_verify, daemon=True)
                         thread.start()
 
@@ -442,6 +446,14 @@ def select_provider(
                         thread.join()
                         ok, msg = verify_result[0]
                         verified = ok
+                        if ok:
+                            logger.info("provider_select: %s credentials verified", provider["full_name"])
+                        else:
+                            logger.warning(
+                                "provider_select: %s credential verification failed — %s",
+                                provider["full_name"],
+                                msg,
+                            )
 
                         if ok:
                             green_r, green_g, green_b = 80, 220, 120
@@ -544,6 +556,11 @@ def select_provider(
                         }
                     )
                     _collected.setdefault("issue_tracking", {})
+                    logger.info(
+                        "provider_select: LLM step complete (provider=%s, model=%s)",
+                        provider["provider_val"],
+                        llm_model,
+                    )
                     step = 1
                     _via_nav = False
                 # else: Esc pressed → loop restarts step 0
@@ -579,6 +596,7 @@ def select_provider(
 
                 if isinstance(result, StepNav):
                     if result.finish:
+                        logger.info("provider_select: wizard finished (from issue tracking)")
                         disable_bracketed_paste()
                         return _collected
                     step = result.target
@@ -612,6 +630,7 @@ def select_provider(
                 docs_result = _run_docs(console, read_key, existing_config, live, jira_creds=_jira_creds)
                 if isinstance(docs_result, StepNav):
                     if docs_result.finish:
+                        logger.info("provider_select: wizard finished (from docs)")
                         disable_bracketed_paste()
                         return _collected
                     step = docs_result.target
@@ -677,6 +696,7 @@ def select_provider(
 
                 if _vc_nav is not None:
                     if _vc_nav.finish:
+                        logger.info("provider_select: wizard finished (from version control)")
                         disable_bracketed_paste()
                         return _collected
                     step = _vc_nav.target
@@ -688,9 +708,11 @@ def select_provider(
                     continue
 
                 vc = _VC_OPTIONS[vc_selected]
+                logger.info("provider_select: version control chosen: %s", vc["name"])
 
                 # Skip selected — no PAT needed, finish wizard
                 if not vc["env_var"]:
+                    logger.info("provider_select: wizard finished (version control skipped)")
                     _collected["vc_env_var"] = ""
                     _collected["vc_token"] = ""
                     disable_bracketed_paste()
@@ -767,6 +789,7 @@ def select_provider(
                         def _do_vc_verify():
                             verify_result.append(_verify_vc_token(vc, vc_input.strip()))
 
+                        logger.info("provider_select: verifying %s token", vc["name"])
                         thread = threading.Thread(target=_do_vc_verify, daemon=True)
                         thread.start()
 
@@ -791,6 +814,10 @@ def select_provider(
                         thread.join()
                         ok, msg = verify_result[0]
                         vc_verified = ok
+                        if ok:
+                            logger.info("provider_select: %s token verified", vc["name"])
+                        else:
+                            logger.warning("provider_select: %s token verification failed — %s", vc["name"], msg)
 
                         if ok:
                             green_r, green_g, green_b = 80, 220, 120
@@ -866,6 +893,7 @@ def select_provider(
 
                 if _step2_done:
                     # Build final result — merge issue tracking data with VC
+                    logger.info("provider_select: wizard finished (all steps complete)")
                     _collected["vc_env_var"] = vc["env_var"]
                     _collected["vc_token"] = vc_token
                     disable_bracketed_paste()

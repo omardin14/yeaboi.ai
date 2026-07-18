@@ -12,6 +12,7 @@ Animation sequence (~2.7s total):
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import time
@@ -24,6 +25,8 @@ from rich.text import Text
 
 from yeaboi.ui.shared._ascii_font import render_ascii_text
 from yeaboi.ui.shared._wordmarks import get_shadow_wordmark
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Animation constants
@@ -286,6 +289,9 @@ def show_splash(console: Console) -> None:
     else:
         text_lines = render_ascii_text("YEABOI")
 
+    logger.info("splash: shown")
+    _splash_start = time.monotonic()
+
     # Enter alt-screen once — stays active through to the next fullscreen UI.
     # Live is created without screen=True so it doesn't toggle alt-screen
     # on enter/exit, eliminating the flicker between screens.
@@ -316,6 +322,7 @@ def show_splash(console: Console) -> None:
 
     # Alt-screen is intentionally left active — the next Live(screen=True)
     # in wizard or mode-select will take over without a visible gap.
+    logger.debug("splash: completed in %.2fs", time.monotonic() - _splash_start)
 
 
 def play_wordmark_intro(
@@ -337,6 +344,7 @@ def play_wordmark_intro(
     """
     rgb = _as_rgb(color)
     text_lines = _resolve_wordmark(word, console.size[0])
+    logger.debug("splash: wordmark intro '%s' shown", word)
 
     def _frames(seconds: float) -> int:
         if frame_time <= 0:

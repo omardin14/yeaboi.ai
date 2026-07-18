@@ -1164,10 +1164,14 @@ Sessions are persisted to SQLite at `~/.yeaboi/data/sessions.db`. Every terminal
   exports/
     analysis/           # HTML + Markdown analysis reports
     planning/           # HTML + Markdown planning exports
-  logs/
-    tui/                # TUI application logs (rotates at 2 MB)
-    analysis/           # Per-analysis session logs
-    planning/           # Per-planning session logs
+  logs/                 # All logs rotate at 2 MB with 3 backups, one shared format
+    tui/                # Main application log (yeaboi.log) — always on
+    analysis/           # Analysis mode log + per-analysis text reports
+    planning/           # Per-planning-session logs ({session-id}.log)
+    standup/            # Daily Standup log (standup.log, incl. scheduled runs)
+    retro/              # Retro mode log (retro.log)
+    performance/        # Performance mode log (performance.log)
+    reporting/          # Reporting mode log (reporting.log)
   .env                  # API keys and credentials
 ```
 
@@ -2092,7 +2096,7 @@ src/yeaboi/
 | `LANGSMITH_TRACING` | No | Enable LangSmith tracing (`true`) |
 | `LANGSMITH_API_KEY` | No | LangSmith API key |
 | `LANGSMITH_PROJECT` | No | LangSmith project name |
-| `LOG_LEVEL` | No | File-based log level (default: `WARNING`) |
+| `LOG_LEVEL` | No | File-based log level: `DEBUG`/`INFO`/`WARNING`/`ERROR` (default: `WARNING`; also cyclable live from the Settings page) |
 | `SESSION_PRUNE_DAYS` | No | Auto-prune sessions older than N days (default: 30, 0=disabled) |
 
 ### Git Conventions

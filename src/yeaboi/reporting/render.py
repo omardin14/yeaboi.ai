@@ -10,10 +10,14 @@ performance/render.py).
 
 from __future__ import annotations
 
+import logging
+
 from rich.console import Group
 from rich.text import Text
 
 from yeaboi.agent.state import DeliveryReport
+
+logger = logging.getLogger(__name__)
 
 _ACCENT = "rgb(140,120,230)"  # Reporting theme indigo — keep in sync with the TUI theme
 
@@ -37,6 +41,11 @@ def _metrics_line(report: DeliveryReport) -> str:
 
 def format_report_lines(report: DeliveryReport) -> list[str]:
     """Return the delivery report as plain-text lines (no ANSI)."""
+    logger.info(
+        "reporting render: plaintext report — period=%s, %d item(s)",
+        report.period_label,
+        len(report.delivered_items),
+    )
     title = report.project_name or "Delivery Report"
     lines = [
         f"{_emoji(report, 'headline')}Delivery Report — {title}",
@@ -72,6 +81,11 @@ def format_report_lines(report: DeliveryReport) -> list[str]:
 
 def format_report_rich(report: DeliveryReport, *, accent: str = _ACCENT) -> Group:
     """Return a Rich renderable for the delivery report."""
+    logger.info(
+        "reporting render: rich report — period=%s, %d item(s)",
+        report.period_label,
+        len(report.delivered_items),
+    )
     title = report.project_name or "Delivery Report"
     body: list[Text] = [
         Text(f"{_emoji(report, 'headline')}Delivery Report — {title}", style=f"bold {accent}"),

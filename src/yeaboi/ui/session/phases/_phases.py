@@ -360,7 +360,9 @@ def _handle_tracker_sync(
         progress=progress,
     )
     if choice != 0:
+        logger.info("Tracker sync cancelled: %s stage=%s", tracker_label, stage)
         return None  # User cancelled
+    logger.info("Tracker sync started: %s stage=%s", tracker_label, stage)
 
     # ── Epic-only sync (single item, no sync_fn) ──────────────────
     if stage == "epic_review":
@@ -560,6 +562,8 @@ def _handle_tracker_sync(
         sync_result = result_box[0]
         if sync_result and sync_result.errors:
             logger.warning("%s sync completed with %d errors", tracker_label, len(sync_result.errors))
+        else:
+            logger.info("Tracker sync completed: %s stage=%s", tracker_label, stage)
         return state_box[0]
 
     return None
@@ -1612,6 +1616,7 @@ def _phase_chat(
 
             # Handle export command
             if text.lower() == "export":
+                logger.info("Chat: export requested")
                 _export_checkpoint(console, graph_state, stage="complete")
                 messages.append(("ai", "Plan exported successfully."))
                 input_value = ""

@@ -9,10 +9,14 @@ and no surface re-implements the layout (mirrors standup/render.py).
 
 from __future__ import annotations
 
+import logging
+
 from rich.console import Group
 from rich.text import Text
 
 from yeaboi.agent.state import OneOnOnePrep, OneOnOneRecord, SixMonthReview
+
+logger = logging.getLogger(__name__)
 
 _ACCENT = "rgb(220,110,90)"  # Performance theme coral — keep in sync with the TUI theme
 
@@ -39,6 +43,7 @@ def _section_lines(title: str, items: tuple[str, ...] | list[str]) -> list[str]:
 
 def format_prep_lines(prep: OneOnOnePrep) -> list[str]:
     """Return a 1:1 prep as plain-text lines (no ANSI)."""
+    logger.info("performance render: 1:1 prep (plaintext) — engineer=%s", prep.engineer)
     lines = [f"1:1 Prep — {prep.engineer}", f"Prepared: {prep.date}", ""]
     if prep.activity_summary:
         lines += ["Sprint work:", f"  {prep.activity_summary}", ""]
@@ -56,6 +61,7 @@ def format_prep_lines(prep: OneOnOnePrep) -> list[str]:
 
 def format_prep_rich(prep: OneOnOnePrep, *, accent: str = _ACCENT) -> Group:
     """Return a Rich renderable for the 1:1 prep."""
+    logger.info("performance render: 1:1 prep (rich) — engineer=%s", prep.engineer)
     body: list[Text] = [
         Text(f"1:1 Prep — {prep.engineer}", style=f"bold {accent}"),
         Text(f"Prepared: {prep.date}", style="dim"),
@@ -82,6 +88,7 @@ def format_prep_rich(prep: OneOnOnePrep, *, accent: str = _ACCENT) -> Group:
 
 def format_completion_lines(record: OneOnOneRecord) -> list[str]:
     """Return a completed 1:1 as plain-text lines (the email body + actions)."""
+    logger.info("performance render: 1:1 completion (plaintext) — engineer=%s", record.engineer)
     lines = [f"1:1 Completed — {record.engineer}", f"Date: {record.date}", ""]
     if record.email_subject:
         lines += [f"Subject: {record.email_subject}", ""]
@@ -96,6 +103,7 @@ def format_completion_lines(record: OneOnOneRecord) -> list[str]:
 
 def format_completion_rich(record: OneOnOneRecord, *, accent: str = _ACCENT) -> Group:
     """Return a Rich renderable for the completed 1:1."""
+    logger.info("performance render: 1:1 completion (rich) — engineer=%s", record.engineer)
     body: list[Text] = [
         Text(f"1:1 Completed — {record.engineer}", style=f"bold {accent}"),
         Text(f"Date: {record.date}", style="dim"),
@@ -122,6 +130,7 @@ def format_completion_rich(record: OneOnOneRecord, *, accent: str = _ACCENT) -> 
 
 def format_review_lines(review: SixMonthReview) -> list[str]:
     """Return a 6-month review as plain-text lines."""
+    logger.info("performance render: 6-month review (plaintext) — engineer=%s", review.engineer)
     lines = [
         f"6-Month Performance Review — {review.engineer}",
         f"Period: {review.period_start or '?'} to {review.period_end or '?'}",
@@ -142,6 +151,7 @@ def format_review_lines(review: SixMonthReview) -> list[str]:
 
 def format_review_rich(review: SixMonthReview, *, accent: str = _ACCENT) -> Group:
     """Return a Rich renderable for the 6-month review."""
+    logger.info("performance render: 6-month review (rich) — engineer=%s", review.engineer)
     body: list[Text] = [
         Text(f"6-Month Review — {review.engineer}", style=f"bold {accent}"),
         Text(f"Period: {review.period_start or '?'} to {review.period_end or '?'}", style="dim"),

@@ -9,10 +9,14 @@ report looks consistent everywhere and no surface re-implements the layout.
 
 from __future__ import annotations
 
+import logging
+
 from rich.console import Group
 from rich.text import Text
 
 from yeaboi.agent.state import StandupReport
+
+logger = logging.getLogger(__name__)
 
 # Emoji markers per confidence label — used in plaintext (Slack/email) output.
 _CONFIDENCE_EMOJI = {
@@ -77,11 +81,21 @@ def format_standup_lines(report: StandupReport) -> list[str]:
 
 def format_standup_plaintext(report: StandupReport) -> str:
     """Return the standup as a single plain-text string (for Slack/email/desktop)."""
+    logger.info(
+        "standup render: plaintext report — %d member update(s), %d warning(s)",
+        len(report.member_updates),
+        len(report.warnings),
+    )
     return "\n".join(format_standup_lines(report))
 
 
 def format_standup_rich(report: StandupReport, *, accent: str = "rgb(200,100,180)") -> Group:
     """Return a Rich renderable for terminal / TUI display."""
+    logger.info(
+        "standup render: rich report — %d member update(s), %d warning(s)",
+        len(report.member_updates),
+        len(report.warnings),
+    )
     body: list[Text] = []
     header = Text(justify="left")
     header.append(f"Daily Standup — {report.date}", style=f"bold {accent}")

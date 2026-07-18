@@ -463,11 +463,11 @@ def delete_project(project_id: str) -> bool:
         state_file.unlink()
         logger.debug("Deleted state file %s", state_file)
 
-    # Clean up the per-session log file
-    log_file = _LOGS_DIR / f"{project_id}.log"
-    if log_file.exists():
-        log_file.unlink()
-        logger.debug("Deleted session log %s", log_file)
+    # Clean up the per-session log file plus any rotation backups (.log.1/.2/.3)
+    if _LOGS_DIR.exists():
+        for log_file in _LOGS_DIR.glob(f"{project_id}.log*"):
+            log_file.unlink()
+            logger.debug("Deleted session log %s", log_file)
 
     logger.info("Deleted project %s", project_id)
     return True
@@ -476,48 +476,30 @@ def delete_project(project_id: str) -> bool:
 # ---------------------------------------------------------------------------
 # Per-session logging
 # ---------------------------------------------------------------------------
-# Each session gets its own log file at ~/.scrum-agent/logs/{project_id}.log.
-# The handler is attached when a session starts and removed when it ends.
-# This keeps session logs isolated for easy debugging and clean deletion.
-
-_session_handler: logging.Handler | None = None
+# Each session gets its own rotating log file at
+# ~/.yeaboi/logs/planning/{project_id}.log. The handler is attached when a
+# session starts and removed when it ends. Handler lifecycle, format, and
+# rotation live in the central yeaboi.logging_setup module — these wrappers
+# keep the historical public API for callers (ui/session).
 
 
 def attach_session_logger(project_id: str) -> None:
     """Attach a per-session file handler to the yeaboi logger.
 
-    Creates ~/.scrum-agent/logs/{project_id}.log. Safe to call multiple times
-    — subsequent calls replace the previous session handler.
+    Creates ~/.yeaboi/logs/planning/{project_id}.log (rotating). Safe to call
+    multiple times — subsequent calls replace the previous session handler.
     """
-    global _session_handler  # noqa: PLW0603
+    from yeaboi.logging_setup import attach_session_log
 
-    from yeaboi.config import get_log_level
-
-    # Remove any existing session handler first
-    remove_session_logger()
-
-    _LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = _LOGS_DIR / f"{project_id}.log"
-    log_level = getattr(logging, get_log_level(), logging.WARNING)
-
-    handler = logging.FileHandler(log_path, encoding="utf-8")
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"),
-    )
-    handler.setLevel(log_level)
-    logging.getLogger("yeaboi").addHandler(handler)
-    _session_handler = handler
-    logger.debug("Session logger attached: %s (level=%s)", log_path, get_log_level())
+    attach_session_log(project_id)
+    logger.debug("Session logger attached for %s", project_id)
 
 
 def remove_session_logger() -> None:
     """Remove the per-session file handler, flushing and closing the file."""
-    global _session_handler  # noqa: PLW0603
-    if _session_handler is not None:
-        _session_handler.flush()
-        _session_handler.close()
-        logging.getLogger("yeaboi").removeHandler(_session_handler)
-        _session_handler = None
+    from yeaboi.logging_setup import detach_session_log
+
+    detach_session_log()
 
 
 def export_project_json(project_id: str, output_dir: Path | None = None) -> Path | None:

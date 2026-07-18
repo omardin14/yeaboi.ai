@@ -572,6 +572,7 @@ def _azdo_enrich_repos_from_git_pull_requests(
                 crit = GitPullRequestSearchCriteria(status=status)
                 chunk = git_client.get_pull_requests(rid, crit, project=project, top=pr_top) or []
             except Exception:
+                logger.debug("get_pull_requests failed for repo %s (status=%s)", name_lower, status, exc_info=True)
                 chunk = []
             for pr in chunk:
                 pid = getattr(pr, "pull_request_id", None)
@@ -782,7 +783,7 @@ def _parse_tickets_with_llm(
                     batch_result = future.result(timeout=30)
                     results.update(batch_result)
                 except Exception:
-                    pass
+                    logger.debug("LLM ticket-parse batch %d failed — skipping", futures[future], exc_info=True)
     except Exception as exc:
         logger.warning("LLM ticket parsing failed entirely: %s", exc)
         return {}
