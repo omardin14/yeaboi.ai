@@ -8,12 +8,58 @@ import pytest
 
 from yeaboi.retro.board import RetroBoard
 from yeaboi.retro.server import (
+    JoinLimiter,
     RetroServer,
     decode_share_code,
     encode_share_code,
     get_lan_ip,
     make_token,
 )
+
+
+class TestJoinLimiter:
+    """The join-code brute-force throttle (F4)."""
+
+    def test_allows_up_to_the_cap(self):
+        lim = JoinLimiter()
+        ip = "10.0.0.5"
+        for _ in range(JoinLimiter._MAX_FAILS - 1):
+            lim.record_failure(ip)
+        assert lim.blocked(ip) is False  # still under the cap
+
+    def test_blocks_after_cap(self):
+        lim = JoinLimiter()
+        ip = "10.0.0.5"
+        for _ in range(JoinLimiter._MAX_FAILS):
+            lim.record_failure(ip)
+        assert lim.blocked(ip) is True
+
+    def test_success_resets_counter(self):
+        lim = JoinLimiter()
+        ip = "10.0.0.5"
+        for _ in range(JoinLimiter._MAX_FAILS):
+            lim.record_failure(ip)
+        lim.record_success(ip)
+        assert lim.blocked(ip) is False
+
+    def test_lockout_is_per_ip(self):
+        lim = JoinLimiter()
+        for _ in range(JoinLimiter._MAX_FAILS):
+            lim.record_failure("1.1.1.1")
+        assert lim.blocked("1.1.1.1") is True
+        assert lim.blocked("2.2.2.2") is False
+
+    def test_lockout_expires_after_window(self, monkeypatch):
+        import yeaboi.retro.server as server_mod
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(server_mod.time, "monotonic", lambda: clock["t"])
+        lim = JoinLimiter()
+        for _ in range(JoinLimiter._MAX_FAILS):
+            lim.record_failure("9.9.9.9")
+        assert lim.blocked("9.9.9.9") is True
+        clock["t"] += JoinLimiter._LOCKOUT_S + 1  # window elapses
+        assert lim.blocked("9.9.9.9") is False
 
 
 class TestShareCode:
@@ -141,6 +187,42 @@ class TestStateEndpoint:
         with pytest.raises(urllib.error.HTTPError) as exc:
             _get(f"http://127.0.0.1:{srv.port}/api/state")
         assert exc.value.code == 403
+
+
+class TestJoinEndpoint:
+    def test_correct_code_returns_token(self, running_server):
+        srv, _ = running_server
+        # /api/join is unauthenticated (it hands out the token), so post without one.
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{srv.port}/api/join",
+            data=json.dumps({"code": srv.join_code}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = json.load(urllib.request.urlopen(req, timeout=5))
+        assert resp["ok"] and resp["token"] == srv.token
+
+    def test_brute_force_is_rate_limited(self, running_server):
+        srv, _ = running_server
+
+        def _attempt(code):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{srv.port}/api/join",
+                data=json.dumps({"code": code}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req, timeout=5)
+                return 200
+            except urllib.error.HTTPError as e:
+                return e.code
+
+        codes = [403] * JoinLimiter._MAX_FAILS
+        assert [_attempt("WRONG-COD") for _ in codes] == codes
+        # Once the cap is hit, further attempts — even the correct code — are throttled.
+        assert _attempt("WRONG-COD") == 429
+        assert _attempt(srv.join_code) == 429
 
 
 class TestReactEndpoint:

@@ -3,6 +3,7 @@
 import os
 from io import StringIO
 
+import pytest
 from rich.console import Console
 
 from yeaboi.setup_wizard import _PROVIDERS, is_first_run, run_setup_wizard, save_config
@@ -121,6 +122,15 @@ class TestSaveConfig:
         config_file = _patch_config_file(monkeypatch, tmp_path)
         path = save_config({"ANTHROPIC_API_KEY": "sk-ant-abc"})
         assert path == config_file
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_saved_config_is_owner_only(self, monkeypatch, tmp_path):
+        import stat
+
+        _patch_config_file(monkeypatch, tmp_path)
+        # The .env holds plaintext API keys, so it must not be group/other readable.
+        path = save_config({"ANTHROPIC_API_KEY": "sk-ant-abc"})
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 # ---------------------------------------------------------------------------

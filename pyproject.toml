@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yeaboi"
-version = "2.12.0"
+version = "2.12.1"
 description = "yeaboi.ai — a team lead's best friend. A terminal AI agent that decomposes projects into epics, user stories, tasks, and sprint plans."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -100,14 +100,31 @@ src = ["src"]
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
+# "S" = flake8-bandit security rules (SAST). See `make security`.
+select = ["E", "F", "I", "N", "W", "UP", "S"]
+# High-noise bandit rules that don't map to real vulnerabilities in this codebase
+# (audited): every subprocess call uses list-form argv (never shell=True), CLI
+# tools are intentionally resolved via PATH, and the try/except-pass sites are
+# best-effort cleanup. Suppressed globally so the signal-bearing S-rules (S104,
+# S105, S310, S311, S608) stay actionable rather than drowned in style noise.
+ignore = [
+    "S101",  # assert — used for internal invariants, stripped only under -O (not shipped that way)
+    "S110",  # try-except-pass — deliberate best-effort cleanup
+    "S112",  # try-except-continue — deliberate best-effort skip
+    "S603",  # subprocess-without-shell — all calls are argv lists, never shell=True (audited)
+    "S607",  # partial-executable-path — git/osascript/sudo/crontab resolved via PATH by design
+]
 
 [tool.ruff.lint.per-file-ignores]
 # page.py is an embedded front-end asset (inline HTML/CSS/JS in string constants);
-# line length carries no meaning there, so exempt it from E501 only.
-"src/yeaboi/retro/page.py" = ["E501"]
+# line length carries no meaning there, so exempt it from E501 only. S608 fires on
+# a JS string that merely resembles SQL — there is no database here.
+"src/yeaboi/retro/page.py" = ["E501", "S608"]
 # presentation.py is an embedded slide-deck asset (inline HTML/CSS/JS string constants).
 "src/yeaboi/reporting/presentation.py" = ["E501"]
+# Tests deliberately use asserts, toy secrets, temp paths, and localhost URLs —
+# they are never shipped, so the bandit (S) category is not meaningful here.
+"tests/**" = ["S"]
 
 [dependency-groups]
 dev = [

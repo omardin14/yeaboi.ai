@@ -46,7 +46,7 @@ def slack_api(method: str, payload: dict, token: str) -> dict:
     import ssl
 
     url = f"https://slack.com/api/{method}"
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310 - fixed https://slack.com endpoint
         url,
         data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -54,7 +54,7 @@ def slack_api(method: str, payload: dict, token: str) -> dict:
     ca = os.environ.get("SSL_CERT_FILE") or os.environ.get("CURL_CA_BUNDLE")
     ctx = ssl.create_default_context(cafile=ca) if ca and Path(ca).exists() else ssl.create_default_context()
     try:
-        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:  # noqa: S310 - fixed https endpoint
             result = json.loads(r.read())
     except urllib.error.HTTPError as e:
         return {"ok": False, "error": f"HTTP {e.code}", "body": e.read().decode()}

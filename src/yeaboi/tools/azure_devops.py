@@ -33,6 +33,35 @@ logger = logging.getLogger(__name__)
 # Truncate file content at this many characters to avoid flooding the LLM context.
 _MAX_CONTENT_CHARS = 8_000
 
+# Valid Azure DevOps work-item states, canonical casing. Used to whitelist the
+# LLM/tool-controlled `state` before it is interpolated into a WIQL query (WIQL
+# offers no bind parameters, so allowlisting is the injection defense).
+_VALID_WORK_ITEM_STATES = {
+    "active": "Active",
+    "new": "New",
+    "resolved": "Resolved",
+    "closed": "Closed",
+    "done": "Done",
+    "removed": "Removed",
+    "all": "All",
+}
+_DEFAULT_WORK_ITEM_STATE = "Active"
+
+
+def _normalize_work_item_state(state: str) -> str:
+    """Map `state` to a known canonical state, falling back to the default.
+
+    Anything not in the whitelist (including injection attempts like
+    ``Active' OR '1'='1``) is rejected and coerced to ``Active`` so it can never
+    reach the WIQL string as attacker-controlled text.
+    """
+    canonical = _VALID_WORK_ITEM_STATES.get(str(state).strip().lower())
+    if canonical is None:
+        logger.warning("azdevops: ignoring unrecognized work-item state %r; using %s", state, _DEFAULT_WORK_ITEM_STATE)
+        return _DEFAULT_WORK_ITEM_STATE
+    return canonical
+
+
 # Key config/manifest files to highlight in the repo tree summary.
 # See README: "Tools" — scoping tool output for LLM relevance
 _KEY_FILES = {
@@ -261,12 +290,21 @@ def azdevops_list_work_items(repo_url: str, max_items: int = 20, state: str = "A
         conn = _make_connection(org_url, get_azure_devops_token())
         wit_client = conn.clients.get_work_item_tracking_client()
 
+        # SECURITY: `state` is an LLM/tool-controlled parameter and `project` is parsed from an
+        # LLM-supplied URL, both interpolated into a WIQL query. WIQL has no bind-parameter API, so
+        # we defend by (a) whitelisting `state` against the known enum — a value like
+        # "Active' OR '1'='1" is not in the set and is coerced to the safe default — and (b) escaping
+        # single quotes in `project` per WIQL rules (a quote is escaped by doubling it).
+        state = _normalize_work_item_state(state)
+        safe_project = project.replace("'", "''")
         # Omit the state clause when state='All' so all states are returned.
         state_clause = f" AND [System.State] = '{state}'" if state != "All" else ""
+        # WIQL is read-only; `state` is whitelisted and `project` escaped above, so this f-string
+        # cannot be steered. WIQL has no bind-parameter API, hence the suppression.
         wiql = Wiql(
             query=(
-                f"SELECT [System.Id] FROM WorkItems"
-                f" WHERE [System.TeamProject] = '{project}'{state_clause}"
+                f"SELECT [System.Id] FROM WorkItems"  # noqa: S608
+                f" WHERE [System.TeamProject] = '{safe_project}'{state_clause}"
                 f" ORDER BY [System.ChangedDate] DESC"
             )
         )
@@ -825,10 +863,13 @@ def azdevops_recent_activity(project: str = "", days: int = 1) -> list[dict]:
         from azure.devops.v7_1.work_item_tracking.models import Wiql
 
         wit_client, _ = _make_azdo_clients()
+        # WIQL has no bind parameters: escape single quotes in `project` (config-derived)
+        # and force `days` to int so neither can alter the query. See _normalize_work_item_state.
+        safe_project = project.replace("'", "''")
         wiql = Wiql(
             query=(
-                "SELECT [System.Id] FROM WorkItems"
-                f" WHERE [System.TeamProject] = '{project}'"
+                "SELECT [System.Id] FROM WorkItems"  # noqa: S608 - read-only WIQL; inputs escaped/int-cast above
+                f" WHERE [System.TeamProject] = '{safe_project}'"
                 f" AND [System.ChangedDate] >= @Today - {int(days)}"
                 " ORDER BY [System.ChangedDate] DESC"
             )

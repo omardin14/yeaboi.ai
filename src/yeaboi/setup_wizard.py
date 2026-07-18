@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from yeaboi.config import get_config_file
+from yeaboi.config import get_config_file, restrict_permissions
 from yeaboi.ui.provider_select import select_provider
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,8 @@ def save_config(data: dict[str, str]) -> Path:
     config_file = get_config_file()
     lines = [f"{k}={v}\n" for k, v in data.items() if v]
     config_file.write_text("".join(lines))
+    # This file holds API keys/tokens in plaintext — lock it to owner-only (0o600).
+    restrict_permissions(config_file, mode=0o600)
     logger.info("Config saved to %s (keys: %s)", config_file, ", ".join(data.keys()))
     return config_file
 

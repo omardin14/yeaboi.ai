@@ -32,7 +32,7 @@ def get_bot_token() -> str:
 def slack_api(method: str, payload: dict, token: str) -> dict:
     url = f"https://slack.com/api/{method}"
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310 - fixed https://slack.com endpoint
         url,
         data=data,
         headers={
@@ -41,7 +41,7 @@ def slack_api(method: str, payload: dict, token: str) -> dict:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - fixed https endpoint
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"HTTP {e.code}: {e.read().decode()}") from e

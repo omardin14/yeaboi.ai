@@ -199,6 +199,47 @@ class TestGetConfigDir:
         # Should not raise
         get_config_dir()
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_config_dir_is_owner_only(self, monkeypatch, tmp_path):
+        import stat
+
+        monkeypatch.setattr("yeaboi.config.Path.home", lambda: tmp_path)
+        d = get_config_dir()
+        assert stat.S_IMODE(d.stat().st_mode) == 0o700
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_config_dir_perms_repaired_when_too_open(self, monkeypatch, tmp_path):
+        import stat
+
+        monkeypatch.setattr("yeaboi.config.Path.home", lambda: tmp_path)
+        (tmp_path / ".yeaboi").mkdir(mode=0o755)
+        d = get_config_dir()  # a subsequent call must tighten an existing loose dir
+        assert stat.S_IMODE(d.stat().st_mode) == 0o700
+
+
+class TestSetConfigValue:
+    """Tests for set_config_value() — the hardened choke point for secret writes."""
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_written_file_is_owner_only(self, monkeypatch, tmp_path):
+        import stat
+
+        from yeaboi.config import set_config_value
+
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+        set_config_value("SLACK_WEBHOOK_URL", "https://hooks.example/secret")
+        assert config_file.exists()
+        assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
+
+    def test_persists_value(self, monkeypatch, tmp_path):
+        from yeaboi.config import set_config_value
+
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+        set_config_value("SLACK_WEBHOOK_URL", "https://hooks.example/secret")
+        assert "SLACK_WEBHOOK_URL='https://hooks.example/secret'" in config_file.read_text()
+
 
 class TestGetConfigFile:
     """Tests for get_config_file() — returns ~/.yeaboi/.env path."""

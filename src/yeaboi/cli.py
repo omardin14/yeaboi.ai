@@ -734,6 +734,37 @@ def _configure_sandbox() -> None:
     print("       ⚠ Tools now execute directly on the host without Docker isolation.")
 
 
+def _is_dangerous_sudo_target(dest: Path) -> bool:
+    """Return True if ``dest`` must never be handed to ``sudo rm -rf``.
+
+    Blocks obvious catastrophes — the filesystem root and the user's home
+    directory itself — that a mistaken ``--install-skill`` argument could point at.
+    """
+    resolved = dest.expanduser().resolve()
+    return resolved == Path(resolved.anchor) or resolved == Path.home().resolve()
+
+
+def _confirm_sudo_overwrite(dest: Path) -> bool:
+    """Confirm before a privileged ``sudo rm -rf`` / ``cp`` overwrite of ``dest``.
+
+    The destination derives from the user-supplied ``--install-skill <path>``
+    argument, so an escalated, recursive delete must be explicit: dangerous
+    targets are refused outright, and everything else requires a typed ``y``.
+    Declining or a non-interactive stream (no TTY) is treated as "no".
+    """
+    if _is_dangerous_sudo_target(dest):
+        print(f"Refusing to 'sudo rm -rf' a protected path: {dest}", file=sys.stderr)
+        return False
+    print(f"\n⚠  Permission denied writing {dest} without elevation.")
+    print(f"   This will run: sudo rm -rf {dest}  &&  sudo cp -r <skill> {dest}")
+    try:
+        answer = input("   Proceed with sudo? [y/N] ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return False
+    return answer in ("y", "yes")
+
+
 def _install_skill(target_arg: str) -> None:
     """Install the bundled scrum-planner skill into OpenClaw.
 
@@ -788,6 +819,9 @@ def _install_skill(target_arg: str) -> None:
             shutil.copytree(source_path, dest)
             count = sum(1 for _ in dest.rglob("*") if _.is_file())
         except PermissionError:
+            if not _confirm_sudo_overwrite(dest):
+                print(f"[{step}] {label}: skipped (declined elevated overwrite of {dest})")
+                return 0
             subprocess.run(["sudo", "rm", "-rf", str(dest)], check=True)
             subprocess.run(["sudo", "cp", "-r", str(source_path), str(dest)], check=True)
             count = sum(1 for _ in source_path.rglob("*") if _.is_file())
