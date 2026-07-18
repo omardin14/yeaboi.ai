@@ -81,6 +81,25 @@ class TestDesktopDelivery:
         assert DesktopDelivery().send(_report()) is True
         assert run.call_args[0][0][0] == "osascript"
 
+    def test_macos_passes_text_as_argv_not_interpolated(self, monkeypatch):
+        # LLM-generated summary containing AppleScript-breaking metacharacters.
+        import dataclasses
+
+        evil = 'pwned" & (do shell script "touch /tmp/x") & "\\`end'
+        report = dataclasses.replace(_report(), team_summary=evil)
+        monkeypatch.setattr(delivery.platform, "system", lambda: "Darwin")
+        run = MagicMock()
+        monkeypatch.setattr(delivery.subprocess, "run", run)
+        assert DesktopDelivery().send(report) is True
+        argv = run.call_args[0][0]
+        # The static script uses `on run argv` and must NOT contain the untrusted text.
+        assert argv[0] == "osascript"
+        script = argv[2]
+        assert "on run argv" in script
+        assert evil not in script  # never interpolated into the AppleScript source
+        # The body is delivered verbatim as a runtime argument (data, not code).
+        assert evil in argv
+
     def test_linux_uses_notify_send(self, monkeypatch):
         monkeypatch.setattr(delivery.platform, "system", lambda: "Linux")
         run = MagicMock()

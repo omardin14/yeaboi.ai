@@ -69,13 +69,27 @@ class DesktopDelivery(NotificationDelivery):
         title = f"Daily Standup — {report.confidence_label or report.date}"
         # One-line body: confidence + team summary head.
         body = report.team_summary or report.confidence_rationale or "Standup ready."
-        body = body.replace('"', "'")[:200]
+        body = body[:200]
         system = platform.system()
         logger.info("delivery[desktop]: system=%s", system)
         try:
             if system == "Darwin":
-                script = f'display notification "{body}" with title "{title}"'
-                subprocess.run(["osascript", "-e", script], check=True, capture_output=True, timeout=10)
+                # SECURITY: body/title are LLM-generated (from Jira/git/transcript data), so they
+                # must never be interpolated into the AppleScript source — a crafted string could
+                # break out of the quoted literal and AppleScript can `do shell script`. Instead we
+                # pass them as runtime arguments via `on run argv`; AppleScript treats argv items as
+                # opaque data, never code, so no escaping is needed and injection is impossible.
+                script = (
+                    "on run argv\n"
+                    "  display notification (item 1 of argv) with title (item 2 of argv)\n"
+                    "end run"
+                )
+                subprocess.run(
+                    ["osascript", "-e", script, body, title],
+                    check=True,
+                    capture_output=True,
+                    timeout=10,
+                )
             elif system == "Linux":
                 subprocess.run(["notify-send", title, body], check=True, capture_output=True, timeout=10)
             else:
@@ -103,7 +117,8 @@ class SlackDelivery(NotificationDelivery):
 
         text = format_standup_plaintext(report)
         payload = json.dumps({"text": text}).encode("utf-8")
-        req = urllib.request.Request(self.webhook_url, data=payload, headers={"Content-Type": "application/json"})
+        # self.webhook_url is the user's own configured https Slack webhook.
+        req = urllib.request.Request(self.webhook_url, data=payload, headers={"Content-Type": "application/json"})  # noqa: S310
         logger.info("delivery[slack]: POSTing standup for %s", report.date)
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 — user-provided webhook URL

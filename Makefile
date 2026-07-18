@@ -4,7 +4,7 @@ UV := $(or $(shell command -v uv 2>/dev/null),$(HOME)/.local/bin/uv)
 # Override for forks of VS Code (e.g. `CODE=cursor make wt-open NAME=my-feature`).
 CODE ?= code
 
-.PHONY: install dev test test-fast test-v test-all lint format run run-dry clean env pre-commit graph eval contract record smoke-test snapshot-update budget-report bump-patch bump-minor bump-major build publish help wt-new wt-open wt-list wt-rm wt-rm-all
+.PHONY: install dev test test-fast test-v test-all lint format security run run-dry clean env pre-commit graph eval contract record smoke-test snapshot-update budget-report bump-patch bump-minor bump-major build publish help wt-new wt-open wt-list wt-rm wt-rm-all
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,13 @@ lint: ## Lint with ruff
 
 format: ## Format with ruff
 	$(UV) run ruff format src/ tests/
+
+security: ## Security scan — bandit (ruff S) SAST + dependency CVE audit
+	@echo "→ SAST (ruff incl. flake8-bandit S rules; respects pyproject ignores)"
+	$(UV) run ruff check src/ tests/
+	@echo "→ Dependency CVE audit (pip-audit against the synced environment)"
+	$(UV) run --with pip-audit pip-audit
+	@echo "✓ Security scan passed"
 
 pre-commit: ## Install pre-commit hooks
 	$(UV) run pre-commit install

@@ -172,7 +172,7 @@ def _simulate_stream(text: str) -> Iterator[str]:
     tokens = re.findall(r"\S+|\n", text)
     prev_was_newline = True  # suppress leading space on first token
     for token in tokens:
-        if token == "\n":
+        if token == "\n":  # noqa: S105 - text-wrap token, not a credential
             yield "\n"
             prev_was_newline = True
         else:

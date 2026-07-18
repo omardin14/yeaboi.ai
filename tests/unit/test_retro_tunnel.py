@@ -1,11 +1,75 @@
 """Unit tests for the Retro Cloudflare tunnel helper (hermetic — no network)."""
 
+import hashlib
 import platform
 import stat
 
 import pytest
 
 from yeaboi.retro import tunnel
+
+
+class _FakeResp:
+    """Minimal context-manager stand-in for urllib's urlopen response."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class TestChecksumVerification:
+    def test_matching_hash_passes(self, monkeypatch):
+        data = b"legit cloudflared bytes"
+        monkeypatch.setitem(tunnel._ASSET_SHA256, "asset-x", hashlib.sha256(data).hexdigest())
+        tunnel._verify_sha256("asset-x", data)  # must not raise
+
+    def test_mismatched_hash_raises(self, monkeypatch):
+        monkeypatch.setitem(tunnel._ASSET_SHA256, "asset-x", "0" * 64)
+        with pytest.raises(OSError, match="checksum mismatch"):
+            tunnel._verify_sha256("asset-x", b"tampered")
+
+    def test_unknown_asset_is_refused(self):
+        with pytest.raises(OSError, match="no pinned checksum"):
+            tunnel._verify_sha256("asset-never-pinned", b"x")
+
+    def test_release_base_is_pinned_not_latest(self):
+        assert "latest" not in tunnel._RELEASE_BASE
+        assert tunnel._CLOUDFLARED_VERSION in tunnel._RELEASE_BASE
+
+
+class TestDownloadIntegrity:
+    def test_tampered_payload_never_lands_on_disk(self, tmp_path, monkeypatch):
+        dest = tmp_path / "cloudflared"
+        monkeypatch.setattr(tunnel, "_asset_name", lambda *a: ("cloudflared-linux-amd64", False))
+        import urllib.request
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResp(b"malicious"))
+        with pytest.raises(OSError, match="checksum mismatch"):
+            tunnel._download_cloudflared(dest)
+        assert not dest.exists()
+        assert not dest.with_suffix(dest.suffix + ".part").exists()
+
+    def test_valid_payload_is_installed_owner_execute_only(self, tmp_path, monkeypatch):
+        dest = tmp_path / "cloudflared"
+        data = b"valid-binary"
+        monkeypatch.setattr(tunnel, "_asset_name", lambda *a: ("asset-ok", False))
+        monkeypatch.setitem(tunnel._ASSET_SHA256, "asset-ok", hashlib.sha256(data).hexdigest())
+        import urllib.request
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResp(data))
+        out = tunnel._download_cloudflared(dest)
+        assert out == dest and dest.read_bytes() == data
+        mode = dest.stat().st_mode
+        assert mode & stat.S_IXUSR  # owner can execute
+        assert not (mode & stat.S_IXGRP) and not (mode & stat.S_IXOTH)  # group/other cannot
 
 
 class TestAssetName:

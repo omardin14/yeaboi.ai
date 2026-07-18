@@ -241,7 +241,7 @@ def send_telemetry(graph_state: dict) -> None:
         import urllib.request
 
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310 - fixed https TELEMETRY_ENDPOINT constant
             TELEMETRY_ENDPOINT,
             data=data,
             headers={"Content-Type": "application/json"},
@@ -249,7 +249,7 @@ def send_telemetry(graph_state: dict) -> None:
         )
 
         # Fire and forget — 3 second timeout, swallow all errors
-        urllib.request.urlopen(req, timeout=3)
+        urllib.request.urlopen(req, timeout=3)  # noqa: S310 - fixed https endpoint constant
         logger.info("Telemetry sent: %s", payload["event_id"])
     except Exception:
         # Never let telemetry crash the app

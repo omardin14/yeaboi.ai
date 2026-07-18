@@ -77,3 +77,25 @@ jobs:
       - run: uv python install 3.11
       - run: uv sync --extra dev
       - run: uv run ruff format --check src/ tests/
+
+  # ── Security ─────────────────────────────────────────────────────────────
+  # SAST (ruff flake8-bandit "S" rules) + dependency CVE audit (pip-audit
+  # against the committed uv.lock) + secret scanning (gitleaks). Mirrors the
+  # `make security` target contributors can run locally.
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so gitleaks can scan all commits on a PR, not just the tip.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
+      - name: SAST + dependency audit
+        run: make security
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

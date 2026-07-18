@@ -1031,7 +1031,7 @@ def _phase_pipeline(
                 # Fake animation delay (1.5-3s) with the pipeline processing screen
                 import random
 
-                delay = random.uniform(1.5, 3.0)
+                delay = random.uniform(1.5, 3.0)  # noqa: S311 - UI animation jitter, not security
                 anim_start = time.monotonic()
                 while time.monotonic() - anim_start < delay:
                     tick = time.monotonic() - anim_start

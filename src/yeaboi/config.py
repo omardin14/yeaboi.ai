@@ -16,6 +16,21 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 
+def restrict_permissions(path: Path, *, mode: int) -> None:
+    """Best-effort ``chmod`` so on-disk secrets aren't group/other readable.
+
+    The config dir (``0o700``) and ``.env`` (``0o600``) hold API keys and tokens
+    in plaintext, so they must not be readable by other local accounts. This is a
+    POSIX concept: on Windows ``chmod`` can't express these bits and the call is a
+    harmless no-op. Never raises — a filesystem that rejects ``chmod`` must not
+    break a config write.
+    """
+    try:
+        path.chmod(mode)
+    except OSError as e:  # pragma: no cover - platform/filesystem dependent
+        logger.debug("could not chmod %s to %o: %s", path, mode, e)
+
+
 def get_config_dir() -> Path:
     """Return ~/.yeaboi/, creating it if necessary.
 
@@ -27,7 +42,24 @@ def get_config_dir() -> Path:
     """
     d = Path.home() / ".yeaboi"
     d.mkdir(exist_ok=True)
+    # Repair perms on every call (cheap): the dir holds .env + sessions.db, both secret-bearing.
+    restrict_permissions(d, mode=0o700)
     return d
+
+
+def set_config_value(key: str, value: str) -> Path:
+    """Persist a single ``key=value`` to ~/.yeaboi/.env and lock the file to 0o600.
+
+    Central choke point for every ``set_key``-based setter so the credential file
+    is re-hardened after each write (``dotenv.set_key`` may recreate it at
+    umask-default perms). Does not touch ``os.environ`` — callers still do that.
+    """
+    from dotenv import set_key
+
+    config_file = get_config_file()
+    set_key(str(config_file), key, value)
+    restrict_permissions(config_file, mode=0o600)
+    return config_file
 
 
 def get_config_file() -> Path:
@@ -94,12 +126,9 @@ def set_tips_enabled(enabled: bool) -> None:
     the whole file and would drop any keys not passed to it. os.environ is updated
     too so the running session reflects the change immediately (no reload needed).
     """
-    from dotenv import set_key
-
     value = "true" if enabled else "false"
-    config_file = get_config_file()
-    # set_key creates the file if missing and preserves existing keys/comments.
-    set_key(str(config_file), "TIPS_ENABLED", value)
+    # set_config_value creates the file if missing, preserves existing keys, and re-locks it to 0o600.
+    config_file = set_config_value("TIPS_ENABLED", value)
     os.environ["TIPS_ENABLED"] = value
     logger.info("Tips %s (persisted to %s)", "enabled" if enabled else "disabled", config_file)
 
@@ -116,11 +145,8 @@ def is_music_enabled() -> bool:
 
 def set_music_enabled(enabled: bool) -> None:
     """Persist the music on/off preference to ~/.scrum-agent/.env and apply it now."""
-    from dotenv import set_key
-
     value = "true" if enabled else "false"
-    config_file = get_config_file()
-    set_key(str(config_file), "MUSIC_ENABLED", value)
+    config_file = set_config_value("MUSIC_ENABLED", value)
     os.environ["MUSIC_ENABLED"] = value
     logger.info("Music %s (persisted to %s)", "enabled" if enabled else "disabled", config_file)
 
@@ -135,11 +161,8 @@ def get_music_channel() -> int:
 
 def set_music_channel(idx: int) -> None:
     """Persist the selected music channel index to ~/.scrum-agent/.env."""
-    from dotenv import set_key
-
     value = str(int(idx))
-    config_file = get_config_file()
-    set_key(str(config_file), "MUSIC_CHANNEL", value)
+    config_file = set_config_value("MUSIC_CHANNEL", value)
     os.environ["MUSIC_CHANNEL"] = value
     logger.info("Music channel set to %s (persisted to %s)", value, config_file)
 
@@ -296,10 +319,7 @@ def get_slack_webhook_url() -> str:
 
 def set_slack_webhook_url(url: str) -> None:
     """Persist the Slack webhook URL to ~/.scrum-agent/.env and apply it now."""
-    from dotenv import set_key
-
-    config_file = get_config_file()
-    set_key(str(config_file), "SLACK_WEBHOOK_URL", url)
+    config_file = set_config_value("SLACK_WEBHOOK_URL", url)
     os.environ["SLACK_WEBHOOK_URL"] = url
     logger.info("Slack webhook URL persisted to %s", config_file)
 
@@ -329,10 +349,7 @@ def get_smtp_password() -> str:
 
 def set_smtp_password(password: str) -> None:
     """Persist the SMTP password to ~/.scrum-agent/.env and apply it now."""
-    from dotenv import set_key
-
-    config_file = get_config_file()
-    set_key(str(config_file), "STANDUP_SMTP_PASSWORD", password)
+    config_file = set_config_value("STANDUP_SMTP_PASSWORD", password)
     os.environ["STANDUP_SMTP_PASSWORD"] = password
     logger.info("SMTP password persisted to %s", config_file)
 
@@ -511,13 +528,11 @@ def set_log_level(level: str) -> None:
 
     Raises ValueError for levels outside VALID_LOG_LEVELS.
     """
-    from dotenv import set_key
-
     level = level.upper()
     if level not in VALID_LOG_LEVELS:
         raise ValueError(f"invalid log level: {level}")
-    config_file = get_config_file()
-    set_key(str(config_file), "LOG_LEVEL", level)
+    # Route through set_config_value so the shared .env stays locked to 0o600.
+    config_file = set_config_value("LOG_LEVEL", level)
     os.environ["LOG_LEVEL"] = level
     logger.info("Log level set to %s (persisted to %s)", level, config_file)
 

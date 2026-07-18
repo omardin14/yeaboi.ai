@@ -173,7 +173,7 @@ def _build_pipeline_screen(
                     # Build morphed string character by character
                     max_len = max(len(cur_plain), len(nxt_plain))
                     morphed = Text(justify="left")
-                    rng = random.Random(scroll_offset)  # deterministic per position
+                    rng = random.Random(scroll_offset)  # noqa: S311 - deterministic UI text scramble, not security
                     for ci in range(max_len):
                         cur_ch = cur_plain[ci] if ci < len(cur_plain) else " "
                         nxt_ch = nxt_plain[ci] if ci < len(nxt_plain) else " "

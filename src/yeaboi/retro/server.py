@@ -36,6 +36,7 @@ import secrets
 import socket
 import struct
 import threading
+import time
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -92,6 +93,50 @@ def make_join_code() -> str:
     return f"{raw[:4]}-{raw[4:]}"
 
 
+class JoinLimiter:
+    """Thread-safe failed-``/api/join`` throttle to stop brute-forcing the join code.
+
+    The join code is a ~40-bit LAN convenience credential; once the Cloudflare
+    tunnel is up, ``/api/join`` is internet-reachable, so unlimited guessing must
+    be stopped. After ``_MAX_FAILS`` wrong codes a source IP is locked out for
+    ``_LOCKOUT_S`` seconds (``429``); a correct code clears that IP's counter.
+    Uses the same ``threading.Lock`` discipline as the board — the background HTTP
+    threads mutate it concurrently.
+    """
+
+    _MAX_FAILS = 8
+    _LOCKOUT_S = 300.0
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        # ip -> (fail_count, window_start_monotonic)
+        self._fails: dict[str, tuple[int, float]] = {}
+
+    def blocked(self, ip: str) -> bool:
+        with self._lock:
+            entry = self._fails.get(ip)
+            if entry is None:
+                return False
+            count, first = entry
+            if count < self._MAX_FAILS:
+                return False
+            if time.monotonic() - first < self._LOCKOUT_S:
+                return True
+            del self._fails[ip]  # lockout window elapsed — forgive
+            return False
+
+    def record_failure(self, ip: str) -> None:
+        with self._lock:
+            count, first = self._fails.get(ip, (0, time.monotonic()))
+            if time.monotonic() - first >= self._LOCKOUT_S:
+                count, first = 0, time.monotonic()  # stale window — restart
+            self._fails[ip] = (count + 1, first)
+
+    def record_success(self, ip: str) -> None:
+        with self._lock:
+            self._fails.pop(ip, None)
+
+
 def encode_share_code(ip: str, port: int, token: str) -> str:
     """Pack ip(4) + port(2, big-endian) + token into a grouped base32 share code."""
     packed = socket.inet_aton(ip) + struct.pack(">H", port) + token.encode()
@@ -137,6 +182,10 @@ class _RetroHandler(BaseHTTPRequestHandler):
     @property
     def _join_code(self) -> str:
         return self.server.join_code  # type: ignore[attr-defined]
+
+    @property
+    def _join_limiter(self) -> JoinLimiter:
+        return self.server.join_limiter  # type: ignore[attr-defined]
 
     def _query(self, key: str) -> str:
         return parse_qs(urlparse(self.path).query).get(key, [""])[0]
@@ -221,10 +270,16 @@ class _RetroHandler(BaseHTTPRequestHandler):
         # /api/join is the ONLY unauthenticated POST: it exchanges the short join
         # code for the strong token (the code-entry gate). Everything else needs it.
         if path == "/api/join":
+            ip = self.client_address[0]
+            if self._join_limiter.blocked(ip):
+                self._send_json(429, {"error": "too many attempts"})
+                return
             code = str(payload.get("code", "")).strip().upper()
             if code and secrets.compare_digest(code, self._join_code):
+                self._join_limiter.record_success(ip)
                 self._send_json(200, {"ok": True, "token": self._token})
             else:
+                self._join_limiter.record_failure(ip)
                 self._send_json(403, {"error": "bad code"})
             return
 
@@ -318,6 +373,7 @@ class RetroServer:
         self.board = board
         self.token = make_token()
         self.join_code = make_join_code()
+        self.join_limiter = JoinLimiter()
         self.ip = get_lan_ip()
         self.port = port
         self._httpd: ThreadingHTTPServer | None = None
@@ -357,7 +413,8 @@ class RetroServer:
         httpd: ThreadingHTTPServer | None = None
         for candidate in range(self.port, self.port + _PORT_WALK):
             try:
-                httpd = ThreadingHTTPServer(("0.0.0.0", candidate), _RetroHandler)
+                # Bind all interfaces so LAN teammates can reach the board (see module docstring).
+                httpd = ThreadingHTTPServer(("0.0.0.0", candidate), _RetroHandler)  # noqa: S104
                 self.port = candidate
                 break
             except OSError:
@@ -370,6 +427,7 @@ class RetroServer:
         httpd.board = self.board  # type: ignore[attr-defined]
         httpd.token = self.token  # type: ignore[attr-defined]
         httpd.join_code = self.join_code  # type: ignore[attr-defined]
+        httpd.join_limiter = self.join_limiter  # type: ignore[attr-defined]
         httpd.page_html = page_html  # type: ignore[attr-defined]
         self._httpd = httpd
         self._thread = threading.Thread(target=httpd.serve_forever, name="retro-http", daemon=True)

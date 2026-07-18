@@ -22,6 +22,7 @@ on the LAN.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import platform
@@ -38,8 +39,27 @@ logger = logging.getLogger(__name__)
 # cloudflared prints the assigned URL to stderr inside a banner box; match it anywhere.
 _URL_RE = re.compile(r"https://[a-z0-9][a-z0-9-]*\.trycloudflare\.com")
 
-# GitHub's "latest" redirect always resolves to the newest release asset.
-_RELEASE_BASE = "https://github.com/cloudflare/cloudflared/releases/latest/download"
+# We pin an exact cloudflared release (not the moving ``latest`` tag) and verify the
+# downloaded bytes against a bundled SHA-256 map before we ever mark the file
+# executable or run it. This closes the supply-chain gap: even if GitHub served a
+# tampered payload, or ``latest`` moved to a backdoored release, the hash mismatch
+# makes us fail closed (delete the temp file, raise — the caller stays LAN-only).
+# To bump: pick a new tag, recompute hashes for every asset below, update both.
+_CLOUDFLARED_VERSION = "2026.7.2"
+_RELEASE_BASE = f"https://github.com/cloudflare/cloudflared/releases/download/{_CLOUDFLARED_VERSION}"
+
+# SHA-256 of each supported release asset (the downloaded bytes: the ``.tgz`` on
+# macOS, the raw binary elsewhere). An asset absent from this map cannot be
+# verified and is therefore refused.
+_ASSET_SHA256 = {
+    "cloudflared-darwin-arm64.tgz": "2086e51c61d6565781d84117a5007d0c826d03ffdc74acb91c08c167f9f8cd7c",
+    "cloudflared-darwin-amd64.tgz": "4ee0d3b48a990a2f9b5faec5838f73ec1f400aa8e0a4864be576adfafec406cb",
+    "cloudflared-linux-amd64": "ec905ea7b7e327ff8abdde8cb64697a2152de74dbcdbf6aec9db8364eb3886cd",
+    "cloudflared-linux-arm64": "405df476437e027fc6d18729a5a77155c0a33a6082aeee60a799a688f3052e66",
+    "cloudflared-linux-386": "cbad04f2700ae4d4971fe07e9ded67327142f2d3338aef86ae04e6042f7ce990",
+    "cloudflared-windows-amd64.exe": "cdb5d4432f6ae1595654a692a51308b69d2bf7af961f5578d9391837cf072df9",
+    "cloudflared-windows-386.exe": "32decf512bb37dfcf8f915e923b8132803cb0f7262995d0b168495694b1ee2d7",
+}
 
 
 def _asset_name(system: str | None = None, machine: str | None = None) -> tuple[str, bool]:
@@ -75,14 +95,31 @@ def _cached_binary_path() -> Path:
 
 
 def _make_executable(path: Path) -> None:
-    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    # Owner-only execute (drop group/other) — this is a cached, app-managed binary
+    # in the user's home; no reason to expose it to other local accounts.
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+
+def _verify_sha256(asset: str, data: bytes) -> None:
+    """Raise unless ``data`` matches the pinned SHA-256 for ``asset``.
+
+    An asset with no pinned hash is refused (fail closed) rather than trusted.
+    """
+    expected = _ASSET_SHA256.get(asset)
+    if expected is None:
+        raise OSError(f"no pinned checksum for cloudflared asset {asset!r}; refusing to install")
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        raise OSError(f"cloudflared checksum mismatch for {asset!r}: expected {expected}, got {actual}")
 
 
 def _download_cloudflared(dest: Path, *, timeout: int = 120) -> Path:
     """Download (and extract, on macOS) the cloudflared binary to ``dest``.
 
-    Downloads over HTTPS from the official ``cloudflare/cloudflared`` GitHub
-    release. Raises on failure; the caller degrades gracefully.
+    Downloads over HTTPS from a **pinned** ``cloudflare/cloudflared`` GitHub
+    release and verifies the bytes against a bundled SHA-256 before installing.
+    Raises on failure (including checksum mismatch); the caller degrades
+    gracefully to LAN-only.
     """
     import urllib.request
 
@@ -91,8 +128,10 @@ def _download_cloudflared(dest: Path, *, timeout: int = 120) -> Path:
     logger.info("retro: downloading cloudflared from %s", url)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - trusted GitHub host
+    with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - trusted, pinned GitHub release
         data = resp.read()
+    # Verify BEFORE writing/extracting/executing: a tampered payload never lands on disk.
+    _verify_sha256(asset, data)
     if is_tgz:
         import io
         import tarfile
