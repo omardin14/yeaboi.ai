@@ -1326,6 +1326,579 @@ def _generate_point_descriptions(
     return _fallback_point_descriptions(cals_with_data)
 
 
+# ---------------------------------------------------------------------------
+# Headline stats + recommendations (pure — shared by the TUI overview,
+# the recommendations card, and the narrative digest below)
+# ---------------------------------------------------------------------------
+
+
+def compute_headline_stats(profile: TeamProfile, examples: dict | None) -> dict:
+    """Derive the headline metrics shown on the analysis overview.
+
+    Mirrors the screen's preference for current ``sprint_details`` over the
+    merged profile (which accumulates historical data), so the overview numbers
+    match the Velocity & Sprints card. Pure — no LLM, no I/O.
+    """
+    ex = examples or {}
+
+    # Velocity from current sprint details when available (matches the table)
+    sp_details = ex.get("sprint_details", [])
+    vel = profile.velocity_avg
+    std = profile.velocity_stddev
+    if isinstance(sp_details, list) and sp_details:
+        sp_pts = [sd["points"] for sd in sp_details if isinstance(sd, dict) and sd.get("points", 0) > 0]
+        if sp_pts:
+            vel = round(sum(sp_pts) / len(sp_pts), 1)
+        if len(sp_pts) >= 2:
+            mean = sum(sp_pts) / len(sp_pts)
+            std = round(math.sqrt(sum((x - mean) ** 2 for x in sp_pts) / len(sp_pts)), 1)
+
+    # Completion rate from current sprint details when available
+    rate = profile.sprint_completion_rate
+    if isinstance(sp_details, list) and sp_details:
+        sp_rates = [sd["rate"] for sd in sp_details if isinstance(sd, dict) and sd.get("planned", 0) > 0]
+        if sp_rates:
+            rate = round(sum(sp_rates) / len(sp_rates), 1)
+
+    # Committed vs delivered (scope timelines)
+    committed_avg = delivered_avg = 0.0
+    delivery_accuracy = 0
+    scope = ex.get("scope_changes", {})
+    if isinstance(scope, dict) and scope.get("totals"):
+        committed_avg = scope["totals"].get("avg_committed_velocity", 0.0)
+        delivered_avg = scope["totals"].get("avg_delivered_velocity", 0.0)
+        if committed_avg > 0:
+            delivery_accuracy = round(delivered_avg / committed_avg * 100)
+
+    # Per-developer velocity — actual contributor avg when available
+    per_dev = 0.0
+    contrib = ex.get("contributor_stats", [])
+    if isinstance(contrib, list) and contrib:
+        vals = [c.get("per_sprint", 0) for c in contrib if c.get("per_sprint", 0) > 0]
+        if vals:
+            per_dev = round(sum(vals) / len(vals), 1)
+    if not per_dev:
+        pdv = ex.get("per_dev_velocity", 0)
+        if isinstance(pdv, (int, float)) and pdv > 0:
+            per_dev = pdv
+
+    # Estimation accuracy — additional_patterns bias when sampled, else profile
+    est_accuracy = profile.estimation_accuracy_pct
+    addl = ex.get("additional_patterns", {})
+    est = addl.get("estimation_bias", {}) if isinstance(addl, dict) else {}
+    if isinstance(est, dict) and est.get("sample", 0) >= 5:
+        est_accuracy = est.get("accurate_pct", est_accuracy)
+
+    trend = ""
+    vt = ex.get("velocity_trend", {})
+    if isinstance(vt, dict) and vt.get("trend") and vt["trend"] != "insufficient_data":
+        trend = vt["trend"]
+
+    team_size = ex.get("team_size", 0)
+    return {
+        "team_size": team_size if isinstance(team_size, int) else 0,
+        "velocity": vel,
+        "stddev": std,
+        "var_pct": round(std / vel * 100) if vel > 0 else 0,
+        "completion_rate": rate,
+        "committed_avg": committed_avg,
+        "delivered_avg": delivered_avg,
+        "delivery_accuracy": delivery_accuracy,
+        "per_dev": per_dev,
+        "spillover_pct": profile.spillover.carried_over_pct,
+        "estimation_accuracy": est_accuracy,
+        "trend": trend,
+    }
+
+
+def compute_recommendations(profile: TeamProfile, examples: dict | None) -> list[tuple[str, str]]:
+    """Build the deterministic (icon+label, text) recommendation list.
+
+    Pure port of the logic that lived inline in the results screen — shared by
+    the Recommendations card, the overview warning count, the narrative digest,
+    and the exporters.
+    """
+    ex = examples or {}
+    stats = compute_headline_stats(profile, ex)
+    vel, std = stats["velocity"], stats["stddev"]
+    cals_with_data = [c for c in profile.point_calibrations if c.sample_count > 0]
+    dod = profile.dod_signal
+    rec_count = ex.get("recurring_count", 0)
+    del_count = ex.get("delivery_count", 0)
+
+    recs: list[tuple[str, str]] = []
+
+    if vel > 0:
+        var_pct = std / vel * 100
+        if var_pct > 35:
+            recs.append(
+                (
+                    "⚠ High velocity variance",
+                    f"Velocity swings ±{var_pct:.0f}% sprint-to-sprint. "
+                    "Consider smaller stories, stricter sprint commitments, "
+                    "or capacity planning to stabilise throughput.",
+                )
+            )
+
+    if profile.sprint_completion_rate > 0 and profile.sprint_completion_rate < 60:
+        recs.append(
+            (
+                "⚠ Low sprint completion",
+                f"Only {profile.sprint_completion_rate:.0f}% of planned work "
+                "completes each sprint. Right-size sprint commitments to "
+                "80–90% of historical velocity.",
+            )
+        )
+
+    if profile.spillover.carried_over_pct > 15:
+        recs.append(
+            (
+                "⚠ Frequent spillover",
+                f"{profile.spillover.carried_over_pct:.0f}% of stories carry "
+                "over. Break large stories into smaller slices and "
+                "set WIP limits to improve flow.",
+            )
+        )
+
+    for cal in cals_with_data:
+        if cal.point_value >= 8 and cal.avg_cycle_time_days > 60:
+            recs.append(
+                (
+                    f"⚠ {cal.point_value}-point stories too large",
+                    f"8-point stories take {cal.avg_cycle_time_days:.0f}d "
+                    "on average. Consider splitting into 3+5 or "
+                    "two 5-point stories for faster feedback.",
+                )
+            )
+            break
+
+    if dod.stories_with_pr_link_pct < 20 and dod.stories_with_pr_link_pct > 0:
+        recs.append(
+            (
+                "ℹ Low PR linkage",
+                f"Only {dod.stories_with_pr_link_pct:.0f}% of stories "
+                "reference a pull request. Link PRs to tickets for "
+                "traceability and automated DoD.",
+            )
+        )
+
+    if dod.stories_with_testing_mention_pct < 15 and dod.stories_with_testing_mention_pct > 0:
+        recs.append(
+            (
+                "ℹ Testing rarely mentioned",
+                f"Only {dod.stories_with_testing_mention_pct:.0f}% of stories "
+                "mention testing. Add explicit test criteria to "
+                "acceptance criteria for quality visibility.",
+            )
+        )
+
+    if rec_count and isinstance(rec_count, int):
+        total = rec_count + (del_count if isinstance(del_count, int) else 0)
+        if total > 0 and rec_count / total > 0.3:
+            recs.append(
+                (
+                    "ℹ High recurring overhead",
+                    f"{rec_count} of {total} tickets "
+                    f"({rec_count / total * 100:.0f}%) are recurring/ceremony. "
+                    "This limits delivery capacity. Consider consolidating "
+                    "or timeboxing recurring work.",
+                )
+            )
+
+    # Per-developer output — use actual contributor stats when available
+    cs_list = ex.get("contributor_stats", [])
+    if isinstance(cs_list, list) and cs_list:
+        cs_velocities = [c.get("per_sprint", 0) for c in cs_list if c.get("per_sprint", 0) > 0]
+        if cs_velocities:
+            cs_avg = round(sum(cs_velocities) / len(cs_velocities), 1)
+            cs_low = [c for c in cs_list if 0 < c.get("per_sprint", 0) < 2 and c.get("sprints_active", 0) >= 2]
+            if cs_avg < 3:
+                recs.append(
+                    (
+                        "ℹ Low per-developer output",
+                        f"Contributors average {cs_avg} pts/sprint. "
+                        "Check for blockers, context-switching, or oversized stories.",
+                    )
+                )
+            elif cs_low:
+                low_names = ", ".join(c["name"] for c in cs_low[:3])
+                recs.append(
+                    (
+                        "ℹ Uneven developer output",
+                        f"{low_names} deliver below 2 pts/sprint. "
+                        "May indicate blockers, onboarding, or heavy KTLO load.",
+                    )
+                )
+
+    repos = ex.get("repositories", {})
+    if isinstance(repos, dict):
+        for sr in repos.get("spillover_repos", []):
+            if isinstance(sr, dict) and sr.get("spill_rate", 0) >= 40:
+                recs.append(
+                    (
+                        f"⚠ {sr['repo']} has high spillover",
+                        f"{sr['spill_rate']}% of stories touching "
+                        f"{sr['repo']} don't complete the sprint. "
+                        "This repo may have long review cycles, "
+                        "difficult deployments, or complex integration work.",
+                    )
+                )
+
+    shadow = ex.get("shadow_spillover", [])
+    if isinstance(shadow, list) and len(shadow) >= 2:
+        recs.append(
+            (
+                "⚠ Shadow spillover",
+                f"{len(shadow)} stories were closed then re-created "
+                "in the next sprint. This masks true spillover — "
+                "consider keeping the original ticket open and moving "
+                "it to the next sprint instead of cloning.",
+            )
+        )
+
+    td = ex.get("task_decomposition", {})
+    if isinstance(td, dict):
+        if td.get("task_completion_rate", 100) < 60:
+            recs.append(
+                (
+                    "⚠ Low task completion",
+                    f"Only {td['task_completion_rate']}% of sub-tasks "
+                    "are completed. Incomplete tasks indicate stories "
+                    "are being closed prematurely or tasks are stale.",
+                )
+            )
+        for cat, rate, count in td.get("bottlenecks", []):
+            recs.append(
+                (
+                    f"⚠ {cat} bottleneck",
+                    f"{cat} tasks have only {rate}% completion "
+                    f"({count} tasks). This suggests {cat.lower()} "
+                    "is being skipped or deprioritised.",
+                )
+            )
+        sw = td.get("stories_with_tasks", 0)
+        tot = td.get("total_stories", 0)
+        if tot > 10 and sw > 0 and sw / tot < 0.3:
+            recs.append(
+                (
+                    "ℹ Low task breakdown",
+                    f"Only {sw} of {tot} stories "
+                    f"({sw / tot * 100:.0f}%) have sub-tasks. "
+                    "Breaking stories into tasks improves visibility "
+                    "and helps the team track progress.",
+                )
+            )
+
+    # AC pattern recommendation (single consolidated)
+    ac_recs = ex.get("ac_patterns", {})
+    if isinstance(ac_recs, dict) and ac_recs.get("recommendation"):
+        recs.append(("ℹ Acceptance criteria gaps", ac_recs["recommendation"]))
+
+    # Scope change recommendations
+    scope = ex.get("scope_changes", {})
+    if isinstance(scope, dict) and scope.get("totals"):
+        sc_totals = scope["totals"]
+        sc_total = sc_totals.get("total_stories", 0)
+        sc_committed = sc_totals.get("avg_committed_velocity", 0.0)
+        sc_delivered = sc_totals.get("avg_delivered_velocity", 0.0)
+        if sc_committed > 0 and sc_delivered / sc_committed < 0.7:
+            del_pct = round(sc_delivered / sc_committed * 100)
+            recs.append(
+                (
+                    "⚠ Low delivery accuracy",
+                    f"Team delivers only {del_pct}% of committed scope "
+                    f"({sc_delivered} of {sc_committed} pts avg). "
+                    "Reduce sprint commitments to match actual capacity.",
+                )
+            )
+        if sc_total > 0:
+            sc_added = sc_totals.get("added_mid_sprint", 0)
+            sc_re_est = sc_totals.get("re_estimated", 0)
+            if sc_added / sc_total > 0.15:
+                recs.append(
+                    (
+                        "⚠ High mid-sprint scope additions",
+                        f"{sc_added} of {sc_total} stories "
+                        f"({sc_added / sc_total * 100:.0f}%) "
+                        "were added after the sprint started. "
+                        "Protect sprint commitments by locking scope after planning.",
+                    )
+                )
+            if sc_re_est / sc_total > 0.15:
+                recs.append(
+                    (
+                        "⚠ Frequent re-estimation",
+                        f"{sc_re_est} of {sc_total} stories "
+                        f"({sc_re_est / sc_total * 100:.0f}%) "
+                        "had their points changed mid-sprint. "
+                        "Improve estimation accuracy with team calibration sessions.",
+                    )
+                )
+        # High scope churn
+        scope_sprints = scope.get("per_sprint", [])
+        high_churn = [s for s in scope_sprints if s.get("scope_churn", 0) > 0.3]
+        if len(high_churn) >= 2:
+            names = ", ".join(s.get("name", "?") for s in high_churn[:3])
+            recs.append(
+                (
+                    "⚠ High scope churn",
+                    f"{len(high_churn)} sprints had >30% scope churn ({names}). "
+                    "Scope is volatile — enforce a sprint lock after planning.",
+                )
+            )
+        chains = scope.get("carry_over_chains", [])
+        if len(chains) >= 3:
+            recs.append(
+                (
+                    "⚠ Carry-over chains",
+                    f"{len(chains)} stories bounced across 3+ sprints. These are zombie stories — split or kill them.",
+                )
+            )
+
+    # DoD recommendation
+    pdod = ex.get("proposed_dod", {})
+    if isinstance(pdod, dict) and pdod.get("health") == "weak":
+        pdod_items = pdod.get("items", [])
+        missing = [i["practice"] for i in pdod_items if i.get("status") == "missing"]
+        missing_str = ", ".join(missing[:3]) if missing else "most practices"
+        recs.append(
+            (
+                "⚠ No consistent Definition of Done",
+                f"The analysis could not find a consistent DoD for this team. "
+                f"{missing_str} show no evidence of being practiced. "
+                "Create a team DoD checklist — even a simple one (code reviewed, "
+                "tests passing, deployed to staging) dramatically improves quality.",
+            )
+        )
+    elif isinstance(pdod, dict) and pdod.get("health") == "moderate":
+        pdod_items = pdod.get("items", [])
+        emerging = [i["practice"] for i in pdod_items if i.get("status") == "emerging"]
+        if emerging:
+            recs.append(
+                (
+                    "ℹ Create a formal Definition of Done",
+                    f"The team does some quality checks but inconsistently. "
+                    f"{', '.join(emerging[:3])} are practiced sometimes but not always. "
+                    "Write a shared DoD checklist and enforce it on every story.",
+                )
+            )
+
+    return recs
+
+
+# ---------------------------------------------------------------------------
+# Analysis narrative — one LLM call that explains what the numbers mean
+# ---------------------------------------------------------------------------
+
+# One key per section card on the analysis results screen.
+_NARRATIVE_KEYS = ("velocity", "team", "estimation", "workflow", "writing", "trends", "recommendations")
+
+# Plain-English definitions for the jargon metrics — shared by the TUI cards
+# and the HTML/MD exporters so the wording never drifts.
+ANALYSIS_GLOSSARY = {
+    "churn": "Churn — % of committed points added or removed mid-sprint (scope change)",
+    "delta": "Δ — net points added (+) or removed (−) after the sprint started",
+    "spill": "Spill% — share of stories not finished, carried into the next sprint",
+    "cycle": "Cycle — days from work starting to done",
+    "variance": "± variance — how much velocity swings sprint-to-sprint",
+    "confidence": "Confidence — how many samples back a number (low <5, high ≥15)",
+}
+
+
+def _build_narrative_digest(profile: TeamProfile, examples: dict | None) -> str:
+    """Compact per-section metric digest fed to the narrative LLM call.
+
+    One short block per section key — a summary, not a raw data dump, to keep
+    the prompt small (~1-2k tokens).
+    """
+    ex = examples or {}
+    stats = compute_headline_stats(profile, ex)
+    blocks: list[str] = []
+
+    vel_parts = [
+        f"velocity {stats['velocity']}±{stats['stddev']} pts/sprint ({stats['var_pct']}% variance)",
+        f"completion {stats['completion_rate']:.0f}%",
+    ]
+    if stats["delivery_accuracy"]:
+        vel_parts.append(
+            f"committed {stats['committed_avg']:g} → delivered {stats['delivered_avg']:g} "
+            f"({stats['delivery_accuracy']}% delivery accuracy)"
+        )
+    if stats["spillover_pct"] > 0:
+        vel_parts.append(f"spillover {stats['spillover_pct']:.0f}%")
+    scope = ex.get("scope_changes", {})
+    if isinstance(scope, dict):
+        churns = [s.get("scope_churn", 0) for s in scope.get("per_sprint", []) if s.get("committed_pts")]
+        if churns:
+            vel_parts.append(f"avg scope churn {sum(churns) / len(churns):.0%}")
+    if stats["trend"]:
+        vel_parts.append(f"trend {stats['trend']}")
+    blocks.append("velocity: " + "; ".join(vel_parts))
+
+    team_parts = []
+    if stats["team_size"]:
+        team_parts.append(f"{stats['team_size']} contributors")
+    if stats["per_dev"]:
+        team_parts.append(f"{stats['per_dev']} pts/dev/sprint")
+    contrib = ex.get("contributor_stats", [])
+    if isinstance(contrib, list) and contrib:
+        tops = ", ".join(f"{c.get('name', '?')} {c.get('delivery_pts', 0)}pts" for c in contrib[:3])
+        team_parts.append(f"top contributors: {tops}")
+    blocks.append("team: " + ("; ".join(team_parts) if team_parts else "no contributor data"))
+
+    est_parts = [f"estimation accuracy {stats['estimation_accuracy']:.0f}%"]
+    for cal in profile.point_calibrations:
+        if cal.sample_count > 0:
+            est_parts.append(f"{cal.point_value}pt≈{cal.avg_cycle_time_days:.0f}d cycle ({cal.sample_count} samples)")
+    blocks.append("estimation: " + "; ".join(est_parts))
+
+    dod = profile.dod_signal
+    wf_parts = []
+    td = ex.get("task_decomposition", {})
+    if isinstance(td, dict) and td.get("total_stories"):
+        wf_parts.append(
+            f"{td.get('stories_with_tasks', 0)}/{td['total_stories']} stories have subtasks, "
+            f"{td.get('task_completion_rate', 0)}% task completion"
+        )
+    wf_parts.append(
+        f"DoD signals: testing {dod.stories_with_testing_mention_pct:.0f}%, "
+        f"PR {dod.stories_with_pr_link_pct:.0f}%, review {dod.stories_with_review_mention_pct:.0f}%, "
+        f"deploy {dod.stories_with_deploy_mention_pct:.0f}%"
+    )
+    pdod = ex.get("proposed_dod", {})
+    if isinstance(pdod, dict) and pdod.get("health"):
+        wf_parts.append(f"DoD health: {pdod['health']}")
+    blocks.append("workflow: " + "; ".join(wf_parts))
+
+    wp = profile.writing_patterns
+    wr_parts = [
+        f"Given/When/Then: {'yes' if wp.uses_given_when_then else 'no'}",
+        f"median {wp.median_ac_count} ACs and {wp.median_task_count_per_story} tasks per story",
+    ]
+    ac_pat = ex.get("ac_patterns", {})
+    if isinstance(ac_pat, dict) and ac_pat.get("stories_with_ac_pct") is not None:
+        wr_parts.append(f"{ac_pat['stories_with_ac_pct']}% of stories have ACs")
+    blocks.append("writing: " + "; ".join(wr_parts))
+
+    tr_parts = []
+    if stats["trend"]:
+        tr_parts.append(f"velocity {stats['trend']}")
+    addl = ex.get("additional_patterns", {})
+    bugs = addl.get("bug_rate", {}) if isinstance(addl, dict) else {}
+    if isinstance(bugs, dict) and bugs.get("bug_count", 0) > 0:
+        tr_parts.append(f"bug rate {bugs.get('bug_pct', 0)}% of stories")
+    repos = ex.get("repositories", {})
+    if isinstance(repos, dict) and repos.get("top_repos"):
+        tr_parts.append(f"{len(repos['top_repos'])} active repos")
+    blocks.append("trends: " + ("; ".join(tr_parts) if tr_parts else "no trend data"))
+
+    rec_labels = [label.lstrip("⚠ℹ ") for label, _ in compute_recommendations(profile, ex)]
+    blocks.append("recommendations: " + ("; ".join(rec_labels) if rec_labels else "none triggered"))
+
+    return "\n".join(blocks)
+
+
+def _fallback_narrative(profile: TeamProfile, examples: dict | None) -> dict:
+    """Deterministic narrative when the LLM is unavailable (no LLM, never raises)."""
+    ex = examples or {}
+    stats = compute_headline_stats(profile, ex)
+    recs = compute_recommendations(profile, ex)
+    comp = stats["completion_rate"]
+    health = "healthy" if comp >= 80 else ("mixed" if comp >= 60 else "strained")
+    sections = {
+        "velocity": (
+            f"The team delivers about {stats['velocity']} points per sprint and completes "
+            f"{comp:.0f}% of what it plans. Higher variance or churn means sprint outcomes "
+            "are harder to predict."
+        ),
+        "team": (
+            f"{stats['team_size'] or 'Several'} people contributed to the analysed sprints. "
+            "The table shows how delivery, spillover and cycle time are distributed across them."
+        ),
+        "estimation": (
+            f"Estimates hold about {stats['estimation_accuracy']:.0f}% of the time. "
+            "The per-point breakdown shows how long each story size really takes for this team."
+        ),
+        "workflow": (
+            "These signals show how consistently the team breaks stories into tasks and "
+            "follows quality practices like testing, code review and deployment."
+        ),
+        "writing": (
+            "These patterns describe how the team writes tickets — acceptance criteria, "
+            "naming and structure. Consistent tickets are easier to estimate and complete."
+        ),
+        "trends": (
+            "Longer-term signals: how velocity moves over time, how much effort goes to bugs, "
+            "and which repositories the work concentrates in."
+        ),
+        "recommendations": (
+            f"{len(recs)} improvement areas were flagged from the metrics."
+            if recs
+            else "No significant issues were flagged from the metrics."
+        ),
+    }
+    summary = (
+        f"Overall the team looks {health}: about {stats['velocity']} points per sprint with "
+        f"{comp:.0f}% sprint completion. "
+        + (f"{len(recs)} areas were flagged for attention — see Recommendations." if recs else "")
+    ).strip()
+    return {"executive_summary": summary, "sections": sections}
+
+
+def _generate_analysis_narrative(profile: TeamProfile, examples: dict | None) -> dict:
+    """Use the LLM to explain what the analysis means in plain English.
+
+    Returns ``{"executive_summary": str, "sections": {key: str}}`` with one
+    entry per section card. Falls back to deterministic text on any failure —
+    this must never raise (it runs at the end of every analysis).
+    """
+    ex = examples or {}
+    digest = _build_narrative_digest(profile, ex)
+
+    # ARC framework: Ask (explain the metrics), Requirements, Context (digest)
+    prompt = (
+        "You are an experienced Scrum coach. A team's sprint history was analysed; "
+        "the key metrics are below. Explain them for a Scrum Master who is NOT a data person.\n\n"
+        "Requirements:\n"
+        '- "executive_summary": 3-4 sentences — overall health, the single biggest risk, '
+        "and the single biggest strength.\n"
+        "- One entry per section key (velocity, team, estimation, workflow, writing, trends, "
+        "recommendations): 2-3 sentences (max 60 words) on what these numbers MEAN for this "
+        "team and what to watch. Plain English, no jargon; refer to concrete numbers.\n\n"
+        "## Metrics digest\n" + digest + "\n\n"
+        'Return ONLY a JSON object: {"executive_summary": "...", '
+        '"sections": {"velocity": "...", "team": "...", "estimation": "...", '
+        '"workflow": "...", "writing": "...", "trends": "...", "recommendations": "..."}}'
+    )
+
+    fallback = _fallback_narrative(profile, ex)
+    try:
+        response = _llm_invoke(prompt, temperature=0.0)
+        text = response.content if hasattr(response, "content") else str(response)
+        text = text.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```\w*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+        result = json.loads(text)
+        if isinstance(result, dict) and isinstance(result.get("sections"), dict):
+            sections = {
+                k: v for k, v in result["sections"].items() if k in _NARRATIVE_KEYS and isinstance(v, str) and v
+            }
+            # Back-fill any section the LLM skipped with the deterministic text
+            for k in _NARRATIVE_KEYS:
+                sections.setdefault(k, fallback["sections"][k])
+            summary = result.get("executive_summary")
+            if not isinstance(summary, str) or not summary:
+                summary = fallback["executive_summary"]
+            logger.info("LLM analysis narrative generated (%d sections)", len(sections))
+            return {"executive_summary": summary, "sections": sections}
+        logger.warning("LLM analysis narrative had unexpected shape; using fallback")
+    except Exception as exc:
+        logger.warning("LLM analysis narrative generation failed: %s", exc)
+
+    return fallback
+
+
 def _worker_writing_patterns(all_stories: list[dict], progress: list[str]) -> WritingPatterns:
     """Worker 3: Work item shapes and writing pattern analysis."""
     progress.append("Computing velocity & spillover\u2026")
@@ -1908,6 +2481,11 @@ def _run_parallel_analysis(
         len(examples),
         sum(len(v) for v in examples.values() if isinstance(v, list)),
     )
+
+    # Plain-English narrative — one LLM call explaining what the numbers mean
+    # per section card. Falls back to deterministic text; never raises.
+    progress.append("Writing plain-English summary…")
+    examples["narrative"] = _generate_analysis_narrative(profile, examples)
 
     return profile, examples
 
@@ -2588,7 +3166,42 @@ def _analyse_story_structure(delivery_stories: list[dict], all_stories: list[dic
 # ---------------------------------------------------------------------------
 
 
-def generate_sample_epic(calibration_text: str, examples: dict | None = None) -> dict:
+def _build_revision_block(feedback: str | None, previous) -> str:
+    """Build the REVISION REQUEST prompt section for feedback-driven regeneration.
+
+    When the user presses Regenerate on a sample artifact and types feedback,
+    the previous artifact + their feedback are appended to the generation prompt
+    so the LLM revises rather than starting from scratch. Returns "" when there
+    is no feedback, keeping the prompt byte-identical to a plain regenerate.
+    """
+    if not feedback:
+        return ""
+    try:
+        previous_json = json.dumps(previous, indent=2, default=str)
+    except Exception:
+        previous_json = str(previous)
+    logger.info("Sample generation: applying revision feedback (%d chars)", len(feedback))
+    return f"""
+
+## REVISION REQUEST
+The user reviewed a previous version and wants changes.
+
+Previous version:
+{previous_json}
+
+User feedback: {feedback}
+
+Apply the feedback. Keep everything the user did not ask to change.
+Return the same JSON schema as above."""
+
+
+def generate_sample_epic(
+    calibration_text: str,
+    examples: dict | None = None,
+    *,
+    feedback: str | None = None,
+    previous: dict | None = None,
+) -> dict:
     """Generate a sample epic matching the team's style using LLM.
 
     Uses the full team calibration text to guide the LLM in producing
@@ -2640,6 +3253,7 @@ Rules:
 - stories_estimate and points_estimate should match historical averages
 - Make the epic realistic for an infrastructure/platform team
 - Return ONLY the JSON object, no other text."""
+    prompt += _build_revision_block(feedback, previous)
 
     try:
         response = _llm_invoke(prompt, temperature=0.3)
@@ -2667,6 +3281,9 @@ def generate_sample_stories(
     calibration_text: str,
     sample_epic: dict,
     examples: dict | None = None,
+    *,
+    feedback: str | None = None,
+    previous: list[dict] | None = None,
 ) -> list[dict]:
     """Generate 2-3 sample user stories matching the team's style.
 
@@ -2740,6 +3357,7 @@ Rules:
 - Titles should match the team's naming conventions
 - definition_of_done MUST reflect the team's ACTUAL observed practices (established and emerging)
 - Return ONLY the JSON array"""
+    prompt += _build_revision_block(feedback, previous)
 
     try:
         response = _llm_invoke(prompt, temperature=0.3)
@@ -2776,6 +3394,9 @@ def generate_sample_tasks(
     calibration_text: str,
     sample_stories: list[dict],
     examples: dict | None = None,
+    *,
+    feedback: str | None = None,
+    previous: list[dict] | None = None,
 ) -> list[dict]:
     """Generate sample tasks for the sample stories matching the team's patterns."""
     _ex = examples or {}
@@ -2823,6 +3444,7 @@ def generate_sample_tasks(
         "- Titles must be imperative (verb-first)\n"
         "- Return ONLY the JSON array"
     )
+    prompt += _build_revision_block(feedback, previous)
 
     try:
         response = _llm_invoke(prompt, temperature=0.3)
@@ -2859,6 +3481,9 @@ def generate_sample_sprint(
     sample_stories: list[dict],
     sample_tasks: list[dict],
     examples: dict | None = None,
+    *,
+    feedback: str | None = None,
+    previous: dict | None = None,
 ) -> dict:
     """Generate a sample sprint plan matching the team's velocity and capacity."""
     _ex = examples or {}
@@ -2892,6 +3517,7 @@ def generate_sample_sprint(
         "- Include realistic capacity notes and risks\n"
         "- Return ONLY the JSON object"
     )
+    prompt += _build_revision_block(feedback, previous)
 
     try:
         response = _llm_invoke(prompt, temperature=0.3)

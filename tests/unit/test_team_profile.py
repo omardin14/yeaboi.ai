@@ -1375,3 +1375,130 @@ class TestProjectListPopup:
             team_popup_pulse=0.5,
         )
         assert panel is not None
+
+
+class TestNarrativePersistenceAndExport:
+    """examples["narrative"] survives the store round-trip and lands in exports."""
+
+    _NARRATIVE = {
+        "executive_summary": "The team is healthy overall.",
+        "sections": {
+            "velocity": "Velocity is steady.",
+            "team": "Load is balanced.",
+            "estimation": "Estimates hold.",
+            "workflow": "DoD is emerging.",
+            "writing": "Tickets are clear.",
+            "trends": "No trend concerns.",
+            "recommendations": "Nothing urgent.",
+        },
+    }
+
+    def test_narrative_survives_store_round_trip(self, tmp_path):
+        profile = _make_profile()
+        examples = {"team_size": 4, "narrative": self._NARRATIVE}
+        with TeamProfileStore(tmp_path / "sessions.db") as store:
+            store.save(profile, examples=examples)
+            loaded, loaded_ex = store.load_with_examples("jira-PROJ")
+
+        assert loaded is not None
+        assert loaded_ex is not None
+        assert loaded_ex["narrative"]["executive_summary"] == "The team is healthy overall."
+        assert loaded_ex["narrative"]["sections"]["velocity"] == "Velocity is steady."
+
+    def test_examples_without_narrative_still_load(self, tmp_path):
+        """Profiles saved before the narrative existed load and render fine."""
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_team_analysis_screen
+
+        profile = _make_profile()
+        with TeamProfileStore(tmp_path / "sessions.db") as store:
+            store.save(profile, examples={"team_size": 4})
+            loaded, loaded_ex = store.load_with_examples("jira-PROJ")
+
+        assert "narrative" not in (loaded_ex or {})
+        panel = _build_team_analysis_screen(loaded, examples=loaded_ex, width=80, height=24)
+        assert panel is not None
+
+    def test_html_export_includes_summary_and_glossary(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_html
+
+        profile = _make_extended_profile()
+        examples = {
+            "narrative": self._NARRATIVE,
+            "sprint_details": [{"name": "S1", "points": 20, "planned": 10, "completed": 9, "rate": 90, "done": True}],
+        }
+        content = export_team_profile_html(profile, output_dir=tmp_path, examples=examples).read_text()
+        assert "Executive Summary" in content
+        assert "The team is healthy overall." in content
+        assert "Velocity is steady." in content
+        assert "Churn — % of committed points added or removed mid-sprint" in content
+
+    def test_html_export_escapes_narrative(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_html
+
+        profile = _make_extended_profile()
+        hostile = {"executive_summary": "<script>alert(1)</script>", "sections": {}}
+        content = export_team_profile_html(profile, output_dir=tmp_path, examples={"narrative": hostile}).read_text()
+        assert "<script>alert(1)</script>" not in content
+        assert "&lt;script&gt;" in content
+
+    def test_md_export_includes_summary_and_glossary(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_md
+
+        profile = _make_extended_profile()
+        examples = {
+            "narrative": self._NARRATIVE,
+            "sprint_details": [{"name": "S1", "points": 20, "planned": 10, "completed": 9, "rate": 90, "done": True}],
+        }
+        content = export_team_profile_md(profile, output_dir=tmp_path, examples=examples).read_text()
+        assert "## Executive Summary" in content
+        assert "- **Velocity & Sprints:** Velocity is steady." in content
+        assert "Churn — % of committed points added or removed mid-sprint" in content
+
+    def test_md_export_without_narrative_has_no_summary(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_md
+
+        profile = _make_extended_profile()
+        content = export_team_profile_md(profile, output_dir=tmp_path, examples={}).read_text()
+        assert "Executive Summary" not in content
+
+
+class TestNarrativeInParallelAnalysis:
+    """_run_parallel_analysis always attaches a narrative (LLM or fallback)."""
+
+    def test_narrative_attached_to_examples(self):
+        from unittest.mock import patch
+
+        from yeaboi.tools.team_learning import _run_parallel_analysis
+
+        sprint_data = [
+            {
+                "sprint_name": "Sprint 1",
+                "completed_points": 20.0,
+                "planned_count": 2,
+                "completed_count": 2,
+                "stories": [
+                    {
+                        "points": 3,
+                        "cycle_time_days": 2.0,
+                        "discipline": "backend",
+                        "task_count": 2,
+                        "ac_count": 3,
+                        "epic_key": "EP-1",
+                        "point_changed": False,
+                        "issue_key": "P-1",
+                        "issue_url": "",
+                        "summary": "Story A",
+                    },
+                ],
+            },
+        ]
+        progress: list[str] = []
+        # No LLM in unit tests — the fallback narrative must still be attached.
+        with patch("yeaboi.agent.llm.get_llm", side_effect=RuntimeError("no key")):
+            _profile, examples = _run_parallel_analysis("jira", "PROJ", sprint_data, progress)
+
+        narrative = examples.get("narrative")
+        assert isinstance(narrative, dict)
+        assert narrative["executive_summary"]
+        assert len(narrative["sections"]) == 7
+        assert "Writing plain-English summary…" in progress

@@ -20,8 +20,24 @@ from datetime import datetime
 from pathlib import Path
 
 from yeaboi.team_profile import TeamProfile
+from yeaboi.tools.team_learning import ANALYSIS_GLOSSARY
 
 logger = logging.getLogger(__name__)
+
+# Display titles for the AI narrative sections (examples["narrative"]["sections"]),
+# in the same order as the TUI overview cards.
+_NARRATIVE_TITLES = (
+    ("velocity", "Velocity & Sprints"),
+    ("team", "Team Members"),
+    ("estimation", "Estimation & Points"),
+    ("workflow", "Workflow & DoD"),
+    ("writing", "Writing Style"),
+    ("trends", "Trends & Repos"),
+    ("recommendations", "Recommendations"),
+)
+
+# Jargon definitions shown under the sprint table in both export formats.
+_SPRINT_GLOSSARY_KEYS = ("churn", "delta", "spill")
 
 
 def _project_export_dir(project_key: str, base_dir: Path | None = None) -> Path:
@@ -143,6 +159,22 @@ def export_team_profile_html(
 
     def _nav(id_: str, label: str) -> None:
         nav_links.append(f'<a href="#{id_}">{_e(label)}</a>')
+
+    # ── Executive Summary (AI narrative, generated at analysis time) ─
+    narrative = ex.get("narrative", {})
+    if isinstance(narrative, dict) and narrative.get("executive_summary"):
+        n_html = f"<p>{_e(str(narrative['executive_summary']))}</p>"
+        n_sections = narrative.get("sections", {})
+        if isinstance(n_sections, dict):
+            n_items = "".join(
+                f"<li><strong>{_e(title)}:</strong> <em>{_e(str(n_sections[nk]))}</em></li>"
+                for nk, title in _NARRATIVE_TITLES
+                if n_sections.get(nk)
+            )
+            if n_items:
+                n_html += f"<ul>{n_items}</ul>"
+        _nav("summary", "Summary")
+        sections.append(_section("summary", "Executive Summary", n_html))
 
     # ── Team & Velocity ─────────────────────────────────────────────
     vel_rows: list[tuple[str, str]] = []
@@ -423,6 +455,11 @@ def export_team_profile_html(
                                 )
 
             _nav("sprints", "Sprints")
+            sprint_content += (
+                '<p style="color:var(--text-muted);font-size:0.85rem;">'
+                + " &middot; ".join(_e(ANALYSIS_GLOSSARY[g]) for g in _SPRINT_GLOSSARY_KEYS)
+                + "</p>"
+            )
             sections.append(_section("sprints", "Sprint Breakdown", sprint_content))
 
     # ── Team Members ───────────────────────────────────────────────
@@ -1327,6 +1364,17 @@ def export_team_profile_md(
         lines.append(f"\nSprints: {', '.join(sprint_names)}")
     lines.append("")
 
+    # ── Executive Summary (AI narrative, generated at analysis time) ─
+    narrative = ex.get("narrative", {})
+    if isinstance(narrative, dict) and narrative.get("executive_summary"):
+        lines.extend(["## Executive Summary", "", str(narrative["executive_summary"]), ""])
+        n_sections = narrative.get("sections", {})
+        if isinstance(n_sections, dict):
+            for nk, title in _NARRATIVE_TITLES:
+                if n_sections.get(nk):
+                    lines.append(f"- **{title}:** {n_sections[nk]}")
+            lines.append("")
+
     # ── Recurring work ──────────────────────────────────────────────
     rec_count = ex.get("recurring_count", 0)
     del_count = ex.get("delivery_count", 0)
@@ -1443,6 +1491,8 @@ def export_team_profile_md(
             has_shadow = sd.get("has_shadow", False)
             icon = "✓" if done else ("○" if has_shadow else "✗")
             lines.append(f"| {name} | {pts} | {completed}/{planned} | {rate}% | {icon} |")
+        lines.append("")
+        lines.append("*" + " · ".join(ANALYSIS_GLOSSARY[g] for g in _SPRINT_GLOSSARY_KEYS) + "*")
         lines.append("")
 
         # Incomplete sprint analysis

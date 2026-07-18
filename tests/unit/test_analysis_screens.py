@@ -818,7 +818,7 @@ class TestBuildTeamAnalysisScreenExtended:
         assert "23.5" in output  # velocity_avg
 
     def test_spillover_rendered(self, profile):
-        result = _build_team_analysis_screen(profile, width=100, height=100)
+        result = _build_team_analysis_screen(profile, view="velocity", width=100, height=100)
         output = _render(result, width=100)
         assert "12.5" in output or "spillover" in output.lower()
 
@@ -867,20 +867,20 @@ class TestBuildTeamAnalysisScreenExtended:
         console.print(panel)
         return buf.getvalue()
 
-    def test_patterns_page_buttons_visible_with_wrapping_tables(self, profile):
-        """Page 2 action buttons must stay on screen even when tables wrap a lot."""
-        for scroll in (0, 9999):  # top of page and clamped-to-bottom
+    def test_workflow_card_buttons_visible_with_wrapping_tables(self, profile):
+        """Workflow & DoD action buttons must stay on screen even when tables wrap a lot."""
+        for scroll in (0, 9999):  # top of card and clamped-to-bottom
             panel = _build_team_analysis_screen(
                 profile,
                 examples=self._DOD_HEAVY_EXAMPLES,
-                page=2,
+                view="workflow",
                 width=120,
                 height=44,
                 scroll_offset=scroll,
             )
             output = self._render_cropped(panel, width=120, height=44)
             assert "Back" in output, f"Back button cropped at scroll={scroll}"
-            assert "Next" in output, f"Next button cropped at scroll={scroll}"
+            assert "Continue" in output, f"Continue button cropped at scroll={scroll}"
 
 
 # ---------------------------------------------------------------------------
@@ -991,3 +991,270 @@ class TestConfirmTicketGeneration:
         # Pressing right past the last button stays on Not now.
         result, _ = self._run(["right", "right", "enter"])
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Analysis overview + section card views (view= API)
+# ---------------------------------------------------------------------------
+
+
+def _make_overview_profile():
+    from yeaboi.team_profile import (
+        DoDSignal,
+        SpilloverStats,
+        StoryPointCalibration,
+        TeamProfile,
+        WritingPatterns,
+    )
+
+    return TeamProfile(
+        team_id="jira-SCRUM",
+        source="jira",
+        project_key="SCRUM",
+        sample_sprints=4,
+        sample_stories=40,
+        velocity_avg=23.5,
+        velocity_stddev=3.2,
+        point_calibrations=(StoryPointCalibration(point_value=3, avg_cycle_time_days=4.0, sample_count=12),),
+        estimation_accuracy_pct=78.0,
+        sprint_completion_rate=88.0,
+        spillover=SpilloverStats(carried_over_pct=12.0),
+        dod_signal=DoDSignal(stories_with_pr_link_pct=40.0, stories_with_testing_mention_pct=30.0),
+        writing_patterns=WritingPatterns(uses_given_when_then=True, median_ac_count=3.0),
+    )
+
+
+_NARRATIVE_EXAMPLES = {
+    "team_size": 5,
+    "sprint_details": [
+        {"name": "Sprint 1", "points": 22, "planned": 10, "completed": 9, "rate": 90, "done": True},
+        {"name": "Sprint 2", "points": 25, "planned": 12, "completed": 10, "rate": 83, "done": False},
+    ],
+    "scope_changes": {
+        "totals": {"avg_committed_velocity": 26.0, "avg_delivered_velocity": 23.5},
+        "per_sprint": [
+            {"name": "Sprint 1", "committed_pts": 26, "final_pts": 28, "scope_change_total": 2, "scope_churn": 0.12}
+        ],
+    },
+    "narrative": {
+        "executive_summary": "The team is broadly healthy with steady delivery.",
+        "sections": {
+            "velocity": "Velocity is stable sprint to sprint.",
+            "team": "Work is spread evenly across the team.",
+            "estimation": "Estimates mostly hold.",
+            "workflow": "Task breakdown is consistent.",
+            "writing": "Tickets are well written.",
+            "trends": "No worrying long-term trends.",
+            "recommendations": "Two small things to tighten up.",
+        },
+    },
+}
+
+_ALL_CARD_KEYS = ("velocity", "team", "estimation", "workflow", "writing", "trends", "recommendations")
+
+
+class TestAnalysisOverview:
+    """The overview view: headline stats, AI executive summary, card list."""
+
+    def _render_view(self, examples=None, selected_card=0, width=100, height=40):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(),
+            examples=examples,
+            view="overview",
+            selected_card=selected_card,
+            width=width,
+            height=height,
+        )
+        assert isinstance(panel, Panel)
+        return _render(panel, width=width)
+
+    def test_returns_panel_by_default(self):
+        panel = _build_team_analysis_screen(_make_overview_profile(), width=80, height=30)
+        assert isinstance(panel, Panel)
+
+    def test_headline_stats_render(self):
+        output = self._render_view(examples=_NARRATIVE_EXAMPLES)
+        assert "At a Glance" in output
+        assert "5 contributors" in output
+        assert "estimates hold" in output
+
+    def test_all_card_titles_render(self):
+        # Selection auto-scrolls, so check the top half with card 0 selected
+        # and the bottom half with the last card selected.
+        top = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=0)
+        bottom = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=6)
+        combined = top + bottom
+        for title in (
+            "Velocity & Sprints",
+            "Team Members",
+            "Estimation & Points",
+            "Workflow & DoD",
+            "Writing Style",
+            "Trends & Repos",
+            "Recommendations",
+        ):
+            assert title in combined, title
+
+    def test_teaser_stats_render(self):
+        output = self._render_view(examples=_NARRATIVE_EXAMPLES)
+        assert "pts/sprint" in output
+
+    def test_selected_card_marker_moves(self):
+        first = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=0)
+        second = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=1)
+        assert first != second
+        assert "▸" in first and "▸" in second
+
+    def test_executive_summary_renders(self):
+        output = self._render_view(examples=_NARRATIVE_EXAMPLES)
+        assert "broadly healthy" in output
+
+    def test_missing_narrative_shows_hint(self):
+        """Old saved profiles have no narrative — overview must still render."""
+        ex = {k: v for k, v in _NARRATIVE_EXAMPLES.items() if k != "narrative"}
+        output = self._render_view(examples=ex)
+        assert "No AI summary saved" in output
+
+    def test_no_examples_at_all(self):
+        output = self._render_view(examples=None)
+        assert "Sections" in output
+
+    def test_recommendation_warning_count(self):
+        from yeaboi.team_profile import DoDSignal, SpilloverStats, TeamProfile, WritingPatterns
+
+        weak = TeamProfile(
+            team_id="jira-W",
+            source="jira",
+            project_key="W",
+            sample_sprints=4,
+            sample_stories=40,
+            velocity_avg=20.0,
+            velocity_stddev=12.0,
+            sprint_completion_rate=45.0,
+            spillover=SpilloverStats(carried_over_pct=30.0),
+            dod_signal=DoDSignal(),
+            writing_patterns=WritingPatterns(),
+        )
+        panel = _build_team_analysis_screen(weak, view="overview", selected_card=6, width=100, height=40)
+        output = _render(panel, width=100)
+        assert "⚠" in output and "flagged" in output
+
+    def test_narrow_and_short_terminals(self):
+        for w, h in ((40, 14), (60, 20), (200, 60)):
+            panel = _build_team_analysis_screen(
+                _make_overview_profile(), examples=_NARRATIVE_EXAMPLES, view="overview", width=w, height=h
+            )
+            assert isinstance(panel, Panel)
+
+    def test_overview_actions(self):
+        output = self._render_view(examples=_NARRATIVE_EXAMPLES)
+        assert "Open" in output and "Continue" in output
+
+
+class TestAnalysisSectionDetail:
+    """Each section card renders its sections, narrative block and glossary."""
+
+    @pytest.mark.parametrize("card_key", _ALL_CARD_KEYS)
+    def test_card_renders_panel(self, card_key):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(), examples=_NARRATIVE_EXAMPLES, view=card_key, width=100, height=40
+        )
+        assert isinstance(panel, Panel)
+
+    @pytest.mark.parametrize("card_key", _ALL_CARD_KEYS)
+    def test_narrative_block_shown(self, card_key):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(), examples=_NARRATIVE_EXAMPLES, view=card_key, width=100, height=50
+        )
+        output = _render(panel, width=100)
+        assert "What this means" in output
+
+    @pytest.mark.parametrize("card_key", _ALL_CARD_KEYS)
+    def test_narrative_block_omitted_without_narrative(self, card_key):
+        ex = {k: v for k, v in _NARRATIVE_EXAMPLES.items() if k != "narrative"}
+        panel = _build_team_analysis_screen(_make_overview_profile(), examples=ex, view=card_key, width=100, height=50)
+        output = _render(panel, width=100)
+        assert "What this means" not in output
+
+    @pytest.mark.parametrize("card_key", _ALL_CARD_KEYS)
+    def test_detail_actions(self, card_key):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(), examples=_NARRATIVE_EXAMPLES, view=card_key, width=100, height=40
+        )
+        output = _render(panel, width=100)
+        assert "Back" in output
+
+    def test_velocity_card_sections_and_breadcrumb(self):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(), examples=_NARRATIVE_EXAMPLES, view="velocity", width=100, height=60
+        )
+        output = _render(panel, width=100)
+        assert "Team & Velocity" in output
+        assert "Sprint Breakdown" in output
+        assert "Overview › Velocity & Sprints" in output
+
+    def test_velocity_card_churn_glossary(self):
+        """The Churn column jargon is explained on the card (user complaint)."""
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(),
+            examples=_NARRATIVE_EXAMPLES,
+            view="velocity",
+            width=100,
+            height=40,
+            scroll_offset=9999,
+        )
+        output = _render(panel, width=100)
+        assert "What the terms mean" in output
+        assert "Churn — % of committed points added or removed mid-sprint" in output
+
+    def test_estimation_card_glossary(self):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(),
+            examples=_NARRATIVE_EXAMPLES,
+            view="estimation",
+            width=100,
+            height=40,
+            scroll_offset=9999,
+        )
+        output = _render(panel, width=100)
+        assert "Cycle — days from work starting to done" in output
+
+    def test_workflow_card_no_glossary(self):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(),
+            examples=_NARRATIVE_EXAMPLES,
+            view="workflow",
+            width=100,
+            height=40,
+            scroll_offset=9999,
+        )
+        output = _render(panel, width=100)
+        assert "What the terms mean" not in output
+
+    def test_recommendations_card_renders_recs(self):
+        from yeaboi.team_profile import DoDSignal, SpilloverStats, TeamProfile, WritingPatterns
+
+        weak = TeamProfile(
+            team_id="jira-W",
+            source="jira",
+            project_key="W",
+            sample_sprints=4,
+            sample_stories=40,
+            velocity_avg=20.0,
+            velocity_stddev=12.0,
+            sprint_completion_rate=45.0,
+            spillover=SpilloverStats(carried_over_pct=30.0),
+            dod_signal=DoDSignal(),
+            writing_patterns=WritingPatterns(),
+        )
+        panel = _build_team_analysis_screen(weak, view="recommendations", width=100, height=50)
+        output = _render(panel, width=100)
+        assert "Low sprint completion" in output
+
+    @pytest.mark.parametrize("card_key", _ALL_CARD_KEYS)
+    def test_empty_profile_all_cards(self, card_key):
+        from yeaboi.team_profile import TeamProfile
+
+        empty = TeamProfile(team_id="e", source="jira", project_key="X", sample_sprints=0, sample_stories=0)
+        panel = _build_team_analysis_screen(empty, examples=None, view=card_key, width=80, height=24)
+        assert isinstance(panel, Panel)

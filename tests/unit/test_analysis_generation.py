@@ -10,6 +10,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from yeaboi.tools.team_learning import (
+    _build_revision_block,
     generate_sample_epic,
     generate_sample_sprint,
     generate_sample_stories,
@@ -416,3 +417,333 @@ class TestGenerateSampleSprint:
         )
         result = generate_sample_sprint(_CALIBRATION, [], [])
         assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# Revision feedback (feedback-driven regeneration)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildRevisionBlock:
+    """Test the REVISION REQUEST prompt-section builder."""
+
+    def test_no_feedback_returns_empty(self):
+        assert _build_revision_block(None, _SAMPLE_EPIC) == ""
+        assert _build_revision_block("", _SAMPLE_EPIC) == ""
+
+    def test_feedback_includes_previous_and_feedback(self):
+        block = _build_revision_block("make the title shorter", _SAMPLE_EPIC)
+        assert "REVISION REQUEST" in block
+        assert "make the title shorter" in block
+        assert _SAMPLE_EPIC["title"] in block
+
+    def test_non_serializable_previous_does_not_raise(self):
+        block = _build_revision_block("tweak it", object())
+        assert "REVISION REQUEST" in block
+        assert "tweak it" in block
+
+
+class TestRegenerationWithFeedback:
+    """Each generator appends the revision block only when feedback is given."""
+
+    @staticmethod
+    def _sent_prompt(mock_get_llm) -> str:
+        messages = mock_get_llm.return_value.invoke.call_args[0][0]
+        return messages[0].content
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_epic_prompt_includes_feedback(self, mock_get_llm):
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_SAMPLE_EPIC))
+
+        generate_sample_epic(_CALIBRATION, _EXAMPLES, feedback="less infra jargon", previous=_SAMPLE_EPIC)
+
+        prompt = self._sent_prompt(mock_get_llm)
+        assert "REVISION REQUEST" in prompt
+        assert "less infra jargon" in prompt
+        assert _SAMPLE_EPIC["title"] in prompt
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_epic_prompt_unchanged_without_feedback(self, mock_get_llm):
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_SAMPLE_EPIC))
+
+        generate_sample_epic(_CALIBRATION, _EXAMPLES)
+
+        assert "REVISION REQUEST" not in self._sent_prompt(mock_get_llm)
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_stories_prompt_includes_feedback(self, mock_get_llm):
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_SAMPLE_STORIES))
+
+        generate_sample_stories(
+            _CALIBRATION, _SAMPLE_EPIC, _EXAMPLES, feedback="split S1 in two", previous=_SAMPLE_STORIES
+        )
+
+        prompt = self._sent_prompt(mock_get_llm)
+        assert "REVISION REQUEST" in prompt
+        assert "split S1 in two" in prompt
+        assert "Implement failover" in prompt  # marker from previous stories
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_tasks_prompt_includes_feedback(self, mock_get_llm):
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_SAMPLE_TASKS))
+
+        generate_sample_tasks(
+            _CALIBRATION, _SAMPLE_STORIES, _EXAMPLES, feedback="add docs tasks", previous=_SAMPLE_TASKS
+        )
+
+        prompt = self._sent_prompt(mock_get_llm)
+        assert "REVISION REQUEST" in prompt
+        assert "add docs tasks" in prompt
+        assert "Build health endpoint" in prompt  # marker from previous tasks
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_sprint_prompt_includes_feedback(self, mock_get_llm):
+        sprint = {"sprint_name": "Sprint 1", "velocity_target": 20, "stories_included": ["S1"]}
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(sprint))
+
+        generate_sample_sprint(
+            _CALIBRATION, _SAMPLE_STORIES, _SAMPLE_TASKS, _EXAMPLES, feedback="lower the target", previous=sprint
+        )
+
+        prompt = self._sent_prompt(mock_get_llm)
+        assert "REVISION REQUEST" in prompt
+        assert "lower the target" in prompt
+        assert "Sprint 1" in prompt  # marker from previous sprint
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_fallback_still_returned_with_feedback(self, mock_get_llm):
+        """Feedback path must not break the deterministic fallback on LLM error."""
+        mock_get_llm.return_value.invoke.side_effect = RuntimeError("API error")
+
+        result = generate_sample_epic(_CALIBRATION, _EXAMPLES, feedback="anything", previous=_SAMPLE_EPIC)
+
+        assert isinstance(result, dict)
+        assert "Fallback" in result["rationale"]
+
+
+# ---------------------------------------------------------------------------
+# Headline stats, recommendations and the analysis narrative LLM call
+# ---------------------------------------------------------------------------
+
+
+def _make_profile(**overrides):
+    from yeaboi.team_profile import (
+        DoDSignal,
+        SpilloverStats,
+        StoryPointCalibration,
+        TeamProfile,
+        WritingPatterns,
+    )
+
+    defaults = dict(
+        team_id="jira-SCRUM",
+        source="jira",
+        project_key="SCRUM",
+        sample_sprints=4,
+        sample_stories=40,
+        velocity_avg=20.0,
+        velocity_stddev=9.0,
+        point_calibrations=(StoryPointCalibration(point_value=3, avg_cycle_time_days=5.0, sample_count=12),),
+        estimation_accuracy_pct=72.0,
+        sprint_completion_rate=55.0,
+        spillover=SpilloverStats(carried_over_pct=22.0),
+        dod_signal=DoDSignal(stories_with_pr_link_pct=10.0),
+        writing_patterns=WritingPatterns(uses_given_when_then=True, median_ac_count=3.0),
+    )
+    defaults.update(overrides)
+    return TeamProfile(**defaults)
+
+
+_STATS_EXAMPLES = {
+    "team_size": 5,
+    "sprint_details": [
+        {"name": "S1", "points": 18, "planned": 10, "rate": 60},
+        {"name": "S2", "points": 22, "planned": 12, "rate": 50},
+    ],
+    "scope_changes": {
+        "totals": {
+            "avg_committed_velocity": 30.0,
+            "avg_delivered_velocity": 20.0,
+            "total_stories": 40,
+            "added_mid_sprint": 8,
+            "re_estimated": 2,
+        },
+        "per_sprint": [
+            {"name": "S1", "committed_pts": 30, "scope_churn": 0.4},
+            {"name": "S2", "committed_pts": 28, "scope_churn": 0.35},
+        ],
+    },
+    "contributor_stats": [
+        {"name": "Ana", "per_sprint": 4.0, "delivery_pts": 30},
+        {"name": "Bo", "per_sprint": 1.5, "delivery_pts": 10, "sprints_active": 3},
+    ],
+}
+
+_NARRATIVE_JSON = {
+    "executive_summary": "Health is mixed; scope volatility is the biggest risk.",
+    "sections": {
+        "velocity": "Velocity swings a lot.",
+        "team": "Two people do most of the work.",
+        "estimation": "Estimates are decent.",
+        "workflow": "Little evidence of a DoD.",
+        "writing": "Ticket writing is solid.",
+        "trends": "No clear trend yet.",
+        "recommendations": "Lock scope after planning.",
+    },
+}
+
+
+class TestComputeHeadlineStats:
+    """compute_headline_stats mirrors the screen's velocity/completion maths."""
+
+    def test_prefers_sprint_details_over_profile(self):
+        from yeaboi.tools.team_learning import compute_headline_stats
+
+        stats = compute_headline_stats(_make_profile(), _STATS_EXAMPLES)
+        assert stats["velocity"] == 20.0  # (18+22)/2, not profile's stale avg
+        assert stats["stddev"] == 2.0
+        assert stats["completion_rate"] == 55.0
+        assert stats["delivery_accuracy"] == 67
+        assert stats["team_size"] == 5
+
+    def test_falls_back_to_profile_without_examples(self):
+        from yeaboi.tools.team_learning import compute_headline_stats
+
+        stats = compute_headline_stats(_make_profile(), None)
+        assert stats["velocity"] == 20.0
+        assert stats["stddev"] == 9.0
+        assert stats["completion_rate"] == 55.0
+        assert stats["delivery_accuracy"] == 0
+
+    def test_empty_profile_no_crash(self):
+        from yeaboi.tools.team_learning import compute_headline_stats
+
+        empty = _make_profile(velocity_avg=0.0, velocity_stddev=0.0, sprint_completion_rate=0.0)
+        stats = compute_headline_stats(empty, {})
+        assert stats["var_pct"] == 0
+
+
+class TestComputeRecommendations:
+    """The deterministic recommendation list (ported from the screen)."""
+
+    def test_flags_expected_warnings(self):
+        from yeaboi.tools.team_learning import compute_recommendations
+
+        labels = [label for label, _ in compute_recommendations(_make_profile(), _STATS_EXAMPLES)]
+        joined = " ".join(labels)
+        assert "Low sprint completion" in joined
+        assert "Frequent spillover" in joined
+        assert "High scope churn" in joined
+
+    def test_healthy_profile_flags_nothing(self):
+        from yeaboi.team_profile import DoDSignal, SpilloverStats, WritingPatterns
+        from yeaboi.tools.team_learning import compute_recommendations
+
+        healthy = _make_profile(
+            velocity_stddev=2.0,
+            sprint_completion_rate=90.0,
+            spillover=SpilloverStats(carried_over_pct=5.0),
+            dod_signal=DoDSignal(),
+            writing_patterns=WritingPatterns(),
+        )
+        assert compute_recommendations(healthy, None) == []
+
+
+class TestGenerateAnalysisNarrative:
+    """One LLM call producing the executive summary + per-section explanations."""
+
+    @staticmethod
+    def _sent_prompt(mock_get_llm) -> str:
+        messages = mock_get_llm.return_value.invoke.call_args[0][0]
+        return messages[0].content
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_successful_generation(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_analysis_narrative
+
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_NARRATIVE_JSON))
+        result = _generate_analysis_narrative(_make_profile(), _STATS_EXAMPLES)
+
+        assert result["executive_summary"].startswith("Health is mixed")
+        assert result["sections"]["velocity"] == "Velocity swings a lot."
+        assert set(result["sections"]) == {
+            "velocity",
+            "team",
+            "estimation",
+            "workflow",
+            "writing",
+            "trends",
+            "recommendations",
+        }
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_prompt_contains_metrics_digest(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_analysis_narrative
+
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_NARRATIVE_JSON))
+        _generate_analysis_narrative(_make_profile(), _STATS_EXAMPLES)
+
+        prompt = self._sent_prompt(mock_get_llm)
+        assert "Metrics digest" in prompt
+        assert "velocity 20.0±2.0" in prompt
+        assert "5 contributors" in prompt
+        assert "Scrum coach" in prompt
+        assert "Return ONLY a JSON object" in prompt
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_code_fences_stripped(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_analysis_narrative
+
+        fenced = "```json\n" + json.dumps(_NARRATIVE_JSON) + "\n```"
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(fenced)
+        result = _generate_analysis_narrative(_make_profile(), _STATS_EXAMPLES)
+        assert result["sections"]["team"] == "Two people do most of the work."
+
+    def test_llm_error_returns_fallback(self):
+        from yeaboi.tools.team_learning import _generate_analysis_narrative
+
+        with patch("yeaboi.agent.llm.get_llm", side_effect=RuntimeError("no key")):
+            result = _generate_analysis_narrative(_make_profile(), _STATS_EXAMPLES)
+        assert result["executive_summary"]
+        assert set(result["sections"]) >= {"velocity", "recommendations"}
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_invalid_json_returns_fallback(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_analysis_narrative
+
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response("not json at all")
+        result = _generate_analysis_narrative(_make_profile(), _STATS_EXAMPLES)
+        assert result["executive_summary"]
+        assert len(result["sections"]) == 7
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_missing_sections_backfilled(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_analysis_narrative
+
+        partial = {"executive_summary": "Short.", "sections": {"velocity": "Only this one."}}
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(partial))
+        result = _generate_analysis_narrative(_make_profile(), _STATS_EXAMPLES)
+        assert result["sections"]["velocity"] == "Only this one."
+        assert result["sections"]["workflow"]  # deterministic back-fill
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_unknown_keys_dropped(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_analysis_narrative
+
+        noisy = dict(_NARRATIVE_JSON)
+        noisy["sections"] = dict(_NARRATIVE_JSON["sections"], bogus="drop me")
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(noisy))
+        result = _generate_analysis_narrative(_make_profile(), _STATS_EXAMPLES)
+        assert "bogus" not in result["sections"]
+
+    def test_fallback_narrative_never_raises_on_empty(self):
+        from yeaboi.tools.team_learning import _fallback_narrative
+
+        empty = _make_profile(
+            velocity_avg=0.0,
+            velocity_stddev=0.0,
+            sprint_completion_rate=0.0,
+            point_calibrations=(),
+        )
+        result = _fallback_narrative(empty, None)
+        assert len(result["sections"]) == 7
