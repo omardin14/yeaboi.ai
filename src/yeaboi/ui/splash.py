@@ -90,6 +90,20 @@ def _center_in_panel(rendered: Text, *, width: int, height: int, block_h: int) -
     )
 
 
+def _block_left_pad(text_lines: list[str], width: int) -> str:
+    """Common left pad that centres the whole block by its widest row.
+
+    Rich's per-line ``justify="center"`` rstrips each line and centres it by
+    its own stripped width — rows with shorter trailing content (e.g. the P
+    in STANDUP, whose bottom rows end 5 cells early) shift sideways and break
+    the glyph columns. Centring the block once and rendering left-anchored
+    keeps every row aligned, matching build_ascii_title's left-justify.
+    """
+    block_w = max((len(line) for line in text_lines), default=0)
+    inner_w = max(0, width - 6)  # panel border + padding, matches _resolve_wordmark
+    return " " * max(0, (inner_w - block_w) // 2)
+
+
 def _build_splash_frame(
     text_lines: list[str],
     *,
@@ -101,20 +115,22 @@ def _build_splash_frame(
     """Build a fade frame: the whole wordmark in one ``rgb`` colour at ``opacity``.
 
     text_lines: ASCII-art rows (a tall ANSI-Shadow wordmark, or the compact
-        two-line render_ascii_text fallback). All rows must be equal width so
-        per-line centre-justify keeps them aligned.
+        two-line render_ascii_text fallback). The block is centred as a whole
+        (one shared left pad from ``_block_left_pad``) so rows with uneven
+        trailing content never mis-align.
     opacity: 0.0–1.0 controls visibility. At 0 the text is invisible
         (spaces only) so it blends with any terminal background. At 1 the
         text is full ``rgb``.
     rgb: base colour (defaults to the brand blue used by the splash).
     """
-    rendered = Text(justify="center")
+    pad = _block_left_pad(text_lines, width)
+    rendered = Text(justify="left")
     if opacity < 0.01:
         # At very low opacity, replace characters with spaces so nothing is
         # visible — avoids a near-black colour standing out against the
         # terminal background regardless of its colour scheme.
         for line_idx, line in enumerate(text_lines):
-            rendered.append(" " * len(line))
+            rendered.append(pad + " " * len(line))
             if line_idx < len(text_lines) - 1:
                 rendered.append("\n")
     else:
@@ -123,6 +139,7 @@ def _build_splash_frame(
         b = int(rgb[2] * opacity)
         style = f"bold rgb({r},{g},{b})"
         for line_idx, line in enumerate(text_lines):
+            rendered.append(pad)
             rendered.append(line, style=style)
             if line_idx < len(text_lines) - 1:
                 rendered.append("\n")
@@ -160,8 +177,10 @@ def _build_shine_frame(
     (``_SHINE_ROW_SKEW``) so the highlight reads as a slanted streak of light.
     """
     span = max(len(line) for line in text_lines) - 1 or 1
-    rendered = Text(justify="center")
+    pad = _block_left_pad(text_lines, width)
+    rendered = Text(justify="left")
     for line_idx, line in enumerate(text_lines):
+        rendered.append(pad)
         for col, ch in enumerate(line):
             if ch == " ":
                 rendered.append(" ")
