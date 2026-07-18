@@ -26,6 +26,7 @@ from rich.text import Text
 from yeaboi.ui.mode_select.screens._screens_secondary import (
     _build_analysis_progress_screen,
     _build_analysis_review_screen,
+    _build_generate_confirm_screen,
     _build_instructions_review_screen,
     _build_sample_epic_screen,
     _build_sample_sprint_screen,
@@ -828,3 +829,165 @@ class TestBuildTeamAnalysisScreenExtended:
     def test_mid_scroll(self, profile):
         result = _build_team_analysis_screen(profile, scroll_offset=10, width=80, height=30)
         assert isinstance(result, Panel)
+
+    # Wrapping tables (DoD + Proposed DoD) previously reported a naive row_count
+    # as their height. When cells wrapped onto multiple rows the viewport packer
+    # over-filled the fixed-height panel and Rich cropped the action buttons off
+    # the bottom (Patterns page showed no buttons). Heights are now measured, so
+    # the buttons must survive even with a tall, heavily-wrapping Proposed DoD.
+    _DOD_HEAVY_EXAMPLES = {
+        "dod_testing": [{"issue_key": "PSOT-791", "summary": "Phase 9: Entra App Registration flow"}],
+        "dod_pr": [{"issue_key": "PSOT-851", "summary": "WIZ - Create an automated repo scanner"}],
+        "dod_review": [{"issue_key": "PSOT-880", "summary": "Complete DAST API Scan Implementation"}],
+        "dod_deploy": [{"issue_key": "PSOT-880", "summary": "Complete DAST API Scan Implementation"}],
+        "proposed_dod": {
+            "summary": "7 of 9 practices are well-established. The team has a clear definition of done.",
+            "health": "strong",
+            "items": [
+                {
+                    "practice": f"Practice number {i} updated",
+                    "status": "established",
+                    "signals": f"{90 - i * 8}% mentioned in stories · 6% have subtasks",
+                    "recommendation": "Consistently done. Include as a required DoD step.",
+                }
+                for i in range(8)
+            ],
+        },
+    }
+
+    @staticmethod
+    def _render_cropped(panel: Panel, width: int, height: int) -> str:
+        """Render exactly like the TUI: a fixed-height panel on a sized console.
+
+        The panel's ``height`` crops overflowing content, so this reproduces the
+        real button-cropping behaviour that a height-less render would hide.
+        """
+        buf = StringIO()
+        console = Console(file=buf, width=width, height=height, force_terminal=False, highlight=False)
+        console.print(panel)
+        return buf.getvalue()
+
+    def test_patterns_page_buttons_visible_with_wrapping_tables(self, profile):
+        """Page 2 action buttons must stay on screen even when tables wrap a lot."""
+        for scroll in (0, 9999):  # top of page and clamped-to-bottom
+            panel = _build_team_analysis_screen(
+                profile,
+                examples=self._DOD_HEAVY_EXAMPLES,
+                page=2,
+                width=120,
+                height=44,
+                scroll_offset=scroll,
+            )
+            output = self._render_cropped(panel, width=120, height=44)
+            assert "Back" in output, f"Back button cropped at scroll={scroll}"
+            assert "Next" in output, f"Next button cropped at scroll={scroll}"
+
+
+# ---------------------------------------------------------------------------
+# Confirmation screen: _build_generate_confirm_screen
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGenerateConfirmScreen:
+    """The gate shown between team/board analysis and sample-ticket generation."""
+
+    def test_returns_panel(self):
+        result = _build_generate_confirm_screen(width=80, height=24)
+        assert isinstance(result, Panel)
+
+    def test_renders_prompt_and_buttons(self):
+        output = _render(_build_generate_confirm_screen(width=100, height=30), width=100)
+        assert "generate sample tickets now?" in output
+        assert "Generate tickets" in output
+        assert "Not now" in output
+
+    def test_both_action_selections(self):
+        """Either button may be highlighted without crashing."""
+        for sel in (0, 1):
+            result = _build_generate_confirm_screen(width=100, height=30, action_sel=sel)
+            assert isinstance(result, Panel)
+
+    def test_subtitle_rendered(self):
+        output = _render(_build_generate_confirm_screen(width=100, height=30, subtitle="jira/PROJ"), width=100)
+        assert "jira/PROJ" in output
+
+    def test_narrow_terminal(self):
+        assert isinstance(_build_generate_confirm_screen(width=40, height=24), Panel)
+
+    def test_short_terminal(self):
+        assert isinstance(_build_generate_confirm_screen(width=80, height=14), Panel)
+
+    def test_buttons_registered(self):
+        """New button labels must have colours registered (CLAUDE.md convention)."""
+        from yeaboi.ui.shared._components import _BTN_COLORS
+
+        assert "Generate tickets" in _BTN_COLORS
+        assert "Not now" in _BTN_COLORS
+
+
+class TestConfirmTicketGeneration:
+    """The driver loop gating analysis → ticket generation (key handling)."""
+
+    class _FakeConsole:
+        size = (100, 30)
+
+    class _FakeLive:
+        def __init__(self):
+            self.frames = 0
+
+        def update(self, _panel):
+            self.frames += 1
+
+    @staticmethod
+    def _run(keys):
+        """Drive _confirm_ticket_generation with a scripted key sequence."""
+        from yeaboi.ui.mode_select import _confirm_ticket_generation
+
+        it = iter(keys)
+
+        def _read_key(timeout=None):
+            return next(it)
+
+        live = TestConfirmTicketGeneration._FakeLive()
+        result = _confirm_ticket_generation(
+            live,
+            TestConfirmTicketGeneration._FakeConsole(),
+            _read_key,
+            0.05,
+            True,
+            subtitle="jira/PROJ",
+        )
+        return result, live
+
+    def test_enter_on_generate_confirms(self):
+        result, live = self._run(["enter"])
+        assert result is True
+        assert live.frames >= 1  # rendered at least once before the keypress
+
+    def test_right_then_enter_declines(self):
+        # Move to "Not now" (sel=1), then confirm the selection.
+        result, _ = self._run(["right", "enter"])
+        assert result is False
+
+    def test_right_left_enter_confirms(self):
+        # Navigate to Not now and back to Generate, then Enter.
+        result, _ = self._run(["right", "left", "enter"])
+        assert result is True
+
+    def test_esc_declines(self):
+        result, _ = self._run(["esc"])
+        assert result is False
+
+    def test_space_selects_current(self):
+        result, _ = self._run([" "])
+        assert result is True
+
+    def test_left_clamps_at_zero(self):
+        # Pressing left at sel=0 stays on Generate.
+        result, _ = self._run(["left", "left", "enter"])
+        assert result is True
+
+    def test_right_clamps_at_one(self):
+        # Pressing right past the last button stays on Not now.
+        result, _ = self._run(["right", "right", "enter"])
+        assert result is False

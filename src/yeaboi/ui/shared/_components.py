@@ -72,6 +72,9 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Jira": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Azure DevOps": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Configure": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Analysis-mode ticket-generation confirmation screen.
+    "Generate tickets": ("rgb(60,160,80)", "rgb(80,200,100)", "rgb(40,50,40)", "rgb(50,60,50)"),
+    "Not now": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Generate": ("rgb(180,80,160)", "rgb(220,120,200)", "rgb(50,40,50)", "rgb(60,50,60)"),
     "My Update": ("rgb(180,80,160)", "rgb(220,120,200)", "rgb(50,40,50)", "rgb(60,50,60)"),
     "Generate Action Items": ("rgb(50,170,170)", "rgb(90,220,220)", "rgb(40,52,52)", "rgb(50,62,62)"),

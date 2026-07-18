@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+import io
+
 import rich.box
-from rich.console import Group
+from rich.console import Console, Group
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.text import Text
@@ -25,6 +27,22 @@ from yeaboi.ui.shared._components import (
     planning_title,
 )
 from yeaboi.ui.shared._scroll import publish_geometry
+
+
+def _measure_render_height(renderable, width: int) -> int:
+    """Return the true number of terminal rows a renderable occupies at ``width``.
+
+    The analysis/profile screens pack a scrollable viewport by hand, estimating
+    each item's height so the packer knows when to stop and leave room for the
+    action buttons below. Plain ``Text`` items are one row, but a Rich table
+    with fixed-width columns wraps long cells onto several rows — a naive
+    ``row_count`` under-counts it, which lets the packer overfill the viewport
+    and push the buttons off the bottom of the fixed-height panel. Rendering to
+    an off-screen console and counting the produced lines gives the real height.
+    """
+    _con = Console(width=max(1, width), file=io.StringIO(), legacy_windows=False)
+    return len(_con.render_lines(renderable, pad=False))
+
 
 # ---------------------------------------------------------------------------
 # Shared analysis review screen builder (mirrors planning mode layout)
@@ -148,6 +166,72 @@ def _build_analysis_review_screen(
 _PAD = PAD  # alias for backward compatibility within this module
 
 
+def _build_generate_confirm_screen(
+    *,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+    subtitle: str = "",
+) -> Panel:
+    """Confirmation screen shown between team/board analysis and ticket generation.
+
+    Separates the two concerns: the user has just analysed the team/board and is
+    now explicitly asked whether they want yeaboi to draft a sample epic/stories/
+    tasks/sprint (which runs the LLM) — rather than the app assuming they do.
+
+    Delegates to ``_build_analysis_review_screen`` so the layout (title, progress
+    dots, viewport, action buttons) stays identical to the rest of analysis mode.
+    """
+    c_label = "bold white"
+    c_body = "rgb(180,180,200)"
+    c_bullet = "rgb(100,180,100)"
+    c_muted = "rgb(120,120,140)"
+
+    def _bullet(text: str) -> Text:
+        t = Text(_PAD + "  ", justify="left")
+        t.append("• ", style=c_bullet)
+        t.append(text, style=c_body)
+        return t
+
+    # The question leads the body so it stays above the fold even on short
+    # terminals, where the viewport shows only a few rows. The action buttons
+    # below are always visible; the explanation and bullets follow.
+    body_lines: list = [
+        Text(""),
+        Text(
+            _PAD + "Analysis complete — generate sample tickets now?",
+            style=c_label,
+            justify="left",
+        ),
+        Text(""),
+        Text(
+            _PAD + "yeaboi can draft a sample set, calibrated to these patterns:",
+            style=c_body,
+            justify="left",
+        ),
+        _bullet("a sample epic"),
+        _bullet("sample user stories"),
+        _bullet("sample tasks"),
+        _bullet("a sample sprint plan"),
+        Text(""),
+        Text(
+            _PAD + "This runs the LLM. You can edit, regenerate, or export each step.",
+            style=c_muted,
+            justify="left",
+        ),
+    ]
+
+    return _build_analysis_review_screen(
+        body_lines,
+        stage_index=0,
+        width=width,
+        height=height,
+        action_sel=action_sel,
+        actions=["Generate tickets", "Not now"],
+        subtitle=subtitle,
+    )
+
+
 def _build_team_analysis_screen(
     profile,
     *,
@@ -203,6 +287,18 @@ def _build_team_analysis_screen(
         lines.append(item)
         _item_heights.append(rendered_h)
         _rendered_lines += rendered_h
+
+    def _add_table(table) -> None:
+        """Append a table with its wrapped height measured (not naive row count).
+
+        Fixed-width columns wrap long cells onto multiple rows; measuring at the
+        body column width (panel interior minus the 1-col scrollbar) keeps the
+        viewport packer honest so the action buttons stay on screen. Measured
+        only on the active page — inactive pages are dropped by ``_add`` anyway.
+        """
+        padded = Padding(table, (0, 0, 0, len(_PAD) + 2))
+        rendered_h = _measure_render_height(padded, max(10, width - 7)) if _active else 1
+        _add(padded, rendered_h=rendered_h)
 
     def _heading(text: str) -> None:
         _add(Text(""))
@@ -471,7 +567,7 @@ def _build_team_analysis_screen(
 
             sp_table.add_row(*row_cells)
 
-        _add(Padding(sp_table, (0, 0, 0, len(_PAD) + 2)), rendered_h=sp_table.row_count + 1)
+        _add_table(sp_table)
 
         # Analysis of incomplete sprints
         incomplete_sprints = [
@@ -741,7 +837,7 @@ def _build_team_analysis_screen(
                 Text(focus[:14], style=c_dim),
                 Text(str(ps), style=ps_sty),
             )
-        _add(Padding(mt, (0, 0, 0, len(_PAD) + 2)), rendered_h=len(_contrib[:10]) + 1)
+        _add_table(mt)
 
         # Insights
         if len(_contrib) >= 3:
@@ -1047,7 +1143,7 @@ def _build_team_analysis_screen(
                 ex_text,
             )
 
-        _add(Padding(dod_table, (0, 0, 0, len(_PAD) + 2)), rendered_h=dod_table.row_count + 1)
+        _add_table(dod_table)
 
         if dod.common_checklist_items:
             _add(Text(""))
@@ -1142,7 +1238,7 @@ def _build_team_analysis_screen(
                 Text(sig, style=c_muted),
                 Text(item.get("recommendation", "")[:55], style=c_dim),
             )
-        _add(Padding(pdod_table, (0, 0, 0, len(_PAD) + 2)), rendered_h=len(proposed_dod["items"]) + 1)
+        _add_table(pdod_table)
 
         # DoD ordering (typical sequence)
         dod_ordering = proposed_dod.get("ordering", [])
@@ -1790,7 +1886,7 @@ def _build_team_analysis_screen(
                 ct_text,
             )
 
-        _add(Padding(repo_table, (0, 0, 0, len(_PAD) + 2)), rendered_h=repo_table.row_count + 1)
+        _add_table(repo_table)
 
         # Spillover-prone repos
         spill_repos = repos.get("spillover_repos", [])
