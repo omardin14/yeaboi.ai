@@ -1621,6 +1621,7 @@ def _phase_chat(
     def _set_paste_notice(msg: str) -> None:
         nonlocal paste_notice
         paste_notice = msg
+
     # Follow the newest message until the user scrolls up; new messages re-pin to
     # the bottom only while following. Manual scroll keys break the follow.
     _chat_follow = True
