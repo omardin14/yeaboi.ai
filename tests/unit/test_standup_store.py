@@ -93,6 +93,23 @@ class TestSelfUpdates:
             store.save_my_update("s1", "2026-07-10", "Alice", "today")
             assert store.get_my_updates("s1", "2026-07-11") == {}
 
+    def test_images_round_trip(self, db_path, tmp_path):
+        img = tmp_path / "burndown.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        with StandupStore(db_path) as store:
+            store.save_my_update("s1", "2026-07-10", "Alice", "see chart [image #1]", images=[str(img)])
+            assert store.get_my_update_images("s1", "2026-07-10") == {"Alice": [str(img)]}
+
+    def test_missing_image_files_pruned(self, db_path, tmp_path):
+        with StandupStore(db_path) as store:
+            store.save_my_update("s1", "2026-07-10", "Alice", "x", images=[str(tmp_path / "gone.png")])
+            assert store.get_my_update_images("s1", "2026-07-10") == {}
+
+    def test_update_without_images_has_none(self, db_path):
+        with StandupStore(db_path) as store:
+            store.save_my_update("s1", "2026-07-10", "Alice", "no pics")
+            assert store.get_my_update_images("s1", "2026-07-10") == {}
+
 
 class TestRunHistory:
     def test_record_and_get_latest(self, db_path):

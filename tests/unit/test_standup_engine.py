@@ -109,6 +109,33 @@ class TestRunStandup:
         assert alice.source == "self-reported"
         assert alice.summary == "I paired with Bob on auth all day."
 
+    def test_pasted_update_images_reach_llm(self, monkeypatch, db_path, seeded_session, tmp_path):
+        """Screenshots saved with 'My Update' become image blocks on the summary call."""
+        img = tmp_path / "burndown.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        _patch_common(
+            monkeypatch,
+            items=[{"author": "Bob", "kind": "issue", "title": "x", "source": "jira"}],
+            counts=[("jira", 1)],
+        )
+        with StandupStore(db_path) as store:
+            store.save_my_update(seeded_session, "2026-07-10", "Alice", "chart attached", images=[str(img)])
+        llm_json = json.dumps({"members": [{"name": "Bob", "summary": "x"}], "team_summary": "ok"})
+        sent = {}
+
+        class _L:
+            def invoke(self, messages):
+                sent["content"] = messages[0].content
+                return _FakeResp(llm_json)
+
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: _L())
+
+        engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        content = sent["content"]
+        assert isinstance(content, list)
+        assert content[0]["type"] == "text"
+        assert content[1]["type"] == "image"
+
     def test_llm_failure_falls_back(self, monkeypatch, db_path, seeded_session):
         _patch_common(
             monkeypatch,

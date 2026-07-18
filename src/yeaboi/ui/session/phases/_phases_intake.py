@@ -24,6 +24,7 @@ from yeaboi.ui.session.screens._accordion import _build_accordion_question_scree
 from yeaboi.ui.session.screens._screens_input import (
     _build_description_screen,
     _build_question_screen,
+    _image_hint,
     _voice_hint,
 )
 
@@ -35,13 +36,16 @@ logger = logging.getLogger(__name__)
 
 
 def _phase_description_input(
-    live: Live, console: Console, _key, *, dry_run: bool = False
-) -> tuple[str, list[str], int, int] | None:
+    live: Live, console: Console, _key, *, dry_run: bool = False, scope_id: str = ""
+) -> tuple[str, list[str], int, int, list[str]] | None:
     """Multi-line text input for the project description.
 
-    Returns (description, input_lines, cursor_row, cursor_col) on submit,
-    or None if the user pressed Esc. The extra state is used by the caller
-    to animate the input box border during LLM processing.
+    Returns (description, input_lines, cursor_row, cursor_col, image_paths) on
+    submit, or None if the user pressed Esc. The extra editor state is used by
+    the caller to animate the input box border during LLM processing;
+    image_paths are the screenshots pasted with Ctrl+V whose [image #N] chips
+    survive in the text (see ui/shared/_attachments.py) — the caller routes them
+    to the analyzer via graph_state["pasted_images"].
 
     When dry_run=True, pre-fills an example description so the developer
     can just hit Enter twice to move on quickly.
@@ -68,6 +72,17 @@ def _phase_description_input(
     from yeaboi.ui.shared._voice_input import DoubleTapSpace, record_voice_input, voice_indicator
 
     _dts = DoubleTapSpace()
+
+    # Ctrl+V image paste — screenshots saved to ~/.yeaboi/attachments/, tracked
+    # here as file paths; a plain-text [image #N] chip marks each one in the buffer.
+    from yeaboi.ui.shared._attachments import handle_ctrl_v, referenced_images
+
+    attachments: list[str] = []
+    paste_notice = ""  # transient status line, cleared on the next keypress
+
+    def _set_paste_notice(msg: str) -> None:
+        nonlocal paste_notice
+        paste_notice = msg
 
     def _voice_render(status, tick):
         _bw, _bh = console.size
@@ -101,9 +116,26 @@ def _phase_description_input(
     _anim0 = time.monotonic()  # shimmer title clock
     while True:
         key = _key()
+        if key and key != "":
+            paste_notice = ""
 
         if key == "esc":
             return None
+        elif key == "ctrl+v":
+            # Reading the clipboard can take a moment (osascript hex round-trip)
+            # — show progress before the blocking call so the UI never looks hung.
+            w, h = console.size
+            live.update(
+                _build_description_screen(
+                    input_lines, cursor_row, cursor_col, width=w, height=h, status_line="Pasting image…"
+                )
+            )
+            chip = handle_ctrl_v(attachments, scope_id=scope_id or "planning", set_notice=_set_paste_notice)
+            if chip:
+                line = input_lines[cursor_row]
+                input_lines[cursor_row] = line[:cursor_col] + chip + line[cursor_col:]
+                cursor_col += len(chip)
+                paste_notice = f"Screenshot attached as {chip}"
         elif key == "alt+enter":
             # Alt+Enter (Option+Enter on macOS) inserts a new line
             line = input_lines[cursor_row]
@@ -119,8 +151,11 @@ def _phase_description_input(
                 while input_lines and not input_lines[-1].strip():
                     input_lines.pop()
                 desc = "\n".join(input_lines)
-                logger.info("Description submitted: len=%d", len(desc))
-                return desc, input_lines, cursor_row, cursor_col
+                # Only attachments whose [image #N] chip survived editing are sent
+                # — deleting a chip from the text detaches its screenshot.
+                images = referenced_images(desc, attachments)
+                logger.info("Description submitted: len=%d, images=%d", len(desc), len(images))
+                return desc, input_lines, cursor_row, cursor_col, images
         elif key == "backspace":
             if cursor_col > 0:
                 line = input_lines[cursor_row]
@@ -211,6 +246,7 @@ def _phase_description_input(
                 width=w,
                 height=h,
                 shimmer_tick=time.monotonic() - _anim0,
+                status_line=paste_notice,
             )
         )
 
@@ -496,6 +532,24 @@ def _question_input_loop(
     use_accordion = questionnaire is not None
     _anim0 = time.monotonic()  # shimmer title clock
 
+    # Ctrl+V image paste (free-text questions only) — surviving [image #N] chips
+    # extend graph_state["pasted_images"] at submit so project_analyzer sees them.
+    # Initialized BEFORE _render(): the closure reads paste_notice on every frame.
+    from yeaboi.ui.shared._attachments import handle_ctrl_v, referenced_images
+
+    attachments: list[str] = []
+    paste_notice = ""
+
+    def _set_paste_notice(msg: str) -> None:
+        nonlocal paste_notice
+        paste_notice = msg
+
+    def _collect_pasted_images(answer: str) -> None:
+        imgs = referenced_images(answer, attachments)
+        if imgs:
+            graph_state["pasted_images"] = list(graph_state.get("pasted_images") or []) + imgs
+            logger.info("questionnaire answer submitted with %d pasted image(s)", len(imgs))
+
     def _render():
         w, h = console.size
         if use_accordion:
@@ -514,10 +568,11 @@ def _question_input_loop(
                 height=h,
                 cursor_pos=cursor_pos,
                 shimmer_tick=time.monotonic() - _anim0,
-                edit_hint=(
+                edit_hint=paste_notice
+                or (
                     "Space toggle \u00b7 Enter submit"
                     if multi_select
-                    else ("Enter/Ctrl+S submit \u00b7 Esc cancel" + ("" if choices else _voice_hint()))
+                    else ("Enter/Ctrl+S submit \u00b7 Esc cancel" + ("" if choices else _voice_hint() + _image_hint()))
                 ),
             )
         return _build_question_screen(
@@ -532,6 +587,7 @@ def _question_input_loop(
             width=w,
             height=h,
             shimmer_tick=time.monotonic() - _anim0,
+            status_line=paste_notice,
         )
 
     live.update(_render())
@@ -586,6 +642,8 @@ def _question_input_loop(
 
     while True:
         key = _key()
+        if key and key != "":
+            paste_notice = ""
 
         if key == "esc":
             return None
@@ -599,6 +657,7 @@ def _question_input_loop(
                         return ", ".join(selected_labels)
                     return choices[selected_choice][0]
                 return choices[selected_choice][0]
+            _collect_pasted_images(input_value)
             return input_value
         elif key == " " and choices and multi_select:
             # Space toggles selection in multi-select mode
@@ -644,6 +703,18 @@ def _question_input_loop(
             pasted = key[6:]
             input_value = input_value[:cursor_pos] + pasted + input_value[cursor_pos:]
             cursor_pos += len(pasted)
+        elif key == "ctrl+v":
+            paste_notice = "Pasting image…"
+            live.update(_render())
+            chip = handle_ctrl_v(
+                attachments,
+                scope_id=graph_state.get("_attachment_scope") or "planning",
+                set_notice=_set_paste_notice,
+            )
+            if chip:
+                input_value = input_value[:cursor_pos] + chip + input_value[cursor_pos:]
+                cursor_pos += len(chip)
+                paste_notice = f"Screenshot attached as {chip}"
         elif isinstance(key, str) and len(key) == 1 and key.isprintable():
             if key == " " and _dts.is_double(cursor_pos > 0 and input_value[cursor_pos - 1] == " ", time.monotonic()):
                 # Double-tap Space → dictate; the first space stays as a separator.

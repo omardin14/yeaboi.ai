@@ -2597,6 +2597,7 @@ def _build_standup_input_screen(
     theme=None,
     title=None,
     box_rows: int = 1,
+    show_image_hint: bool = False,
 ) -> Panel:
     """Build a themed single-line input screen for the Daily Standup flows.
 
@@ -2615,7 +2616,7 @@ def _build_standup_input_screen(
     # See README: "Daily Standup" — TUI page
     # See README: "TUI system" — voice input overlay
     """
-    from yeaboi.ui.session.screens._screens_input import _voice_hint
+    from yeaboi.ui.session.screens._screens_input import _image_hint, _voice_hint
     from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
 
     theme = theme or STANDUP_THEME
@@ -2661,7 +2662,8 @@ def _build_standup_input_screen(
     if status:
         hint_line = Text(_PAD + "  " + status, style=box_style or theme.accent, justify="left")
     else:
-        hint_line = Text(_PAD + "  Enter to confirm  ·  Esc to cancel" + _voice_hint(), style=theme.dim, justify="left")
+        hints = "Enter to confirm  ·  Esc to cancel" + _voice_hint() + (_image_hint() if show_image_hint else "")
+        hint_line = Text(_PAD + "  " + hints, style=theme.dim, justify="left")
 
     # Vertically pad the middle so the field sits in the upper-third like the dashboard.
     body: list = [label, Text(""), *box_lines, Text(""), hint_line]

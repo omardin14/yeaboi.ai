@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS standup_updates (
     standup_date TEXT NOT NULL,
     member       TEXT NOT NULL,
     update_text  TEXT NOT NULL DEFAULT '',
+    images_json  TEXT NOT NULL DEFAULT '[]',
     created_at   TEXT NOT NULL
 );"""
 
@@ -138,6 +139,13 @@ class StandupStore:
         # before it existed (same try/except pattern SessionStore uses).
         try:
             self._conn.execute("ALTER TABLE standup_config ADD COLUMN lead_minutes INTEGER NOT NULL DEFAULT 10")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        # Idempotent migration: screenshots pasted (Ctrl+V) into "My Update" — a
+        # JSON list of file paths under ~/.yeaboi/attachments/, attached to the
+        # summary LLM call as multimodal image blocks at run time.
+        try:
+            self._conn.execute("ALTER TABLE standup_updates ADD COLUMN images_json TEXT NOT NULL DEFAULT '[]'")
         except sqlite3.OperationalError:
             pass  # column already exists
 
@@ -234,21 +242,32 @@ class StandupStore:
 
     # ── Self-reported updates ─────────────────────────────────────────────
 
-    def save_my_update(self, session_id: str, standup_date: str, member: str, update_text: str) -> None:
+    def save_my_update(
+        self, session_id: str, standup_date: str, member: str, update_text: str, images: list[str] | None = None
+    ) -> None:
         """Store a user-typed update for a member on a given date.
 
         A member submitting again for the same date overwrites the prior entry
         (delete-then-insert) so the latest text always wins.
+
+        images: file paths of screenshots pasted into the update (Ctrl+V) —
+            attached to the summary LLM call when the standup runs.
         """
-        logger.info("Saving self-reported update: session=%s date=%s member=%s", session_id, standup_date, member)
+        logger.info(
+            "Saving self-reported update: session=%s date=%s member=%s images=%d",
+            session_id,
+            standup_date,
+            member,
+            len(images or []),
+        )
         self._conn.execute(
             "DELETE FROM standup_updates WHERE session_id = ? AND standup_date = ? AND member = ?",
             (session_id, standup_date, member),
         )
         self._conn.execute(
-            """INSERT INTO standup_updates (session_id, standup_date, member, update_text, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (session_id, standup_date, member, update_text, self._now()),
+            """INSERT INTO standup_updates (session_id, standup_date, member, update_text, images_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (session_id, standup_date, member, update_text, json.dumps(images or []), self._now()),
         )
 
     def get_my_updates(self, session_id: str, standup_date: str) -> dict[str, str]:
@@ -258,6 +277,29 @@ class StandupStore:
             (session_id, standup_date),
         ).fetchall()
         return {member: text for member, text in rows}
+
+    def get_my_update_images(self, session_id: str, standup_date: str) -> dict[str, list[str]]:
+        """Return ``{member: [image paths]}`` for self-reported updates on a date.
+
+        Paths whose file no longer exists are pruned here so the engine only ever
+        sees attachable screenshots (deleted files degrade silently).
+        """
+        rows = self._conn.execute(
+            "SELECT member, images_json FROM standup_updates WHERE session_id = ? AND standup_date = ?",
+            (session_id, standup_date),
+        ).fetchall()
+        out: dict[str, list[str]] = {}
+        for member, images_json in rows:
+            try:
+                paths = json.loads(images_json) if images_json else []
+            except (json.JSONDecodeError, TypeError):
+                paths = []
+            live = [p for p in paths if isinstance(p, str) and Path(p).exists()]
+            if len(live) < len(paths):
+                logger.warning("standup: %d pasted image(s) missing on disk for %s", len(paths) - len(live), member)
+            if live:
+                out[member] = live
+        return out
 
     # ── Run history ───────────────────────────────────────────────────────
 

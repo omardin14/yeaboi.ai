@@ -379,6 +379,49 @@ class TestProjectAnalyzer:
         result = project_analyzer(state)
         assert isinstance(result["project_analysis"], ProjectAnalysis)
 
+    def test_pasted_images_sent_as_multimodal_blocks(self, monkeypatch, tmp_path):
+        """With pasted_images in state, the LLM receives text + image content blocks."""
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        fake_response = MagicMock()
+        fake_response.content = VALID_ANALYSIS_JSON
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = fake_response
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
+
+        result = project_analyzer(self._make_state(pasted_images=[str(img)]))
+        assert isinstance(result["project_analysis"], ProjectAnalysis)
+        sent = mock_llm.invoke.call_args[0][0][0].content
+        assert isinstance(sent, list)
+        assert sent[0]["type"] == "text"
+        assert sent[1]["type"] == "image"
+        assert sent[1]["mime_type"] == "image/png"
+
+    def test_no_images_sends_plain_string_prompt(self, monkeypatch):
+        """Without pasted images the prompt stays a plain string (regression)."""
+        fake_response = MagicMock()
+        fake_response.content = VALID_ANALYSIS_JSON
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = fake_response
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
+
+        project_analyzer(self._make_state())
+        sent = mock_llm.invoke.call_args[0][0][0].content
+        assert isinstance(sent, str)
+
+    def test_missing_image_file_degrades_to_plain_prompt(self, monkeypatch, tmp_path):
+        """A deleted attachment (e.g. after --resume) degrades to text-only, no crash."""
+        fake_response = MagicMock()
+        fake_response.content = VALID_ANALYSIS_JSON
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = fake_response
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
+
+        result = project_analyzer(self._make_state(pasted_images=[str(tmp_path / "gone.png")]))
+        assert isinstance(result["project_analysis"], ProjectAnalysis)
+        sent = mock_llm.invoke.call_args[0][0][0].content
+        assert isinstance(sent, str)
+
 
 class TestScanRepoContext:
     """Tests for the _scan_repo_context() helper function."""

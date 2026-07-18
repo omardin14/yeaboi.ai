@@ -945,6 +945,24 @@ class ScrumState(_RequiredState, total=False):
     # the LLM can ground analysis in the user's own documentation.
     user_context: str
 
+    # Pasted screenshot attachments (Ctrl+V in TUI textboxes) — PNG/JPEG file
+    # paths under ~/.yeaboi/attachments/. Paths, not bytes, so state stays small
+    # and sessions survive --resume; a deleted file degrades to text-only at
+    # invoke time (see agent/llm.py:load_image_b64). state["messages"] must stay
+    # text-only (nodes string-op on .content), so images ride here instead and
+    # become multimodal content blocks only inside get_llm().invoke() call sites.
+    #
+    # pasted_images: collected from the project-description input and questionnaire
+    # answers; consumed by project_analyzer.
+    pasted_images: list[str]
+    # review_feedback_images: screenshots attached to the current review-edit
+    # feedback; consumed once by the node being regenerated, then cleared
+    # alongside last_review_feedback.
+    review_feedback_images: list[str]
+    # chat_images: screenshots attached to the current post-pipeline chat message;
+    # consumed by the agent node (call_model) on the next invoke, then cleared.
+    chat_images: list[str]
+
     # Review loop
     # See README: "Guardrails" — human-in-the-loop pattern
     # pending_review holds the name of the generation node awaiting user review

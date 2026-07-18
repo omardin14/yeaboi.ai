@@ -25,8 +25,6 @@ import json
 import logging
 from datetime import date
 
-from langchain_core.messages import HumanMessage
-
 from yeaboi.agent.state import MemberUpdate, StandupReport
 from yeaboi.standup import collector, confidence, sprint_context
 from yeaboi.standup.store import StandupStore
@@ -147,6 +145,7 @@ def _summarize_members(
     members: list[str],
     self_reported: dict[str, str],
     sprint_name: str,
+    self_reported_images: dict[str, list[str]] | None = None,
 ) -> tuple[list[MemberUpdate], str, list[str]]:
     """Produce (member_updates, team_summary, warnings) via one LLM call + deterministic fallback.
 
@@ -154,6 +153,10 @@ def _summarize_members(
     a user-facing *warning* and the deterministic fallback is used, so the standup
     still renders with a clear reason instead of crashing or looking empty.
     Self-reported updates are always passed through verbatim regardless of the LLM.
+
+    self_reported_images: per-member screenshot paths pasted (Ctrl+V) into "My
+        Update" — attached to the summary LLM call as multimodal image blocks so
+        the model can fold what they show into the team summary.
     """
     grouped = _group_activity_by_author(bundle.items, members)
     inferred_names = [m for m in members if m not in self_reported]
@@ -178,7 +181,7 @@ def _summarize_members(
         logger.warning("standup: LLM not configured (%s) — using deterministic fallback", why)
         return _fallback([f"AI summary unavailable — {why}."])
 
-    from yeaboi.agent.llm import get_llm, track_usage
+    from yeaboi.agent.llm import get_llm, invoke_with_images, track_usage
     from yeaboi.agent.nodes import _is_llm_auth_or_billing_error
     from yeaboi.prompts.standup import get_standup_summary_prompt
 
@@ -193,9 +196,17 @@ def _summarize_members(
         activity_counts=bundle.counts,
     )
 
+    # Screenshots pasted into "My Update" — flattened across members and attached
+    # as multimodal image blocks (see agent/llm.py; degrades text-only on failure).
+    images = [p for paths in (self_reported_images or {}).values() for p in paths]
+
     try:
-        logger.info("standup: invoking LLM to summarize %d inferred member(s)", len(inferred_payload))
-        response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+        logger.info(
+            "standup: invoking LLM to summarize %d inferred member(s) (%d pasted image(s))",
+            len(inferred_payload),
+            len(images),
+        )
+        response = invoke_with_images(get_llm(temperature=0.0), prompt, images)
         track_usage(response)
         parsed = _parse_standup_response(response.content)
     except Exception as exc:
@@ -262,6 +273,7 @@ def run_standup(
     with StandupStore(db_path) as store:
         config = store.load_config(session_id)
         self_reported = store.get_my_updates(session_id, date_str)
+        self_reported_images = store.get_my_update_images(session_id, date_str)
 
     resolved_channels = channels or (config or {}).get("delivery_channels") or ["terminal"]
     source_params = _resolve_source_params(config)
@@ -299,6 +311,7 @@ def run_standup(
         members=members,
         self_reported=self_reported,
         sprint_name=ctx.sprint_name,
+        self_reported_images=self_reported_images,
     )
 
     # Warnings the user must see: source auth failures (from the collector) first,

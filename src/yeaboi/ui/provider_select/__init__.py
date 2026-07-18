@@ -44,6 +44,10 @@ from yeaboi.ui.provider_select.screens._screens_vc import (
     _build_vc_select_screen,
 )
 from yeaboi.ui.shared._animations import COLOR_RGB, FADE_IN_LEVELS, FADE_OUT_LEVELS, FRAME_TIME_30FPS
+
+# Ctrl+V response for token/model fields — their content never reaches an LLM,
+# so image paste is rejected with the standard notice (see ui/shared/_attachments.py).
+from yeaboi.ui.shared._attachments import UNSUPPORTED_MESSAGE as _IMG_UNSUPPORTED
 from yeaboi.ui.shared._input import disable_bracketed_paste, enable_bracketed_paste
 from yeaboi.ui.shared._input import read_key as _read_key  # noqa: F401 — re-export for compat
 from yeaboi.ui.shared._music_bar import make_live
@@ -314,6 +318,8 @@ def select_provider(
                         val += key[6:]
                         err = ""
                         verified = None
+                    elif key == "ctrl+v":
+                        err = _IMG_UNSUPPORTED
                     elif len(key) == 1 and key.isprintable():
                         val += key
                         err = ""
@@ -523,6 +529,8 @@ def select_provider(
                         input_value += key[6:]
                         error = ""
                         verified = None
+                    elif key == "ctrl+v":
+                        error = _IMG_UNSUPPORTED
                     elif len(key) == 1 and key.isprintable():
                         input_value += key
                         error = ""
@@ -875,6 +883,8 @@ def select_provider(
                         vc_input += key[6:]
                         vc_error = ""
                         vc_verified = None
+                    elif key == "ctrl+v":
+                        vc_error = _IMG_UNSUPPORTED
                     elif len(key) == 1 and key.isprintable():
                         vc_input += key
                         vc_error = ""

@@ -149,6 +149,8 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 
 🎵 **Focus Music** — Optional background music via [`ffplay`](https://ffmpeg.org/ffplay.html) (ffmpeg): `Ctrl+P` play/pause, `Ctrl+O` to switch channel, from any screen. Auto-pauses while you dictate a voice note
 
+📸 **Screenshot Paste** — Press `Ctrl+V` in any LLM-connected textbox (project description, questionnaire answers, edit feedback, chat, standup update, 1:1 transcript) to attach a screenshot from your clipboard. An `[image #N]` chip marks it in the text, and the model sees the actual image — mockups, whiteboards, burndown charts. Use `Ctrl+V`, not `Cmd+V` (terminals can only paste *text* via Cmd+V)
+
 ---
 
 ## 🏁 Getting Started
@@ -1938,6 +1940,37 @@ Core constraints:
 | **The Flipped Prompt** | Project Intake — agent asks the user what information it needs before proceeding |
 | **Iterative Prompting** | Refinement loop — output improves with each round of user feedback |
 | **Neutral Prompts** | Evaluation — avoid leading phrasing that biases the LLM |
+
+### Multimodal Content Blocks (Screenshot Paste)
+
+LangChain message `content` is either a plain string or a **list of typed content
+blocks**. When the user pastes a screenshot with `Ctrl+V`, the prompt is sent as:
+
+```python
+HumanMessage(content=[
+    {"type": "text", "text": prompt},
+    {"type": "image", "source_type": "base64", "mime_type": "image/png", "data": "<b64>"},
+])
+```
+
+This is LangChain's *portable* block shape — `langchain-core` translates it into each
+provider's native format, so the same code works for Anthropic, OpenAI, Google, and
+Bedrock. Three design rules keep it robust (`agent/llm.py`):
+
+- **Paths, not bytes, in state** — pasted images are saved as PNG files under
+  `~/.yeaboi/attachments/<scope>/`; graph state carries only the file paths
+  (`pasted_images`, `review_feedback_images`, `chat_images`), so sessions stay small
+  and screenshots survive `--resume`. Base64 encoding happens only at the moment of
+  the LLM call (`invoke_with_images`).
+- **`state["messages"]` stays text-only** — many nodes do string operations on
+  message content, so images are attached to the outgoing message list at invoke
+  time and never stored in history.
+- **Graceful degradation** — a deleted file is skipped with a warning; a non-vision
+  model that rejects image blocks triggers one text-only retry. The pipeline never
+  fails because of a screenshot.
+
+Deleting an `[image #N]` chip from the textbox detaches that screenshot before send
+(`ui/shared/_attachments.py:referenced_images`).
 
 ---
 

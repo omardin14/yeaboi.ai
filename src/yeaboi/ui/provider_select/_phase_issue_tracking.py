@@ -357,6 +357,11 @@ def _run_issue_tracking(
                 it_values[it_selected] = it_values.get(it_selected, "") + key[6:]
                 it_errors.pop(it_selected, None)
                 it_verified.pop(it_selected, None)
+            elif key == "ctrl+v":
+                # Credential fields never reach an LLM — reject image paste with a notice.
+                from yeaboi.ui.shared._attachments import UNSUPPORTED_MESSAGE
+
+                it_errors[it_selected] = UNSUPPORTED_MESSAGE
             elif len(key) == 1 and key.isprintable():
                 it_values[it_selected] = it_values.get(it_selected, "") + key
                 it_errors.pop(it_selected, None)

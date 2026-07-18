@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import sys
 
 import rich.box
 from rich.console import Group
@@ -41,6 +42,23 @@ def _voice_hint() -> str:
     if available:
         return " · \U0001f3a4 double-tap Space to speak"
     return f" · \U0001f3a4 dictate: {voice_install_command()}"
+
+
+def _image_hint() -> str:
+    """Return a discoverability suffix for Ctrl+V screenshot paste.
+
+    Shown only on fields where pasted images actually reach the LLM. Spells out
+    "Ctrl" — and warns off ⌘V on macOS, where Cmd+V is the terminal emulator's
+    plain-text paste and physically cannot carry an image — because Mac users
+    would otherwise reach for Cmd+V and conclude the feature doesn't exist.
+    Returns "" when tips are switched off, mirroring _voice_hint().
+    """
+    from yeaboi.config import is_tips_enabled
+
+    if not is_tips_enabled():
+        return ""
+    suffix = " (not ⌘V)" if sys.platform == "darwin" else ""
+    return f" · \U0001f4f7 Ctrl+V paste screenshot{suffix}"
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +169,7 @@ def _build_description_screen(
         submit_hint = Text(_PAD + status_line, style="bold white", justify="left")
     else:
         submit_hint = Text(
-            _PAD + "Enter submit \u00b7 \u2303N new line \u00b7 Esc go back" + _voice_hint(),
+            _PAD + "Enter submit \u00b7 \u2303N new line \u00b7 Esc go back" + _voice_hint() + _image_hint(),
             style="dim",
             justify="left",
         )
@@ -319,9 +337,13 @@ def _build_question_screen(
             body_h += 1
         body.append(Text(""))
         body_h += 1
-        hint = Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel" + _voice_hint(), style="dim", justify="left")
+        hint = Text(
+            _PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel" + _voice_hint() + _image_hint(), style="dim", justify="left"
+        )
     else:
-        hint = Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel" + _voice_hint(), style="dim", justify="left")
+        hint = Text(
+            _PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel" + _voice_hint() + _image_hint(), style="dim", justify="left"
+        )
 
     # Inline voice-recording indicator replaces the hint so the user stays here.
     if status_line:

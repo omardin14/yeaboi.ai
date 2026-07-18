@@ -32,6 +32,7 @@ from yeaboi.agent.state import (
     StoryPointValue,
     UserStory,
 )
+from yeaboi.ui.session.editor import _editor_core as _core
 from yeaboi.ui.session.editor._editor_core import (
     _append_styled_line,
     _continuation_style,
@@ -324,6 +325,9 @@ def _render_editor(
     sub.append("Ctrl+S Save", style="bold rgb(60,160,80)")
     sub.append("  |  ", style="dim")
     sub.append("Esc Cancel", style="dim")
+    if _core._editor_notice:
+        sub.append("  |  ", style="dim")
+        sub.append(_core._editor_notice, style="bold white")
     if _is_add_marker(buffer, cursor_row):
         sub.append("  |  ", style="dim")
         sub.append("Enter Add Criteria", style="bold rgb(70,100,180)")
@@ -561,13 +565,23 @@ def edit_story(
             key = _key()
 
         old_row = cursor_row
+        if key and key != "" and key != "ctrl+v":
+            _core._set_editor_notice("")
 
         if key == "esc":
             logger.info("editor: story edit cancelled: %s", story.id)
+            _core._set_editor_notice("")
             return None
         elif key == "ctrl+s":
             logger.info("editor: story edit saved: %s", story.id)
+            _core._set_editor_notice("")
             return _parse_edited_story("\n".join(buffer), story)
+        elif key == "ctrl+v":
+            # Image paste is not supported inside artifact editors — a chip would
+            # become literal story text. Use Regenerate feedback for screenshots.
+            from yeaboi.ui.shared._attachments import unsupported_notice
+
+            unsupported_notice(_core._set_editor_notice)
         elif key == "enter":
             if _is_add_marker(buffer, cursor_row):
                 ac_count = sum(1 for ln in buffer if re.match(r"^\[\d+\]\s*Given", ln))

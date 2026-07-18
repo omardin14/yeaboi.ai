@@ -7,8 +7,11 @@ from langchain_core.language_models import BaseChatModel
 from yeaboi.agent.llm import (
     _PROVIDER_DEFAULTS,
     DEFAULT_MODEL,
+    build_multimodal_content,
     get_llm,
     get_usage_stats,
+    invoke_with_images,
+    load_image_b64,
     reset_usage_stats,
     track_usage,
 )
@@ -315,3 +318,95 @@ class TestTrackUsage:
         assert stats["output_tokens"] == 0
         assert stats["total_tokens"] == 0
         assert stats["call_count"] == 0
+
+
+class TestMultimodalHelpers:
+    """Tests for the pasted-screenshot (vision) helpers."""
+
+    PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+    @pytest.fixture
+    def png_file(self, tmp_path):
+        p = tmp_path / "shot.png"
+        p.write_bytes(self.PNG_BYTES)
+        return p
+
+    def test_load_image_b64_happy_path(self, png_file):
+        import base64
+
+        loaded = load_image_b64(png_file)
+        assert loaded is not None
+        b64, mime = loaded
+        assert mime == "image/png"
+        assert base64.b64decode(b64) == self.PNG_BYTES
+
+    def test_load_image_b64_jpeg_mime(self, tmp_path):
+        p = tmp_path / "shot.jpg"
+        p.write_bytes(b"\xff\xd8\xff")
+        assert load_image_b64(p)[1] == "image/jpeg"
+
+    def test_load_image_b64_missing_file_returns_none(self, tmp_path):
+        assert load_image_b64(tmp_path / "gone.png") is None
+
+    def test_build_content_no_images_returns_plain_string(self):
+        assert build_multimodal_content("hello", []) == "hello"
+        assert build_multimodal_content("hello", None) == "hello"
+
+    def test_build_content_with_image_returns_blocks(self, png_file):
+        content = build_multimodal_content("describe this", [str(png_file)])
+        assert isinstance(content, list)
+        assert content[0] == {"type": "text", "text": "describe this"}
+        img = content[1]
+        assert img["type"] == "image"
+        assert img["source_type"] == "base64"
+        assert img["mime_type"] == "image/png"
+        assert img["data"]
+
+    def test_build_content_all_missing_degrades_to_string(self, tmp_path):
+        content = build_multimodal_content("text", [str(tmp_path / "gone.png")])
+        assert content == "text"
+
+
+class TestInvokeWithImages:
+    """invoke_with_images must be a drop-in for invoke([HumanMessage(prompt)])."""
+
+    class _FakeLLM:
+        def __init__(self, fail_first=False):
+            self.fail_first = fail_first
+            self.calls = []
+
+        def invoke(self, messages):
+            self.calls.append(messages)
+            if self.fail_first and len(self.calls) == 1:
+                raise ValueError("model does not support image input")
+            return "response"
+
+    def test_no_images_single_plain_invoke(self):
+        llm = self._FakeLLM()
+        assert invoke_with_images(llm, "prompt", []) == "response"
+        assert len(llm.calls) == 1
+        assert llm.calls[0][0].content == "prompt"
+
+    def test_images_sent_as_blocks(self, tmp_path):
+        p = tmp_path / "a.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n")
+        llm = self._FakeLLM()
+        invoke_with_images(llm, "prompt", [str(p)])
+        content = llm.calls[0][0].content
+        assert isinstance(content, list)
+        assert {b["type"] for b in content} == {"text", "image"}
+
+    def test_rejected_images_retries_text_only(self, tmp_path):
+        p = tmp_path / "a.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n")
+        llm = self._FakeLLM(fail_first=True)
+        assert invoke_with_images(llm, "prompt", [str(p)]) == "response"
+        assert len(llm.calls) == 2
+        assert llm.calls[1][0].content == "prompt"  # retry dropped the image
+
+    def test_text_only_failure_propagates(self):
+        # With no images there is no retry — errors reach the caller's own
+        # auth/billing handling untouched.
+        llm = self._FakeLLM(fail_first=True)
+        with pytest.raises(ValueError):
+            invoke_with_images(llm, "prompt", [])

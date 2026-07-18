@@ -271,6 +271,13 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
             return "alt+enter"
         if ch == "\x13":
             return "ctrl+s"
+        if ch == "\x16":
+            # Ctrl+V → paste image from the OS clipboard. Terminals cannot deliver
+            # image bytes via stdin (bracketed paste above is text-only), so input
+            # loops handle "ctrl+v" by reading the clipboard directly — see
+            # ui/shared/_attachments.py. Note: Cmd+V on macOS stays a terminal
+            # *text* paste; Ctrl+V is the image binding, like Claude Code.
+            return "ctrl+v"
         # Ctrl+P / Ctrl+O — global background-music controls. Handled here (the one
         # input chokepoint every screen's loop reads through) so music works app-wide
         # with no per-loop changes, and works even inside text fields because these

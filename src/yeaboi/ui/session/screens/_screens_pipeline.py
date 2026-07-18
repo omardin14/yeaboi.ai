@@ -16,6 +16,7 @@ from rich.text import Text
 
 from yeaboi.ui.session._utils import _pad_left, _wrap_text
 from yeaboi.ui.session.screens._screens import _build_action_bar, _planning_title
+from yeaboi.ui.session.screens._screens_input import _image_hint
 from yeaboi.ui.shared._animations import scrollbar_column
 from yeaboi.ui.shared._components import PAD
 from yeaboi.ui.shared._scroll import publish_geometry
@@ -388,11 +389,13 @@ def _build_chat_screen(
     tick: float = 0.0,
     shimmer_tick: float | None = None,
     scroll_meta: dict | None = None,
+    notice: str = "",
 ) -> Panel:
     """Build the post-pipeline chat screen.
 
     messages: list of (role, text) tuples — role is "user" or "ai".
     shimmer_tick: if set, animates the title's travelling highlight.
+    notice: transient status text under the input box (e.g. Ctrl+V image paste).
     """
     from yeaboi.ui.shared._animations import loading_border_color
 
@@ -401,7 +404,7 @@ def _build_chat_screen(
 
     inner_h = height - 4
     header_h = 10
-    input_h = 5  # input box area
+    input_h = 6  # input box area + hint/notice line
     viewport_h = max(3, inner_h - header_h - input_h)
 
     # Render messages to lines
@@ -467,6 +470,10 @@ def _build_chat_screen(
     )
     body.append(Text(""))
     body.append(_pad_left(input_box))
+    if notice:
+        body.append(Text(_PAD + notice, style="bold white", justify="left"))
+    else:
+        body.append(Text(_PAD + "Enter send · Esc back" + _image_hint(), style="dim", justify="left"))
 
     content = Group(
         Text(""),
@@ -499,8 +506,13 @@ def _build_edit_prompt_screen(
     width: int = 80,
     height: int = 24,
     shimmer_tick: float | None = None,
+    notice: str = "",
 ) -> Panel:
-    """Build a screen prompting for edit feedback (used by both intake and pipeline edits)."""
+    """Build a screen prompting for edit feedback (used by both intake and pipeline edits).
+
+    notice: if set, replaces the submit hint with this transient status text
+        (e.g. Ctrl+V image-paste feedback).
+    """
     title = _planning_title(shimmer_tick)
     sub = Text(_PAD + "What changes would you like?", style="dim", justify="left")
 
@@ -525,7 +537,10 @@ def _build_edit_prompt_screen(
     )
     body.append(_pad_left(input_box))
     body.append(Text(""))
-    body.append(Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel", style="dim", justify="left"))
+    if notice:
+        body.append(Text(_PAD + notice, style="bold white", justify="left"))
+    else:
+        body.append(Text(_PAD + "Enter/Ctrl+S submit \u00b7 Esc cancel" + _image_hint(), style="dim", justify="left"))
 
     inner_h = height - 4
     header_h = 10

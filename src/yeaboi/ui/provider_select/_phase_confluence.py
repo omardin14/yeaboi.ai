@@ -301,6 +301,11 @@ def _run_confluence_form(
             values[selected] = values.get(selected, "") + key[6:]
             errors.pop(selected, None)
             verified.pop(selected, None)
+        elif key == "ctrl+v":
+            # Credential fields never reach an LLM — reject image paste with a notice.
+            from yeaboi.ui.shared._attachments import UNSUPPORTED_MESSAGE
+
+            errors[selected] = UNSUPPORTED_MESSAGE
         elif len(key) == 1 and key.isprintable():
             values[selected] = values.get(selected, "") + key
             errors.pop(selected, None)

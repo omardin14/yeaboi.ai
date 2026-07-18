@@ -673,6 +673,36 @@ class TestSmallProjectOversizedField:
         assert restored["_intake_mode"] == "small_project"
 
 
+class TestPastedImagesFields:
+    """Pasted-screenshot path lists round-trip through session state (--resume)."""
+
+    def test_round_trip(self):
+        from yeaboi.sessions import _deserialize_state, _serialize_state
+
+        state = {
+            "messages": [],
+            "pasted_images": ["/home/u/.yeaboi/attachments/p/img-a1b2c3d4.png"],
+            "review_feedback_images": ["/home/u/.yeaboi/attachments/p/img-e5f6.jpg"],
+            "chat_images": [],
+        }
+        restored = _deserialize_state(_serialize_state(state))
+        assert restored["pasted_images"] == state["pasted_images"]
+        assert restored["review_feedback_images"] == state["review_feedback_images"]
+        assert restored["chat_images"] == []
+
+    def test_legacy_state_without_fields_deserializes(self):
+        # Sessions saved before this feature have no image keys — must not raise.
+        from yeaboi.sessions import _deserialize_state, _serialize_state
+
+        restored = _deserialize_state(_serialize_state({"messages": [], "project_name": "old"}))
+        assert "pasted_images" not in restored
+        assert restored.get("pasted_images", []) == []
+
+    def test_fields_are_optional_keys(self):
+        for key in ("pasted_images", "review_feedback_images", "chat_images"):
+            assert key in ScrumState.__optional_keys__
+
+
 class TestStateGraphCompatibility:
     def test_stategraph_accepts_scrum_state(self):
         """LangGraph's StateGraph must accept ScrumState without errors."""

@@ -898,6 +898,7 @@ def run_repl(
                     graph_state.pop("pending_review", None)
                     graph_state.pop("last_review_decision", None)
                     graph_state.pop("last_review_feedback", None)
+                    graph_state.pop("review_feedback_images", None)
 
                     # Check if the pipeline is now complete (all artifacts generated).
                     # If so, show a completion message instead of invoking the graph
