@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 from rich.panel import Panel
 
 from yeaboi.ui.shared._ascii_font import render_ascii_text
-from yeaboi.ui.splash import _build_splash_frame, show_splash
+from yeaboi.ui.splash import _build_shine_frame, _build_splash_frame, show_splash
 
 
 class TestBuildSplashFrame:
@@ -61,22 +61,63 @@ class TestBuildSplashFrame:
         assert isinstance(frame, Panel)
 
     def test_text_centered(self):
-        """The rendered Text object uses center justification."""
+        """The wordmark block is horizontally centred inside the panel."""
         lines = render_ascii_text("HI")
         frame = _build_splash_frame(lines, width=80, height=24, opacity=1.0)
-        # Dig into the Group to find the Text renderable
-        group = frame.renderable
-        # Group stores renderables in _renderables
-        text_items = [r for r in group.renderables if isinstance(r, from_text_cls())]
-        # At least one Text should be center-justified (the ASCII art)
-        assert any(t.justify == "center" for t in text_items if hasattr(t, "justify"))
+        art_rows = _rendered_art_rows(frame, width=80)
+        block_w = max(len(line) for line in lines)
+        # Panel border (1) + padding (2) + shared block pad ((inner - block)//2)
+        expected_start = 3 + (74 - block_w) // 2
+        assert art_rows
+        assert all(_first_ink(row) == expected_start for row in art_rows)
+
+    def test_rows_stay_aligned_with_uneven_trailing_content(self):
+        """Rows whose stripped widths differ must share one left origin.
+
+        Regression: Rich's per-line center-justify rstripped each row and
+        re-centred it by its own width, so STANDUP's shorter bottom rows (the
+        P glyph ends 5 cells early) drifted right and broke the letters.
+        """
+        from yeaboi.ui.shared._wordmarks import get_shadow_wordmark
+
+        lines = get_shadow_wordmark("Standup")
+        assert lines, "STANDUP wordmark should exist"
+        frame = _build_splash_frame(lines, width=120, height=30, opacity=1.0)
+        art_rows = _rendered_art_rows(frame, width=120)
+        starts = {_first_ink(row) for row in art_rows}
+        assert len(art_rows) == len(lines)
+        assert len(starts) == 1, f"rows start at differing columns: {starts}"
+
+    def test_shine_frame_rows_stay_aligned(self):
+        """The shine frame keeps uneven rows column-aligned too."""
+        from yeaboi.ui.shared._wordmarks import get_shadow_wordmark
+
+        lines = get_shadow_wordmark("Standup")
+        frame = _build_shine_frame(lines, width=120, height=30, hotspot=0.5)
+        art_rows = _rendered_art_rows(frame, width=120)
+        starts = {_first_ink(row) for row in art_rows}
+        assert len(art_rows) == len(lines)
+        assert len(starts) == 1, f"rows start at differing columns: {starts}"
 
 
-def from_text_cls():
-    """Return the Text class for isinstance checks."""
-    from rich.text import Text
+_ART_CHARS = "█╗╔╝╚═║"
 
-    return Text
+
+def _rendered_art_rows(frame, *, width: int) -> list[str]:
+    """Render a frame panel to plain text and return the wordmark rows."""
+    from io import StringIO
+
+    from rich.console import Console
+
+    buf = StringIO()
+    console = Console(file=buf, width=width, height=60)
+    console.print(frame)
+    return [row for row in buf.getvalue().splitlines() if any(ch in _ART_CHARS for ch in row)]
+
+
+def _first_ink(row: str) -> int:
+    """Column of the first wordmark character in a rendered panel row."""
+    return min(row.index(ch) for ch in _ART_CHARS if ch in row)
 
 
 class TestShowSplash:
