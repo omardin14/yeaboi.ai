@@ -496,6 +496,32 @@ def get_log_level() -> str:
     return "WARNING"
 
 
+# Levels settable from the Settings page cycle button. CRITICAL stays readable
+# from .env for power users but is deliberately not part of the cycle.
+VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+def set_log_level(level: str) -> None:
+    """Persist LOG_LEVEL to ~/.yeaboi/.env and apply it to the running process.
+
+    Uses dotenv's set_key so only this one key is updated (preserves other
+    keys/comments). os.environ is updated too so get_log_level() reflects the
+    change immediately. Callers that want live handlers retuned should also
+    call yeaboi.logging_setup.apply_level().
+
+    Raises ValueError for levels outside VALID_LOG_LEVELS.
+    """
+    from dotenv import set_key
+
+    level = level.upper()
+    if level not in VALID_LOG_LEVELS:
+        raise ValueError(f"invalid log level: {level}")
+    config_file = get_config_file()
+    set_key(str(config_file), "LOG_LEVEL", level)
+    os.environ["LOG_LEVEL"] = level
+    logger.info("Log level set to %s (persisted to %s)", level, config_file)
+
+
 def _env_truthy(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
 

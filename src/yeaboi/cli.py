@@ -2,7 +2,6 @@
 
 import argparse
 import logging
-import logging.handlers
 import os
 import re
 import sys
@@ -18,7 +17,6 @@ from yeaboi import __version__, paths
 from yeaboi.config import (
     detect_proxy,
     disable_langsmith_tracing,
-    get_log_level,
     is_langsmith_enabled,
     load_user_config,
 )
@@ -557,18 +555,16 @@ def _run_standup(args: argparse.Namespace) -> int:
 
     # See README: "Daily Standup" — scheduling, headless run
     """
-    import logging as _logging
-
-    from yeaboi.paths import get_db_path, get_standup_log_dir
+    from yeaboi.logging_setup import attach_mode_handler, configure_logging
+    from yeaboi.paths import get_db_path
     from yeaboi.sessions import SessionStore
 
-    # Route standup logs to their own directory so scheduled runs are auditable.
-    log_dir = get_standup_log_dir()
-    handler = _logging.FileHandler(log_dir / "standup-run.log", encoding="utf-8")
-    handler.setFormatter(_logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
-    root = _logging.getLogger("yeaboi")
-    root.addHandler(handler)
-    root.setLevel(getattr(_logging, get_log_level(), _logging.INFO))
+    # Route standup records to logs/standup/standup.log (rotating) alongside the
+    # main TUI log, so scheduled runs are auditable. Level comes from LOG_LEVEL
+    # (default WARNING) — set LOG_LEVEL=INFO in ~/.yeaboi/.env for run-by-run
+    # audit detail. The process exits after the run, so no detach is needed.
+    configure_logging()
+    attach_mode_handler("standup")
 
     db_path = get_db_path()
     session_id = args.standup_session
@@ -1041,33 +1037,25 @@ def main(argv: list[str] | None = None) -> None:
     # ── Non-interactive headless flow ────────────────────────────────────────
     # Runs the full pipeline without any TUI, splash, or interactive input.
     if args.non_interactive:
+        from yeaboi.logging_setup import configure_logging
+
+        configure_logging()
         _run_headless(args)
         return
 
     # ── Migrate legacy file structure ────────────────────────────────────────
-    from yeaboi.paths import get_tui_log_path, migrate_legacy_paths
+    from yeaboi.paths import migrate_legacy_paths
 
     migrate_legacy_paths()
 
     # ── File-based logging ────────────────────────────────────────────────────
-    # Writes to ~/.scrum-agent/logs/tui/yeaboi.log so developers can
-    # diagnose issues without interfering with the TUI display. Rotates at 2 MB.
-    # Log level is controlled by LOG_LEVEL in .env (default: WARNING).
-    # Set LOG_LEVEL=DEBUG for full diagnostics.
-    _log_path = get_tui_log_path()
-    _log_level = getattr(logging, get_log_level(), logging.WARNING)
-    _file_handler = logging.handlers.RotatingFileHandler(
-        _log_path,
-        maxBytes=2 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    _file_handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"),
-    )
-    _file_handler.setLevel(_log_level)
-    logging.getLogger("yeaboi").addHandler(_file_handler)
-    logging.getLogger("yeaboi").setLevel(_log_level)
+    # Writes to ~/.yeaboi/logs/tui/yeaboi.log so developers can diagnose issues
+    # without interfering with the TUI display. Rotates at 2 MB. Log level is
+    # controlled by LOG_LEVEL in .env (default: WARNING; DEBUG for diagnostics)
+    # and can be changed live from the Settings page.
+    from yeaboi.logging_setup import configure_logging
+
+    configure_logging()
 
     # Create the console with the requested theme so semantic style names
     # ([command], [hint], [success], etc.) resolve correctly throughout the

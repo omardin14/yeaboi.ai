@@ -445,3 +445,59 @@ class TestCalcViewport:
         vp = calc_viewport(30, header_h=6, action_h=4)
         # inner = 26, viewport = 26-6-4=16
         assert vp == 16
+
+
+class TestLogLevelButton:
+    def test_registered_in_btn_colors(self):
+        from yeaboi.ui.shared._components import _BTN_COLORS
+
+        assert "Log Level" in _BTN_COLORS
+        # Same silver scheme as Configure — both are Settings-page actions.
+        assert _BTN_COLORS["Log Level"] == _BTN_COLORS["Configure"]
+
+    def test_settings_screen_renders_log_level_button(self):
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
+
+        panel = _build_settings_screen({"_config_path": "/tmp/.env"}, width=100, height=90)
+        assert isinstance(panel, Panel)
+        console = Console(width=120)
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Log Level" in out
+        assert "Configure" in out
+        assert "Back" in out
+
+    def test_three_buttons_fit_at_width_80(self):
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
+
+        panel = _build_settings_screen({"_config_path": "/tmp/.env"}, width=80, height=40, action_sel=1)
+        console = Console(width=80)
+        with console.capture() as cap:
+            console.print(panel)
+        assert "Log Level" in cap.get()
+
+
+class TestNextLogLevel:
+    def test_full_cycle(self):
+        from yeaboi.ui.mode_select import _next_log_level
+
+        assert _next_log_level("DEBUG") == "INFO"
+        assert _next_log_level("INFO") == "WARNING"
+        assert _next_log_level("WARNING") == "ERROR"
+        assert _next_log_level("ERROR") == "DEBUG"
+
+    def test_lowercase_input(self):
+        from yeaboi.ui.mode_select import _next_log_level
+
+        assert _next_log_level("info") == "WARNING"
+
+    def test_unknown_treated_as_warning(self):
+        from yeaboi.ui.mode_select import _next_log_level
+
+        assert _next_log_level("CRITICAL") == "ERROR"
+        assert _next_log_level("garbage") == "ERROR"

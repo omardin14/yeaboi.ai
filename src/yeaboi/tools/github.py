@@ -149,7 +149,7 @@ def github_read_repo(repo_url: str, max_depth: int = 2) -> str:
                     pct = bytes_count / total * 100
                     lines.append(f"  {lang}: {pct:.1f}%")
         except github.GithubException:
-            pass  # Language data not critical — skip silently
+            logger.debug("github_read_repo: language data unavailable — skipping", exc_info=True)
 
         lines.append("")
         lines.append(
@@ -319,7 +319,7 @@ def github_read_readme(repo_url: str) -> str:
                     contrib_content += f"\n\n[Truncated at {_MAX_CONTENT_CHARS} characters]"
                 sections.append(f"\n=== CONTRIBUTING.md ===\n\n{contrib_content}")
         except github.GithubException:
-            pass  # CONTRIBUTING.md is optional — skip silently
+            logger.debug("github_read_readme: no CONTRIBUTING.md — skipping")
 
         logger.debug("github_read_readme completed for %s", slug)
         return "\n".join(sections)

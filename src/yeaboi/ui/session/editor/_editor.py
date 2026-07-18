@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 
@@ -45,6 +46,8 @@ from yeaboi.ui.shared._components import PAD, planning_title
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
 
 _ADD_AC_MARKER = "Add Criteria"
 
@@ -478,6 +481,7 @@ def edit_story(
 
     Returns a new UserStory with edited fields, or None if cancelled (Esc).
     """
+    logger.info("editor: story editor opened: %s", story.id)
     text = _story_to_text(story)
     buffer = text.split("\n")
     cursor_row, cursor_col = _clamp_cursor_to_editable(buffer, 0, 0)
@@ -559,8 +563,10 @@ def edit_story(
         old_row = cursor_row
 
         if key == "esc":
+            logger.info("editor: story edit cancelled: %s", story.id)
             return None
         elif key == "ctrl+s":
+            logger.info("editor: story edit saved: %s", story.id)
             return _parse_edited_story("\n".join(buffer), story)
         elif key == "enter":
             if _is_add_marker(buffer, cursor_row):

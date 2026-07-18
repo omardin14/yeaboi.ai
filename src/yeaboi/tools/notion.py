@@ -435,6 +435,7 @@ def notion_recent_pages(root_id: str = "", days: int = 1) -> list[dict]:
             user = client.users.retrieve(user_id)
             name = user.get("name", "") if isinstance(user, dict) else ""
         except Exception:
+            logger.debug("notion: user lookup failed for id=%s", user_id, exc_info=True)
             name = ""
         _user_names[user_id] = name
         return name

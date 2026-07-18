@@ -423,7 +423,7 @@ def _phase_intake_questions(
         else:
             screen_kwargs["preamble_lines"] = preamble_lines
 
-        logger.debug("Intake graph invoke: Q%s", cur_q if isinstance(qs, QuestionnaireState) else "?")
+        logger.info("Intake answer submitted: Q%s", cur_q if isinstance(qs, QuestionnaireState) else "?")
         result = _invoke_with_animation(
             live,
             console,

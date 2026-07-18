@@ -4453,7 +4453,7 @@ def _build_settings_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(["Configure", "Back"], action_sel)
+    btn_top, btn_mid, btn_bot = build_action_buttons(["Configure", "Log Level", "Back"], action_sel)
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable

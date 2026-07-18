@@ -10,9 +10,13 @@
 #   3. Add a dispatch branch in cli.main()
 """
 
+import logging
+
 from rich.console import Console
 
 from yeaboi.prompts.intake import STARTUP_MODE_MENU, STARTUP_MODE_ORDER
+
+logger = logging.getLogger(__name__)
 
 
 def _render_startup_mode_menu(console: Console) -> None:
@@ -27,6 +31,7 @@ def _render_startup_mode_menu(console: Console) -> None:
     Args:
         console: Rich Console instance for output.
     """
+    logger.info("mode menu: shown")
     console.print()
     console.print("[bold]What would you like to do?[/bold]")
     console.print()
@@ -55,6 +60,7 @@ def _resolve_startup_mode(user_input: str) -> str | None:
     try:
         idx = int(user_input)
         if 1 <= idx <= len(STARTUP_MODE_ORDER):
+            logger.info("mode menu: selected %s", STARTUP_MODE_ORDER[idx - 1])
             return STARTUP_MODE_ORDER[idx - 1]
         return None
     except ValueError:
@@ -62,5 +68,6 @@ def _resolve_startup_mode(user_input: str) -> str | None:
 
     # Accept exact key match (used by --mode flag and tests)
     if user_input in STARTUP_MODE_ORDER:
+        logger.info("mode menu: selected %s", user_input)
         return user_input
     return None

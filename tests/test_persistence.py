@@ -204,6 +204,21 @@ class TestDeleteProject:
         result = delete_project("no-projects")
         assert result is False
 
+    def test_delete_removes_log_and_rotation_backups(self, _isolate_config_dir, monkeypatch, tmp_path):
+        logs_dir = tmp_path / "logs" / "planning"
+        logs_dir.mkdir(parents=True)
+        monkeypatch.setattr("yeaboi.persistence._LOGS_DIR", logs_dir)
+
+        save_project_snapshot("proj-1", {"messages": ["a"]})
+        # Simulate a rotated session log: base file plus RotatingFileHandler backups.
+        for name in ("proj-1.log", "proj-1.log.1", "proj-1.log.2"):
+            (logs_dir / name).write_text("log line\n")
+        (logs_dir / "proj-2.log").write_text("other session\n")
+
+        assert delete_project("proj-1") is True
+        assert not list(logs_dir.glob("proj-1.log*"))
+        assert (logs_dir / "proj-2.log").exists()  # other sessions untouched
+
 
 class TestExportProjectJson:
     def test_export_existing_project(self, _isolate_config_dir, tmp_path):

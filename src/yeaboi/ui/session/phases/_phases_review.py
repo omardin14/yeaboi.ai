@@ -235,6 +235,7 @@ def _edit_accordion_browse(
             browse_idx = min(len(nav_questions) - 1, browse_idx + 1)
         elif key == "enter":
             q_num = nav_questions[browse_idx]
+            logger.info("Accordion edit: Q%d selected for re-answer", q_num)
             if graph is None:
                 # Dry-run: edit answer inline (no graph invocation).
                 # Uses the accordion question input which supports both
@@ -265,6 +266,7 @@ def _edit_accordion_browse(
                 qs.editing_question = None
                 if new_answer is not None and new_answer != "":
                     qs.answers[q_num] = new_answer
+                    logger.info("Accordion edit: Q%d answer updated", q_num)
                 # Stay in browse mode — re-render accordion with updated answer
                 graph_state["pending_review"] = "project_intake"
             else:

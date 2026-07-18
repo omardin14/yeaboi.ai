@@ -20,6 +20,8 @@ from pathlib import Path
 
 from rich.console import Console
 
+from yeaboi.logging_setup import attach_mode_handler, mode_log
+from yeaboi.logging_setup import detach as detach_mode_handler
 from yeaboi.paths import get_db_path as _get_db_path
 from yeaboi.ui.mode_select.screens._project_cards import (  # noqa: F401
     ProfileSummary,
@@ -77,6 +79,20 @@ logger = logging.getLogger(__name__)
 _DESC_SCROLL_SPEED = 200  # characters per second for typewriter reveal
 _HEADER_SUB_SPEED = 45  # characters per second for the page subtitle typewriter reveal
 _FRAME_TIME = FRAME_TIME_60FPS
+
+
+def _next_log_level(current: str) -> str:
+    """Return the next level in the Settings cycle: DEBUG → INFO → WARNING → ERROR → DEBUG.
+
+    Unknown values (including CRITICAL, which is .env-only) are treated as
+    WARNING, so the first press lands on ERROR.
+    """
+    from yeaboi.config import VALID_LOG_LEVELS
+
+    current = current.upper()
+    if current not in VALID_LOG_LEVELS:
+        current = "WARNING"
+    return VALID_LOG_LEVELS[(VALID_LOG_LEVELS.index(current) + 1) % len(VALID_LOG_LEVELS)]
 
 
 # ---------------------------------------------------------------------------
@@ -1290,6 +1306,13 @@ def _standup_generate(session_id: str) -> str:
 
         report = run_standup(session_id, deliver=False, dry_run=True)
         warn = f" · {len(report.warnings)} notice(s)" if report.warnings else ""
+        logger.info(
+            "standup: generated report — day %s/%s, %d notice(s) (session=%s)",
+            report.sprint_day,
+            report.sprint_total_days,
+            len(report.warnings),
+            session_id,
+        )
         return f"Generated — day {report.sprint_day}/{report.sprint_total_days}, {report.confidence_label}{warn}."
     except Exception as e:
         logger.error("standup: generate failed: %s", e, exc_info=True)
@@ -1304,9 +1327,11 @@ def _standup_export(session_id: str, data: dict) -> str:
     with StandupStore(_ana_dbp) as store:
         report = store.get_latest_report(session_id)
     if report is None:
+        logger.info("standup export: nothing to export yet (session=%s)", session_id)
         return "Nothing to export yet — press Generate first."
     try:
         paths = export_standup(report, project_name=data.get("session_name", "") or session_id)
+        logger.info("standup export: wrote Markdown + HTML to %s (session=%s)", paths["markdown"].parent, session_id)
         return f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
     except Exception as e:
         logger.error("standup export failed: %s", e, exc_info=True)
@@ -1338,11 +1363,13 @@ def _standup_generate_flow(
         default="",
     )
     if update is None:
+        logger.info("standup generate: cancelled at update prompt (session=%s)", session_id)
         return None  # Esc → cancel the whole Generate
     if update.strip():
         member = get_standup_user_name()
         with StandupStore(_ana_dbp) as store:
             store.save_my_update(session_id, date.today().isoformat(), member, update.strip())
+        logger.info("standup generate: self-update saved (session=%s)", session_id)
     return _standup_generate(session_id)
 
 
@@ -1447,9 +1474,12 @@ def _standup_configure(console: Console, live, read_key, frame_time, supports_ti
     cur_enabled = "yes" if existing.get("enabled") else "no"
 
     def _ask(prompt: str, step: str, default: str) -> str | None:
-        return _standup_read_line(
+        value = _standup_read_line(
             console, live, read_key, frame_time, supports_timeout, prompt=prompt, step=step, default=default
         )
+        if value is None:
+            logger.info("standup configure: cancelled at %s (session=%s)", step.strip(), session_id)
+        return value
 
     # Ask for the STANDUP time (when it happens); the job fires a few minutes before.
     time_in = _ask("Standup time (HH:MM) — the meeting time", "Configure standup  (1/6)", cur_time)
@@ -1504,16 +1534,20 @@ def _standup_my_update(console: Console, live, read_key, frame_time, supports_ti
         console, live, read_key, frame_time, supports_timeout, prompt="Your name", step="My update  (1/2)", default="Me"
     )
     if member is None:
+        logger.info("standup my-update: cancelled (session=%s)", session_id)
         return "Update cancelled."
     text = _standup_read_line(
         console, live, read_key, frame_time, supports_timeout, prompt="Your update for today", step="My update  (2/2)"
     )
     if text is None:
+        logger.info("standup my-update: cancelled (session=%s)", session_id)
         return "Update cancelled."
     if not text.strip():
+        logger.info("standup my-update: no update entered (session=%s)", session_id)
         return "No update entered."
     with StandupStore(_ana_dbp) as store:
         store.save_my_update(session_id, date.today().isoformat(), member, text.strip())
+    logger.info("standup my-update: saved (session=%s)", session_id)
     return f"Saved update for {member}."
 
 
@@ -1570,6 +1604,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                     logger.info("standup: no session available — returning to mode select")
                 break
             if sel == 0:  # Generate — ask for the user's own update first, then run
+                logger.info("standup: Generate pressed (session=%s)", session_id)
                 try:
                     proceed = _standup_generate_flow(console, live, read_key, frame_time, supports_timeout, session_id)
                 except Exception as e:  # never let a prompt crash the TUI
@@ -1581,13 +1616,16 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                 else:
                     data = _collect_standup_data()
             elif sel == 3:  # Export — write the latest report as Markdown + HTML
+                logger.info("standup: Export pressed (session=%s)", session_id)
                 data = _collect_standup_data(message=_standup_export(session_id, data))
                 scroll = 0
             else:  # My Update / Configure — in-TUI themed input (stays inside Live)
                 try:
                     if sel == 1:
+                        logger.info("standup: My Update pressed (session=%s)", session_id)
                         msg = _standup_my_update(console, live, read_key, frame_time, supports_timeout, session_id)
                     else:
+                        logger.info("standup: Configure pressed (session=%s)", session_id)
                         msg = _standup_configure(console, live, read_key, frame_time, supports_timeout, session_id)
                 except Exception as e:  # never let a prompt crash the TUI
                     logger.error("standup action failed: %s", e, exc_info=True)
@@ -1597,6 +1635,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
         elif k in ("esc", "q"):
             break
         _render()
+    logger.info("standup: page closed (session=%s)", data.get("session_id", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -1748,9 +1787,11 @@ def _performance_export(engineer: str) -> str:
     elif prep is not None:
         artifact, kind = prep, "prep"
     if artifact is None:
+        logger.info("performance export: nothing to export yet for engineer=%s", engineer)
         return "Nothing to export yet — generate a 1:1 prep or review first."
     try:
         paths = export.export_artifact(artifact, engineer=engineer, kind=kind)
+        logger.info("performance export: wrote %s for engineer=%s to %s", kind, engineer, paths["markdown"].parent)
         return f"Exported {kind} to {paths['markdown'].parent}  (Markdown + HTML)"
     except Exception as e:  # noqa: BLE001
         logger.error("performance export failed: %s", e, exc_info=True)
@@ -1849,21 +1890,25 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                 from yeaboi.performance.engine import run_one_on_one_prep
 
                 prep = run_one_on_one_prep(engineer, session_id=session_id, db_path=_ana_dbp)
+                logger.info("performance: 1:1 prep generated for engineer=%s", engineer)
                 _show_detail(format_prep_lines(prep), f"1:1 Prep — {engineer}", "Prep generated.")
             elif label == "1:1 Complete":
                 transcript = _performance_get_transcript(console, live, read_key, frame_time, supports_timeout)
                 if transcript is None or not transcript.strip():
+                    logger.info("performance: 1:1 completion cancelled — no transcript (engineer=%s)", engineer)
                     state["message"] = "1:1 completion cancelled — no transcript."
                     return
                 from yeaboi.performance.engine import complete_one_on_one
 
                 record = complete_one_on_one(engineer, transcript, session_id=session_id, db_path=_ana_dbp)
                 sent = "email sent" if not record.warnings else "see notices"
+                logger.info("performance: 1:1 completed for engineer=%s (%s)", engineer, sent)
                 _show_detail(format_completion_lines(record), f"1:1 Summary — {engineer}", f"Completed — {sent}.")
             elif label == "6mo Review":
                 from yeaboi.performance.engine import run_six_month_review
 
                 review = run_six_month_review(engineer, session_id=session_id, db_path=_ana_dbp)
+                logger.info("performance: 6-month review generated for engineer=%s", engineer)
                 _show_detail(format_review_lines(review), f"6-Month Review — {engineer}", "Review generated.")
             elif label == "Notes":
                 note = _standup_read_line(
@@ -1881,8 +1926,10 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
 
                     with PerformanceStore(_ana_dbp) as store:
                         store.add_note(engineer, note.strip())
+                    logger.info("performance: note saved for engineer=%s", engineer)
                     state["message"] = f"Note saved for {engineer}."
                 else:
+                    logger.info("performance: note cancelled — nothing entered (engineer=%s)", engineer)
                     state["message"] = "No note entered."
         except Exception as e:  # never let an action crash the TUI
             logger.error("performance action %s failed: %s", label, e, exc_info=True)
@@ -1909,9 +1956,11 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                 if label == "Back":
                     break
                 if not roster:
+                    logger.info("performance: %s pressed with empty roster", label)
                     state["message"] = "No engineers — connect Jira or Azure DevOps first."
                 else:
                     engineer = roster[state["selected"]]
+                    logger.info("performance: %s pressed for engineer=%s", label, engineer)
                     if label == "Export":
                         state["message"] = _performance_export(engineer)
                     else:
@@ -1938,12 +1987,14 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                     state["sel"], state["scroll"], state["message"] = 0, 0, ""
                     state["select_time"] = time.monotonic()  # replay the reveal on return
                 elif label == "Export" and roster:
+                    logger.info("performance: Export pressed in detail view for engineer=%s", roster[state["selected"]])
                     state["message"] = _performance_export(roster[state["selected"]])
             elif k in ("esc", "q"):
                 state["view"] = "roster"
                 state["sel"], state["scroll"], state["message"] = 0, 0, ""
                 state["select_time"] = time.monotonic()
         _render()
+    logger.info("performance: page closed (session=%s)", session_id)
 
 
 def _collect_reporting_data(message: str = "") -> dict:
@@ -2084,10 +2135,12 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
     def _generate() -> None:
         """Generate the delivery report for the selected non-quarter period."""
         period_key = periods[state["selected"]][0]
+        logger.info("reporting: generating report (period=%s, session=%s)", period_key, session_id)
         try:
             from yeaboi.reporting.engine import run_delivery_report
 
             report = run_delivery_report(period_key, session_id=session_id, db_path=_ana_dbp)
+            logger.info("reporting: report generated — %d item(s) (period=%s)", len(report.delivered_items), period_key)
             _show_report(report, _delivered_msg(report))
         except Exception as e:  # never let an action crash the TUI
             logger.error("reporting generate failed: %s", e, exc_info=True)
@@ -2095,6 +2148,13 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
 
     def _run_quarter(window_start: str, window_end: str, names: tuple, label: str) -> None:
         """Generate a quarter report over an explicit sprint-derived window."""
+        logger.info(
+            "reporting: generating quarter report %s → %s over %d sprint(s) (session=%s)",
+            window_start,
+            window_end,
+            len(names),
+            session_id,
+        )
         try:
             from yeaboi.reporting.engine import run_delivery_report
 
@@ -2107,6 +2167,7 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
                 sprint_names=names,
                 period_label_override=label,
             )
+            logger.info("reporting: quarter report generated — %d item(s)", len(report.delivered_items))
             _show_report(report, _delivered_msg(report))
         except Exception as e:  # never let an action crash the TUI
             logger.error("reporting quarter generate failed: %s", e, exc_info=True)
@@ -2128,10 +2189,12 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
             logger.warning("reporting: could not load plan state for sprint list", exc_info=True)
         refs = mark_in_quarter(list_sprints(plan_state), q_start, q_end)
         if not refs:
+            logger.info("reporting: no sprint list available — reporting over the calendar quarter")
             today_iso = _date.today().isoformat()
             _run_quarter(q_start, min(q_end, today_iso), (), q_label)
             state["message"] = "No sprint list available — reported over the calendar quarter. " + state["message"]
             return
+        logger.info("reporting: sprint multi-select opened (%d sprint(s))", len(refs))
         state["sprints"] = refs
         state["sprint_checked"] = {i for i, s in enumerate(refs) if s.in_quarter}
         inq = [i for i, s in enumerate(refs) if s.in_quarter]
@@ -2144,8 +2207,10 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
         refs = state["sprints"]
         checked = sorted(i for i in state["sprint_checked"] if 0 <= i < len(refs))
         if not checked:
+            logger.info("reporting: sprint selection confirmed with no sprints checked")
             state["message"] = "Select at least one sprint (Space to toggle)."
             return
+        logger.info("reporting: sprint selection confirmed (%d of %d sprint(s))", len(checked), len(refs))
         sel = [refs[i] for i in checked]
         starts = [s.start_date for s in sel if s.start_date]
         ends = [s.end_date for s in sel if s.end_date]
@@ -2160,12 +2225,15 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
     def _export() -> None:
         report = state.get("report")
         if report is None:
+            logger.info("reporting: Export pressed with nothing to export")
             state["message"] = "Nothing to export yet — generate a report first."
             return
+        logger.info("reporting: Export pressed (period=%s)", report.period_label)
         try:
             from yeaboi.reporting.export import export_report
 
             paths = export_report(report, theme=state["theme"])
+            logger.info("reporting: exported to %s (theme=%s)", paths["markdown"].parent, state["theme"])
             state["message"] = f"Exported to {paths['markdown'].parent}  (Markdown + HTML + slides)"
         except Exception as e:  # noqa: BLE001
             logger.error("reporting export failed: %s", e, exc_info=True)
@@ -2174,6 +2242,7 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
     def _cycle_theme() -> None:
         idx = (list(THEMES).index(state["theme"]) + 1) % len(THEMES) if state["theme"] in THEMES else 0
         state["theme"] = THEMES[idx]
+        logger.info("reporting: presentation theme cycled to %s", state["theme"])
         state["message"] = f"Presentation theme: {state['theme']}"
 
     _render()
@@ -2252,6 +2321,7 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
                 state["view"] = "picker"
                 state["sel"], state["scroll"], state["message"] = 0, 0, ""
         _render()
+    logger.info("reporting: page closed (session=%s)", session_id)
 
 
 def _resolve_retro_session() -> tuple[str, str, str, str]:
@@ -2341,6 +2411,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
     server = RetroServer(board, port=get_retro_server_port())
     try:
         server.start()
+        logger.info("retro: server started on port %s (session=%s)", server.port, session_id)
     except OSError as e:
         logger.error("retro: failed to start server: %s", e, exc_info=True)
         data = {
@@ -2377,6 +2448,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                 remote["status"] = "Setting up remote link — fetching cloudflared (first use, ~40MB)…"
                 binary = ensure_cloudflared()
                 if binary is None:
+                    logger.warning("retro: remote link failed — could not obtain cloudflared binary")
                     remote["status"] = "Remote link failed — could not obtain cloudflared (see logs)."
                     return
                 remote["status"] = "Starting secure Cloudflare tunnel…"
@@ -2384,8 +2456,10 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                 public = tunnel.start(timeout=30)
                 if not public:
                     tunnel.stop()
+                    logger.warning("retro: remote link failed — tunnel did not start within timeout")
                     remote["status"] = "Remote link failed — tunnel did not start (see logs)."
                     return
+                logger.info("retro: remote tunnel ready (port=%s)", server.port)
                 remote["tunnel"] = tunnel
                 # Token-free public URL: off-network teammates must still enter the
                 # join code (the token is never handed out in a shareable link).
@@ -2398,11 +2472,13 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
             finally:
                 remote["starting"] = False
 
+        logger.info("retro: Share Remotely pressed — starting tunnel setup (session=%s)", session_id)
         remote["starting"] = True
         remote["status"] = "Setting up remote link…"
         _threading.Thread(target=_worker, name="retro-tunnel-setup", daemon=True).start()
 
     def _stop_remote() -> None:
+        logger.info("retro: Stop Sharing pressed — stopping remote tunnel (session=%s)", session_id)
         tunnel = remote.get("tunnel")
         if tunnel is not None:
             tunnel.stop()
@@ -2451,10 +2527,12 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                 if sel == 3:  # Close
                     break
                 if sel == 0:  # Generate Action Items (one LLM call, never raises)
+                    logger.info("retro: Generate Action Items pressed (session=%s)", session_id)
                     try:
                         from yeaboi.retro.engine import generate_action_items
 
                         message = generate_action_items(board)
+                        logger.info("retro: generate action items result: %s", message)
                     except Exception as e:  # defensive — never let it crash the TUI
                         logger.error("retro: generate action items failed: %s", e, exc_info=True)
                         message = f"Generate failed: {e}"
@@ -2466,11 +2544,13 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                         _start_remote()
                     scroll = 0
                 elif sel == 2:  # Export → Markdown + HTML
+                    logger.info("retro: Export pressed (session=%s)", session_id)
                     try:
                         from yeaboi.retro.export import export_retro
 
                         report = board_to_report(board, sprint_name=sprint_name)
                         paths = export_retro(report, project_name=project_name or session_name)
+                        logger.info("retro: exported to %s", paths["markdown"].parent)
                         message = f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
                     except Exception as e:
                         logger.error("retro: export failed: %s", e, exc_info=True)
@@ -2692,6 +2772,10 @@ def select_mode(
             # ── Route: Team Analysis mode → dedicated analysis flow ──────
             if chosen["key"] == "team-analysis":
                 logger.info("Analysis mode selected")
+                # Route all records to logs/analysis/analysis.log while the
+                # analysis flow runs. The branch is too large for a `with`
+                # block, so it detaches explicitly at both `continue` exits.
+                attach_mode_handler("analysis")
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 from yeaboi.azdevops_sync import is_azdevops_board_configured as _azdevops_check
                 from yeaboi.jira_sync import is_jira_configured as _jira_check
@@ -2725,6 +2809,7 @@ def select_mode(
                             break
                     _restart_mode_select = True
                     _skip_fade_in = True
+                    detach_mode_handler("analysis")
                     continue
 
                 # Load existing team profiles
@@ -3641,6 +3726,7 @@ def select_mode(
                     _skip_fade_in = True
 
                 # Always return to mode select after analysis mode exits
+                detach_mode_handler("analysis")
                 continue
 
             # 2d: Smooth fade-in — all cards appear together, opacity 0→1
@@ -3705,7 +3791,9 @@ def select_mode(
             if chosen["key"] == "daily-standup":
                 logger.info("Daily Standup mode selected")
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
-                _run_standup_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                # Route all records to logs/standup/standup.log while the page runs.
+                with mode_log("standup"):
+                    _run_standup_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
@@ -3714,7 +3802,8 @@ def select_mode(
             if chosen["key"] == "retro":
                 logger.info("Retro mode selected")
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
-                _run_retro_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                with mode_log("retro"):
+                    _run_retro_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
@@ -3723,7 +3812,8 @@ def select_mode(
             if chosen["key"] == "performance":
                 logger.info("Performance mode selected")
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
-                _run_performance_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                with mode_log("performance"):
+                    _run_performance_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
@@ -3732,7 +3822,8 @@ def select_mode(
             if chosen["key"] == "reporting":
                 logger.info("Reporting mode selected")
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
-                _run_reporting_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                with mode_log("reporting"):
+                    _run_reporting_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
@@ -3760,6 +3851,7 @@ def select_mode(
                         sub_reveal=0.0,
                     )
                 )
+                logger.info("Usage page opened")
                 while True:
                     k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
                     if k in SCROLL_KEYS:
@@ -3783,6 +3875,7 @@ def select_mode(
                             sub_reveal=_u_elapsed * _HEADER_SUB_SPEED,
                         )
                     )
+                logger.info("Usage page closed")
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
@@ -3820,7 +3913,7 @@ def select_mode(
                     elif sk == "left":
                         _s_sel = max(0, _s_sel - 1)
                     elif sk == "right":
-                        _s_sel = min(1, _s_sel + 1)
+                        _s_sel = min(2, _s_sel + 1)
                     elif sk in ("enter", " "):
                         if _s_sel == 0:
                             # Configure — launch setup wizard
@@ -3836,6 +3929,16 @@ def select_mode(
                             _settings_data = _collect_settings_data()
                             logger.info("Settings: config reloaded after wizard")
                             live.start()
+                        elif _s_sel == 1:
+                            # Log Level — cycle, persist to .env, apply live
+                            from yeaboi.config import get_log_level, set_log_level
+                            from yeaboi.logging_setup import apply_level
+
+                            _new_level = _next_log_level(get_log_level())
+                            set_log_level(_new_level)
+                            apply_level(_new_level)
+                            _settings_data = _collect_settings_data()
+                            logger.info("Settings: log level cycled to %s", _new_level)
                         else:
                             logger.info("Settings: user pressed Back")
                             break

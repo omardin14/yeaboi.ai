@@ -67,6 +67,7 @@ def get_lan_ip() -> str:
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
     except OSError:
+        logger.debug("retro: LAN IP detection failed — falling back to loopback")
         return "127.0.0.1"
     finally:
         s.close()

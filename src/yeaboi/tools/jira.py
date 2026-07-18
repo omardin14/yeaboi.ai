@@ -559,7 +559,7 @@ def jira_fetch_velocity(project_key: str = "") -> str:
                         if assignee:
                             assignees.add(assignee.accountId)
             except JIRAError:
-                pass  # Non-fatal: assignee count may be incomplete
+                logger.debug("jira velocity: assignee lookup failed — count may be incomplete", exc_info=True)
 
         team_velocity = sum(totals) / len(totals) if totals else 0.0
         logger.debug("Velocity totals=%s, avg=%.1f, assignees=%d", totals, team_velocity, len(assignees))

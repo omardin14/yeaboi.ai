@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import sys
 import termios
@@ -33,6 +34,8 @@ from yeaboi.ui.provider_select.screens._screens import (
 )
 from yeaboi.ui.provider_select.screens._screens_vc import _build_issue_tracking_screen
 from yeaboi.ui.shared._animations import FRAME_TIME_30FPS
+
+logger = logging.getLogger(__name__)
 
 _TITLE = "Notion"
 _SUBTITLE = "Docs"
@@ -117,10 +120,13 @@ def _run_notion(
     """
     choice = _run_notion_selection(console, read_key, live)
     if isinstance(choice, StepNav):
+        logger.info("Notion sub-step: section navigation (%r)", choice)
         return choice
     if choice is None:
+        logger.info("Notion sub-step: user pressed Esc (back)")
         return None
     if choice == "skip":
+        logger.info("Notion sub-step: skipped")
         return {}
     return _run_notion_form(console, read_key, existing_config, live)
 
@@ -140,6 +146,7 @@ def _run_notion_form(
     """
     import threading
 
+    logger.info("Entering Notion setup form")
     fields = _NOTION_FIELDS
     n = len(fields)
     _cfg = existing_config or {}
@@ -180,6 +187,7 @@ def _run_notion_form(
 
             # Empty token → skip Notion entirely (it's optional).
             if not token:
+                logger.info("Notion form: empty token, skipping")
                 return {}
 
             # Verify the token with a pulsing border while the API call runs.
@@ -188,6 +196,7 @@ def _run_notion_form(
             def _do_verify():
                 verify_result.append(_verify_notion(token))
 
+            logger.info("Notion form: verifying integration token")
             thread = threading.Thread(target=_do_verify, daemon=True)
             thread.start()
 
@@ -203,6 +212,7 @@ def _run_notion_form(
             ok, msg = verify_result[0]
 
             if ok:
+                logger.info("Notion form: token verified")
                 # Green success flash, matching the Jira/VC verify animation.
                 green_r, green_g, green_b = 80, 220, 120
                 for frame in range(10):
@@ -225,15 +235,18 @@ def _run_notion_form(
                     if val:
                         notion_data[field["env_var"]] = val
                 _save_progress(notion_data)
+                logger.info("Notion form: saved (%d keys)", len(notion_data))
                 return notion_data
 
             # Verification failed — surface the error on the token field.
+            logger.warning("Notion form: verification failed — %s", msg)
             errors[0] = msg
             selected = 0
             _render(errors=errors)
             continue
 
         elif key == "esc":
+            logger.info("Notion form: user pressed Esc (back)")
             return None
         elif key == "clear":
             values[selected] = ""

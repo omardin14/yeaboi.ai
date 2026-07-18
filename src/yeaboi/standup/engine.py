@@ -68,7 +68,7 @@ def _resolve_source_params(config: dict | None) -> dict:
 
         params["github_repo"] = get_standup_github_repo() or ""
     except Exception:
-        pass
+        logger.debug("standup: could not resolve GitHub repo config — skipping", exc_info=True)
     return params
 
 

@@ -28,9 +28,12 @@ names) are rendered via ``textContent`` (``esc()``), never raw ``innerHTML``.
 from __future__ import annotations
 
 import json
+import logging
 
 from yeaboi.music import CHANNELS
 from yeaboi.retro.board import AVATARS, REACTION_EMOJIS, RETRO_GRID_LABELS, RETRO_GRIDS
+
+logger = logging.getLogger(__name__)
 
 # Grid (key, label) pairs for the client, kept in server order.
 _GRID_JS = [[k, RETRO_GRID_LABELS[k]] for k in RETRO_GRIDS]
@@ -773,7 +776,7 @@ def build_board_html() -> str:
         # so the browser plays real streams instead of synthesized tones.
         .replace("__MUSIC_CHANNELS__", _lit([{"name": c["name"], "url": c["url"]} for c in CHANNELS]))
     )
-    return (
+    html = (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
@@ -854,3 +857,5 @@ def build_board_html() -> str:
         "</div></div>\n"
         f"<script>{js}</script>\n</body>\n</html>"
     )
+    logger.debug("retro: board page built (%d bytes)", len(html.encode("utf-8")))
+    return html

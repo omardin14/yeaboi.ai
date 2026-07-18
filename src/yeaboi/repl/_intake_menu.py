@@ -1,5 +1,7 @@
 """Intake mode menu and offline sub-menu rendering and resolution."""
 
+import logging
+
 from rich.console import Console
 
 from yeaboi.prompts.intake import (
@@ -8,6 +10,8 @@ from yeaboi.prompts.intake import (
     OFFLINE_SUBMENU,
     OFFLINE_SUBMENU_ORDER,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _render_intake_mode_menu(console: Console) -> None:
@@ -22,6 +26,7 @@ def _render_intake_mode_menu(console: Console) -> None:
     Args:
         console: Rich Console instance for output.
     """
+    logger.info("intake menu: shown")
     console.print()
     console.print("[bold]How would you like to get started?[/bold]")
     console.print()
@@ -50,6 +55,7 @@ def _resolve_intake_mode(user_input: str) -> str | None:
         return None
 
     if 1 <= idx <= len(INTAKE_MODE_ORDER):
+        logger.info("intake menu: selected %s", INTAKE_MODE_ORDER[idx - 1])
         return INTAKE_MODE_ORDER[idx - 1]
     return None
 
@@ -63,6 +69,7 @@ def _render_offline_submenu(console: Console) -> None:
     Args:
         console: Rich Console instance for output.
     """
+    logger.info("offline submenu: shown")
     console.print()
     for i, key in enumerate(OFFLINE_SUBMENU_ORDER):
         title, description = OFFLINE_SUBMENU[key]
@@ -89,5 +96,6 @@ def _resolve_offline_choice(user_input: str) -> str | None:
         return None
 
     if 1 <= idx <= len(OFFLINE_SUBMENU_ORDER):
+        logger.info("offline submenu: selected %s", OFFLINE_SUBMENU_ORDER[idx - 1])
         return OFFLINE_SUBMENU_ORDER[idx - 1]
     return None
