@@ -1626,6 +1626,58 @@ def _standup_my_update(console: Console, live, read_key, frame_time, supports_ti
     return f"Saved update for {member}."
 
 
+def _run_changelog_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Event loop for the Changelog page (opened with `c` from mode select).
+
+    Read-only: Up/Down scrolls the release notes, Enter/Esc/q returns to mode
+    select. Data is the bundled ``changelog_data.json`` (no network); the upgrade
+    banner reflects whatever the background PyPI check has found so far.
+    """
+    from yeaboi.changelog import load_changelog
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_changelog_screen
+    from yeaboi.update_check import get_update_status
+
+    entries = load_changelog()
+    update_status = get_update_status()
+    logger.info(
+        "changelog: page opened (%d entries, update_available=%s)", len(entries), update_status["update_available"]
+    )
+    scroll = 0
+    _scroll_meta: dict = {}
+    anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
+
+    def _render() -> None:
+        w, h = console.size
+        elapsed = time.monotonic() - anim_start
+        # One-row safety margin — same as the other pages (see _run_standup_page).
+        live.update(
+            _build_changelog_screen(
+                entries,
+                update_status=update_status,
+                scroll_offset=scroll,
+                scroll_meta=_scroll_meta,
+                width=w,
+                height=max(10, h - 1),
+                action_sel=0,
+                shimmer_tick=elapsed,
+                sub_reveal=elapsed * _HEADER_SUB_SPEED,
+            )
+        )
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if k in SCROLL_KEYS:
+            _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
+            if _ns == scroll:
+                continue
+            scroll = _ns
+        elif k in ("enter", " ", "esc", "q"):  # single Back button
+            break
+        _render()
+    logger.info("changelog: page closed")
+
+
 def _run_standup_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
     """Event loop for the Daily Standup dashboard page.
 
@@ -2778,6 +2830,13 @@ def select_mode(
     selected = 0
     n = len(_MODE_CARDS)
 
+    # Kick off the one-shot PyPI update check on a daemon thread. Idempotent and
+    # fire-and-forget — the bottom-left version row picks the result up whenever
+    # a frame renders after the fetch lands.
+    from yeaboi.update_check import start_background_check
+
+    start_background_check()
+
     w, h = console.size
     start_time = time.monotonic()
     select_time = start_time
@@ -2871,6 +2930,14 @@ def select_mode(
                     from yeaboi.config import is_tips_enabled, set_tips_enabled
 
                     set_tips_enabled(not is_tips_enabled())
+                elif key == "c":
+                    # Open the Changelog page (bottom-left hint). Handled inline
+                    # like `t` — no break, so returning falls straight back into
+                    # this loop and the frame update below repaints mode select.
+                    logger.info("changelog opened from mode select")
+                    play_wordmark_intro(console, live, "Changelog", "rgb(160,160,180)", frame_time=_FRAME_TIME)
+                    _run_changelog_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                    select_time = time.monotonic()  # restart the description typewriter
 
                 elapsed = time.monotonic() - select_time
                 reveal = elapsed * _DESC_SCROLL_SPEED  # float for sub-char fade

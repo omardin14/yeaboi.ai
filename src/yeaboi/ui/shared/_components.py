@@ -60,6 +60,9 @@ STANDUP_THEME = Theme(accent="rgb(200,100,180)", accent_bright="rgb(255,150,220)
 RETRO_THEME = Theme(accent="rgb(80,190,190)", accent_bright="rgb(120,230,230)")
 PERFORMANCE_THEME = Theme(accent="rgb(220,110,90)", accent_bright="rgb(255,150,120)")
 REPORTING_THEME = Theme(accent="rgb(140,120,230)", accent_bright="rgb(180,160,255)")
+# Silver chrome on purpose — the changelog page's per-feature area tags carry the
+# colour (each tag uses its mode's accent), so the page frame stays neutral.
+CHANGELOG_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
 
 # Button color scheme: (accent_border, accent_label, grey_border, grey_label)
 _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
@@ -234,6 +237,11 @@ def performance_title(shimmer_tick: float | None = None, *, width: int | None = 
 def reporting_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Reporting ASCII title (indigo accent). Optionally shimmering."""
     return build_ascii_title("Reporting", "rgb(140,120,230)", shimmer_tick=shimmer_tick, width=width)
+
+
+def changelog_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
+    """Return the Changelog ASCII title (silver accent). Optionally shimmering."""
+    return build_ascii_title("Changelog", "rgb(160,160,180)", shimmer_tick=shimmer_tick, width=width)
 
 
 def build_popup(

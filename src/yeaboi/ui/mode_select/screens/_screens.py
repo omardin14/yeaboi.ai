@@ -261,6 +261,38 @@ def _build_tip_rows(shimmer_tick: float) -> list[Text]:
     return [tip_line, control]
 
 
+def _build_version_row(width: int) -> Text:
+    """Build the bottom-left version hint: current version + changelog keycap.
+
+    Sits as the last interior row of the mode screen — bottom-left, opposite the
+    music bar (which lives on the Panel's bottom *border*, right-aligned). When
+    the background PyPI check has found a newer release, the row grows into an
+    upgrade advisory with the exact command to run. Reads the check state lazily
+    (like ``_build_tip_rows`` reads tips config) so no call site changes and
+    tests can monkeypatch ``yeaboi.update_check.get_update_status``.
+    """
+    from yeaboi.update_check import get_update_status
+
+    status = get_update_status()
+    dim = f"rgb({_TIP_DOT_DIM[0]},{_TIP_DOT_DIM[1]},{_TIP_DOT_DIM[2]})"
+    accent = f"rgb({_TIP_DOT_ON[0]},{_TIP_DOT_ON[1]},{_TIP_DOT_ON[2]})"
+    key_style = f"bold rgb({_TIP_KEY[0]},{_TIP_KEY[1]},{_TIP_KEY[2]})"
+
+    row = Text(justify="left")
+    row.append(f"v{status['current']}", style="rgb(120,120,140)")
+    if status["update_available"]:
+        row.append(" → ", style=dim)
+        row.append(f"v{status['latest']}", style=accent)
+        # On narrow terminals drop the command so the row never wraps.
+        if width >= 72:
+            row.append("  ·  ", style=dim)
+            row.append(status["upgrade_command"], style=accent)
+    row.append("  ·  ", style=dim)
+    row.append("c", style=key_style)
+    row.append(" changelog", style=dim)
+    return row
+
+
 def _build_mode_screen(
     selected: int,
     *,
@@ -312,9 +344,14 @@ def _build_mode_screen(
     # position dots + a keycap control hint.
     tip_rows = _build_tip_rows(shimmer_tick)
 
-    # Reserve two rows for the tip block; centre the mode rows in the space above.
+    # Bottom-left version hint (+ upgrade advisory when a newer release exists),
+    # opposite the music bar on the border below it.
+    version_row = _build_version_row(width)
+
+    # Reserve two rows for the tip block plus one for the version row; centre the
+    # mode rows in the space above.
     inner_h = height - 4
-    body_area = max(0, inner_h - len(tip_rows))
+    body_area = max(0, inner_h - len(tip_rows) - 1)
     mid_top = max(0, (body_area - body_h) // 2)
     mid_bot = max(0, body_area - body_h - mid_top)
 
@@ -323,6 +360,7 @@ def _build_mode_screen(
         *body,
         *[Text("") for _ in range(mid_bot)],
         *tip_rows,
+        version_row,
     )
 
     return Panel(
