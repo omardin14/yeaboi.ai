@@ -1376,7 +1376,9 @@ def _standup_generate_flow(
 
     from yeaboi.config import get_standup_user_name
     from yeaboi.standup.store import StandupStore
+    from yeaboi.ui.shared._attachments import referenced_images
 
+    attachments: list[str] = []
     update = _standup_read_line(
         console,
         live,
@@ -1386,6 +1388,8 @@ def _standup_generate_flow(
         prompt="Your update for today (Enter to skip)",
         step="Generate standup  —  add your update",
         default="",
+        attachments=attachments,
+        scope_id=session_id or "standup",
     )
     if update is None:
         logger.info("standup generate: cancelled at update prompt (session=%s)", session_id)
@@ -1393,7 +1397,13 @@ def _standup_generate_flow(
     if update.strip():
         member = get_standup_user_name()
         with StandupStore(_ana_dbp) as store:
-            store.save_my_update(session_id, date.today().isoformat(), member, update.strip())
+            store.save_my_update(
+                session_id,
+                date.today().isoformat(),
+                member,
+                update.strip(),
+                images=referenced_images(update, attachments),
+            )
         logger.info("standup generate: self-update saved (session=%s)", session_id)
     return _standup_generate(session_id)
 
@@ -1442,6 +1452,8 @@ def _standup_read_line(
     theme=None,
     title=None,
     box_rows: int = 1,
+    attachments: list[str] | None = None,
+    scope_id: str = "",
 ) -> str | None:
     """Collect a single line of input inside the Live display (themed, read_key-driven).
 
@@ -1456,14 +1468,25 @@ def _standup_read_line(
 
     ``theme``/``title`` re-brand the screen for non-standup pages (e.g. the
     analysis regenerate-feedback prompt); defaults keep the standup look.
+
+    attachments: caller-owned list that Ctrl+V screenshot paths are appended to
+        (each marked by an [image #N] chip in the text; resolve survivors with
+        referenced_images() after submit). None disables image paste — Ctrl+V
+        shows the standard "not supported" notice instead.
     """
     import time as _time
 
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
+    from yeaboi.ui.shared._attachments import handle_ctrl_v, unsupported_notice
     from yeaboi.ui.shared._voice_input import DoubleTapSpace, record_voice_input, voice_indicator
 
     value = ""
+    notice = ""
     _dts = DoubleTapSpace()
+
+    def _set_notice(msg: str) -> None:
+        nonlocal notice
+        notice = msg
 
     def _render(*, border_style: str = "", status: str = "") -> None:
         w, h = console.size
@@ -1480,6 +1503,7 @@ def _standup_read_line(
                 theme=theme,
                 title=title,
                 box_rows=box_rows,
+                show_image_hint=attachments is not None,
             )
         )
 
@@ -1506,6 +1530,8 @@ def _standup_read_line(
     _render()
     while True:
         k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if k and k != "":
+            notice = ""
         if k == "enter":
             return value.strip() or default
         if k == "esc":
@@ -1518,6 +1544,15 @@ def _standup_read_line(
             value = value.rstrip().rsplit(" ", 1)[0] if " " in value.strip() else ""
         elif isinstance(k, str) and k.startswith("paste:"):
             value += k[len("paste:") :]
+        elif k == "ctrl+v":
+            if attachments is None:
+                unsupported_notice(_set_notice)
+            else:
+                _render(status="Pasting image…")
+                chip = handle_ctrl_v(attachments, scope_id=scope_id or "standup", set_notice=_set_notice)
+                if chip:
+                    value += chip
+                    notice = f"Screenshot attached as {chip}"
         elif k == " " and _dts.is_double(value.endswith(" "), _time.monotonic()):
             # Double-tap Space → dictate. The first space (already in `value`)
             # stays as a separator; the transcript is appended after it.
@@ -1526,7 +1561,7 @@ def _standup_read_line(
                 value += spoken.replace("\n", " ")
         elif isinstance(k, str) and len(k) == 1 and k.isprintable():
             value += k
-        _render()
+        _render(status=notice)
 
 
 def _standup_configure(console: Console, live, read_key, frame_time, supports_timeout, session_id: str) -> str:
@@ -1604,6 +1639,7 @@ def _standup_my_update(console: Console, live, read_key, frame_time, supports_ti
     from datetime import date
 
     from yeaboi.standup.store import StandupStore
+    from yeaboi.ui.shared._attachments import referenced_images
 
     member = _standup_read_line(
         console, live, read_key, frame_time, supports_timeout, prompt="Your name", step="My update  (1/2)", default="Me"
@@ -1611,8 +1647,19 @@ def _standup_my_update(console: Console, live, read_key, frame_time, supports_ti
     if member is None:
         logger.info("standup my-update: cancelled (session=%s)", session_id)
         return "Update cancelled."
+    # Ctrl+V attaches screenshots (e.g. a burndown chart) to the update; surviving
+    # [image #N] chips resolve to files the summary LLM call receives as image blocks.
+    attachments: list[str] = []
     text = _standup_read_line(
-        console, live, read_key, frame_time, supports_timeout, prompt="Your update for today", step="My update  (2/2)"
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        prompt="Your update for today",
+        step="My update  (2/2)",
+        attachments=attachments,
+        scope_id=session_id or "standup",
     )
     if text is None:
         logger.info("standup my-update: cancelled (session=%s)", session_id)
@@ -1620,10 +1667,12 @@ def _standup_my_update(console: Console, live, read_key, frame_time, supports_ti
     if not text.strip():
         logger.info("standup my-update: no update entered (session=%s)", session_id)
         return "No update entered."
+    images = referenced_images(text, attachments)
     with StandupStore(_ana_dbp) as store:
-        store.save_my_update(session_id, date.today().isoformat(), member, text.strip())
-    logger.info("standup my-update: saved (session=%s)", session_id)
-    return f"Saved update for {member}."
+        store.save_my_update(session_id, date.today().isoformat(), member, text.strip(), images=images)
+    logger.info("standup my-update: saved (session=%s, images=%d)", session_id, len(images))
+    suffix = f" (+{len(images)} image{'s' if len(images) != 1 else ''})" if images else ""
+    return f"Saved update for {member}.{suffix}"
 
 
 def _run_changelog_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
@@ -1856,12 +1905,14 @@ def _performance_roster_hints(roster: list[str]) -> list[str]:
         return [generic for _ in roster]
 
 
-def _performance_get_transcript(console, live, read_key, frame_time, supports_timeout) -> str | None:
+def _performance_get_transcript(console, live, read_key, frame_time, supports_timeout) -> tuple[str, list[str]] | None:
     """Collect a 1:1 transcript — via a file path, or pasted/typed inline.
 
-    Returns the transcript text, or None if the user cancelled (Esc). Supports both
-    input methods per the design: a file path is read from disk; an empty path drops
-    to an inline paste field.
+    Returns (transcript_text, image_paths), or None if the user cancelled (Esc).
+    Supports both input methods per the design: a file path is read from disk; an
+    empty path drops to an inline paste field. In the inline field, Ctrl+V attaches
+    screenshots (e.g. a photo of whiteboard notes) that the summarising LLM call
+    receives as multimodal image blocks.
     """
     path = _standup_read_line(
         console,
@@ -1882,10 +1933,14 @@ def _performance_get_transcript(console, live, read_key, frame_time, supports_ti
 
             text = Path(path).expanduser().read_text(encoding="utf-8")
             logger.info("performance: read transcript from %s (%d chars)", path, len(text))
-            return text
+            return text, []
         except Exception as e:  # noqa: BLE001 — fall through to paste on a bad path
             logger.warning("performance: could not read transcript file %s: %s", path, e)
-    return _standup_read_line(
+
+    from yeaboi.ui.shared._attachments import referenced_images
+
+    attachments: list[str] = []
+    text = _standup_read_line(
         console,
         live,
         read_key,
@@ -1894,7 +1949,12 @@ def _performance_get_transcript(console, live, read_key, frame_time, supports_ti
         prompt="Paste the meeting notes / transcript",
         step="1:1 Complete  —  paste transcript",
         default="",
+        attachments=attachments,
+        scope_id="performance",
     )
+    if text is None:
+        return None
+    return text, referenced_images(text, attachments)
 
 
 def _performance_export(engineer: str) -> str:
@@ -2132,14 +2192,17 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                 logger.info("performance: 1:1 prep generated for engineer=%s", engineer)
                 _show_detail(format_prep_lines(prep), f"1:1 Prep — {engineer}", "Prep generated.")
             elif label == "1:1 Complete":
-                transcript = _performance_get_transcript(console, live, read_key, frame_time, supports_timeout)
-                if transcript is None or not transcript.strip():
+                transcript_result = _performance_get_transcript(console, live, read_key, frame_time, supports_timeout)
+                if transcript_result is None or not transcript_result[0].strip():
                     logger.info("performance: 1:1 completion cancelled — no transcript (engineer=%s)", engineer)
                     state["message"] = "1:1 completion cancelled — no transcript."
                     return
+                transcript, transcript_images = transcript_result
                 from yeaboi.performance.engine import complete_one_on_one
 
-                record = complete_one_on_one(engineer, transcript, session_id=session_id, db_path=_ana_dbp)
+                record = complete_one_on_one(
+                    engineer, transcript, session_id=session_id, db_path=_ana_dbp, images=transcript_images
+                )
                 sent = "email sent" if not record.warnings else "see notices"
                 logger.info("performance: 1:1 completed for engineer=%s (%s)", engineer, sent)
                 _show_detail(format_completion_lines(record), f"1:1 Summary — {engineer}", f"Completed — {sent}.")
@@ -5251,6 +5314,11 @@ def select_mode(
                         elif key.startswith("paste:") if isinstance(key, str) else False:
                             import_value += key[6:]
                             import_error = ""
+                        elif key == "ctrl+v":
+                            # A file-path field never reaches an LLM — reject image paste.
+                            from yeaboi.ui.shared._attachments import UNSUPPORTED_MESSAGE
+
+                            import_error = UNSUPPORTED_MESSAGE
                         elif len(key) == 1 and key.isprintable():
                             import_value += key
                             import_error = ""

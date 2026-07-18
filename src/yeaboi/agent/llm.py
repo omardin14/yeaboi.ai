@@ -229,3 +229,82 @@ def get_llm(model: str | None = None, temperature: float = 0.0) -> BaseChatModel
     raise ValueError(
         f"Unknown LLM_PROVIDER: {provider!r}. Valid options are: anthropic (default), openai, google, bedrock."
     )
+
+
+# ---------------------------------------------------------------------------
+# Multimodal (vision) helpers — pasted screenshot support
+# ---------------------------------------------------------------------------
+#
+# # See README: "Prompt Construction" — multimodal content blocks
+# LangChain message content is either a plain string OR a list of typed
+# "content blocks". The portable block shape
+#   {"type": "image", "source_type": "base64", "mime_type": "image/png", "data": ...}
+# is translated by langchain-core into each provider's native format
+# (ChatAnthropic, ChatOpenAI, ChatGoogleGenerativeAI, ChatBedrockConverse), so
+# one shape covers all four providers get_llm() can return.
+#
+# Images travel through the app as *file paths* (under ~/.yeaboi/attachments/)
+# and are base64-encoded only here, at the moment of the LLM call — state stays
+# small, sessions survive --resume, and a deleted file degrades to text-only.
+
+_MIME_FOR_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def load_image_b64(path) -> tuple[str, str] | None:
+    """Read an image file and return ``(base64_data, mime_type)``.
+
+    Returns ``None`` (with a warning log) when the file is missing or unreadable —
+    e.g. the user deleted ~/.yeaboi/attachments/ between sessions. Callers skip
+    the image and proceed text-only rather than failing the whole LLM call.
+    """
+    import base64
+    from pathlib import Path
+
+    p = Path(path)
+    try:
+        data = p.read_bytes()
+    except OSError as exc:
+        logger.warning("pasted image missing or unreadable, skipping: %s (%s)", path, exc)
+        return None
+    mime = _MIME_FOR_EXT.get(p.suffix.lower(), "image/png")
+    return base64.b64encode(data).decode("ascii"), mime
+
+
+def build_multimodal_content(text: str, image_paths) -> str | list[dict]:
+    """Build ``HumanMessage`` content: plain text, or text + image blocks.
+
+    With no loadable images this returns ``text`` unchanged, so callers can swap
+    it in unconditionally — the no-image behaviour is byte-identical to today's
+    ``HumanMessage(content=prompt)``.
+    """
+    blocks: list[dict] = []
+    for path in image_paths or []:
+        loaded = load_image_b64(path)
+        if loaded is None:
+            continue
+        b64, mime = loaded
+        blocks.append({"type": "image", "source_type": "base64", "mime_type": mime, "data": b64})
+    if not blocks:
+        return text
+    return [{"type": "text", "text": text}, *blocks]
+
+
+def invoke_with_images(llm: BaseChatModel, prompt: str, image_paths=None):
+    """Invoke ``llm`` with ``prompt`` plus any pasted screenshots.
+
+    Drop-in replacement for ``llm.invoke([HumanMessage(content=prompt)])``.
+    If the multimodal call fails (e.g. a non-vision Bedrock model rejects image
+    blocks), we log a warning and retry once text-only — the user loses the
+    screenshot context but the pipeline never crashes because of it. Auth/billing
+    errors on the text-only path still propagate to the caller's usual handling.
+    """
+    from langchain_core.messages import HumanMessage
+
+    content = build_multimodal_content(prompt, image_paths)
+    if isinstance(content, str):
+        return llm.invoke([HumanMessage(content=content)])
+    try:
+        return llm.invoke([HumanMessage(content=content)])
+    except Exception as exc:
+        logger.warning("model rejected image blocks (%s); retrying text-only", exc)
+        return llm.invoke([HumanMessage(content=prompt)])

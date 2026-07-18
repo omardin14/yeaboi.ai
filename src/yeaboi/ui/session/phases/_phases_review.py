@@ -294,15 +294,39 @@ def _edit_accordion_browse(
             original_q = qs.current_question
 
 
-def _get_edit_input(live: Live, console: Console, _key, prompt: str) -> str | None:
-    """Show a simple text input for edit prompts. Returns text or None on Esc."""
+def _get_edit_input(
+    live: Live,
+    console: Console,
+    _key,
+    prompt: str,
+    *,
+    attachments: list[str] | None = None,
+    scope_id: str = "",
+) -> str | None:
+    """Show a simple text input for edit prompts. Returns text or None on Esc.
+
+    attachments: caller-owned list that Ctrl+V screenshot paths are appended to
+        (each marked by an [image #N] chip in the text). The caller resolves
+        surviving chips with referenced_images() after submit. None disables
+        image paste (shows the standard "not supported" notice instead).
+    """
+    from yeaboi.ui.shared._attachments import handle_ctrl_v, unsupported_notice
+
     input_value = ""
+    notice = ""
     w, h = console.size
     live.update(_build_edit_prompt_screen(prompt, input_value, width=w, height=h))
+
+    def _set_notice(msg: str) -> None:
+        nonlocal notice
+        notice = msg
 
     _anim0 = time.monotonic()  # shimmer title clock
     while True:
         key = _key()
+        if key and key != "":
+            notice = ""
+
         if key == "esc":
             return None
         elif key in ("enter", "ctrl+s"):
@@ -319,6 +343,16 @@ def _get_edit_input(live: Live, console: Console, _key, prompt: str) -> str | No
             input_value = input_value[:word_start]
         elif isinstance(key, str) and key.startswith("paste:"):
             input_value += key[6:]
+        elif key == "ctrl+v":
+            if attachments is None:
+                unsupported_notice(_set_notice)
+            else:
+                w, h = console.size
+                live.update(_build_edit_prompt_screen(prompt, input_value, width=w, height=h, notice="Pasting image…"))
+                chip = handle_ctrl_v(attachments, scope_id=scope_id or "planning", set_notice=_set_notice)
+                if chip:
+                    input_value += chip
+                    notice = f"Screenshot attached as {chip}"
         elif isinstance(key, str) and len(key) == 1 and key.isprintable():
             input_value += key
         elif key == "":
@@ -328,5 +362,7 @@ def _get_edit_input(live: Live, console: Console, _key, prompt: str) -> str | No
 
         w, h = console.size
         live.update(
-            _build_edit_prompt_screen(prompt, input_value, width=w, height=h, shimmer_tick=time.monotonic() - _anim0)
+            _build_edit_prompt_screen(
+                prompt, input_value, width=w, height=h, shimmer_tick=time.monotonic() - _anim0, notice=notice
+            )
         )

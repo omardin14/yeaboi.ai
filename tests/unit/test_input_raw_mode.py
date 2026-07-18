@@ -85,6 +85,31 @@ def test_exit_without_enter_is_noop():
     exit_raw_mode()  # must not raise
 
 
+def test_ctrl_v_decodes_to_paste_image_key(pty_pair):
+    # Ctrl+V (\x16) must map to the "ctrl+v" action so input loops can trigger
+    # clipboard image paste (ui/shared/_attachments.py).
+    #
+    # The byte is written from a timer thread AFTER read_key is already
+    # select()-waiting: read_key's setcbreak uses TCSAFLUSH, which both discards
+    # any input written beforehand and (in the fixture's cooked+echo mode) would
+    # let the line discipline swallow \x16 as VLNEXT — writing mid-wait mirrors
+    # how a real keypress arrives.
+    import threading
+
+    master, slave = pty_pair
+
+    class _Stdin:
+        def fileno(self):
+            return slave
+
+    t = threading.Timer(0.2, os.write, args=(master, b"\x16"))
+    t.start()
+    try:
+        assert _input.read_key(stdin=_Stdin(), timeout=3.0) == "ctrl+v"
+    finally:
+        t.cancel()
+
+
 def test_enter_raw_mode_on_non_tty_is_safe(monkeypatch):
     # A pipe fd is not a terminal — enter_raw_mode must swallow the error.
     r, w = os.pipe()

@@ -311,7 +311,7 @@ class TestPhaseDescriptionInput:
         keys = iter(["enter", "enter"])
         result = _phase_description_input(live, console, lambda: next(keys), dry_run=True)
         assert result is not None
-        desc, _, _, _ = result
+        desc, _, _, _, _ = result
         assert "restaurant reservations" in desc
 
     def test_clear_and_type(self):
@@ -320,7 +320,7 @@ class TestPhaseDescriptionInput:
         console = _make_console()
         keys = iter(["clear", "H", "i", "enter", "enter"])
         result = _phase_description_input(live, console, lambda: next(keys), dry_run=True)
-        desc, _, _, _ = result
+        desc, _, _, _, _ = result
         assert desc == "Hi"
 
     def test_backspace(self):
@@ -330,8 +330,36 @@ class TestPhaseDescriptionInput:
         # Clear, type "ab", backspace, type "c" → "ac"
         keys = iter(["clear", "a", "b", "backspace", "c", "enter", "enter"])
         result = _phase_description_input(live, console, lambda: next(keys))
-        desc, _, _, _ = result
+        desc, _, _, _, _ = result
         assert desc == "ac"
+
+    def test_ctrl_v_attaches_image_and_returns_paths(self, monkeypatch, tmp_path):
+        """Ctrl+V inserts an [image #N] chip; surviving chips return their paths."""
+        img = tmp_path / "img-abc.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        monkeypatch.setattr("yeaboi.clipboard.read_clipboard_image", lambda: (img.read_bytes(), "image/png"))
+        monkeypatch.setattr("yeaboi.paths.ATTACHMENTS_DIR", tmp_path / "attachments")
+        live = MagicMock()
+        console = _make_console()
+        keys = iter(["s", "e", "e", " ", "ctrl+v", "enter"])
+        result = _phase_description_input(live, console, lambda: next(keys), scope_id="proj-1")
+        desc, _, _, _, images = result
+        assert "see [image #1]" == desc
+        assert len(images) == 1
+        assert images[0].endswith(".png")
+
+    def test_ctrl_v_deleted_chip_detaches_image(self, monkeypatch, tmp_path):
+        """Deleting the chip text means the image is not returned at submit."""
+        monkeypatch.setattr("yeaboi.clipboard.read_clipboard_image", lambda: (b"\x89PNG\r\n\x1a\n", "image/png"))
+        monkeypatch.setattr("yeaboi.paths.ATTACHMENTS_DIR", tmp_path / "attachments")
+        live = MagicMock()
+        console = _make_console()
+        # Paste a chip ("[image #1]" = 10 chars), delete it entirely, type "x".
+        keys = iter(["ctrl+v"] + ["backspace"] * 10 + ["x", "enter"])
+        result = _phase_description_input(live, console, lambda: next(keys), scope_id="proj-1")
+        desc, _, _, _, images = result
+        assert desc == "x"
+        assert images == []
 
 
 # ---------------------------------------------------------------------------

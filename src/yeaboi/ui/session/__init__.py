@@ -209,6 +209,11 @@ def _run_session_body(
             except Exception:
                 pass
 
+    # Where Ctrl+V screenshots for this session are saved (~/.yeaboi/attachments/
+    # <scope>/). Stashed in state so nested input loops don't need project_id
+    # threaded through every signature; persists harmlessly across --resume.
+    graph_state["_attachment_scope"] = project_id
+
     if questionnaire is not None:
         questionnaire.intake_mode = intake_mode
         graph_state["questionnaire"] = questionnaire
@@ -220,11 +225,16 @@ def _run_session_body(
     # Skipped when resuming a project that already has messages.
     # In dry-run mode, the input is pre-filled with an example description.
     if questionnaire is None and resume_graph_state is None:
-        desc_result = _phase_description_input(live, console, _key, dry_run=dry_run)
+        desc_result = _phase_description_input(live, console, _key, dry_run=dry_run, scope_id=project_id)
         if desc_result is None:
             return  # Esc pressed — go back to mode select
 
-        description, desc_lines, desc_row, desc_col = desc_result
+        description, desc_lines, desc_row, desc_col, desc_images = desc_result
+        if desc_images:
+            # Screenshot paths ride in graph state (not in messages — nodes
+            # string-op on message content); project_analyzer attaches them as
+            # multimodal image blocks at invoke time. See agent/state.py.
+            graph_state["pasted_images"] = desc_images
 
         # ── Dry-run: skip LLM calls, load pre-saved state ──
         # Instead of jumping straight to the pipeline, set the questionnaire

@@ -25,7 +25,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END
 
 from yeaboi.agent.ceremony_history import gather_ceremony_context
-from yeaboi.agent.llm import get_llm
+from yeaboi.agent.llm import get_llm, invoke_with_images
 from yeaboi.agent.repo_signals import analyze_context, scan_repo_signals
 from yeaboi.agent.state import (
     DOD_ITEMS,
@@ -158,6 +158,30 @@ def _user_confirmed(text: str) -> bool:
     return any(lowered.startswith(p) for p in affirm_prefixes)
 
 
+def _attach_chat_images(state: ScrumState, all_messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Rebuild the latest human message with pasted screenshots at invoke time.
+
+    state["messages"] must stay text-only — many nodes string-op on .content —
+    so Ctrl+V screenshots ride in state["chat_images"] (file paths) and are
+    converted to multimodal content blocks only in the message list handed to
+    the LLM, never in the stored history. See agent/llm.py:build_multimodal_content.
+    """
+    images = list(state.get("chat_images") or [])
+    if not images:
+        return all_messages
+    from yeaboi.agent.llm import build_multimodal_content
+
+    for i in range(len(all_messages) - 1, -1, -1):
+        msg = all_messages[i]
+        if isinstance(msg, HumanMessage) and isinstance(msg.content, str):
+            content = build_multimodal_content(msg.content, images)
+            if isinstance(content, list):
+                logger.info("chat: attaching %d pasted image(s) to the latest user message", len(images))
+                return [*all_messages[:i], HumanMessage(content=content), *all_messages[i + 1 :]]
+            break  # images unreadable — degrade to text-only
+    return all_messages
+
+
 def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, list[BaseMessage]]]:
     """Return a call_model node function with the given tools bound to the LLM.
 
@@ -195,9 +219,12 @@ def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, l
             # generates tool_calls when it wants to use one.
             _bound_llm = get_llm().bind_tools(tools)
         system_message = SystemMessage(content=get_system_prompt())
-        all_messages = [system_message, *state["messages"]]
+        all_messages = _attach_chat_images(state, [system_message, *state["messages"]])
         response = _bound_llm.invoke(all_messages)
-        return {"messages": [response]}
+        out: dict = {"messages": [response]}
+        if state.get("chat_images"):
+            out["chat_images"] = []  # consumed — clear so later turns don't re-send
+        return out
 
     return call_model_with_tools
 
@@ -241,14 +268,19 @@ def call_model(state: ScrumState) -> dict[str, list[BaseMessage]]:
     # Prepend system prompt to conversation history for each call.
     # The system message is NOT stored in state — it's injected fresh
     # each invocation so different nodes can use different system context.
-    all_messages = [system_message, *state["messages"]]
+    # Pasted screenshots (chat_images) are attached to the latest human
+    # message here, at invoke time only — stored history stays text-only.
+    all_messages = _attach_chat_images(state, [system_message, *state["messages"]])
 
     response = get_llm().invoke(all_messages)
 
     # Return single-item list — the add_messages reducer on ScrumState["messages"]
     # will append this response to the existing conversation history.
     # See README: "Agentic Blueprint Reference" — node return format
-    return {"messages": [response]}
+    out: dict = {"messages": [response]}
+    if state.get("chat_images"):
+        out["chat_images"] = []  # consumed — clear so later turns don't re-send
+    return out
 
 
 def should_continue(state: ScrumState) -> str:
@@ -5586,10 +5618,17 @@ def project_analyzer(state: ScrumState) -> dict:
         previous_output=previous_output,
     )
 
+    # Pasted screenshots (Ctrl+V in the description/questionnaire inputs, plus any
+    # attached to review-edit feedback) — file paths converted to multimodal image
+    # blocks at invoke time only. See agent/llm.py:invoke_with_images.
+    images = list(state.get("pasted_images") or []) + list(state.get("review_feedback_images") or [])
+    if images:
+        logger.info("project_analyzer: attaching %d pasted image(s)", len(images))
+
     try:
         # Single LLM call with low temperature for deterministic JSON extraction.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+        response = invoke_with_images(get_llm(temperature=0.0), prompt, images)
         analysis = _parse_analysis_response(response.content, questionnaire, team_size, velocity)
     except Exception as exc:
         if _is_llm_auth_or_billing_error(exc):
@@ -5968,10 +6007,14 @@ def feature_generator(state: ScrumState) -> dict:
         previous_output=previous_output,
     )
 
+    # Screenshots attached to review-edit feedback (Ctrl+V) — sent only when the
+    # user is asking for changes; the normal pass works from the analysis alone.
+    review_images = list(state.get("review_feedback_images") or []) if review_mode else []
+
     try:
         # Single LLM call with low temperature for deterministic JSON output.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+        response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
         features = _parse_features_response(response.content, analysis)
     except Exception as exc:
         if _is_llm_auth_or_billing_error(exc):
@@ -7022,10 +7065,13 @@ def story_writer(state: ScrumState) -> dict:
         previous_output=previous_output,
     )
 
+    # Screenshots attached to review-edit feedback (Ctrl+V) — review passes only.
+    review_images = list(state.get("review_feedback_images") or []) if review_mode else []
+
     try:
         # Single LLM call with low temperature for deterministic JSON output.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+        response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
         stories = _parse_stories_response(response.content, features, analysis)
     except Exception as exc:
         if _is_llm_auth_or_billing_error(exc):
@@ -7540,8 +7586,10 @@ def task_decomposer(state: ScrumState) -> dict:
             review_mode=review_mode,
             previous_output=previous_output,
         )
+        # Screenshots attached to review-edit feedback (Ctrl+V) — review passes only.
+        review_images = list(state.get("review_feedback_images") or [])
         try:
-            response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+            response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
             tasks = _parse_tasks_response(response.content, stories)
         except Exception as exc:
             if _is_llm_auth_or_billing_error(exc):
@@ -8325,10 +8373,13 @@ def sprint_planner(state: ScrumState) -> dict:
         previous_output=previous_output,
     )
 
+    # Screenshots attached to review-edit feedback (Ctrl+V) — review passes only.
+    review_images = list(state.get("review_feedback_images") or []) if review_mode else []
+
     try:
         # Single LLM call with low temperature for deterministic JSON output.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+        response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
         sprints = _parse_sprints_response(response.content, stories, velocity, starting_sprint_number)
     except Exception as exc:
         if _is_llm_auth_or_billing_error(exc):

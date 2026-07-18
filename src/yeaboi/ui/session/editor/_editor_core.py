@@ -32,6 +32,20 @@ from yeaboi.ui.shared._components import PAD, planning_title
 # Shared field label pattern for all editors (story, task, sprint, etc.)
 # ---------------------------------------------------------------------------
 
+# Transient editor notice — rendered in the subtitle by render_editor_panel (and
+# the story editor's _render_editor), cleared on the next keypress. Used for the
+# Ctrl+V response: artifact editors deliberately do NOT accept image paste — a
+# literal [image #N] chip would end up inside the artifact text (and its exports),
+# and these editors make no LLM call that could consume the screenshot. Paste
+# screenshots into the Edit/Regenerate feedback prompt instead.
+_editor_notice = ""
+
+
+def _set_editor_notice(msg: str) -> None:
+    global _editor_notice
+    _editor_notice = msg
+
+
 _FIELD_LABELS = (
     r"Persona|Goal|Benefit|Points|Priority|Discipline|Title|Description|Name|Capacity"
     r"|Type|Target State|Sprint Length|Target Sprints"
@@ -185,6 +199,9 @@ def render_editor_panel(
     sub.append("Ctrl+S Save", style="bold rgb(60,160,80)")
     sub.append("  |  ", style="dim")
     sub.append("Esc Cancel", style="dim")
+    if _editor_notice:
+        sub.append("  |  ", style="dim")
+        sub.append(_editor_notice, style="bold white")
 
     inner_h = height - 4
     header_h = 10
@@ -323,12 +340,22 @@ def edit_buffer_loop(
             key = _key(timeout=0.05)
         except TypeError:
             key = _key()
+        if key and key != "" and key != "ctrl+v":
+            _set_editor_notice("")
 
         if key == "esc":
+            _set_editor_notice("")
             return None
 
         elif key == "ctrl+s":
+            _set_editor_notice("")
             return buffer
+
+        elif key == "ctrl+v":
+            # See _editor_notice above — image paste is not supported in artifact editors.
+            from yeaboi.ui.shared._attachments import unsupported_notice
+
+            unsupported_notice(_set_editor_notice)
 
         elif key == "backspace":
             min_col = editable_start_fn(buffer[cursor_row])

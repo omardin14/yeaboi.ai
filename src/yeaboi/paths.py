@@ -26,6 +26,8 @@ Directory structure:
     │   ├── planning/             # Per-planning-session logs
     │   ├── standup/              # Daily Standup logs
     │   └── retro/                # Retro logs
+    ├── attachments/              # Screenshots pasted into TUI textboxes (Ctrl+V)
+    │   └── {scope_id}/           #   per session/project scope
     ├── scrum-docs/               # SCRUM.md files for each project
     ├── .env                      # Environment variables
     └── repl-history              # REPL command history
@@ -95,6 +97,7 @@ SCRUM_DOCS_DIR = ROOT_DIR / "scrum-docs"
 ENV_FILE = ROOT_DIR / ".env"
 REPL_HISTORY = ROOT_DIR / "repl-history"
 BIN_DIR = ROOT_DIR / "bin"  # app-managed helper binaries (e.g. cloudflared for retro tunnels)
+ATTACHMENTS_DIR = ROOT_DIR / "attachments"  # screenshots pasted into TUI textboxes (Ctrl+V)
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +246,17 @@ def get_bin_dir() -> Path:
     """Return the app-managed helper-binary directory, creating it if needed."""
     BIN_DIR.mkdir(parents=True, exist_ok=True)
     return BIN_DIR
+
+
+def get_attachments_dir(scope_id: str) -> Path:
+    """Return the pasted-image directory for a session/project scope, creating it if needed.
+
+    Only file *paths* are stored in session state — the PNG/JPEG bytes live here,
+    so sessions stay small and pasted screenshots survive ``--resume``.
+    """
+    d = ATTACHMENTS_DIR / ((scope_id or "misc").lower())
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def migrate_root_dir() -> None:

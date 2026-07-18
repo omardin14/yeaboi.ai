@@ -124,6 +124,48 @@ class TestCompletion:
         record = engine.complete_one_on_one("Ada", "   ", db_path=db_path, deliver=False)
         assert "No transcript" in record.warnings[0]
 
+    def test_pasted_images_reach_llm_as_blocks(self, monkeypatch, db_path, tmp_path):
+        """images= paths become multimodal content blocks on the single LLM call."""
+        img = tmp_path / "whiteboard.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        sent_content = {}
+
+        class _L:
+            def invoke(self, messages):
+                sent_content["content"] = messages[0].content
+                return _FakeResp(json.dumps({"email_subject": "s", "email_summary": "b", "action_items": []}))
+
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: _L())
+
+        record = engine.complete_one_on_one(
+            "Ada", "we talked", db_path=db_path, deliver=False, today=date(2026, 7, 12), images=[str(img)]
+        )
+        assert not record.warnings
+        content = sent_content["content"]
+        assert isinstance(content, list)
+        assert content[0]["type"] == "text"
+        assert content[1]["type"] == "image"
+
+    def test_missing_image_file_degrades_to_text(self, monkeypatch, db_path, tmp_path):
+        """A deleted screenshot file falls back to the plain-string prompt."""
+        sent_content = {}
+
+        class _L:
+            def invoke(self, messages):
+                sent_content["content"] = messages[0].content
+                return _FakeResp(json.dumps({"email_subject": "s", "email_summary": "b", "action_items": []}))
+
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: _L())
+
+        engine.complete_one_on_one(
+            "Ada", "we talked", db_path=db_path, deliver=False, images=[str(tmp_path / "gone.png")]
+        )
+        assert isinstance(sent_content["content"], str)
+
     def test_llm_failure_keeps_transcript(self, monkeypatch, db_path):
         monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
         monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)

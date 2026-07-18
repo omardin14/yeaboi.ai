@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import date, timedelta
-
-from langchain_core.messages import HumanMessage
 
 from yeaboi.agent.state import (
     EngineerActivity,
@@ -64,11 +63,15 @@ def _str_list(value) -> tuple[str, ...]:
     return tuple(str(v).strip() for v in value if str(v).strip())
 
 
-def _invoke_llm(prompt: str, *, what: str) -> tuple[dict, list[str]]:
+def _invoke_llm(prompt: str, *, what: str, images: Sequence[str] = ()) -> tuple[dict, list[str]]:
     """Run one LLM call for ``prompt``; return (parsed_json, warnings).
 
     Returns ({}, [warning]) on any non-configured / auth / request failure so the
     caller can fall back deterministically — the engine never crashes on LLM issues.
+
+    images: optional pasted-screenshot file paths, attached as multimodal image
+        blocks (see agent/llm.py:invoke_with_images — degrades to text-only if
+        the model rejects them or the files are gone).
     """
     from yeaboi.config import is_llm_configured
 
@@ -77,12 +80,12 @@ def _invoke_llm(prompt: str, *, what: str) -> tuple[dict, list[str]]:
         logger.warning("performance[%s]: LLM not configured (%s)", what, why)
         return {}, [f"AI output unavailable — {why}."]
 
-    from yeaboi.agent.llm import get_llm, track_usage
+    from yeaboi.agent.llm import get_llm, invoke_with_images, track_usage
     from yeaboi.agent.nodes import _is_llm_auth_or_billing_error
 
     try:
-        logger.info("performance[%s]: invoking LLM", what)
-        response = get_llm(temperature=0.2).invoke([HumanMessage(content=prompt)])
+        logger.info("performance[%s]: invoking LLM (%d image(s))", what, len(images))
+        response = invoke_with_images(get_llm(temperature=0.2), prompt, images)
         track_usage(response)
         return _parse_json_response(response.content), []
     except Exception as exc:  # noqa: BLE001 — turn any LLM failure into a warning + fallback
@@ -238,6 +241,7 @@ def complete_one_on_one(
     recipients: list[str] | None = None,
     db_path=None,
     today: date | None = None,
+    images: Sequence[str] = (),
 ) -> OneOnOneRecord:
     """Turn a 1:1 transcript into an email summary + tracked action items.
 
@@ -245,6 +249,10 @@ def complete_one_on_one(
     the action items flow into the next prep), and — when ``deliver`` is set —
     emails the summary via SMTP. Delivery is best-effort; an SMTP failure becomes a
     warning, never a crash.
+
+    images: screenshots the lead pasted (Ctrl+V) alongside the transcript —
+        attached to the summarising LLM call as multimodal image blocks.
+        Consumed immediately; not persisted with the record.
     """
     today = today or date.today()
     date_str = today.isoformat()
@@ -265,7 +273,7 @@ def complete_one_on_one(
         transcript=transcript,
         prior_prep=asdict(prior_prep) if prior_prep else None,
     )
-    parsed, warnings = _invoke_llm(prompt, what="1:1 completion")
+    parsed, warnings = _invoke_llm(prompt, what="1:1 completion", images=images)
 
     if not parsed:
         record = _fallback_completion(engineer, date_str, transcript, warnings)

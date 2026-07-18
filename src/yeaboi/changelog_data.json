@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.14.0",
+      "date": "2026-07-18",
+      "summary": "You can now paste a screenshot straight from your clipboard into any text box with Ctrl+V, just like Claude Code. A small chip shows where the image landed in your text, and it travels with your message so the AI can see and reason about what you pasted — in project descriptions, feedback when regenerating, chat, standup updates, and 1:1 transcripts.",
+      "highlights": [
+        {"text": "Paste screenshots into text fields with Ctrl+V; a chip marks where the image is attached", "areas": ["general"]},
+        {"text": "Pasted images are sent to the AI in project descriptions, regenerate feedback, and chat", "areas": ["analysis", "planning"]},
+        {"text": "Pasted images also supported in Daily Standup updates and Performance 1:1 transcripts", "areas": ["standup", "performance"]}
+      ]
+    },
+    {
       "version": "2.13.0",
       "date": "2026-07-18",
       "summary": "yeaboi now keeps you up to date and tells you what's new. The welcome screen shows the version you're running in the bottom-left corner and quietly checks PyPI in the background — when a newer release exists, it shows the exact upgrade command for how you installed. Press c to open the new Changelog page: an AI-written summary of every release, with each change tagged by the feature it touches in that feature's colour.",

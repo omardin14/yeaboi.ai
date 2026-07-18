@@ -3,13 +3,61 @@
 from rich.panel import Panel
 
 from yeaboi.ui.mode_select.screens._screens import _build_mode_screen
-from yeaboi.ui.session.screens._screens_input import _voice_hint
+from yeaboi.ui.session.screens._screens_input import _image_hint, _voice_hint
 from yeaboi.voice import voice_install_command
 
 
 def test_voice_hint_empty_when_tips_disabled(monkeypatch):
     monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: False)
     assert _voice_hint() == ""
+
+
+def test_image_hint_empty_when_tips_disabled(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: False)
+    assert _image_hint() == ""
+
+
+def test_image_hint_mentions_ctrl_v(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    hint = _image_hint()
+    assert "Ctrl+V" in hint
+    assert "screenshot" in hint
+
+
+def test_image_hint_warns_off_cmd_v_on_macos(monkeypatch):
+    """Mac users would reach for Cmd+V — the hint must steer them to Ctrl+V."""
+    import sys
+
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert "not ⌘V" in _image_hint()
+
+
+def test_image_hint_no_cmd_warning_on_linux(monkeypatch):
+    import sys
+
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert "⌘" not in _image_hint()
+
+
+def test_standup_input_screen_image_hint_gated(monkeypatch):
+    """The standup input screen shows the Ctrl+V hint only for image-enabled fields."""
+    import io
+
+    from rich.console import Console
+
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
+
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+
+    def _rendered(**kwargs) -> str:
+        buf = io.StringIO()
+        Console(file=buf, width=200, height=30).print(_build_standup_input_screen("Update?", "", **kwargs))
+        return buf.getvalue()
+
+    assert "Ctrl+V" in _rendered(show_image_hint=True)
+    assert "Ctrl+V" not in _rendered(show_image_hint=False)
 
 
 def test_voice_hint_present_when_available_and_enabled(monkeypatch):

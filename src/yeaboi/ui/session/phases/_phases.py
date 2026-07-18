@@ -1165,6 +1165,7 @@ def _phase_pipeline(
             graph_state.pop("pending_review", None)
             graph_state.pop("last_review_decision", None)
             graph_state.pop("last_review_feedback", None)
+            graph_state.pop("review_feedback_images", None)
             continue
 
         # Review loop
@@ -1267,6 +1268,7 @@ def _phase_pipeline(
                     graph_state.pop("pending_review", None)
                     graph_state.pop("last_review_decision", None)
                     graph_state.pop("last_review_feedback", None)
+                    graph_state.pop("review_feedback_images", None)
                     graph_state.pop("_small_project_oversized", None)
                     # Save Point C — persist after each pipeline stage acceptance
                     if project_id:
@@ -1404,17 +1406,27 @@ def _phase_pipeline(
                         break  # Re-invoke graph to regenerate analysis
                     else:
                         # Non-story stages: prompt for feedback → LLM regeneration
+                        edit_attachments: list[str] = []
                         feedback = _get_edit_input(
                             live,
                             console,
                             _key,
                             "Describe what you'd like to change:",
+                            attachments=edit_attachments,
+                            scope_id=graph_state.get("_attachment_scope", ""),
                         )
                         if feedback:
+                            from yeaboi.ui.shared._attachments import referenced_images
+
                             pending_node = graph_state["pending_review"]
                             serialized = _serialize_artifacts_for_review(graph_state, pending_node)
                             _clear_downstream_artifacts(graph_state, pending_node)
                             graph_state["last_review_decision"] = ReviewDecision.EDIT
+                            # Ctrl+V screenshots attached to this feedback — consumed
+                            # by the regenerating node, cleared alongside the feedback.
+                            feedback_images = referenced_images(feedback, edit_attachments)
+                            if feedback_images:
+                                graph_state["review_feedback_images"] = feedback_images
                             if serialized:
                                 graph_state["last_review_feedback"] = (
                                     f"{feedback}\n\n---PREVIOUS OUTPUT---\n{serialized}"
@@ -1427,17 +1439,25 @@ def _phase_pipeline(
                 elif action == "Regenerate":
                     logger.info("Review decision: Regenerate for %s", pending)
                     # LLM-assisted regeneration (story stage only)
+                    regen_attachments: list[str] = []
                     feedback = _get_edit_input(
                         live,
                         console,
                         _key,
                         "Describe what you'd like the AI to change:",
+                        attachments=regen_attachments,
+                        scope_id=graph_state.get("_attachment_scope", ""),
                     )
                     if feedback:
+                        from yeaboi.ui.shared._attachments import referenced_images
+
                         pending_node = graph_state["pending_review"]
                         serialized = _serialize_artifacts_for_review(graph_state, pending_node)
                         _clear_downstream_artifacts(graph_state, pending_node)
                         graph_state["last_review_decision"] = ReviewDecision.EDIT
+                        feedback_images = referenced_images(feedback, regen_attachments)
+                        if feedback_images:
+                            graph_state["review_feedback_images"] = feedback_images
                         if serialized:
                             graph_state["last_review_feedback"] = f"{feedback}\n\n---PREVIOUS OUTPUT---\n{serialized}"
                         else:
@@ -1590,6 +1610,18 @@ def _phase_chat(
     input_value = ""
     scroll_offset = 0
     _chat_scroll_meta: dict = {}
+
+    # Ctrl+V image paste — per-message attachments; surviving [image #N] chips
+    # ride to the agent node via invoke_state["chat_images"] (see agent/state.py).
+    from yeaboi.ui.shared._attachments import handle_ctrl_v, referenced_images
+
+    chat_attachments: list[str] = []
+    paste_notice = ""
+
+    def _set_paste_notice(msg: str) -> None:
+        nonlocal paste_notice
+        paste_notice = msg
+
     # Follow the newest message until the user scrolls up; new messages re-pin to
     # the bottom only while following. Manual scroll keys break the follow.
     _chat_follow = True
@@ -1605,6 +1637,8 @@ def _phase_chat(
     _chat_anim0 = time.monotonic()  # shimmer title clock
     while True:
         key = _key()
+        if key and key != "":
+            paste_notice = ""
 
         if key == "esc":
             return
@@ -1640,9 +1674,16 @@ def _phase_chat(
             input_value = ""
             logger.debug("Chat message sent: len=%d", len(text))
 
-            # Invoke graph in background
+            # Invoke graph in background. The message itself stays text-only
+            # (nodes string-op on .content); surviving screenshots travel via
+            # the chat_images state field and are attached inside call_model.
+            chat_images = referenced_images(text, chat_attachments)
+            chat_attachments = []
             user_msg = HumanMessage(content=text)
             invoke_state = {**graph_state, "messages": [*graph_state.get("messages", []), user_msg]}
+            if chat_images:
+                invoke_state["chat_images"] = chat_images
+                logger.info("Chat message includes %d pasted image(s)", len(chat_images))
 
             # Show processing state
             result_box: list = [None, None]
@@ -1710,6 +1751,27 @@ def _phase_chat(
             input_value = ""
         elif isinstance(key, str) and key.startswith("paste:"):
             input_value += key[6:]
+        elif key == "ctrl+v":
+            w, h = console.size
+            live.update(
+                _build_chat_screen(
+                    messages,
+                    input_value,
+                    scroll_offset,
+                    width=w,
+                    height=h,
+                    scroll_meta=_chat_scroll_meta,
+                    notice="Pasting image…",
+                )
+            )
+            chip = handle_ctrl_v(
+                chat_attachments,
+                scope_id=graph_state.get("_attachment_scope", "") or "planning",
+                set_notice=_set_paste_notice,
+            )
+            if chip:
+                input_value += chip
+                paste_notice = f"Screenshot attached as {chip}"
         elif isinstance(key, str) and len(key) == 1 and key.isprintable():
             input_value += key
         elif key == "":
@@ -1727,6 +1789,7 @@ def _phase_chat(
                 height=h,
                 shimmer_tick=time.monotonic() - _chat_anim0,
                 scroll_meta=_chat_scroll_meta,
+                notice=paste_notice,
             )
         )
         # Adopt the builder's clamped bottom when following or when we requested
