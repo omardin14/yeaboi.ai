@@ -96,3 +96,61 @@ class TestInputScreenBranding:
         out = buf.getvalue()
         assert "What should change?" in out
         assert "Regenerate epic" in out
+
+
+class TestMultiRowInputBox:
+    """box_rows > 1 renders a large wrapping text box (used by regen feedback)."""
+
+    @staticmethod
+    def _render(value: str, *, box_rows: int, width: int = 120, height: int = 38) -> str:
+        from io import StringIO
+
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
+        from yeaboi.ui.shared._components import ANALYSIS_THEME, analysis_title
+
+        buf = StringIO()
+        Console(file=buf, width=width, force_terminal=False).print(
+            _build_standup_input_screen(
+                "What should change? (Enter to regenerate as-is)",
+                value,
+                step="Regenerate epic — feedback",
+                theme=ANALYSIS_THEME,
+                title=analysis_title(),
+                width=width,
+                height=height,
+                box_rows=box_rows,
+            )
+        )
+        return buf.getvalue()
+
+    def test_large_box_has_requested_rows(self):
+        out = self._render("short feedback", box_rows=6)
+        # 6 interior rows -> 6 lines whose content sits between two │ box edges
+        interior_rows = [ln for ln in out.splitlines() if ln.count("│") >= 4]
+        assert len(interior_rows) == 6
+
+    def test_value_and_cursor_render(self):
+        out = self._render("make the title shorter", box_rows=6)
+        assert "make the title shorter█" in out
+
+    def test_long_text_wraps_and_cursor_stays_visible(self):
+        out = self._render("word " * 80, box_rows=6)
+        assert "█" in out
+        # wrapped across multiple interior rows
+        rows_with_text = [ln for ln in out.splitlines() if ln.count("│") >= 4 and "word" in ln]
+        assert len(rows_with_text) >= 2
+
+    def test_small_terminal_clamps_box_keeps_hint(self):
+        out = self._render("x", box_rows=6, height=22)
+        assert "Enter to confirm" in out
+        assert "█" in out
+        interior_rows = [ln for ln in out.splitlines() if ln.count("│") >= 4]
+        assert 2 <= len(interior_rows) < 6
+
+    def test_single_row_default_unchanged(self):
+        out = self._render("hello", box_rows=1)
+        assert " hello█" in out
+        interior_rows = [ln for ln in out.splitlines() if ln.count("│") >= 4]
+        assert len(interior_rows) == 1

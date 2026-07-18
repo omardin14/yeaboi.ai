@@ -2456,6 +2456,7 @@ def _build_standup_input_screen(
     status: str = "",
     theme=None,
     title=None,
+    box_rows: int = 1,
 ) -> Panel:
     """Build a themed single-line input screen for the Daily Standup flows.
 
@@ -2466,7 +2467,10 @@ def _build_standup_input_screen(
 
     Other pages reuse this screen with their own branding by passing ``theme``
     (a Theme constant) and ``title`` (a rendered ASCII-art title); defaults
-    keep the standup look.
+    keep the standup look. ``box_rows > 1`` renders a large multi-row text box
+    (the value wraps across rows; the cursor row always stays visible) for
+    longer free-text answers like regenerate feedback — the input is still one
+    logical line, Enter confirms.
 
     # See README: "Daily Standup" — TUI page
     # See README: "TUI system" — voice input overlay
@@ -2485,12 +2489,33 @@ def _build_standup_input_screen(
     if default:
         label.append(f"   (default: {default})", style=theme.dim)
 
-    field_inner = f" {value}█ "
-    box_top = Text(_PAD + "  ╭" + "─" * max(len(field_inner), 40) + "╮", style=box_style)
-    box_mid = Text(_PAD + "  │", style=box_style)
-    box_mid.append(field_inner.ljust(max(len(field_inner), 40)), style=f"bold {theme.accent_bright}")
-    box_mid.append("│", style=box_style)
-    box_bot = Text(_PAD + "  ╰" + "─" * max(len(field_inner), 40) + "╯", style=box_style)
+    if box_rows <= 1:
+        field_inner = f" {value}█ "
+        box_top = Text(_PAD + "  ╭" + "─" * max(len(field_inner), 40) + "╮", style=box_style)
+        box_mid = Text(_PAD + "  │", style=box_style)
+        box_mid.append(field_inner.ljust(max(len(field_inner), 40)), style=f"bold {theme.accent_bright}")
+        box_mid.append("│", style=box_style)
+        box_bot = Text(_PAD + "  ╰" + "─" * max(len(field_inner), 40) + "╯", style=box_style)
+        box_lines = [box_top, box_mid, box_bot]
+    else:
+        # Large text box: wide, several rows, the value wraps across them.
+        # Clamp the row count so the box + hint always fit the terminal
+        # (label + 2 blanks + hint = 4 rows, box borders = 2 rows).
+        rows = max(2, min(box_rows, calc_viewport(height, header_h=10, action_h=1) - 6))
+        inner_w = max(46, min(width - len(_PAD) - 12, 110))
+        text_w = inner_w - 2  # one space of padding each side
+        raw = value + "█"
+        chunks = [raw[i : i + text_w] for i in range(0, len(raw), text_w)]
+        chunks = chunks[-rows:]  # keep the cursor row visible when the text overflows
+        while len(chunks) < rows:
+            chunks.append("")
+        box_lines = [Text(_PAD + "  ╭" + "─" * inner_w + "╮", style=box_style)]
+        for chunk in chunks:
+            row = Text(_PAD + "  │", style=box_style)
+            row.append(f" {chunk}".ljust(inner_w), style=f"bold {theme.accent_bright}")
+            row.append("│", style=box_style)
+            box_lines.append(row)
+        box_lines.append(Text(_PAD + "  ╰" + "─" * inner_w + "╯", style=box_style))
 
     # While recording/transcribing, the voice status replaces the usual hint.
     if status:
@@ -2499,7 +2524,7 @@ def _build_standup_input_screen(
         hint_line = Text(_PAD + "  Enter to confirm  ·  Esc to cancel" + _voice_hint(), style=theme.dim, justify="left")
 
     # Vertically pad the middle so the field sits in the upper-third like the dashboard.
-    body: list = [label, Text(""), box_top, box_mid, box_bot, Text(""), hint_line]
+    body: list = [label, Text(""), *box_lines, Text(""), hint_line]
     pad_rows = max(0, calc_viewport(height, header_h=10, action_h=1) - len(body))
     body.extend(Text("") for _ in range(pad_rows))
 

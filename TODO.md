@@ -1350,6 +1350,7 @@ _Bring Azure DevOps to full feature parity with Jira — read board/velocity, cr
 - [x] `tools/team_learning.py` — `_build_revision_block(feedback, previous)` (REVISION REQUEST prompt section; "" when no feedback so plain regenerate is byte-identical) + keyword-only `feedback`/`previous` params on `generate_sample_{epic,stories,tasks,sprint}`
 - [x] TUI — `_ask_regen_feedback()` in `ui/mode_select/__init__.py` (analysis-branded prompt before every Regenerate: Esc cancels with no LLM call, empty Enter regenerates as-is, typed feedback + previous artifact fed to the LLM); wired into all four sample pages incl. `_regen_sprint`
 - [x] Shared input re-branding — keyword-only `theme`/`title` overrides on `_build_standup_input_screen` + `_standup_read_line` passthrough (defaults keep the standup look; voice dictation + paste work unchanged)
+- [x] Large feedback box — `box_rows` option on `_build_standup_input_screen`/`_standup_read_line` (wide multi-row wrapping box, cursor row kept visible, clamps to small terminals); regen feedback prompt uses `box_rows=6`
 - [x] Tests — `TestBuildRevisionBlock`/`TestRegenerationWithFeedback` in `test_analysis_generation.py` (prompt contains feedback + previous marker, absent without feedback, fallback intact); new `test_analysis_regen_feedback.py` (scripted-key drive: typed/empty/Esc/backspace/paste; theme override render); `make test` (3555 passed) + `make lint` clean
 
 ### Phase 32.3: Analysis results — overview + section cards, AI explanations, jargon glossary

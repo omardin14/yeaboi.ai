@@ -1418,6 +1418,7 @@ def _ask_regen_feedback(console: Console, live, read_key, frame_time, supports_t
         default="",
         theme=ANALYSIS_THEME,
         title=analysis_title(),
+        box_rows=6,
     )
     if fb is None:
         logger.info("Regenerate %s: cancelled at feedback prompt", label)
@@ -1440,6 +1441,7 @@ def _standup_read_line(
     default: str = "",
     theme=None,
     title=None,
+    box_rows: int = 1,
 ) -> str | None:
     """Collect a single line of input inside the Live display (themed, read_key-driven).
 
@@ -1477,6 +1479,7 @@ def _standup_read_line(
                 status=status,
                 theme=theme,
                 title=title,
+                box_rows=box_rows,
             )
         )
 
@@ -1497,6 +1500,7 @@ def _standup_read_line(
             status=line,
             theme=theme,
             title=title,
+            box_rows=box_rows,
         )
 
     _render()
