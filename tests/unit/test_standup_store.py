@@ -73,6 +73,51 @@ class TestConfig:
             cfg = store.load_config("s1")
         assert cfg["delivery_channels"] == ["terminal"]
 
+    def test_my_aliases_round_trip(self, db_path):
+        with StandupStore(db_path) as store:
+            store.save_config(
+                "s1",
+                enabled=True,
+                time="10:00",
+                weekdays="1-5",
+                delivery_channels=["terminal"],
+                my_aliases="omardin14, Omar N",
+            )
+            cfg = store.load_config("s1")
+        assert cfg["my_aliases"] == "omardin14, Omar N"
+
+    def test_my_aliases_defaults_empty(self, db_path):
+        with StandupStore(db_path) as store:
+            store.save_config("s1", enabled=True, time="10:00", weekdays="1-5", delivery_channels=["terminal"])
+            cfg = store.load_config("s1")
+        assert cfg["my_aliases"] == ""
+
+    def test_my_aliases_column_migrates_old_db(self, db_path):
+        """A standup_config table created before my_aliases existed gains the column on open."""
+        import sqlite3
+
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """CREATE TABLE standup_config (
+                   session_id TEXT PRIMARY KEY,
+                   enabled INTEGER NOT NULL DEFAULT 0,
+                   time TEXT NOT NULL DEFAULT '10:00',
+                   timezone TEXT NOT NULL DEFAULT '',
+                   weekdays TEXT NOT NULL DEFAULT '1-5',
+                   delivery_channels TEXT NOT NULL DEFAULT '["terminal"]',
+                   repo_path TEXT NOT NULL DEFAULT '',
+                   created_at TEXT NOT NULL,
+                   updated_at TEXT NOT NULL
+               );
+               INSERT INTO standup_config (session_id, enabled, created_at, updated_at)
+               VALUES ('s1', 1, 'now', 'now');"""
+        )
+        conn.close()
+        with StandupStore(db_path) as store:
+            cfg = store.load_config("s1")
+        assert cfg is not None
+        assert cfg["my_aliases"] == ""
+
 
 class TestSelfUpdates:
     def test_save_and_get(self, db_path):
@@ -147,6 +192,48 @@ class TestRunHistory:
             store._conn.execute("UPDATE standup_history SET report_json = 'garbage'")
             assert store.get_latest_report("s1") is None
 
+    def test_self_report_round_trips(self, db_path):
+        report = _make_report(
+            member_updates=(
+                MemberUpdate(name="Me", summary="Merged auth PR", source="combined", self_report="paired\nall day"),
+            )
+        )
+        with StandupStore(db_path) as store:
+            store.record_run(report)
+            latest = store.get_latest_report("s1")
+        assert latest.member_updates[0].self_report == "paired\nall day"
+        assert latest.member_updates[0].source == "combined"
+
+    def test_old_report_json_without_self_report_deserializes(self, db_path):
+        """Reports persisted before the self_report field existed still load."""
+        import json
+
+        with StandupStore(db_path) as store:
+            store.record_run(_make_report())
+            # Strip self_report from the stored JSON to simulate an old row.
+            (raw,) = store._conn.execute("SELECT report_json FROM standup_history").fetchone()
+            d = json.loads(raw)
+            for m in d["member_updates"]:
+                m.pop("self_report", None)
+            store._conn.execute("UPDATE standup_history SET report_json = ?", (json.dumps(d),))
+            latest = store.get_latest_report("s1")
+        assert latest is not None
+        assert latest.member_updates[0].self_report == ""
+
+    def test_activity_window_round_trips(self, db_path):
+        report = _make_report(activity_window="Fri 2026-07-17 00:00 → now")
+        with StandupStore(db_path) as store:
+            store.record_run(report)
+            latest = store.get_latest_report("s1")
+        assert latest.activity_window == "Fri 2026-07-17 00:00 → now"
+
+    def test_my_name_round_trips(self, db_path):
+        report = _make_report(my_name="Omar Din")
+        with StandupStore(db_path) as store:
+            store.record_run(report)
+            latest = store.get_latest_report("s1")
+        assert latest.my_name == "Omar Din"
+
 
 class TestMigrationCreatesTables:
     def test_session_store_v6_creates_standup_tables(self, db_path):
@@ -160,3 +247,25 @@ class TestMigrationCreatesTables:
         with StandupStore(db_path) as store:
             store.save_config("s1", enabled=True, time="09:50", weekdays="1-5", delivery_channels=["terminal"])
             assert store.load_config("s1") is not None
+
+
+class TestSkippedSourcesRoundTrip:
+    def test_round_trips(self, db_path):
+        report = _make_report(skipped_sources=(("github", "STANDUP_GITHUB_REPO not set"),))
+        with StandupStore(db_path) as store:
+            store.record_run(report)
+            latest = store.get_latest_report("s1")
+        assert latest.skipped_sources == (("github", "STANDUP_GITHUB_REPO not set"),)
+
+    def test_old_report_without_field_deserializes(self, db_path):
+        import json
+
+        with StandupStore(db_path) as store:
+            store.record_run(_make_report())
+            (raw,) = store._conn.execute("SELECT report_json FROM standup_history").fetchone()
+            d = json.loads(raw)
+            d.pop("skipped_sources", None)
+            store._conn.execute("UPDATE standup_history SET report_json = ?", (json.dumps(d),))
+            latest = store.get_latest_report("s1")
+        assert latest is not None
+        assert latest.skipped_sources == ()

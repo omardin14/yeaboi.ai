@@ -400,13 +400,85 @@ def confluence_update_page(
 # See README: "Daily Standup" — recent-activity collection
 
 
-def confluence_recent_pages(space_key: str = "", days: int = 1) -> list[dict]:
-    """Return Confluence pages modified within the last ``days`` days.
+# Cap on per-page version-history lookups (1 extra API call each) so a busy
+# space can't stall the standup; pages arrive newest-first so the cap keeps
+# the most recently edited ones.
+_MAX_VERSION_LOOKUPS = 25
 
-    Each item: {author, kind='page', title, timestamp, key(id)}. Returns [] when
-    Confluence is unconfigured or the CQL query fails.
+
+def _iso_to_dt(ts: str):
+    """Parse an ISO timestamp from the Confluence API; None when unparseable."""
+    from datetime import UTC, datetime
+
+    try:
+        parsed = datetime.fromisoformat((ts or "").replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _page_cutoff(days: int, since):
+    from datetime import UTC, datetime, timedelta
+
+    if since is not None:
+        return since.astimezone(UTC) if since.tzinfo else since.replace(tzinfo=UTC)
+    return datetime.now(UTC) - timedelta(days=int(days))
+
+
+def _version_editor_items(conf, page_id: str, title: str, cutoff, exclude: set[str]) -> list[dict]:
+    """One item per DISTINCT in-window editor of a page beyond those already credited.
+
+    The CQL result only exposes the LAST editor; the version history exposes
+    every editor. Best-effort raw REST call — any failure skips the page.
     """
-    logger.info("confluence_recent_pages: space=%r days=%d", space_key, days)
+    try:
+        data = conf.get(f"rest/api/content/{page_id}/version", params={"limit": 50})
+    except Exception as e:
+        logger.debug("confluence version lookup failed for %s: %s", page_id, e)
+        return []
+    versions = data.get("results", []) if isinstance(data, dict) else []
+    out: list[dict] = []
+    seen = set(exclude)
+    for version in versions:
+        if not isinstance(version, dict):
+            continue
+        when = _iso_to_dt(version.get("when", ""))
+        if when is None or when < cutoff:
+            continue
+        by = version.get("by", {}) if isinstance(version.get("by"), dict) else {}
+        name = by.get("displayName", "") or ""
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(
+            {
+                "author": name,
+                "author_email": by.get("email", "") or "",
+                "kind": "page",
+                "title": f"edited '{title}'",
+                "timestamp": (version.get("when", "") or "")[:19],
+                "key": page_id,
+            }
+        )
+    return out
+
+
+def confluence_recent_pages(space_key: str = "", days: int = 1, since=None) -> list[dict]:
+    """Return Confluence page activity since the window start — every editor, not just the last.
+
+    The window is ``since → now`` when ``since`` (a datetime — always a midnight
+    for the standup, so a CQL date literal is exact) is given, else the last
+    ``days`` days. Emitted kinds:
+
+    - ``page``         — one item per distinct in-window editor of each modified page
+                         (the last editor from the CQL result + earlier editors from
+                         the page's version history, capped at _MAX_VERSION_LOOKUPS pages)
+    - ``page-created`` — the creator of a page created in-window (no extra call)
+
+    Each item: {author, author_email?, kind, title, timestamp, key(id)}.
+    Returns [] when Confluence is unconfigured or the CQL query fails.
+    """
+    logger.info("confluence_recent_pages: space=%r days=%d since=%s", space_key, days, since)
     conf = _make_confluence_client()
     if conf is None:
         logger.warning("confluence_recent_pages skipped — Confluence not configured")
@@ -414,27 +486,58 @@ def confluence_recent_pages(space_key: str = "", days: int = 1) -> list[dict]:
 
     key = space_key.strip() or (get_confluence_space_key() or "")
     space_filter = f' AND space = "{key}"' if key else ""
+    # CQL supports absolute "yyyy-MM-dd" date literals and now("-Nd") date math.
+    modified_clause = (
+        f'lastModified >= "{since:%Y-%m-%d}"' if since is not None else f'lastModified >= now("-{int(days)}d")'
+    )
+    cutoff = _page_cutoff(days, since)
     try:
-        # CQL date math: lastModified >= now("-Nd"). Order newest first.
-        cql = f'type = page AND lastModified >= now("-{int(days)}d"){space_filter} ORDER BY lastModified DESC'
-        results = conf.cql(cql, limit=50, expand="history.lastUpdated")
+        cql = f"type = page AND {modified_clause}{space_filter} ORDER BY lastModified DESC"
+        results = conf.cql(cql, limit=50, expand="history.lastUpdated,history.createdBy,history.createdDate")
         pages = results.get("results", []) if isinstance(results, dict) else []
         items: list[dict] = []
+        version_lookups = 0
         for page in pages:
             content = page.get("content", page)  # cql may nest the page under "content"
             history = content.get("history", {}) if isinstance(content, dict) else {}
             last_updated = history.get("lastUpdated", {}) if isinstance(history, dict) else {}
-            author = last_updated.get("by", {}).get("displayName", "") if isinstance(last_updated, dict) else ""
+            by = last_updated.get("by", {}) if isinstance(last_updated, dict) else {}
+            author = by.get("displayName", "") if isinstance(by, dict) else ""
+            title = content.get("title", page.get("title", "Untitled"))
+            page_id = content.get("id", page.get("id", ""))
             items.append(
                 {
                     "author": author,
+                    "author_email": (by.get("email", "") or "") if isinstance(by, dict) else "",
                     "kind": "page",
-                    "title": content.get("title", page.get("title", "Untitled")),
+                    "title": title,
                     "timestamp": (last_updated.get("when", "") or "")[:19] if isinstance(last_updated, dict) else "",
-                    "key": content.get("id", page.get("id", "")),
+                    "key": page_id,
                 }
             )
-        logger.info("confluence_recent_pages: %d page(s) in last %d day(s)", len(items), days)
+            credited = {author} if author else set()
+            # Page created in-window → credit the creator (data already in the expand).
+            created_by = history.get("createdBy", {}) if isinstance(history, dict) else {}
+            created_when = _iso_to_dt(history.get("createdDate", "") if isinstance(history, dict) else "")
+            creator = created_by.get("displayName", "") if isinstance(created_by, dict) else ""
+            if creator and created_when is not None and created_when >= cutoff:
+                if creator not in credited:
+                    items.append(
+                        {
+                            "author": creator,
+                            "author_email": (created_by.get("email", "") or ""),
+                            "kind": "page-created",
+                            "title": f"created '{title}'",
+                            "timestamp": (history.get("createdDate", "") or "")[:19],
+                            "key": page_id,
+                        }
+                    )
+                credited.add(creator)
+            # Earlier in-window editors hidden behind the last modifier.
+            if page_id and version_lookups < _MAX_VERSION_LOOKUPS:
+                version_lookups += 1
+                items.extend(_version_editor_items(conf, page_id, title, cutoff, credited))
+        logger.info("confluence_recent_pages: %d item(s) from %d page(s)", len(items), len(pages))
         return items
     except HTTPError as e:
         code = getattr(getattr(e, "response", None), "status_code", 0)

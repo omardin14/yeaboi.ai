@@ -344,10 +344,16 @@ def github_read_readme(repo_url: str) -> str:
 # See README: "Daily Standup" — recent-activity collection
 
 
-def _since_dt(days: int):
-    """Return a timezone-aware UTC datetime ``days`` days ago (for GitHub API filters)."""
+def _since_dt(days: int, since=None):
+    """Return the UTC window-start datetime for GitHub API filters.
+
+    ``since`` (a tz-aware datetime, e.g. the standup's previous-working-day
+    midnight) wins when given; otherwise fall back to ``days`` days ago.
+    """
     from datetime import UTC, datetime, timedelta
 
+    if since is not None:
+        return since.astimezone(UTC)
     return datetime.now(UTC) - timedelta(days=int(days))
 
 
@@ -364,24 +370,36 @@ def _raise_if_github_auth(e: Exception) -> None:
         raise StandupSourceError("github", "authentication failed — check GITHUB_TOKEN")
 
 
-def github_recent_commits(repo_url: str, days: int = 1) -> list[dict]:
-    """Return commits pushed to the default branch within the last ``days`` days.
+def github_recent_commits(repo_url: str, days: int = 1, since=None) -> list[dict]:
+    """Return commits pushed to the default branch since the window start.
 
-    Each item: {author, kind='commit', title, timestamp, key(sha)}. Returns []
-    when the repo can't be read (no token / not found / rate-limited).
+    The window is ``since → now`` when ``since`` (tz-aware datetime) is given,
+    else the last ``days`` days. Each item: {author, kind='commit', title,
+    timestamp, key(sha)}. Returns [] when the repo can't be read (no token /
+    not found / rate-limited).
     """
-    logger.info("github_recent_commits: repo=%r days=%d", repo_url, days)
+    logger.info("github_recent_commits: repo=%r days=%d since=%s", repo_url, days, since)
     try:
         slug = _parse_repo(repo_url)
         repo = _get_github_client().get_repo(slug)
-        commits = repo.get_commits(since=_since_dt(days))
+        commits = repo.get_commits(since=_since_dt(days, since))
         items: list[dict] = []
         for c in commits[:100]:
             commit = c.commit
             author = commit.author.name if commit.author else ""
+            email = (getattr(commit.author, "email", "") or "") if commit.author else ""
             msg = (commit.message or "").splitlines()[0] if commit.message else ""
             ts = commit.author.date.isoformat()[:19] if commit.author and commit.author.date else ""
-            items.append({"author": author, "kind": "commit", "title": msg, "timestamp": ts, "key": c.sha[:8]})
+            items.append(
+                {
+                    "author": author,
+                    "author_email": email,
+                    "kind": "commit",
+                    "title": msg,
+                    "timestamp": ts,
+                    "key": c.sha[:8],
+                }
+            )
         logger.info("github_recent_commits: %d commit(s) in last %d day(s)", len(items), days)
         return items
     except github.RateLimitExceededException:
@@ -393,19 +411,62 @@ def github_recent_commits(repo_url: str, days: int = 1) -> list[dict]:
         return []
 
 
-def github_recent_prs(repo_url: str, days: int = 1) -> list[dict]:
-    """Return pull requests updated within the last ``days`` days.
+# Caps for the PR-branch commit scan: each PR costs 1-2 extra API requests, so
+# only the newest in-window PRs are expanded and each contributes a bounded
+# number of commits.
+_MAX_PR_COMMIT_LOOKUPS = 10
+_MAX_COMMITS_PER_PR = 60
 
-    Each item: {author, kind='pr', title, status, timestamp, key(#num)}. Returns
-    [] on any error. Sorted by updated desc; stops once older than the window.
+
+def _pr_branch_commit_items(pr, cutoff) -> list[dict]:
+    """In-window commits on a PR's branch — feature work invisible on the default branch.
+
+    Best-effort: any failure yields [] for this PR only. The collector's dedupe
+    pass drops shas that already arrived via the default-branch scan.
     """
-    logger.info("github_recent_prs: repo=%r days=%d", repo_url, days)
+    try:
+        commits = list(pr.get_commits()[:_MAX_COMMITS_PER_PR])
+    except Exception as e:
+        logger.debug("github pr #%s commit lookup failed: %s", getattr(pr, "number", "?"), e)
+        return []
+    items: list[dict] = []
+    for c in commits:
+        commit = c.commit
+        when = commit.author.date if commit.author else None
+        if when is None or when.tzinfo is None or when < cutoff:
+            continue
+        msg = (commit.message or "").splitlines()[0] if commit.message else ""
+        items.append(
+            {
+                "author": commit.author.name if commit.author else "",
+                "author_email": (getattr(commit.author, "email", "") or "") if commit.author else "",
+                "kind": "commit",
+                "title": f"{msg} (PR #{pr.number})",
+                "timestamp": commit.author.date.isoformat()[:19],
+                "key": c.sha[:8],
+            }
+        )
+    return items
+
+
+def github_recent_prs(repo_url: str, days: int = 1, since=None) -> list[dict]:
+    """Return pull requests updated since the window start, plus their branch commits.
+
+    The window is ``since → now`` when ``since`` (tz-aware datetime) is given,
+    else the last ``days`` days. Each PR item: {author, kind='pr', title, status,
+    timestamp, key(#num)}. For the newest in-window PRs (open or merged, capped
+    at _MAX_PR_COMMIT_LOOKUPS) the PR's branch commits are also emitted as
+    kind='commit' items so unmerged feature-branch work is visible. Returns []
+    on any error. Sorted by updated desc; stops once older than the window.
+    """
+    logger.info("github_recent_prs: repo=%r days=%d since=%s", repo_url, days, since)
     try:
         slug = _parse_repo(repo_url)
         repo = _get_github_client().get_repo(slug)
-        cutoff = _since_dt(days)
+        cutoff = _since_dt(days, since)
         prs = repo.get_pulls(state="all", sort="updated", direction="desc")
         items: list[dict] = []
+        commit_lookups = 0
         for pr in prs[:100]:
             updated = pr.updated_at
             # updated_at may be naive; compare in UTC terms defensively.
@@ -423,7 +484,10 @@ def github_recent_prs(repo_url: str, days: int = 1) -> list[dict]:
                     "key": f"#{pr.number}",
                 }
             )
-        logger.info("github_recent_prs: %d PR(s) in last %d day(s)", len(items), days)
+            if status in ("open", "merged") and commit_lookups < _MAX_PR_COMMIT_LOOKUPS:
+                commit_lookups += 1
+                items.extend(_pr_branch_commit_items(pr, cutoff))
+        logger.info("github_recent_prs: %d item(s) in last %d day(s)", len(items), days)
         return items
     except github.RateLimitExceededException:
         logger.warning("github_recent_prs skipped — rate limit reached")

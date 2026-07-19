@@ -1,10 +1,11 @@
 """Prompt construction for the Daily Standup summary.
 
 One LLM call turns raw activity + sprint context into (a) a concise per-member
-update for each person whose work must be *inferred* from activity, and (b) a
-team-level narrative. Members who typed their own update are handled verbatim by
-the engine and are NOT re-summarized here — we only pass their text in as
-context so the team narrative can reference it.
+update for EVERY team member, derived from their tracked activity, and (b) a
+team-level narrative. A member's typed self-report is passed as supporting
+context for their entry — it enriches the analysis (extra intent, blockers)
+but the summary must stay grounded in the listed activity, so the user still
+learns what their activity shows even when they typed an update themselves.
 
 Uses the ARC framework (Ask · Requirements · Context) like every other prompt in
 this package.
@@ -24,22 +25,26 @@ def get_standup_summary_prompt(
     sprint_total_days: int,
     confidence_label: str,
     confidence_rationale: str,
-    inferred_members: list[dict],
-    self_reported: dict[str, str],
+    members: list[dict],
     activity_counts: list[tuple[str, int]],
 ) -> str:
     """Build the standup-summary prompt.
 
     Args:
-        inferred_members: [{"name": str, "activity": [ {kind,title,status,source}, ... ]}]
-            — one entry per person whose update must be inferred from activity.
-        self_reported: {member_name: typed_update} — passed as context only.
+        members: [{"name": str, "activity": [ {kind,title,status,source}, ... ],
+            "in_progress": [ {kind,title,status,source}, ... ],
+            "self_report": str}] — one entry per team member. "activity" holds
+            their tracked items across all sources (commits, PRs, ticket
+            updates, comments, page edits); "in_progress" holds tickets
+            currently assigned to them and in progress (possibly untouched in
+            the window); "self_report" is their own typed update ("" when they
+            didn't type one), used as supporting context, never as a
+            replacement for the activity analysis.
         activity_counts: (source, count) pairs for the "what we looked at" line.
     """
     # --- Context block: everything the model needs to reason over ------------
     counts_str = ", ".join(f"{src}: {n}" for src, n in activity_counts) or "no activity sources reported"
-    inferred_json = json.dumps(inferred_members, ensure_ascii=False, indent=2)
-    self_json = json.dumps(self_reported, ensure_ascii=False, indent=2)
+    members_json = json.dumps(members, ensure_ascii=False, indent=2)
 
     # ARC: Ask
     ask = (
@@ -51,14 +56,26 @@ def get_standup_summary_prompt(
     # ARC: Requirements
     requirements = (
         "Requirements:\n"
-        "- For EACH person in INFERRED_MEMBERS, write a one- to two-sentence 'summary' of what they "
-        "worked on, derived ONLY from their listed activity. Do not invent work that isn't in the data.\n"
-        "- If their activity suggests a blocker (e.g. a PR stuck in review, a ticket flipped back to "
-        "'Blocked'), note it in 'blockers'; otherwise use an empty string.\n"
+        "- For EACH person in MEMBERS, write a one- to two-sentence 'summary' of what they "
+        "worked on, grounded in their listed activity. Do not invent work that isn't in the data.\n"
+        "- When a person has a non-empty 'self_report', treat it as supporting context: "
+        "cross-reference it with their activity, still describe what their activity shows, and fold in "
+        "anything the self-report adds (intent, progress, blockers). Do NOT simply repeat the "
+        "self-report — their own words are shown separately.\n"
+        "- Item 'kind' tells you what the person actually did — phrase it accordingly: 'commit'/'pr' "
+        "(wrote/shipped code), 'update' (moved/edited a ticket, e.g. 'moved X to In Review'), "
+        "'comment' (engaged in a discussion), 'page'/'page-created' (wrote documentation), "
+        "'issue'/'work_item' (a ticket assigned to them was updated).\n"
+        "- 'in_progress' lists tickets currently assigned to the person. Distinguish completed vs "
+        "ongoing work: fold in-progress tickets into the summary as what they are (still) working on.\n"
+        "- If a person has activity but no self_report, infer their summary from the activity alone. "
+        "If a person has NO activity and NO self_report but has 'in_progress' items, summarize them as "
+        "continuing work on those tickets (e.g. \"Continuing work on X\") — never say 'No activity "
+        "detected' for them. Only when all three are empty use 'No activity detected.' as the summary.\n"
+        "- If their activity or self-report suggests a blocker (e.g. a PR stuck in review, a ticket "
+        "flipped back to 'Blocked'), note it in 'blockers'; otherwise use an empty string.\n"
         "- Write 'team_summary' as 2-4 sentences: overall momentum, notable progress, and any risks. "
         f"Factor in the sprint status (currently '{confidence_label}': {confidence_rationale}).\n"
-        "- People in SELF_REPORTED already wrote their own update — do NOT produce summaries for them, "
-        "but DO consider their updates when writing team_summary.\n"
         "- Be concrete and concise. No filler, no preamble.\n"
         "- Return ONLY a JSON object, no markdown fences, of the exact shape:\n"
         '  {"members": [{"name": "...", "summary": "...", "blockers": "..."}], "team_summary": "..."}'
@@ -69,8 +86,7 @@ def get_standup_summary_prompt(
         "Context:\n"
         f"- Sprint: {sprint_name or 'unknown'} — day {sprint_day} of {sprint_total_days}.\n"
         f"- Activity sources examined ({counts_str}).\n"
-        f"- INFERRED_MEMBERS (summarize these):\n{inferred_json}\n"
-        f"- SELF_REPORTED (context only, do not summarize):\n{self_json}"
+        f"- MEMBERS (one summary each):\n{members_json}"
     )
 
     return f"{ask}\n\n{requirements}\n\n{context}"

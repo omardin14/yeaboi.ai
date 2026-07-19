@@ -56,6 +56,10 @@ def _patch_common(monkeypatch, *, items, counts):
     # Pretend the LLM provider is configured so the summarizer exercises the LLM
     # branch (individual tests override this to test the not-configured path).
     monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+    # Identity auto-detection is environment-dependent (global git config, live
+    # tracker credentials) — stub it so tests are deterministic and offline.
+    monkeypatch.setattr(engine, "_detect_tracker_identity", lambda: ("", []))
+    monkeypatch.setattr(engine, "_detect_git_identity", lambda repo: [])
 
 
 class TestRunStandup:
@@ -90,14 +94,53 @@ class TestRunStandup:
         assert all(m.source == "inferred" for m in report.member_updates)
         assert report.activity_counts == (("github", 1), ("jira", 1))
 
-    def test_self_reported_is_verbatim(self, monkeypatch, db_path, seeded_session):
+    def test_self_report_is_context_not_replacement(self, monkeypatch, db_path, seeded_session):
+        """A typed update rides alongside the activity analysis — it never suppresses it."""
+        _patch_common(
+            monkeypatch,
+            items=[
+                {"author": "Alice", "kind": "commit", "title": "auth pairing session", "source": "github"},
+                {"author": "Bob", "kind": "issue", "title": "x", "source": "jira"},
+            ],
+            counts=[("github", 1), ("jira", 1)],
+        )
+        with StandupStore(db_path) as store:
+            store.save_my_update(seeded_session, "2026-07-10", "Alice", "I paired with Bob on auth all day.")
+        llm_json = json.dumps(
+            {
+                "members": [
+                    {"name": "Alice", "summary": "Paired on auth; pushed the pairing-session commit."},
+                    {"name": "Bob", "summary": "Worked on x"},
+                ],
+                "team_summary": "ok",
+            }
+        )
+        captured: dict = {}
+
+        def _fake_invoke(self, m):
+            captured["prompt"] = m
+            return _FakeResp(llm_json)
+
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": _fake_invoke})())
+
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        alice = next(m for m in report.member_updates if m.name == "Alice")
+        # Analysis of her activity, with her own words carried separately.
+        assert alice.summary == "Paired on auth; pushed the pairing-session commit."
+        assert alice.self_report == "I paired with Bob on auth all day."
+        assert alice.source == "combined"
+        # Her self-report reached the LLM as context (Alice's payload entry).
+        assert "I paired with Bob on auth all day." in str(captured["prompt"])
+
+    def test_self_report_without_activity(self, monkeypatch, db_path, seeded_session):
+        """A self-reporter with no matching activity still surfaces, tagged self-reported."""
         _patch_common(
             monkeypatch,
             items=[{"author": "Bob", "kind": "issue", "title": "x", "source": "jira"}],
             counts=[("jira", 1)],
         )
         with StandupStore(db_path) as store:
-            store.save_my_update(seeded_session, "2026-07-10", "Alice", "I paired with Bob on auth all day.")
+            store.save_my_update(seeded_session, "2026-07-10", "Alice", "Interviews all day.")
         llm_json = json.dumps({"members": [{"name": "Bob", "summary": "Worked on x"}], "team_summary": "ok"})
         monkeypatch.setattr(
             "yeaboi.agent.llm.get_llm",
@@ -107,7 +150,8 @@ class TestRunStandup:
         report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
         alice = next(m for m in report.member_updates if m.name == "Alice")
         assert alice.source == "self-reported"
-        assert alice.summary == "I paired with Bob on auth all day."
+        assert alice.self_report == "Interviews all day."
+        assert alice.summary == "No activity detected."
 
     def test_pasted_update_images_reach_llm(self, monkeypatch, db_path, seeded_session, tmp_path):
         """Screenshots saved with 'My Update' become image blocks on the summary call."""
@@ -273,3 +317,495 @@ class TestRunStandup:
             seeded_session, deliver=True, channels=["terminal"], db_path=db_path, today=date(2026, 7, 10)
         )
         assert delivered["channels"] == ["terminal"]
+
+
+class TestAliasMatching:
+    def test_normalize_author_case_and_strip(self):
+        assert engine._normalize_author("  Alice ") == {"alice"}
+
+    def test_normalize_author_email_adds_local_part(self):
+        assert engine._normalize_author("Omar@X.com") == {"omar@x.com", "omar"}
+
+    def test_normalize_author_empty(self):
+        assert engine._normalize_author("") == set()
+        assert engine._normalize_author(None) == set()
+
+    def test_build_alias_map_names_always_included(self):
+        m = engine._build_alias_map(["Alice", "Bob"])
+        assert m["Alice"] == {"alice"}
+        assert m["Bob"] == {"bob"}
+
+    def test_build_alias_map_my_aliases_and_git_identity(self, monkeypatch):
+        monkeypatch.setattr(engine, "_detect_git_identity", lambda repo: ["Omar Noureldin", "omar@x.com"])
+        m = engine._build_alias_map(["Me", "Bob"], my_name="Me", my_aliases="omardin14, Omar N", repo_path="/some/repo")
+        assert {"me", "omardin14", "omar n", "omar noureldin", "omar@x.com", "omar"} <= m["Me"]
+        assert m["Bob"] == {"bob"}  # only the standup user gets extra aliases
+
+    def test_detect_git_identity_no_git(self, monkeypatch):
+        """No git binary at all → no identities, no crash (repo and global lookups)."""
+        import subprocess
+
+        def no_git(*a, **k):
+            raise FileNotFoundError("git")
+
+        monkeypatch.setattr(subprocess, "run", no_git)
+        assert engine._detect_git_identity("") == []
+        assert engine._detect_git_identity("/some/repo") == []
+
+    def test_detect_git_identity_includes_global(self, monkeypatch):
+        """With no repo path the GLOBAL git identity is still detected (zero-config)."""
+        import subprocess
+        from types import SimpleNamespace
+
+        def fake_run(cmd, **k):
+            assert "--global" in cmd
+            value = "Omar Din" if cmd[-1] == "user.name" else "omar@x.com"
+            return SimpleNamespace(returncode=0, stdout=value + "\n")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert engine._detect_git_identity("") == ["Omar Din", "omar@x.com"]
+
+    def test_detect_tracker_identity_from_jira(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        client = MagicMock()
+        client.myself.return_value = {"displayName": "Omar Din", "emailAddress": "omar@x.com"}
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: client)
+        monkeypatch.setattr("yeaboi.config.get_github_token", lambda: "")
+        display, identities = engine._detect_tracker_identity()
+        assert display == "Omar Din"
+        assert identities == ["Omar Din", "omar@x.com"]
+
+    def test_detect_tracker_identity_unconfigured(self, monkeypatch):
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)
+        monkeypatch.setattr("yeaboi.config.get_github_token", lambda: "")
+        assert engine._detect_tracker_identity() == ("", [])
+
+    def test_grouping_via_alias(self):
+        items = [
+            {"author": "omardin14", "kind": "commit", "title": "fix login", "source": "github"},
+            {"author": "Bob", "kind": "issue", "title": "API bug", "source": "jira"},
+            {"author": "stranger", "kind": "commit", "title": "misc", "source": "github"},
+        ]
+        alias_map = {"Me": {"me", "omardin14"}, "Bob": {"bob"}}
+        grouped = engine._group_activity_by_author(items, ["Me", "Bob"], alias_map)
+        assert [a["title"] for a in grouped["Me"]] == ["fix login"]
+        assert [a["title"] for a in grouped["Bob"]] == ["API bug"]
+
+    def test_grouping_case_insensitive_without_alias_map(self):
+        items = [{"author": "ALICE", "kind": "commit", "title": "x", "source": "github"}]
+        grouped = engine._group_activity_by_author(items, ["Alice"])
+        assert len(grouped["Alice"]) == 1
+
+
+class TestRosterMerge:
+    def _llm(self, monkeypatch, members_json):
+        llm_json = json.dumps({"members": members_json, "team_summary": "ok"})
+        monkeypatch.setattr(
+            "yeaboi.agent.llm.get_llm",
+            lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
+        )
+
+    def test_unmatched_authors_become_members(self, monkeypatch, db_path, seeded_session):
+        """Activity by someone outside the plan roster is never silently dropped."""
+        _patch_common(
+            monkeypatch,
+            items=[
+                {"author": "Alice", "kind": "commit", "title": "login", "source": "github"},
+                {"author": "charlie-dev", "kind": "pr", "title": "refactor", "source": "github"},
+            ],
+            counts=[("github", 2)],
+        )
+        self._llm(monkeypatch, [{"name": "Alice", "summary": "login"}, {"name": "charlie-dev", "summary": "refactor"}])
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        names = [m.name for m in report.member_updates]
+        assert "charlie-dev" in names  # not in selected_team_members, still present
+        assert "Alice" in names and "Bob" in names
+
+    def test_my_activity_attaches_via_configured_alias(self, monkeypatch, db_path, seeded_session):
+        """Aliased GitHub commits fold into the standup user's card, not a stranger card."""
+        with StandupStore(db_path) as store:
+            store.save_config(
+                seeded_session,
+                enabled=False,
+                time="10:00",
+                weekdays="1-5",
+                delivery_channels=["terminal"],
+                my_aliases="omardin14",
+            )
+        _patch_common(
+            monkeypatch,
+            items=[{"author": "omardin14", "kind": "commit", "title": "fix login", "source": "github"}],
+            counts=[("github", 1)],
+        )
+        monkeypatch.setattr(engine, "_detect_git_identity", lambda repo: [])
+        self._llm(monkeypatch, [{"name": "Me", "summary": "Fixed the login flow."}])
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        names = [m.name for m in report.member_updates]
+        assert "omardin14" not in names  # claimed by "Me" via the alias
+        me = next(m for m in report.member_updates if m.name == "Me")
+        assert me.summary == "Fixed the login flow."
+        assert me.source == "inferred"
+
+    def test_no_sources_configured_warns(self, monkeypatch, db_path, seeded_session):
+        _patch_common(monkeypatch, items=[], counts=[])
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        assert any("No activity sources configured" in w for w in report.warnings)
+
+
+class TestActivityWindow:
+    def _llm_ok(self, monkeypatch):
+        llm_json = json.dumps({"members": [], "team_summary": "ok"})
+        monkeypatch.setattr(
+            "yeaboi.agent.llm.get_llm",
+            lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
+        )
+
+    def test_default_window_is_previous_working_day(self, monkeypatch, db_path, seeded_session):
+        """A Monday run reaches back to Friday 00:00 — weekend work windows never skip Friday."""
+        captured: dict = {}
+
+        def fake_collect(**kw):
+            captured.update(kw)
+            return ActivityBundle(items=[], counts=[("jira", 0)])
+
+        monkeypatch.setattr(engine.collector, "collect_recent_activity", fake_collect)
+        monkeypatch.setattr(
+            engine.sprint_context,
+            "gather",
+            lambda state, **kw: SprintContext(sprint_name="S", start_date="2026-07-06", sprint_length_weeks=2),
+        )
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        self._llm_ok(monkeypatch)
+
+        # 2026-07-20 is a Monday → window start must be Friday 2026-07-17 00:00.
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 20))
+        since = captured["since"]
+        assert (since.year, since.month, since.day, since.hour) == (2026, 7, 17, 0)
+        assert "days" not in captured
+        assert report.activity_window.startswith("Fri 2026-07-17")
+        assert report.activity_window.endswith("→ now")
+
+    def test_explicit_days_keeps_legacy_window(self, monkeypatch, db_path, seeded_session):
+        captured: dict = {}
+
+        def fake_collect(**kw):
+            captured.update(kw)
+            return ActivityBundle(items=[], counts=[])
+
+        monkeypatch.setattr(engine.collector, "collect_recent_activity", fake_collect)
+        monkeypatch.setattr(
+            engine.sprint_context,
+            "gather",
+            lambda state, **kw: SprintContext(sprint_name="S", start_date="2026-07-06", sprint_length_weeks=2),
+        )
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        self._llm_ok(monkeypatch)
+
+        report = engine.run_standup(seeded_session, deliver=False, days=3, db_path=db_path, today=date(2026, 7, 20))
+        assert captured["days"] == 3
+        assert "since" not in captured
+        assert report.activity_window == "last 3 day(s)"
+
+
+class TestIdentityResolution:
+    def _llm(self, monkeypatch, members_json):
+        llm_json = json.dumps({"members": members_json, "team_summary": "ok"})
+        monkeypatch.setattr(
+            "yeaboi.agent.llm.get_llm",
+            lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
+        )
+
+    def test_me_resolves_to_tracker_display_name(self, monkeypatch, db_path, seeded_session):
+        """Default "Me" + detected Jira identity → one card under the real name.
+
+        The self-report typed as "Me" is re-keyed, activity authored under the
+        Jira displayName attaches to that same card, and no duplicate
+        "Omar Din" member appears.
+        """
+        _patch_common(
+            monkeypatch,
+            items=[{"author": "Omar Din", "kind": "issue", "title": "GuardDuty S3", "source": "jira"}],
+            counts=[("jira", 1)],
+        )
+        monkeypatch.setattr(engine, "_detect_tracker_identity", lambda: ("Omar Din", ["Omar Din", "omar@x.com"]))
+        with StandupStore(db_path) as store:
+            store.save_my_update(seeded_session, "2026-07-10", "Me", "Working on GuardDuty.")
+        self._llm(monkeypatch, [{"name": "Omar Din", "summary": "Progressing GuardDuty S3 protection."}])
+
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        names = [m.name for m in report.member_updates]
+        assert "Me" not in names
+        assert names.count("Omar Din") == 1
+        assert names[0] == "Omar Din"  # the user's card comes first
+        me = report.member_updates[0]
+        assert me.self_report == "Working on GuardDuty."
+        assert me.summary == "Progressing GuardDuty S3 protection."
+        assert me.source == "combined"
+        assert report.my_name == "Omar Din"
+
+    def test_explicit_user_name_not_renamed(self, monkeypatch, db_path, seeded_session):
+        """STANDUP_USER_NAME set → keep it, but detected identities still alias-match."""
+        _patch_common(
+            monkeypatch,
+            items=[{"author": "Omar Din", "kind": "issue", "title": "x", "source": "jira"}],
+            counts=[("jira", 1)],
+        )
+        monkeypatch.setattr("yeaboi.config.get_standup_user_name", lambda: "Dinho")
+        monkeypatch.setattr(engine, "_detect_tracker_identity", lambda: ("Omar Din", ["Omar Din"]))
+        self._llm(monkeypatch, [{"name": "Dinho", "summary": "Worked on x."}])
+
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        names = [m.name for m in report.member_updates]
+        assert names[0] == "Dinho"
+        assert "Omar Din" not in names  # aliased into Dinho's card, not a stranger card
+        assert report.my_name == "Dinho"
+
+    def test_roster_from_tracker_when_no_plan_members(self, monkeypatch, db_path):
+        """No plan roster → teammates come from Jira/AzDO assignees (fetch_roster),
+        including those with no activity in today's window."""
+        sid = "sess-roster"
+        with SessionStore(db_path) as s:
+            s.create_session(sid, "Roster Project", mode="planning")
+            s.save_state(sid, {"sprint_length_weeks": 2})  # no selected_team_members
+        _patch_common(
+            monkeypatch,
+            items=[{"author": "Sarah", "kind": "issue", "title": "YEA-42 review", "source": "jira"}],
+            counts=[("jira", 1)],
+        )
+        monkeypatch.setattr(engine, "_detect_tracker_identity", lambda: ("Omar Din", ["Omar Din"]))
+        from yeaboi.agent.state import EngineerRef
+
+        monkeypatch.setattr(
+            "yeaboi.performance.roster.fetch_roster",
+            lambda **kw: [
+                EngineerRef(name="James", source="jira"),
+                EngineerRef(name="Omar Din", source="jira"),
+                EngineerRef(name="Sarah", source="jira"),
+            ],
+        )
+        llm_json = json.dumps(
+            {"members": [{"name": "Sarah", "summary": "Moved YEA-42 into review."}], "team_summary": "ok"}
+        )
+        monkeypatch.setattr(
+            "yeaboi.agent.llm.get_llm",
+            lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
+        )
+
+        report = engine.run_standup(sid, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        names = [m.name for m in report.member_updates]
+        # User first, whole team present, the roster's "Omar Din" merged into the user's card.
+        assert names == ["Omar Din", "James", "Sarah"]
+        james = next(m for m in report.member_updates if m.name == "James")
+        assert james.summary == "No activity detected."
+        sarah = next(m for m in report.member_updates if m.name == "Sarah")
+        assert sarah.summary == "Moved YEA-42 into review."
+
+
+class TestProgressCallback:
+    def test_phases_reported_in_order(self, monkeypatch, db_path, seeded_session):
+        _patch_common(monkeypatch, items=[], counts=[("jira", 0)])
+        llm_json = json.dumps({"members": [], "team_summary": "ok"})
+        monkeypatch.setattr(
+            "yeaboi.agent.llm.get_llm",
+            lambda **k: type("L", (), {"invoke": lambda self, m: _FakeResp(llm_json)})(),
+        )
+        phases: list[str] = []
+        engine.run_standup(
+            seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10), on_progress=phases.append
+        )
+        assert phases == [
+            "Collecting recent activity",
+            "Reading sprint progress",
+            "Resolving team & identities",
+            "Writing summaries with AI",
+            "Saving & exporting",
+        ]
+
+    def test_broken_callback_never_breaks_the_run(self, monkeypatch, db_path, seeded_session):
+        _patch_common(monkeypatch, items=[], counts=[])
+
+        def boom(phase):
+            raise RuntimeError("ui went away")
+
+        report = engine.run_standup(
+            seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10), on_progress=boom
+        )
+        assert report is not None
+
+
+class TestAliasEnrichment:
+    def test_email_seen_on_tracker_item_claims_git_commits(self):
+        """A Jira item exposing a member's email lets their git commits attach."""
+        alias_map = {"Omar Din": {"omar din"}, "Ahmet Ince": {"ahmet ince"}}
+        items = [
+            {"author": "Omar Din", "author_email": "omar.din@corp.com", "kind": "issue", "title": "t"},
+            {"author": "omar.din@corp.com", "author_email": "omar.din@corp.com", "kind": "commit", "title": "c"},
+        ]
+        engine._enrich_aliases_from_items(alias_map, items)
+        assert "omar.din@corp.com" in alias_map["Omar Din"]
+        assert "omar.din" in alias_map["Omar Din"]  # local part too
+        assert alias_map["Ahmet Ince"] == {"ahmet ince"}  # untouched
+
+        grouped = engine._group_activity_by_author(items, list(alias_map), alias_map)
+        assert len(grouped["Omar Din"]) == 2
+
+    def test_no_emails_changes_nothing(self):
+        alias_map = {"Alice": {"alice"}}
+        engine._enrich_aliases_from_items(alias_map, [{"author": "Alice", "kind": "issue", "title": "t"}])
+        assert alias_map == {"Alice": {"alice"}}
+
+    def test_run_standup_does_not_spawn_phantom_member_for_known_email(self, monkeypatch, db_path, seeded_session):
+        items = [
+            {"author": "Alice", "author_email": "alice@corp.com", "kind": "issue", "title": "t", "source": "jira"},
+            {
+                "author": "alice@corp.com",
+                "author_email": "alice@corp.com",
+                "kind": "commit",
+                "title": "c",
+                "source": "local_git",
+            },
+        ]
+        _patch_common(monkeypatch, items=items, counts=[("jira", 1), ("local_git", 1)])
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        report = engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        names = [m.name for m in report.member_updates]
+        assert "alice@corp.com" not in names
+        alice = next(m for m in report.member_updates if m.name == "Alice")
+        assert "c" in alice.summary or "t" in alice.summary
+
+
+class TestWipFlow:
+    def test_wip_only_member_reads_continuing_work(self, monkeypatch, db_path, seeded_session):
+        items = [
+            {"author": "Bob", "kind": "wip", "title": "Ship exports", "status": "In Progress", "source": "jira"},
+        ]
+        _patch_common(monkeypatch, items=items, counts=[("jira", 1)])
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        report = engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        bob = next(m for m in report.member_updates if m.name == "Bob")
+        assert bob.summary == "Continuing work on: Ship exports"
+
+    def test_truly_empty_member_still_no_activity(self, monkeypatch, db_path, seeded_session):
+        _patch_common(monkeypatch, items=[], counts=[("jira", 0)])
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        report = engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        alice = next(m for m in report.member_updates if m.name == "Alice")
+        assert alice.summary == "No activity detected."
+
+    def test_fresh_activity_preferred_over_wip(self):
+        acts = [
+            {"kind": "wip", "title": "Old ticket"},
+            {"kind": "commit", "title": "shipped fix"},
+        ]
+        assert engine._fallback_summary(acts) == "shipped fix"
+
+    def test_llm_payload_splits_activity_and_in_progress(self, monkeypatch, db_path, seeded_session):
+        items = [
+            {"author": "Alice", "kind": "commit", "title": "login page", "source": "github"},
+            {"author": "Alice", "kind": "wip", "title": "Ship exports", "status": "In Progress", "source": "jira"},
+        ]
+        _patch_common(monkeypatch, items=items, counts=[("github", 1), ("jira", 1)])
+        captured: dict = {}
+
+        def fake_prompt(**kwargs):
+            captured.update(kwargs)
+            return "PROMPT"
+
+        monkeypatch.setattr("yeaboi.prompts.standup.get_standup_summary_prompt", fake_prompt)
+        monkeypatch.setattr(
+            "yeaboi.agent.llm.invoke_with_images", lambda llm, prompt, images: _FakeResp('{"members": []}')
+        )
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **kw: object())
+        engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        alice = next(m for m in captured["members"] if m["name"] == "Alice")
+        assert [a["title"] for a in alice["activity"]] == ["login page"]
+        assert [a["title"] for a in alice["in_progress"]] == ["Ship exports"]
+
+    def test_confidence_excludes_wip_from_activity_count(self, monkeypatch, db_path, seeded_session):
+        items = [
+            {"author": "Alice", "kind": "commit", "title": "c", "source": "github"},
+            {"author": "Bob", "kind": "wip", "title": "w", "source": "jira"},
+        ]
+        _patch_common(monkeypatch, items=items, counts=[("github", 1), ("jira", 1)])
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        seen: dict = {}
+        real_compute = engine.confidence.compute
+
+        def spy_compute(**kwargs):
+            seen.update(kwargs)
+            return real_compute(**kwargs)
+
+        monkeypatch.setattr(engine.confidence, "compute", spy_compute)
+        engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        assert seen["activity_count"] == 1
+
+
+class TestSkippedSources:
+    def _run(self, monkeypatch, db_path, seeded_session, bundle):
+        monkeypatch.setattr(engine.collector, "collect_recent_activity", lambda **kw: bundle)
+        monkeypatch.setattr(
+            engine.sprint_context,
+            "gather",
+            lambda state, **kw: __import__("yeaboi.standup.sprint_context", fromlist=["SprintContext"]).SprintContext(
+                sprint_name="S", start_date="2026-07-06", sprint_length_weeks=2
+            ),
+        )
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        monkeypatch.setattr(engine, "_detect_tracker_identity", lambda: ("", []))
+        monkeypatch.setattr(engine, "_detect_git_identity", lambda repo: [])
+        return engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+
+    def test_skipped_sources_land_on_report(self, monkeypatch, db_path, seeded_session):
+        from yeaboi.standup.collector import ActivityBundle
+
+        bundle = ActivityBundle(
+            items=[],
+            counts=[("jira", 0)],
+            skipped=[("github", "STANDUP_GITHUB_REPO not set")],
+        )
+        report = self._run(monkeypatch, db_path, seeded_session, bundle)
+        assert report.skipped_sources == (("github", "STANDUP_GITHUB_REPO not set"),)
+
+    def test_partial_coverage_advises_configuring_skipped_sources(self, monkeypatch, db_path, seeded_session):
+        # Jira ran but GitHub/AzDO were not set up → the report itself must say
+        # so (⚠ Notices) and advise connecting them, not just the Activity detail.
+        from yeaboi.standup.collector import ActivityBundle
+
+        bundle = ActivityBundle(
+            items=[],
+            counts=[("jira", 2)],
+            skipped=[
+                ("github", "STANDUP_GITHUB_REPO not set"),
+                ("azure_devops", "AZURE_DEVOPS_PROJECT not set"),
+            ],
+        )
+        report = self._run(monkeypatch, db_path, seeded_session, bundle)
+        notice = next((w for w in report.warnings if w.startswith("Not scanned:")), "")
+        assert "Github (STANDUP_GITHUB_REPO not set)" in notice
+        assert "Azure Devops (AZURE_DEVOPS_PROJECT not set)" in notice
+        assert "connect these in .env" in notice
+        assert notice == report.warnings[-1]  # advisory, so auth/LLM problems stay on top
+
+    def test_nothing_configured_keeps_single_generic_notice(self, monkeypatch, db_path, seeded_session):
+        # All sources skipped → the existing "No activity sources configured"
+        # notice already advises; no duplicate per-source line.
+        from yeaboi.standup.collector import ActivityBundle
+
+        bundle = ActivityBundle(
+            items=[],
+            counts=[],
+            skipped=[("github", "STANDUP_GITHUB_REPO not set"), ("jira", "JIRA_PROJECT_KEY not set")],
+        )
+        report = self._run(monkeypatch, db_path, seeded_session, bundle)
+        assert any(w.startswith("No activity sources configured") for w in report.warnings)
+        assert not any(w.startswith("Not scanned:") for w in report.warnings)
+
+    def test_no_skipped_sources_no_notice(self, monkeypatch, db_path, seeded_session):
+        from yeaboi.standup.collector import ActivityBundle
+
+        bundle = ActivityBundle(items=[], counts=[("jira", 2)], skipped=[])
+        report = self._run(monkeypatch, db_path, seeded_session, bundle)
+        assert not any(w.startswith("Not scanned:") for w in report.warnings)
