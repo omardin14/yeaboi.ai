@@ -41,13 +41,19 @@ def _distinct_authors(items: list[dict]) -> list[str]:
 
 
 def _jira_members(jira_project: str, days: int) -> list[EngineerRef]:
-    """Best-effort Jira roster: distinct assignees on recently-updated issues."""
+    """Best-effort Jira roster: distinct assignees on recently-updated + in-progress issues.
+
+    Changelog and comment items are excluded — they credit anyone who touched a
+    ticket (a commenting stakeholder, a drive-by field edit), which is activity
+    worth showing in the standup feed but not evidence of team membership. Only
+    the assignee-credited kinds (``issue``/``wip``) count toward the roster.
+    """
     if not jira_project:
         return []
     try:
         from yeaboi.tools.jira import jira_recent_activity
 
-        items = jira_recent_activity(jira_project, days=days)
+        items = jira_recent_activity(jira_project, days=days, include_changelog=False, include_comments=False)
     except ImportError:
         logger.warning("Jira SDK not installed — skipping Jira roster")
         return []

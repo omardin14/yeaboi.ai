@@ -696,11 +696,26 @@ def _parse_jira_ts(ts: str) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+# App/automation accounts act on tickets (rule-driven transitions, field edits)
+# but are not people — filtering them here keeps bots out of the activity feed,
+# the standup team, and the roster in one place. Jira Cloud marks them with
+# accountType == "app"; the display-name set catches well-known bots on
+# Server/DC where accountType doesn't exist.
+_BOT_DISPLAY_NAMES = frozenset({"automation for jira"})
+
+
 def _actor_fields(actor) -> tuple[str, str]:
-    """(displayName, emailAddress) from a Jira user object — email is often hidden (GDPR)."""
+    """(displayName, emailAddress) from a Jira user object — email is often hidden (GDPR).
+
+    App/bot accounts resolve to ("", "") so they are never credited as an
+    activity author — callers already treat an empty name as "no actor".
+    """
     if actor is None:
         return "", ""
-    return getattr(actor, "displayName", "") or "", getattr(actor, "emailAddress", "") or ""
+    name = getattr(actor, "displayName", "") or ""
+    if getattr(actor, "accountType", "") == "app" or name.strip().lower() in _BOT_DISPLAY_NAMES:
+        return "", ""
+    return name, getattr(actor, "emailAddress", "") or ""
 
 
 def _issue_url(issue_key: str) -> str:

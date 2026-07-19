@@ -410,6 +410,67 @@ class TestJiraChangelogItems:
         assert items[0]["author_email"] == ""
 
 
+class TestJiraBotFiltering:
+    """App/automation accounts must never be credited as activity authors —
+    otherwise they surface as standup team members (e.g. "Automation for Jira")."""
+
+    _NOW = datetime.now(UTC).isoformat()
+
+    def _client(self, monkeypatch, issues):
+        client = MagicMock()
+        client.search_issues.side_effect = [issues, []]
+        monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: client)
+        monkeypatch.setattr("yeaboi.tools.jira.get_jira_project_key", lambda: "PROJ")
+        return client
+
+    def test_app_account_changelog_skipped(self, monkeypatch):
+        issue = _jira_issue()
+        issue.changelog = SimpleNamespace(
+            histories=[
+                SimpleNamespace(
+                    author=SimpleNamespace(displayName="Deploy Bot", accountType="app"),
+                    created=self._NOW,
+                    items=[SimpleNamespace(field="status", toString="Done")],
+                )
+            ]
+        )
+        self._client(monkeypatch, [issue])
+        items = jira_recent_activity("PROJ", days=1)
+        assert [i for i in items if i["kind"] == "update"] == []
+
+    def test_automation_for_jira_name_filtered_without_account_type(self, monkeypatch):
+        # Server/DC has no accountType — the well-known display name is enough.
+        issue = _jira_issue()
+        issue.fields.comment = SimpleNamespace(
+            comments=[
+                SimpleNamespace(
+                    author=SimpleNamespace(displayName="Automation for Jira"),
+                    created=self._NOW,
+                    body="rule fired",
+                )
+            ]
+        )
+        self._client(monkeypatch, [issue])
+        items = jira_recent_activity("PROJ", days=1)
+        assert [i for i in items if i["kind"] == "comment"] == []
+
+    def test_bot_assignee_treated_as_unassigned(self, monkeypatch):
+        issue = _jira_issue()
+        issue.fields.assignee = SimpleNamespace(displayName="Automation for Jira", accountType="app")
+        self._client(monkeypatch, [issue])
+        items = jira_recent_activity("PROJ", days=1)
+        assert items[0]["kind"] == "issue"
+        assert items[0]["author"] == ""
+
+    def test_human_actor_unaffected(self, monkeypatch):
+        # atlassian accounts carry accountType == "atlassian" — must pass through.
+        issue = _jira_issue()
+        issue.fields.assignee = SimpleNamespace(displayName="Alice", emailAddress="a@corp.com", accountType="atlassian")
+        self._client(monkeypatch, [issue])
+        items = jira_recent_activity("PROJ", days=1)
+        assert items[0]["author"] == "Alice"
+
+
 class TestJiraWip:
     def test_wip_items_credited_to_assignee(self, monkeypatch):
         wip_issue = _jira_issue(key="PROJ-9", summary="Ship exports", assignee_name="Eve", assignee_email="")
@@ -700,6 +761,24 @@ class TestConfluenceMultiEditor:
         assert len(created) == 1
         assert created[0]["author"] == "Nia"
         assert created[0]["title"] == "created 'Runbook'"
+
+    def test_app_account_editors_skipped(self, monkeypatch):
+        # Cloud automation/app users edit pages too — they must not be credited.
+        conf = MagicMock()
+        page = self._page()
+        page["content"]["history"]["lastUpdated"]["by"]["accountType"] = "app"
+        conf.cql.return_value = {"results": [page]}
+        conf.get.return_value = {
+            "results": [
+                {"by": {"displayName": "App Sync", "accountType": "app"}, "when": self._NOW_ISO, "number": 2},
+                {"by": {"displayName": "Omar", "accountType": "atlassian"}, "when": self._NOW_ISO, "number": 1},
+            ]
+        }
+        monkeypatch.setattr("yeaboi.tools.confluence._make_confluence_client", lambda: conf)
+        monkeypatch.setattr("yeaboi.tools.confluence.get_confluence_space_key", lambda: "SPACE")
+        items = confluence_recent_pages("SPACE", days=1)
+        # The page item stays (author blank), only the human version editor is credited.
+        assert [i["author"] for i in items] == ["", "Omar"]
 
     def test_version_lookup_failure_skips_page_quietly(self, monkeypatch):
         conf = MagicMock()
