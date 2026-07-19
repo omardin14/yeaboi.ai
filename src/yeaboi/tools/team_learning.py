@@ -1704,6 +1704,21 @@ ANALYSIS_GLOSSARY = {
     "confidence": "Confidence — how many samples back a number (low <5, high ≥15)",
 }
 
+# Coaching insight categories — key order is display order. Shared by the TUI
+# (insights screen + results card) and the MD/HTML exporters so the wording
+# never drifts (same pattern as ANALYSIS_GLOSSARY above).
+INSIGHT_CATEGORIES = (
+    ("start", "Start doing"),
+    ("stop", "Stop doing"),
+    ("keep", "Keep doing"),
+    ("try", "Worth trying"),
+)
+
+_INSIGHT_KEYS = tuple(k for k, _ in INSIGHT_CATEGORIES)
+
+# Cap items per category so the screen stays scannable.
+_INSIGHT_MAX_ITEMS = 4
+
 
 def _build_narrative_digest(profile: TeamProfile, examples: dict | None) -> str:
     """Compact per-section metric digest fed to the narrative LLM call.
@@ -1895,6 +1910,203 @@ def _generate_analysis_narrative(profile: TeamProfile, examples: dict | None) ->
         logger.warning("LLM analysis narrative had unexpected shape; using fallback")
     except Exception as exc:
         logger.warning("LLM analysis narrative generation failed: %s", exc)
+
+    return fallback
+
+
+def _insight_item(title: str, detail: str, evidence: str = "") -> dict:
+    """One coaching insight — small dict so it JSON-serializes with the examples."""
+    return {"title": title, "detail": detail, "evidence": evidence}
+
+
+def _fallback_team_insights(profile: TeamProfile, examples: dict | None) -> dict:
+    """Deterministic coaching insights when the LLM is unavailable.
+
+    Maps the existing recommendation engine + headline stats into the four
+    coaching categories. Every category is guaranteed non-empty so the insights
+    screen always has content. Pure — no LLM, no I/O, never raises.
+    """
+    ex = examples or {}
+    stats = compute_headline_stats(profile, ex)
+    recs = compute_recommendations(profile, ex)
+
+    # ⚠ warnings read as "stop doing this"; ℹ notices read as "start doing this".
+    stop = [_insight_item(label.lstrip("⚠ "), text) for label, text in recs if label.startswith("⚠")]
+    start = [_insight_item(label.lstrip("ℹ "), text) for label, text in recs if label.startswith("ℹ")]
+
+    keep: list[dict] = []
+    if stats["completion_rate"] >= 80:
+        keep.append(
+            _insight_item(
+                "Realistic sprint commitments",
+                "The team finishes most of what it plans — keep sizing sprints the same way.",
+                f"{stats['completion_rate']:.0f}% average sprint completion",
+            )
+        )
+    if profile.writing_patterns.uses_given_when_then:
+        keep.append(
+            _insight_item(
+                "Given/When/Then acceptance criteria",
+                "Structured acceptance criteria make stories testable — keep writing them this way.",
+                "Given/When/Then structure detected in story descriptions",
+            )
+        )
+    if stats["estimation_accuracy"] >= 70:
+        keep.append(
+            _insight_item(
+                "Current estimation practice",
+                "Estimates hold up well against actual cycle times — keep the calibration you have.",
+                f"{stats['estimation_accuracy']:.0f}% estimation accuracy",
+            )
+        )
+    td = ex.get("task_decomposition", {})
+    if isinstance(td, dict) and td.get("total_stories", 0) > 0:
+        sw, tot = td.get("stories_with_tasks", 0), td["total_stories"]
+        if sw / tot >= 0.5:
+            keep.append(
+                _insight_item(
+                    "Breaking stories into sub-tasks",
+                    "Decomposed stories are easier to track and finish — keep the habit.",
+                    f"{sw} of {tot} stories have sub-tasks",
+                )
+            )
+    # Guaranteed grounded final item so `keep` is never empty.
+    keep.append(
+        _insight_item(
+            "The current sprint cadence",
+            "A steady cadence is the foundation the rest of the analysis builds on.",
+            f"{profile.sample_sprints} sprints analysed",
+        )
+    )
+
+    try_items: list[dict] = []
+    if stats["spillover_pct"] > 15:
+        try_items.append(
+            _insight_item(
+                "WIP limits",
+                "Capping work-in-progress forces stories to finish before new ones start, cutting carry-over.",
+                f"{stats['spillover_pct']:.0f}% of stories carry over between sprints",
+            )
+        )
+    if stats["var_pct"] > 35:
+        try_items.append(
+            _insight_item(
+                "Capacity-based sprint planning",
+                "Plan the next sprint from the last 3 sprints' delivered points instead of gut feel.",
+                f"Velocity swings ±{stats['var_pct']}% sprint-to-sprint",
+            )
+        )
+    if isinstance(td, dict) and td.get("total_stories", 0) > 10:
+        sw, tot = td.get("stories_with_tasks", 0), td["total_stories"]
+        if sw / tot < 0.3:
+            try_items.append(
+                _insight_item(
+                    "A task-breakdown template",
+                    "A shared checklist (build / test / review / deploy) makes decomposition routine.",
+                    f"Only {sw} of {tot} stories have sub-tasks",
+                )
+            )
+    if not try_items:
+        try_items.append(
+            _insight_item(
+                "A mid-sprint goal check-in",
+                "A 10-minute halfway review catches at-risk stories while there is still time to react.",
+                f"Based on {profile.sample_sprints} analysed sprints",
+            )
+        )
+
+    # `start`/`stop` fall back to generic-but-useful coaching when no
+    # recommendation triggered (a healthy team still gets a full screen).
+    if not start:
+        start.append(
+            _insight_item(
+                "Reviewing these metrics with the team",
+                "Share the analysis in a retro — the numbers land better when the team owns them.",
+                f"{profile.sample_sprints} sprints analysed",
+            )
+        )
+    if not stop:
+        stop.append(
+            _insight_item(
+                "Adding unplanned work mid-sprint",
+                "Even healthy teams leak scope — route new requests to the backlog unless truly urgent.",
+                "No major warning signals were triggered by the metrics",
+            )
+        )
+
+    return {
+        "start": start[:_INSIGHT_MAX_ITEMS],
+        "stop": stop[:_INSIGHT_MAX_ITEMS],
+        "keep": keep[:_INSIGHT_MAX_ITEMS],
+        "try": try_items[:_INSIGHT_MAX_ITEMS],
+    }
+
+
+def _generate_team_insights(profile: TeamProfile, examples: dict | None) -> dict:
+    """Use the LLM to coach the team lead: start / stop / keep / worth trying.
+
+    Returns ``{"start": [...], "stop": [...], "keep": [...], "try": [...]}``
+    where each item is ``{"title", "detail", "evidence"}``. Falls back to
+    deterministic insights on any failure — this must never raise (it runs at
+    the end of every analysis, like the narrative call above).
+    """
+    ex = examples or {}
+    digest = _build_narrative_digest(profile, ex)
+
+    # See README: "Prompt Construction" — ARC framework: Ask (coach the lead),
+    # Requirements (categories, item shape, evidence), Context (metrics digest).
+    prompt = (
+        "You are an experienced agile coach. A team's sprint history was analysed; "
+        "the key metrics are below. Coach the team lead on how to improve the team — "
+        "team setup, ways of working, estimation, process, and the mix of work.\n\n"
+        "Requirements:\n"
+        '- Four categories: "start" (things to start doing), "stop" (things to stop '
+        'doing or avoid), "keep" (things working well to keep doing), "try" '
+        "(experiments worth trying).\n"
+        '- 2-4 items per category. Each item: "title" (imperative, max 10 words), '
+        '"detail" (1-2 plain-English sentences of practical advice), "evidence" '
+        "(one short phrase citing a concrete number from the digest).\n"
+        "- Ground every item in the digest — no generic advice the data doesn't support.\n\n"
+        "## Metrics digest\n" + digest + "\n\n"
+        "Return ONLY a JSON object: "
+        '{"start": [{"title": "...", "detail": "...", "evidence": "..."}], '
+        '"stop": [...], "keep": [...], "try": [...]}'
+    )
+
+    fallback = _fallback_team_insights(profile, ex)
+    try:
+        response = _llm_invoke(prompt, temperature=0.0)
+        text = response.content if hasattr(response, "content") else str(response)
+        text = text.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```\w*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+        result = json.loads(text)
+        if isinstance(result, dict):
+            insights: dict = {}
+            for key in _INSIGHT_KEYS:
+                raw = result.get(key)
+                items = []
+                if isinstance(raw, list):
+                    for it in raw:
+                        if isinstance(it, dict) and isinstance(it.get("title"), str) and it["title"].strip():
+                            items.append(
+                                _insight_item(
+                                    it["title"].strip(),
+                                    it["detail"].strip() if isinstance(it.get("detail"), str) else "",
+                                    it["evidence"].strip() if isinstance(it.get("evidence"), str) else "",
+                                )
+                            )
+                # Back-fill any empty/missing category with deterministic items
+                insights[key] = items[:_INSIGHT_MAX_ITEMS] if items else fallback[key]
+            logger.info(
+                "LLM team insights generated (%s)",
+                ", ".join(f"{k}={len(v)}" for k, v in insights.items()),
+            )
+            return insights
+        logger.warning("LLM team insights had unexpected shape; using fallback")
+    except Exception as exc:
+        logger.warning("LLM team insights generation failed: %s", exc)
 
     return fallback
 
@@ -2486,6 +2698,12 @@ def _run_parallel_analysis(
     # per section card. Falls back to deterministic text; never raises.
     progress.append("Writing plain-English summary…")
     examples["narrative"] = _generate_analysis_narrative(profile, examples)
+
+    # Coaching insights — one LLM call turning the same digest into
+    # start/stop/keep/try advice for the team lead. Falls back to
+    # deterministic insights; never raises.
+    progress.append("Coaching insights…")
+    examples["insights"] = _generate_team_insights(profile, examples)
 
     return profile, examples
 

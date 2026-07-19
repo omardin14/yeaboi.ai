@@ -2555,6 +2555,148 @@ def _performance_document(engineer: str) -> tuple[str, str] | str:
     return f"{label} — {engineer}", build(artifact)
 
 
+def _run_team_insights(
+    live,
+    console: Console,
+    read_key,
+    frame_time: float,
+    supports_timeout: bool,
+    profile,
+    examples: dict | None,
+    *,
+    sprint_names: list[str] | None = None,
+) -> str:
+    """Event loop for the coaching-insights screen (results → insights → confirm).
+
+    Shows the AI's start/stop/keep/try advice before the app suggests
+    generating sample tickets. Up/Down scroll, Left/Right pick an action,
+    Enter runs it. Returns ``"continue"`` to proceed to ticket generation
+    and ``"back"`` (Back/Esc) to return to the results overview.
+    """
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_team_insights_screen
+
+    scroll = 0
+    scroll_meta: dict = {}
+    sel = 0
+    actions = ["Continue", "Export", "Back"]
+    subtitle = f"{profile.source}/{profile.project_key}  ·  Team Insights" if profile else "Team Insights"
+    logger.info("Team insights: showing for %s/%s", profile.source, profile.project_key)
+
+    while True:
+        w, h = console.size
+        live.update(
+            _build_team_insights_screen(
+                profile,
+                examples=examples,
+                scroll_offset=scroll,
+                scroll_meta=scroll_meta,
+                width=w,
+                height=h,
+                action_sel=sel,
+                subtitle=subtitle,
+            )
+        )
+
+        kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if kk in SCROLL_KEYS:
+            scroll = coalesce_scroll(scroll, kk, scroll_meta, read_key)
+        elif kk == "left":
+            sel = max(0, sel - 1)
+        elif kk == "right":
+            sel = min(len(actions) - 1, sel + 1)
+        elif kk in ("enter", " "):
+            act = actions[sel]
+            if act == "Continue":
+                logger.info("Team insights: continue to ticket generation")
+                return "continue"
+            if act == "Back":
+                logger.info("Team insights: back to results")
+                return "back"
+            if act == "Export":
+                logger.info("Team insights: Export pressed")
+                _team_profile_export_flow(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    profile=profile,
+                    examples=examples,
+                    sprint_names=sprint_names,
+                )
+        elif kk in ("esc", "q"):
+            logger.info("Team insights: back to results")
+            return "back"
+
+
+def _ensure_insights(
+    live,
+    console: Console,
+    read_key,
+    frame_time: float,
+    supports_timeout: bool,
+    profile,
+    examples: dict | None,
+) -> dict:
+    """Backfill coaching insights for profiles saved before insights existed.
+
+    Fresh analyses attach ``examples["insights"]`` at analysis time; old saved
+    profiles lack it. Generate on demand (worker thread + progress screen so
+    the UI keeps animating) and persist back to the store so it's a one-time
+    cost per profile. The generator falls back deterministically, so this
+    never fails — worst case the screen shows fallback insights.
+    """
+    ex = dict(examples or {})
+    if isinstance(ex.get("insights"), dict):
+        return ex
+
+    import threading
+
+    from yeaboi.tools.team_learning import _generate_team_insights
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_analysis_progress_screen
+
+    logger.info("Team insights: backfilling for %s", profile.team_id)
+    result_box: list = [None]
+    done = threading.Event()
+
+    def _work() -> None:
+        try:
+            result_box[0] = _generate_team_insights(profile, ex)
+        finally:
+            done.set()
+
+    t0 = time.monotonic()
+    threading.Thread(target=_work, daemon=True).start()
+    anim = 0.0
+    while not done.is_set():
+        anim += frame_time
+        w, h = console.size
+        live.update(
+            _build_analysis_progress_screen(
+                ["Generating coaching insights…"],
+                width=w,
+                height=h,
+                elapsed=time.monotonic() - t0,
+                anim_tick=anim,
+                source=profile.source,
+                mode="analysis",
+            )
+        )
+        time.sleep(frame_time)
+
+    if isinstance(result_box[0], dict):
+        ex["insights"] = result_box[0]
+        try:
+            from yeaboi.team_profile import TeamProfileStore
+
+            with TeamProfileStore(_ana_dbp) as _s:
+                _s.save(profile, examples=ex)
+            logger.info("Team insights: backfilled and saved for %s", profile.team_id)
+        except Exception as exc:
+            logger.warning("Team insights: backfill save failed: %s", exc)
+    return ex
+
+
 def _run_performance_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
     """Event loop for the Performance page.
 
@@ -3866,16 +4008,45 @@ def select_mode(
                                             _sel_p.team_id,
                                         )
                                 if _full:
-                                    _res = _run_team_analysis_results(
-                                        live,
-                                        console,
-                                        read_key,
-                                        _FRAME_TIME,
-                                        _supports_timeout,
-                                        _full,
-                                        _stored_ex,
-                                    )
-                                    if _res == "continue":
+                                    while True:
+                                        _res = _run_team_analysis_results(
+                                            live,
+                                            console,
+                                            read_key,
+                                            _FRAME_TIME,
+                                            _supports_timeout,
+                                            _full,
+                                            _stored_ex,
+                                        )
+                                        if _res != "continue":
+                                            break
+
+                                        # Backfill insights for profiles saved before
+                                        # they existed, then show them; Back returns
+                                        # to the results overview.
+                                        _stored_ex = _ensure_insights(
+                                            live,
+                                            console,
+                                            read_key,
+                                            _FRAME_TIME,
+                                            _supports_timeout,
+                                            _full,
+                                            _stored_ex,
+                                        )
+                                        if (
+                                            _run_team_insights(
+                                                live,
+                                                console,
+                                                read_key,
+                                                _FRAME_TIME,
+                                                _supports_timeout,
+                                                _full,
+                                                _stored_ex,
+                                            )
+                                            == "back"
+                                        ):
+                                            continue
+
                                         from yeaboi.agent.nodes import _format_team_calibration
 
                                         _si_text = _format_team_calibration(
@@ -3914,6 +4085,7 @@ def select_mode(
                                                     _stored_ex,
                                                     resume_state=_si_resume,
                                                 )
+                                        break
                                 continue
                             elif _is_profile and _ana_focus == 1:
                                 # Delete profile — open confirmation popup
@@ -4264,18 +4436,39 @@ def select_mode(
                             # Show results (overview + section cards)
                             _ta_examples = _ta_examples_box[0] or {}
                             _ta_sprint_names = _ta_sprint_names_box[0]
-                            _res = _run_team_analysis_results(
-                                live,
-                                console,
-                                read_key,
-                                _FRAME_TIME,
-                                _supports_timeout,
-                                _ta_profile,
-                                _ta_examples,
-                                sprint_names=_ta_sprint_names,
-                                team_name=_ta_team_name,
-                            )
-                            if _res == "continue":
+                            _ta_sub = f"{_ta_profile.source}/{_ta_profile.project_key}" if _ta_profile else ""
+                            while True:
+                                _res = _run_team_analysis_results(
+                                    live,
+                                    console,
+                                    read_key,
+                                    _FRAME_TIME,
+                                    _supports_timeout,
+                                    _ta_profile,
+                                    _ta_examples,
+                                    sprint_names=_ta_sprint_names,
+                                    team_name=_ta_team_name,
+                                )
+                                if _res != "continue":
+                                    break
+
+                                # Coaching insights before suggesting sample
+                                # tickets; Back returns to the results overview.
+                                if (
+                                    _run_team_insights(
+                                        live,
+                                        console,
+                                        read_key,
+                                        _FRAME_TIME,
+                                        _supports_timeout,
+                                        _ta_profile,
+                                        _ta_examples,
+                                        sprint_names=_ta_sprint_names,
+                                    )
+                                    == "back"
+                                ):
+                                    continue
+
                                 global _ana_sid  # noqa: PLW0603
 
                                 # Ask before generating tickets — separate the
@@ -4286,7 +4479,7 @@ def select_mode(
                                     read_key,
                                     _FRAME_TIME,
                                     _supports_timeout,
-                                    subtitle=f"{_ta_profile.source}/{_ta_profile.project_key}" if _ta_profile else "",
+                                    subtitle=_ta_sub,
                                 ):
                                     from yeaboi.agent.nodes import _format_team_calibration
                                     from yeaboi.sessions import SessionStore as _AStore
@@ -4319,6 +4512,7 @@ def select_mode(
                                             _ta_examples,
                                             resume_state=None,
                                         )
+                                break
                         elif _ta_error_box[0]:
                             w, h = console.size
                             live.update(
@@ -5356,20 +5550,40 @@ def select_mode(
                             logger.warning("Failed to write analysis log: %s", _log_exc)
 
                         # Show results screen (overview + section cards).
-                        # Continue and Esc both fall through to intake below.
+                        # Continue shows the coaching insights first (Back
+                        # returns to the results overview); Continue on the
+                        # insights and Esc both fall through to intake below.
                         _ta_examples = _ta_examples_box[0] or {}
                         _ta_sprint_names = _ta_sprint_names_box[0]
-                        _run_team_analysis_results(
-                            live,
-                            console,
-                            read_key,
-                            _FRAME_TIME,
-                            _supports_timeout,
-                            _ta_profile,
-                            _ta_examples,
-                            sprint_names=_ta_sprint_names,
-                            team_name=_ta_team_name,
-                        )
+                        while True:
+                            _ta_res = _run_team_analysis_results(
+                                live,
+                                console,
+                                read_key,
+                                _FRAME_TIME,
+                                _supports_timeout,
+                                _ta_profile,
+                                _ta_examples,
+                                sprint_names=_ta_sprint_names,
+                                team_name=_ta_team_name,
+                            )
+                            if _ta_res != "continue":
+                                break
+                            if (
+                                _run_team_insights(
+                                    live,
+                                    console,
+                                    read_key,
+                                    _FRAME_TIME,
+                                    _supports_timeout,
+                                    _ta_profile,
+                                    _ta_examples,
+                                    sprint_names=_ta_sprint_names,
+                                )
+                                == "back"
+                            ):
+                                continue
+                            break
                     elif _ta_error_box[0]:
                         w, h = console.size
                         live.update(

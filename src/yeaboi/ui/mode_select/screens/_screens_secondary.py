@@ -17,6 +17,7 @@ from rich.text import Text
 from yeaboi.ui.mode_select.screens._analysis_sections import (
     _TA_CARDS,
     _ta_glossary_lines,
+    _ta_insights,
     _ta_narrative_block,
     _ta_overview,
     _TaCtx,
@@ -217,6 +218,51 @@ def _build_generate_confirm_screen(
         height=height,
         action_sel=action_sel,
         actions=["Generate tickets", "Not now"],
+        subtitle=subtitle,
+    )
+
+
+def _build_team_insights_screen(
+    profile,
+    *,
+    examples: dict | None = None,
+    scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+    subtitle: str = "",
+) -> Panel:
+    """Coaching insights screen shown between analysis results and ticket generation.
+
+    Presents the AI's start/stop/keep/try advice for improving the team before
+    the app suggests generating sample tickets. Delegates to
+    ``_build_analysis_review_screen`` so the layout (title, progress dots,
+    viewport, scrollbar, action buttons) stays identical to the rest of
+    analysis mode.
+    """
+    body_lines: list = [
+        Text(""),
+        Text(PAD + "How to improve this team", style="bold white", justify="left"),
+        Text(
+            PAD + "Coaching insights grounded in the analysed sprints.",
+            style="rgb(120,120,140)",
+            justify="left",
+        ),
+    ]
+    ctx = _TaCtx(width, examples)
+    _ta_insights(ctx, profile)
+    body_lines.extend(ctx.lines)
+
+    return _build_analysis_review_screen(
+        body_lines,
+        stage_index=0,
+        scroll_offset=scroll_offset,
+        scroll_meta=scroll_meta,
+        width=width,
+        height=height,
+        action_sel=action_sel,
+        actions=["Continue", "Export", "Back"],
         subtitle=subtitle,
     )
 
