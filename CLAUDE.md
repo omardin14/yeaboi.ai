@@ -65,12 +65,6 @@ Key README sections to reference:
 - "Tools" — 30 tools, tool types, risk levels
 - "Scrum Standards" — story format, acceptance criteria, story points, DoD, discipline tagging
 
-## REQUIRED: Progress Tracking
-
-After completing any implementation step, IMMEDIATELY update `TODO.md`:
-- Change `- [ ]` to `- [x]` for the completed item
-- Do NOT wait for the developer to ask — do it automatically as part of the workflow
-
 ## REQUIRED: Verification
 
 After every code change, ALWAYS run:
