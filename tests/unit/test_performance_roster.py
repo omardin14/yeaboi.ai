@@ -9,7 +9,7 @@ class TestFetchRoster:
     def test_distinct_assignees_merged_and_sorted(self, monkeypatch):
         monkeypatch.setattr(
             "yeaboi.tools.jira.jira_recent_activity",
-            lambda project_key, days=1: [
+            lambda project_key, days=1, **kwargs: [
                 {"author": "Bob"},
                 {"author": "Ada"},
                 {"author": "Bob"},  # duplicate collapses
@@ -25,6 +25,22 @@ class TestFetchRoster:
         # Ada came from both — Jira (first source) wins the source tag.
         ada = next(r for r in result if r.name == "Ada")
         assert ada.source == "jira"
+
+    def test_jira_roster_counts_assignees_only(self, monkeypatch):
+        # The roster must ask Jira for assignee-credited items only — commenters
+        # and changelog actors (drive-by editors) are not team-membership evidence.
+        captured = {}
+
+        def fake_activity(project_key, days=1, **kwargs):
+            captured.update(kwargs)
+            return [{"author": "Ada"}]
+
+        monkeypatch.setattr("yeaboi.tools.jira.jira_recent_activity", fake_activity)
+        monkeypatch.setattr("yeaboi.tools.azure_devops.azdevops_recent_activity", lambda project, days=1: [])
+        result = roster.fetch_roster(jira_project="PROJ", azdo_project="AZ")
+        assert [r.name for r in result] == ["Ada"]
+        assert captured["include_changelog"] is False
+        assert captured["include_comments"] is False
 
     def test_empty_when_no_projects(self, monkeypatch):
         # No projects and no env config → empty roster, no crash.

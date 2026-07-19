@@ -441,6 +441,17 @@ def _page_link(content: dict, page_id: str) -> str:
     return f"{base}/wiki/pages/viewpage.action?pageId={page_id}"
 
 
+def _display_name(by) -> str:
+    """Display name from a Confluence user dict — "" for app/automation accounts.
+
+    Cloud marks bots with accountType == "app"; filtering here keeps them out of
+    the activity feed and the standup team (callers treat "" as "no author").
+    """
+    if not isinstance(by, dict) or by.get("accountType", "") == "app":
+        return ""
+    return by.get("displayName", "") or ""
+
+
 def _version_editor_items(conf, page_id: str, title: str, cutoff, exclude: set[str], url: str = "") -> list[dict]:
     """One item per DISTINCT in-window editor of a page beyond those already credited.
 
@@ -462,7 +473,7 @@ def _version_editor_items(conf, page_id: str, title: str, cutoff, exclude: set[s
         if when is None or when < cutoff:
             continue
         by = version.get("by", {}) if isinstance(version.get("by"), dict) else {}
-        name = by.get("displayName", "") or ""
+        name = _display_name(by)
         if not name or name in seen:
             continue
         seen.add(name)
@@ -519,7 +530,7 @@ def confluence_recent_pages(space_key: str = "", days: int = 1, since=None) -> l
             history = content.get("history", {}) if isinstance(content, dict) else {}
             last_updated = history.get("lastUpdated", {}) if isinstance(history, dict) else {}
             by = last_updated.get("by", {}) if isinstance(last_updated, dict) else {}
-            author = by.get("displayName", "") if isinstance(by, dict) else ""
+            author = _display_name(by)
             title = content.get("title", page.get("title", "Untitled"))
             page_id = content.get("id", page.get("id", ""))
             page_url = _page_link(content if isinstance(content, dict) else {}, page_id)
@@ -538,7 +549,7 @@ def confluence_recent_pages(space_key: str = "", days: int = 1, since=None) -> l
             # Page created in-window → credit the creator (data already in the expand).
             created_by = history.get("createdBy", {}) if isinstance(history, dict) else {}
             created_when = _iso_to_dt(history.get("createdDate", "") if isinstance(history, dict) else "")
-            creator = created_by.get("displayName", "") if isinstance(created_by, dict) else ""
+            creator = _display_name(created_by)
             if creator and created_when is not None and created_when >= cutoff:
                 if creator not in credited:
                     items.append(
