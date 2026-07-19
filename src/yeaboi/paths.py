@@ -5,8 +5,12 @@ accessed through this module to ensure consistency across the codebase.
 (The config dir was ``~/.scrum-agent`` before the yeaboi.ai rebrand; an
 existing tree is migrated automatically — see ``migrate_root_dir``.)
 
+The whole tree can be relocated with ``YEABOI_HOME`` (Settings → Data Dir);
+only ``.env`` stays at ``~/.yeaboi/.env`` — it's the bootstrap file that
+holds ``YEABOI_HOME`` itself.
+
 Directory structure:
-    ~/.yeaboi/
+    ~/.yeaboi/                    # or $YEABOI_HOME
     ├── data/
     │   ├── sessions.db           # SQLite: sessions, team profiles, token usage
     │   ├── states/               # Legacy checkpoint JSON files
@@ -29,19 +33,38 @@ Directory structure:
     ├── attachments/              # Screenshots pasted into TUI textboxes (Ctrl+V)
     │   └── {scope_id}/           #   per session/project scope
     ├── scrum-docs/               # SCRUM.md files for each project
-    ├── .env                      # Environment variables
+    ├── .env                      # Environment variables (always at ~/.yeaboi/.env)
     └── repl-history              # REPL command history
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Root
 # ---------------------------------------------------------------------------
 
-ROOT_DIR = Path.home() / ".yeaboi"
+# The default data home. ~/.yeaboi/.env is *always* read from here (it's the
+# bootstrap file that can itself set YEABOI_HOME — deriving its location from
+# the override would be circular).
+DEFAULT_ROOT_DIR = Path.home() / ".yeaboi"
+
+
+def _resolve_root() -> Path:
+    """Resolve the data home: $YEABOI_HOME when set, else ~/.yeaboi.
+
+    Read once at import time — every constant below derives from ROOT_DIR, so
+    changing the setting mid-run takes effect on the next start (the Settings
+    flow says so). Kept as a named function so tests can exercise the
+    resolution with a monkeypatched environment.
+    """
+    raw = os.getenv("YEABOI_HOME", "").strip()
+    return Path(raw).expanduser() if raw else DEFAULT_ROOT_DIR
+
+
+ROOT_DIR = _resolve_root()
 
 # Pre-rebrand config dir (yeaboi.ai was "Scrum AI Agent"). If present and the
 # new ROOT_DIR isn't, the whole tree is migrated once at startup.
@@ -94,7 +117,9 @@ LEGACY_TUI_LOG = ROOT_DIR / "scrum-agent.log"
 # ---------------------------------------------------------------------------
 
 SCRUM_DOCS_DIR = ROOT_DIR / "scrum-docs"
-ENV_FILE = ROOT_DIR / ".env"
+# Pinned to the default home on purpose — see DEFAULT_ROOT_DIR: this file can
+# set YEABOI_HOME, so it can't live inside the directory it relocates.
+ENV_FILE = DEFAULT_ROOT_DIR / ".env"
 REPL_HISTORY = ROOT_DIR / "repl-history"
 BIN_DIR = ROOT_DIR / "bin"  # app-managed helper binaries (e.g. cloudflared for retro tunnels)
 ATTACHMENTS_DIR = ROOT_DIR / "attachments"  # screenshots pasted into TUI textboxes (Ctrl+V)
@@ -198,6 +223,54 @@ def get_reporting_export_dir(project_key: str) -> Path:
     d = REPORTING_EXPORTS_DIR / (project_key.lower() or "report")
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def move_data_tree(new_root: Path) -> tuple[bool, str]:
+    """Best-effort move of the current data tree into *new_root*.
+
+    Used by Settings → Data Dir after the user confirms the move. The source is
+    the *currently effective* home (re-read from the environment, not the
+    import-time ROOT_DIR constant, so a second change in one session moves from
+    the right place). ``.env`` is skipped — it always stays at ~/.yeaboi/.env —
+    and so is any child that already exists at the destination. Never raises;
+    returns (ok, status message).
+    """
+    import logging
+    import shutil
+
+    raw = os.getenv("YEABOI_HOME", "").strip()
+    src_root = Path(raw).expanduser() if raw else DEFAULT_ROOT_DIR
+    new_root = new_root.expanduser()
+    if src_root == new_root:
+        return True, "Data already lives there — nothing to move"
+    if not src_root.exists():
+        return True, "No existing data to move"
+    moved, skipped, failed = 0, 0, 0
+    try:
+        new_root.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not create %s: %s", new_root, exc)
+        return False, f"Could not create {new_root}: {exc}"
+    for child in src_root.iterdir():
+        if child.name == ".env":
+            skipped += 1
+            continue
+        target = new_root / child.name
+        if target.exists():
+            skipped += 1
+            continue
+        try:
+            shutil.move(str(child), str(target))
+            moved += 1
+        except Exception as exc:
+            failed += 1
+            logging.getLogger(__name__).warning("Could not move %s -> %s: %s", child, target, exc)
+    msg = f"Moved {moved} item(s) to {new_root}"
+    if skipped:
+        msg += f", skipped {skipped}"
+    if failed:
+        msg += f", failed {failed} (see log)"
+    return failed == 0, msg
 
 
 def get_tui_log_path() -> Path:

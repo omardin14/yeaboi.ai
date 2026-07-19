@@ -288,6 +288,59 @@ def get_notion_root_page_id() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Storage & export destinations
+# ---------------------------------------------------------------------------
+# One YEABOI_HOME override relocates the whole data tree (exports, logs, DB…);
+# Notion/Confluence exports publish to the destinations collected in provider
+# setup, falling back to the tool's natural default (Notion root page /
+# Confluence space root) when no dedicated exports page is set.
+
+
+def _set_env_value(key: str, value: str) -> None:
+    """Persist an env var to ~/.yeaboi/.env and apply it to the live process."""
+    from dotenv import set_key
+
+    config_file = get_config_file()
+    set_key(str(config_file), key, value)
+    os.environ[key] = value
+    logger.info("%s persisted to %s", key, config_file)
+
+
+def get_data_dir() -> str:
+    """Return the configured data home (YEABOI_HOME), or '' when using ~/.yeaboi.
+
+    The actual resolution lives in paths.py (import time); this getter exists
+    for the Settings page display and the Data Dir edit flow.
+    """
+    return os.getenv("YEABOI_HOME", "") or ""
+
+
+def set_data_dir(value: str) -> None:
+    """Persist the data home override ('' clears back to ~/.yeaboi).
+
+    Written to the pinned bootstrap ~/.yeaboi/.env (see paths.ENV_FILE) —
+    module-level path constants are baked at import, so a restart fully applies.
+    """
+    _set_env_value("YEABOI_HOME", value.strip())
+
+
+def get_notion_export_parent_page_id() -> str | None:
+    """Return the Notion page ID exports publish under, or None when unavailable.
+
+    The dedicated exports page (NOTION_EXPORT_PARENT_PAGE_ID, optional in the
+    Notion setup step) wins; otherwise falls back to NOTION_ROOT_PAGE_ID. The
+    Notion API can't create top-level pages, so None (neither set) blocks
+    Notion export with a warning pointing at Setup.
+    """
+    return os.getenv("NOTION_EXPORT_PARENT_PAGE_ID") or get_notion_root_page_id()
+
+
+def get_confluence_export_parent_page_id() -> str | None:
+    """Return the optional Confluence parent page ID for exports (blank = space root)."""
+    return os.getenv("CONFLUENCE_EXPORT_PARENT_PAGE_ID") or None
+
+
+# ---------------------------------------------------------------------------
 # Daily Standup configuration
 # ---------------------------------------------------------------------------
 # Non-secret standup settings (schedule time, channels) live in the SQLite

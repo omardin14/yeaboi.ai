@@ -304,6 +304,35 @@ class TestExportProjectMd:
         assert result is None
 
 
+class TestExportDefaultDirectory:
+    """Without an explicit output_dir, exports land in the planning export dir."""
+
+    def test_default_is_planning_export_dir(self, _isolate_config_dir, tmp_path, monkeypatch):
+        qs = QuestionnaireState()
+        qs.answers[1] = "My Cool App"
+        save_project_snapshot("proj-1", {"messages": ["msg"], "questionnaire": qs})
+
+        import yeaboi.paths as paths_mod
+        import yeaboi.repl._io as _io_mod
+
+        monkeypatch.setattr(paths_mod, "PLANNING_EXPORTS_DIR", tmp_path / "planning")
+        monkeypatch.setattr(_io_mod, "_export_plan_markdown", lambda state, path: path)
+
+        out_path = export_project_md("proj-1")
+        assert out_path == tmp_path / "planning" / "my-cool-app" / "my-cool-app-plan.md"
+
+    def test_explicit_output_dir_still_wins(self, _isolate_config_dir, tmp_path, monkeypatch):
+        qs = QuestionnaireState()
+        qs.answers[1] = "My Cool App"
+        save_project_snapshot("proj-1", {"messages": ["msg"], "questionnaire": qs})
+
+        import yeaboi.repl._io as _io_mod
+
+        monkeypatch.setattr(_io_mod, "_export_plan_markdown", lambda state, path: path)
+        out_path = export_project_md("proj-1", output_dir=tmp_path)
+        assert out_path == tmp_path / "my-cool-app-plan.md"
+
+
 class TestExportProjectPlan:
     def test_exports_both_formats(self, _isolate_config_dir, tmp_path, monkeypatch):
         qs = QuestionnaireState()

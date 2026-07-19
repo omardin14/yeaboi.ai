@@ -420,6 +420,40 @@ class TestSettingsScreen:
         assert isinstance(r1, Panel)
         assert isinstance(r2, Panel)
 
+    @staticmethod
+    def _render(data: dict, *, height: int = 60) -> str:
+        from io import StringIO
+
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
+
+        result = _build_settings_screen(data, width=100, height=height)
+        buf = StringIO()
+        Console(file=buf, width=100, force_terminal=False).print(result)
+        return buf.getvalue()
+
+    def test_storage_section_rendered(self):
+        output = self._render({"YEABOI_HOME": "/data/yeaboi"})
+        assert "Storage" in output
+        assert "/data/yeaboi" in output
+
+    def test_data_dir_default_label_when_unset(self):
+        output = self._render({})
+        assert "~/.yeaboi (default)" in output
+
+    def test_data_dir_button_rendered(self):
+        output = self._render({}, height=40)
+        assert "Data Dir" in output
+
+    def test_status_message_rendered(self):
+        output = self._render({"_message": "Data directory saved — restart yeaboi to fully apply"})
+        assert "restart yeaboi" in output
+
+    def test_notion_token_masked(self):
+        output = self._render({"NOTION_TOKEN": "ntn_verysecretvalue12345"})
+        assert "verysecretvalue12345" not in output
+
 
 class TestCollectSettingsData:
     def test_returns_dict(self, monkeypatch):

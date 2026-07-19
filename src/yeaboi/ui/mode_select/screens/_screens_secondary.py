@@ -2914,6 +2914,11 @@ def _build_settings_screen(
 
     body_lines: list = []
 
+    # ── Transient status message (e.g. after a Data Dir change) ───
+    message = config_data.get("_message", "")
+    if message:
+        body_lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+
     def _heading(text: str) -> None:
         body_lines.append(Text(""))
         h = Text(_PAD + "  ", justify="left")
@@ -2965,6 +2970,12 @@ def _build_settings_screen(
     _heading("Notion")
     _row("Token", config_data.get("NOTION_TOKEN", ""), masked=True)
     _row("Root Page/DB", config_data.get("NOTION_ROOT_PAGE_ID", ""))
+
+    # ── Storage ───────────────────────────────────────────────────
+    # One YEABOI_HOME override relocates the whole data tree (exports, logs,
+    # sessions DB…). Edited via the Data Dir action button.
+    _heading("Storage")
+    _row("Data Directory", config_data.get("YEABOI_HOME", "") or "~/.yeaboi (default)")
 
     # ── Daily Standup delivery ────────────────────────────────────
     # Secrets (Slack webhook, SMTP password) are masked like every other credential.
@@ -3021,7 +3032,7 @@ def _build_settings_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(["Configure", "Log Level", "Back"], action_sel)
+    btn_top, btn_mid, btn_bot = build_action_buttons(["Configure", "Log Level", "Data Dir", "Back"], action_sel)
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable

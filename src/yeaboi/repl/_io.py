@@ -378,8 +378,25 @@ def _export_plan_markdown(graph_state: dict, path: Path | None = None) -> Path:
         The path the file was written to.
     """
     output_path = path or Path("scrum-plan.md")
-    lines: list[str] = []
     logger.debug("_export_plan_markdown: path=%s", output_path)
+    output_path.write_text(build_plan_markdown(graph_state))
+    section_counts = {
+        "features": len(graph_state.get("features", [])),
+        "stories": len(graph_state.get("stories", [])),
+        "tasks": len(graph_state.get("tasks", [])),
+        "sprints": len(graph_state.get("sprints", [])),
+    }
+    logger.info("Exported markdown: path=%s sections=%s", output_path, section_counts)
+    return output_path
+
+
+def build_plan_markdown(graph_state: dict) -> str:
+    """Build the sprint-plan Markdown document as a string.
+
+    Extracted from ``_export_plan_markdown`` so the same content can be
+    published to Notion/Confluence (via export_targets) without touching disk.
+    """
+    lines: list[str] = []
 
     # Analysis profile provenance
     profile_id = graph_state.get("analysis_profile_id", "")
@@ -523,15 +540,7 @@ def _export_plan_markdown(graph_state: dict, path: Path | None = None) -> Path:
                 lines.append(f"- {sid}")
             lines.append("")
 
-    output_path.write_text("\n".join(lines))
-    section_counts = {
-        "features": len(graph_state.get("features", [])),
-        "stories": len(graph_state.get("stories", [])),
-        "tasks": len(graph_state.get("tasks", [])),
-        "sprints": len(graph_state.get("sprints", [])),
-    }
-    logger.info("Exported markdown: path=%s sections=%s", output_path, section_counts)
-    return output_path
+    return "\n".join(lines)
 
 
 def _export_checkpoint(console: Console, graph_state: dict, stage: str = "complete") -> None:

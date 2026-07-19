@@ -1243,9 +1243,9 @@ The Settings page provides a read-only view of your current configuration and a 
 | **API Keys** | Configured keys with values masked (e.g., `sk-ant-***...***abc`) |
 | **Issue Tracking** | Jira and/or Azure DevOps connection status, org URL, project |
 | **Version Control** | GitHub token status |
-| **Paths** | Database location, export directories, log directories |
+| **Storage** | The data directory (`YEABOI_HOME`) everything is written under |
 
-From the Settings page you can launch the **setup wizard** to reconfigure providers, API keys, and integrations. The page uses a grey colour theme.
+From the Settings page you can launch the **setup wizard** to reconfigure providers, API keys, and integrations, cycle the **log level**, and change the **data directory** (with an offer to move your existing sessions, exports, and logs to the new location). The page uses a grey colour theme.
 
 ---
 
@@ -2123,9 +2123,12 @@ src/yeaboi/
 | `JIRA_EMAIL` | If using Jira | Atlassian account email |
 | `JIRA_API_TOKEN` | If using Jira | Jira API token |
 | `JIRA_PROJECT_KEY` | If using Jira | Project key (e.g. `MYPROJ`) |
-| `CONFLUENCE_SPACE_KEY` | No | Confluence space key (shares Atlassian auth with Jira) |
+| `CONFLUENCE_SPACE_KEY` | No | Confluence space key (shares Atlassian auth with Jira); Export buttons publish here |
+| `CONFLUENCE_EXPORT_PARENT_PAGE_ID` | No | Optional page Confluence exports nest under (blank = space root) |
 | `NOTION_TOKEN` | No | Notion integration token (its own auth; enables Notion doc tools) |
-| `NOTION_ROOT_PAGE_ID` | No | Default parent for created Notion pages; enables the Notion standup source |
+| `NOTION_ROOT_PAGE_ID` | No | Default parent for created Notion pages; enables the Notion standup source; Notion exports fall back here |
+| `NOTION_EXPORT_PARENT_PAGE_ID` | No | Optional dedicated page the Export buttons publish under (blank = `NOTION_ROOT_PAGE_ID`) |
+| `YEABOI_HOME` | No | Data home for everything yeaboi writes — exports, logs, sessions DB (default: `~/.yeaboi`; `.env` always stays at `~/.yeaboi/.env`; editable in Settings → Data Dir) |
 | `LANGSMITH_TRACING` | No | Enable LangSmith tracing (`true`) |
 | `LANGSMITH_API_KEY` | No | LangSmith API key |
 | `LANGSMITH_PROJECT` | No | LangSmith project name |

@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.live import Live
 
 from yeaboi.agent.state import ReviewDecision
-from yeaboi.repl._io import _export_checkpoint
 from yeaboi.repl._review import (
     _clear_downstream_artifacts,
     _serialize_artifacts_for_review,
@@ -49,6 +48,67 @@ logger = logging.getLogger(__name__)
 # clamps it down to its real maximum for display and publishes that maximum via
 # scroll_meta, which the loop then adopts. Larger than any realistic line count.
 _SCROLL_BOTTOM = 1_000_000_000
+
+
+def _plan_slug(graph_state: dict) -> str:
+    """Filesystem-safe slug for the plan's project name (same rules as persistence)."""
+    name = getattr(graph_state.get("project_analysis"), "project_name", "") or "project"
+    return "".join(c if c.isalnum() or c in "-_" else "-" for c in name.lower()).strip("-") or "project"
+
+
+def _plan_export_flow(live, console, key_fn, graph_state: dict, stage: str) -> None:
+    """Export the plan via the shared destination picker (files / Notion / Confluence).
+
+    Files land in the planning export dir (~/.yeaboi/exports/planning/<project>/,
+    honouring the YEABOI_HOME data-dir override) — unified with the other modes
+    instead of the old scrum-plan.* in the current working directory. Blocks on
+    the success screen (min 1 s + a key press); returns straight away on Back/Esc.
+    """
+    from yeaboi.ui.shared._export_picker import pick_export_destination
+
+    def _open_setup():
+        # Same suspend-wizard-resume dance as Settings → Configure.
+        from yeaboi.ui.mode_select import _launch_setup_wizard
+
+        _launch_setup_wizard(console, live)
+
+    dest = pick_export_destination(live, console, key_fn, 0.05, True, mode="planning", open_setup=_open_setup)
+    if dest is None:
+        return
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_project_export_success_screen
+
+    if dest == "files":
+        from yeaboi.html_exporter import export_plan_html
+        from yeaboi.paths import get_planning_export_dir
+        from yeaboi.repl._io import _export_plan_markdown
+
+        out_dir = get_planning_export_dir(_plan_slug(graph_state))
+        html_path = export_plan_html(graph_state, stage=stage, path=out_dir / "scrum-plan.html")
+        md_path = _export_plan_markdown(graph_state, path=out_dir / "scrum-plan.md")
+        logger.info("Exported: HTML=%s, MD=%s", html_path, md_path)
+        body = f"HTML  {html_path}\nMD    {md_path}"
+        subtitle = "Exported (HTML + MD)"
+    else:
+        from yeaboi.export_targets import publish_markdown
+        from yeaboi.repl._io import build_plan_markdown
+
+        name = getattr(graph_state.get("project_analysis"), "project_name", "")
+        title = f"Sprint Plan — {name}" if name else "Sprint Plan"
+        result = publish_markdown(dest, title=title, markdown=build_plan_markdown(graph_state))
+        body = result.url or result.message
+        subtitle = result.message if result.ok else f"Export failed — {result.message}"
+
+    w, h = console.size
+    live.update(_build_project_export_success_screen(body, width=w, height=h, subtitle=subtitle, mode="planning"))
+    t0 = time.monotonic()
+    while True:
+        try:
+            ek = key_fn(timeout=0.05)
+        except TypeError:
+            ek = key_fn()
+        if time.monotonic() - t0 > 1.0 and ek:
+            break
+
 
 # ---------------------------------------------------------------------------
 # Story-level auto-scroll helper
@@ -972,34 +1032,7 @@ def _phase_pipeline(
                                     _ep_lines = _render_to_lines(console, _ep_renderable, _rw)
                         elif _ep_act == "Export":
                             logger.info("Epic review: exporting")
-                            from yeaboi.html_exporter import export_plan_html
-                            from yeaboi.repl._io import _export_plan_markdown
-                            from yeaboi.ui.mode_select.screens._screens_secondary import (
-                                _build_project_export_success_screen,
-                            )
-
-                            _h_path = export_plan_html(graph_state, stage="project_analyzer")
-                            _m_path = _export_plan_markdown(graph_state)
-                            w, h = console.size
-                            live.update(
-                                _build_project_export_success_screen(
-                                    f"HTML  {_h_path}\nMD    {_m_path}",
-                                    width=w,
-                                    height=h,
-                                    subtitle="Exported (HTML + MD)",
-                                    mode="planning",
-                                )
-                            )
-                            import time as _ep_t
-
-                            _t0 = _ep_t.monotonic()
-                            while True:
-                                try:
-                                    _ek = _key(timeout=0.05)
-                                except TypeError:
-                                    _ek = _key()
-                                if _ep_t.monotonic() - _t0 > 1.0 and _ek:
-                                    break
+                            _plan_export_flow(live, console, _key, graph_state, "project_analyzer")
                         elif _ep_act in ("Jira", "Azure DevOps"):
                             logger.info("Epic review: syncing to %s", _ep_act)
                             _btn_tracker = "jira" if _ep_act == "Jira" else "azdevops"
@@ -1467,39 +1500,7 @@ def _phase_pipeline(
                     # Cancel — stay on review
                 elif action == "Export":
                     logger.info("Review decision: Export for %s", pending)
-                    from yeaboi.html_exporter import export_plan_html
-                    from yeaboi.repl._io import _export_plan_markdown
-
-                    html_path = export_plan_html(graph_state, stage=pending)
-                    md_path = _export_plan_markdown(graph_state)
-                    logger.info("Exported: HTML=%s, MD=%s", html_path, md_path)
-
-                    # Show export success screen using shared component
-                    from yeaboi.ui.mode_select.screens._screens_secondary import (
-                        _build_project_export_success_screen,
-                    )
-
-                    paths = f"HTML  {html_path}\nMD    {md_path}"
-                    w, h = console.size
-                    live.update(
-                        _build_project_export_success_screen(
-                            paths,
-                            width=w,
-                            height=h,
-                            subtitle="Exported (HTML + MD)",
-                            mode="planning",
-                        )
-                    )
-                    import time as _export_time
-
-                    _t0 = _export_time.monotonic()
-                    while True:
-                        try:
-                            _ek = _key(timeout=0.05)
-                        except TypeError:
-                            _ek = _key()
-                        if _export_time.monotonic() - _t0 > 1.0 and _ek:
-                            break
+                    _plan_export_flow(live, console, _key, graph_state, pending)
                     status_msg = ""
                     # Force immediate redraw
                     w, h = console.size
@@ -1651,7 +1652,7 @@ def _phase_chat(
             # Handle export command
             if text.lower() == "export":
                 logger.info("Chat: export requested")
-                _export_checkpoint(console, graph_state, stage="complete")
+                _plan_export_flow(live, console, _key, graph_state, "complete")
                 messages.append(("ai", "Plan exported successfully."))
                 input_value = ""
                 # Pin to the newest line: request past-the-end, the builder clamps

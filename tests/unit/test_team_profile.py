@@ -1118,6 +1118,21 @@ class TestTeamProfileExporter:
         path = export_team_profile_md(profile, output_dir=tmp_path)
         assert path.exists()
 
+    def test_build_markdown_returns_string(self):
+        """The string builder (used by Notion/Confluence export) matches the file content."""
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        md = build_team_profile_markdown(_make_extended_profile())
+        assert isinstance(md, str)
+        assert "# Team Profile" in md
+        assert "## Team & Velocity" in md
+
+    def test_build_markdown_minimal_profile(self):
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        md = build_team_profile_markdown(TeamProfile(team_id="x", source="jira", project_key="X"))
+        assert "# Team Profile" in md
+
     def test_exports_sorted_into_project_subdirectory(self, tmp_path):
         """Exports land in a per-project subdirectory: {base}/{project_key}/."""
         from yeaboi.team_profile_exporter import export_team_profile_html, export_team_profile_md

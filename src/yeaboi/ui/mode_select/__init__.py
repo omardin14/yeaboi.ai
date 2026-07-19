@@ -530,39 +530,21 @@ def _run_preview_flow(
 
     def _do_export():
         """Cumulative export — includes analysis profile + all accepted samples."""
-        logger.info("Preview: exporting analysis (HTML + MD)")
+        logger.info("Preview: exporting analysis")
         from yeaboi.agent.ceremony_history import gather_ceremony_context
-        from yeaboi.team_profile_exporter import (
-            export_team_profile_html,
-            export_team_profile_md,
-        )
 
         # Project-first here — the analysed project_key is known, so its retros sort ahead.
         ceremony = gather_ceremony_context(ta_profile.project_key)
-        html_path = export_team_profile_html(ta_profile, examples=ta_examples, ceremony=ceremony)
-        md_path = export_team_profile_md(ta_profile, examples=ta_examples, ceremony=ceremony)
-        w, h = console.size
-        from yeaboi.ui.mode_select.screens._screens_secondary import (
-            _build_project_export_success_screen,
+        _team_profile_export_flow(
+            console,
+            live,
+            read_key,
+            frame_time,
+            supports_timeout,
+            profile=ta_profile,
+            examples=ta_examples,
+            ceremony=ceremony,
         )
-
-        paths = f"HTML  {html_path}\nMD    {md_path}"
-        live.update(
-            _build_project_export_success_screen(
-                paths,
-                width=w,
-                height=h,
-                subtitle="Exported (HTML + MD)",
-                mode="analysis",
-            )
-        )
-        import time as _t
-
-        _t0 = _t.monotonic()
-        while True:
-            _ek = _rk()
-            if _t.monotonic() - _t0 > 1.5 and _ek:
-                break
 
     # Ensure we have a session ID for saving progress
     global _ana_sid  # noqa: PLW0603
@@ -1251,6 +1233,11 @@ def _collect_settings_data() -> dict:
         "JIRA_API_TOKEN",
         "JIRA_PROJECT_KEY",
         "CONFLUENCE_SPACE_KEY",
+        # Notion (rendered by the settings screen; was missing from this list)
+        "NOTION_TOKEN",
+        "NOTION_ROOT_PAGE_ID",
+        # Storage (Settings → Data Dir)
+        "YEABOI_HOME",
         "AZURE_DEVOPS_ORG_URL",
         "AZURE_DEVOPS_PROJECT",
         "AZURE_DEVOPS_TOKEN",
@@ -1275,6 +1262,121 @@ def _collect_settings_data() -> dict:
         data[k] = os.environ.get(k, "")
     data["_config_path"] = str(get_config_file())
     return data
+
+
+def _launch_setup_wizard(console: Console, live) -> None:
+    """Suspend the Live display, run the setup wizard, reload config, resume.
+
+    Shared by Settings → Configure and the export picker's Open Setup hook.
+    """
+    logger.info("Launching setup wizard")
+    live.stop()
+    try:
+        from yeaboi.setup_wizard import run_setup_wizard
+
+        run_setup_wizard(console)
+        from yeaboi.config import load_user_config
+
+        load_user_config()
+        logger.info("Config reloaded after setup wizard")
+    finally:
+        live.start()
+
+
+def _settings_data_dir_flow(console: Console, live, read_key, frame_time, supports_timeout) -> str:
+    """Settings editor for the data directory (YEABOI_HOME, persisted to ~/.yeaboi/.env).
+
+    One prompt for the path (Enter keeps the current value, ``-`` clears back
+    to ~/.yeaboi, Esc aborts). When the location actually changes, a Move/Leave
+    popup offers to relocate the existing tree. Returns a status message for
+    the Settings page ('' when nothing changed).
+    """
+    from yeaboi.config import get_data_dir, set_data_dir
+    from yeaboi.paths import move_data_tree
+    from yeaboi.ui.shared._components import SETTINGS_THEME, settings_title
+
+    logger.info("Settings: opening Data Dir editor")
+    current = get_data_dir()
+    value = _standup_read_line(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        prompt="Data directory (blank = ~/.yeaboi) — holds exports, logs, sessions",
+        step="Data Dir  ·  '-' clears",
+        default=current,
+        theme=SETTINGS_THEME,
+        title=settings_title(),
+    )
+    if value is None:
+        logger.info("Settings: Data Dir editor cancelled")
+        return ""
+    value = "" if value.strip() == "-" else value.strip()
+    if value == current:
+        return ""
+
+    message = "Data directory saved — restart yeaboi to fully apply"
+    new_root = Path(value).expanduser() if value else Path.home() / ".yeaboi"
+    if _confirm_move_data(console, live, read_key, frame_time, supports_timeout, new_root):
+        ok, move_msg = move_data_tree(new_root)
+        logger.info("Settings: data move to %s → ok=%s (%s)", new_root, ok, move_msg)
+        message = f"{move_msg}. Restart yeaboi to fully apply"
+    set_data_dir(value)
+    logger.info("Settings: data directory set to %r", value)
+    return message
+
+
+def _confirm_move_data(console: Console, live, read_key, frame_time, supports_timeout, new_root: Path) -> bool:
+    """Move/Leave popup shown after the data directory changes; True = move."""
+    from rich.align import Align
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from yeaboi.ui.shared._components import (
+        PAD,
+        SETTINGS_THEME,
+        build_action_buttons,
+        build_popup,
+        settings_title,
+    )
+
+    sel = 0
+    while True:
+        w, h = console.size
+        lines: list = [Text(""), settings_title(width=w), Text("")]
+        lines.append(Text(PAD + "Move existing data?", style="bold white", justify="left"))
+        hint = "Move copies your sessions, exports and logs" if sel == 0 else "Start fresh — old data stays put"
+        lines.append(Text(PAD + hint, style=SETTINGS_THEME.muted, justify="left"))
+        lines.append(Text(""))
+        lines.append(
+            Align.center(
+                build_popup(
+                    f"Move existing data (sessions, exports, logs) to\n{new_root}?",
+                    width=min(w - 8, 60),
+                    border_style=SETTINGS_THEME.warn,
+                )
+            )
+        )
+        lines.append(Text(""))
+        btn_top, btn_mid, btn_bot = build_action_buttons(["Move", "Leave"], sel)
+        lines += [btn_top, btn_mid, btn_bot]
+        live.update(Panel(Group(*lines), height=h, padding=(1, 2), border_style=SETTINGS_THEME.sep))
+        try:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        except TypeError:
+            k = read_key()
+        if not k:  # idle tick / consumed mouse event
+            continue
+        if k == "left":
+            sel = 0
+        elif k == "right":
+            sel = 1
+        elif k in ("enter", " "):
+            return sel == 0
+        elif k in ("esc", "q"):
+            return False
 
 
 def _collect_standup_data(message: str = "") -> dict:
@@ -1349,6 +1451,250 @@ def _standup_generate(session_id: str, on_progress=None) -> str:
     except Exception as e:
         logger.error("standup: generate failed: %s", e, exc_info=True)
         return f"Generate failed: {e}"
+
+
+def _pick_dest(
+    console,
+    live,
+    read_key,
+    frame_time,
+    supports_timeout,
+    *,
+    mode: str,
+    extra_options: list[str] | None = None,
+) -> str | None:
+    """Open the shared export-destination picker; returns the key or None.
+
+    Passes an ``open_setup`` hook so the blocked-destination warning can jump
+    straight into the setup wizard and resume the export.
+    """
+    from yeaboi.ui.shared._export_picker import pick_export_destination
+
+    return pick_export_destination(
+        live,
+        console,
+        read_key,
+        frame_time,
+        supports_timeout,
+        mode=mode,
+        extra_options=extra_options,
+        open_setup=lambda: _launch_setup_wizard(console, live),
+    )
+
+
+def _export_via_picker(
+    console,
+    live,
+    read_key,
+    frame_time,
+    supports_timeout,
+    *,
+    mode: str,
+    files_export,
+    get_document,
+    extra_options: list[str] | None = None,
+    extra_handlers: dict | None = None,
+) -> str | None:
+    """Run the shared destination picker and dispatch the chosen export.
+
+    files_export() -> str runs the existing on-disk Markdown+HTML export;
+    get_document() -> (title, markdown) | str supplies the content for
+    Notion/Confluence publishing (a plain string is an error message shown
+    as-is, e.g. "Nothing to export yet"). Returns the status message to show,
+    or None when the user backed out of the picker (caller leaves the page
+    message unchanged).
+    """
+    dest = _pick_dest(console, live, read_key, frame_time, supports_timeout, mode=mode, extra_options=extra_options)
+    if dest is None:
+        return None
+    if dest == "files":
+        return files_export()
+    if extra_handlers and dest in extra_handlers:
+        return extra_handlers[dest]()
+
+    doc = get_document()
+    if isinstance(doc, str):
+        return doc
+    title, markdown = doc
+    from yeaboi.export_targets import publish_markdown
+
+    return publish_markdown(dest, title=title, markdown=markdown).message
+
+
+def _team_profile_export_flow(
+    console,
+    live,
+    read_key,
+    frame_time,
+    supports_timeout,
+    *,
+    profile,
+    examples: dict | None = None,
+    sprint_names: list[str] | None = None,
+    ceremony=None,
+) -> None:
+    """Shared team-profile export: picker → files or Notion/Confluence → success screen.
+
+    Blocks on the success screen (min 1.5 s + a key press) like the previous
+    inline export blocks did; returns immediately when the picker is cancelled.
+    """
+    dest = _pick_dest(console, live, read_key, frame_time, supports_timeout, mode="analysis")
+    if dest is None:
+        return
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_project_export_success_screen
+
+    if dest == "files":
+        from yeaboi.team_profile_exporter import export_team_profile_html, export_team_profile_md
+
+        html_path = export_team_profile_html(profile, examples=examples, sprint_names=sprint_names, ceremony=ceremony)
+        md_path = export_team_profile_md(profile, examples=examples, sprint_names=sprint_names, ceremony=ceremony)
+        body = f"HTML  {html_path}\nMD    {md_path}"
+        subtitle = "Team profile exported (HTML + MD)"
+    else:
+        from yeaboi.export_targets import publish_markdown
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        md = build_team_profile_markdown(profile, examples=examples, sprint_names=sprint_names, ceremony=ceremony)
+        result = publish_markdown(dest, title=f"Team Profile — {profile.source}/{profile.project_key}", markdown=md)
+        body = result.url or result.message
+        subtitle = result.message if result.ok else f"Export failed — {result.message}"
+
+    w, h = console.size
+    live.update(_build_project_export_success_screen(body, width=w, height=h, subtitle=subtitle, mode="analysis"))
+    t0 = time.monotonic()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if time.monotonic() - t0 > 1.5 and k:
+            break
+
+
+def _project_tracker_sync(
+    console,
+    live,
+    read_key,
+    frame_time,
+    supports_timeout,
+    project_id: str,
+    action: str,
+) -> str:
+    """Full plan sync to Jira/Azure DevOps with a live progress screen.
+
+    Extracted verbatim from the old project-card export submenu; returns the
+    status message to show on the export success screen.
+    """
+    import threading
+
+    from yeaboi.persistence import load_graph_state, save_graph_state, save_project_snapshot
+
+    tracker_label = "Jira" if action == "jira" else "Azure DevOps"
+    if action == "jira":
+        from yeaboi.jira_sync import sync_all_to_jira as _sync_all_fn
+    else:
+        from yeaboi.azdevops_sync import sync_all_to_azdevops as _sync_all_fn
+
+    gs = load_graph_state(project_id)
+    if not gs:
+        return "No saved state for this project"
+
+    # Run sync in background thread with live progress
+    _sync_result_box: list = [None, None]  # [result, error]
+    _sync_state_box: list = [None]
+    _sync_done = threading.Event()
+    # Shared progress state: log of completed items + current active item
+    _sync_log: list[str] = []
+    _sync_current: list[str] = ["Starting..."]
+    _sync_counter: list[int] = [0, 0]  # [current, total]
+
+    def _on_sync_progress(current, total, desc):
+        _sync_counter[0] = current
+        _sync_counter[1] = total
+        if _sync_current[0] and _sync_current[0] != "Starting...":
+            _sync_log.append(f"  ✓ {_sync_current[0]}")
+        _sync_current[0] = desc
+
+    def _run_sync():
+        try:
+            r, s = _sync_all_fn(gs, on_progress=_on_sync_progress)
+            _sync_result_box[0] = r
+            _sync_state_box[0] = s
+        except Exception as exc:
+            _sync_result_box[1] = exc
+        finally:
+            _sync_done.set()
+
+    _sync_thread = threading.Thread(target=_run_sync, daemon=True)
+    _sync_thread.start()
+
+    # Show live scrolling log while the thread runs
+    while not _sync_done.is_set():
+        w, h = console.size
+        viewport_h = max(3, h - 12)
+        visible_log = _sync_log[-viewport_h:] if _sync_log else []
+        cur = _sync_counter[0]
+        tot = _sync_counter[1]
+        counter = f"[{cur}/{tot}]" if tot else ""
+        active = f"  ▸ {counter} {_sync_current[0]}"
+        display_lines = "\n".join([*visible_log, active])
+        live.update(
+            _build_project_export_success_screen(
+                display_lines,
+                width=w,
+                height=h,
+                subtitle=f"{tracker_label} sync",
+                hint="",
+            )
+        )
+        time.sleep(frame_time)
+    _sync_thread.join()
+
+    if _sync_result_box[1] is not None:
+        from yeaboi.ui.session._utils import _classify_api_error
+
+        _sync_err = _classify_api_error(_sync_result_box[1])
+        return f"{tracker_label} sync failed: {_sync_err}"
+    if _sync_result_box[0] is None:
+        return f"{tracker_label} sync failed"
+
+    sr = _sync_result_box[0]
+    new_gs = _sync_state_box[0]
+    if new_gs:
+        save_graph_state(project_id, new_gs)
+        save_project_snapshot(project_id, new_gs)
+    _iters = getattr(sr, "sprints_created", None) or getattr(sr, "iterations_created", {})
+    created = len(sr.stories_created) + len(sr.tasks_created) + len(_iters)
+    skipped = sr.skipped
+    errors = len(sr.errors)
+    parts = []
+    if created:
+        parts.append(f"{created} created")
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    if errors:
+        parts.append(f"{errors} errors")
+    epic = getattr(sr, "epic_key", None) or getattr(sr, "epic_id", None) or ""
+    prefix = f"Epic: {epic} — " if epic else ""
+    summary = ", ".join(parts) or "Nothing to sync"
+    # Show first error for diagnosis
+    if sr.errors:
+        first_err = sr.errors[0][:80]
+        summary += f"\n{first_err}"
+        # Write all errors to log file for debugging
+        _err_path = Path.home() / ".scrum-agent" / "jira-sync-errors.log"
+        _err_path.write_text("\n".join(sr.errors), encoding="utf-8")
+    return prefix + summary
+
+
+def _standup_document(session_id: str, data: dict) -> tuple[str, str] | str:
+    """Return (title, markdown) for the latest standup report, or an error message."""
+    from yeaboi.standup.export import build_standup_markdown
+    from yeaboi.standup.store import StandupStore
+
+    with StandupStore(_ana_dbp) as store:
+        report = store.get_latest_report(session_id)
+    if report is None:
+        return "Nothing to export yet — press Generate first."
+    name = data.get("session_name", "") or session_id
+    return f"Daily Standup — {report.date} — {name}", build_standup_markdown(report)
 
 
 def _standup_export(session_id: str, data: dict) -> str:
@@ -1870,9 +2216,20 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                     proceed = f"Generate failed: {e}"
                 data = _collect_standup_data(message=proceed if proceed is not None else "")
                 _reset_to_overview()
-            elif act == "Export":  # write the latest report as Markdown + HTML
+            elif act == "Export":  # pick a destination (files / Notion / Confluence)
                 logger.info("standup: Export pressed (session=%s)", session_id)
-                data = _collect_standup_data(message=_standup_export(session_id, data))
+                msg = _export_via_picker(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    mode="standup",
+                    files_export=lambda: _standup_export(session_id, data),
+                    get_document=lambda: _standup_document(session_id, data),
+                )
+                if msg is not None:  # None = user backed out of the picker
+                    data = _collect_standup_data(message=msg)
                 _reset_to_overview()
             else:  # Configure — in-TUI themed input (stays inside Live)
                 try:
@@ -2034,25 +2391,35 @@ def _performance_get_transcript(console, live, read_key, frame_time, supports_ti
     return text, referenced_images(text, attachments)
 
 
-def _performance_export(engineer: str) -> str:
-    """Re-export the engineer's most recent artifact (review > completion > prep)."""
-    from yeaboi.performance import export
+def _performance_latest_artifact(engineer: str) -> tuple[object, str] | None:
+    """Return the engineer's most recent artifact as (artifact, kind), or None.
+
+    Priority mirrors usefulness: review > completion > prep.
+    """
     from yeaboi.performance.store import PerformanceStore
 
     with PerformanceStore(_ana_dbp) as store:
         review = store.get_latest_review(engineer)
         completions = store.get_recent_completions(engineer, limit=1)
         prep = store.get_latest_prep(engineer)
-    artifact, kind = None, ""
     if review is not None:
-        artifact, kind = review, "review"
-    elif completions:
-        artifact, kind = completions[0], "completion"
-    elif prep is not None:
-        artifact, kind = prep, "prep"
-    if artifact is None:
+        return review, "review"
+    if completions:
+        return completions[0], "completion"
+    if prep is not None:
+        return prep, "prep"
+    return None
+
+
+def _performance_export(engineer: str) -> str:
+    """Re-export the engineer's most recent artifact (review > completion > prep)."""
+    from yeaboi.performance import export
+
+    found = _performance_latest_artifact(engineer)
+    if found is None:
         logger.info("performance export: nothing to export yet for engineer=%s", engineer)
         return "Nothing to export yet — generate a 1:1 prep or review first."
+    artifact, kind = found
     try:
         paths = export.export_artifact(artifact, engineer=engineer, kind=kind)
         logger.info("performance export: wrote %s for engineer=%s to %s", kind, engineer, paths["markdown"].parent)
@@ -2139,29 +2506,17 @@ def _run_team_analysis_results(
                 scroll = 0
                 sel = 0
             elif act == "Export":
-                from yeaboi.team_profile_exporter import (
-                    export_team_profile_html,
-                    export_team_profile_md,
+                logger.info("Analysis results: Export pressed (view=%s)", view)
+                _team_profile_export_flow(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    profile=profile,
+                    examples=examples,
+                    sprint_names=sprint_names,
                 )
-
-                export_team_profile_html(profile, examples=examples, sprint_names=sprint_names)
-                exp_path = export_team_profile_md(profile, examples=examples, sprint_names=sprint_names)
-                logger.info("Analysis results: exported profile to %s", exp_path)
-                w, h = console.size
-                live.update(
-                    _build_project_export_success_screen(
-                        str(exp_path),
-                        width=w,
-                        height=h,
-                        subtitle="Team profile exported",
-                        mode="analysis",
-                    )
-                )
-                exp_t0 = time.monotonic()
-                while True:
-                    ek = read_key(timeout=frame_time) if supports_timeout else read_key()
-                    if time.monotonic() - exp_t0 > 1.5 and ek:
-                        break
             elif act == "Continue":
                 logger.info("Analysis results: continue to ticket generation")
                 return "continue"
@@ -2172,6 +2527,23 @@ def _run_team_analysis_results(
             view = "overview"
             scroll = 0
             sel = 0
+
+
+def _performance_document(engineer: str) -> tuple[str, str] | str:
+    """Return (title, markdown) for the engineer's latest artifact, or an error message."""
+    from yeaboi.performance import export
+
+    found = _performance_latest_artifact(engineer)
+    if found is None:
+        return "Nothing to export yet — generate a 1:1 prep or review first."
+    artifact, kind = found
+    builders = {
+        "prep": (export.build_prep_markdown, "1:1 Prep"),
+        "completion": (export.build_completion_markdown, "1:1 Summary"),
+        "review": (export.build_review_markdown, "6-Month Review"),
+    }
+    build, label = builders[kind]
+    return f"{label} — {engineer}", build(artifact)
 
 
 def _run_performance_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
@@ -2341,7 +2713,18 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                     engineer = roster[state["selected"]]
                     logger.info("performance: %s pressed for engineer=%s", label, engineer)
                     if label == "Export":
-                        state["message"] = _performance_export(engineer)
+                        msg = _export_via_picker(
+                            console,
+                            live,
+                            read_key,
+                            frame_time,
+                            supports_timeout,
+                            mode="performance",
+                            files_export=lambda: _performance_export(engineer),
+                            get_document=lambda: _performance_document(engineer),
+                        )
+                        if msg is not None:
+                            state["message"] = msg
                     else:
                         _run_action(label, engineer)
                         # An action may have changed open-action counts / added a
@@ -2366,8 +2749,20 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                     state["sel"], state["scroll"], state["message"] = 0, 0, ""
                     state["select_time"] = time.monotonic()  # replay the reveal on return
                 elif label == "Export" and roster:
-                    logger.info("performance: Export pressed in detail view for engineer=%s", roster[state["selected"]])
-                    state["message"] = _performance_export(roster[state["selected"]])
+                    engineer = roster[state["selected"]]
+                    logger.info("performance: Export pressed in detail view for engineer=%s", engineer)
+                    msg = _export_via_picker(
+                        console,
+                        live,
+                        read_key,
+                        frame_time,
+                        supports_timeout,
+                        mode="performance",
+                        files_export=lambda: _performance_export(engineer),
+                        get_document=lambda: _performance_document(engineer),
+                    )
+                    if msg is not None:
+                        state["message"] = msg
             elif k in ("esc", "q"):
                 state["view"] = "roster"
                 state["sel"], state["scroll"], state["message"] = 0, 0, ""
@@ -2601,6 +2996,23 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
         label = q_label if set(checked) == detected else f"{q_label} (custom)"
         _run_quarter(window_start, window_end, names, label)
 
+    def _export_files() -> str:
+        report = state.get("report")
+        try:
+            from yeaboi.reporting.export import export_report
+
+            paths = export_report(report, theme=state["theme"])
+            return f"Exported to {paths['markdown'].parent}  (Markdown + HTML + slides)"
+        except Exception as e:  # noqa: BLE001
+            logger.error("reporting export failed: %s", e, exc_info=True)
+            return f"Export failed: {e}"
+
+    def _export_document() -> tuple[str, str] | str:
+        from yeaboi.reporting.export import _title, build_report_markdown
+
+        report = state.get("report")
+        return _title(report), build_report_markdown(report)
+
     def _export() -> None:
         report = state.get("report")
         if report is None:
@@ -2608,15 +3020,18 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
             state["message"] = "Nothing to export yet — generate a report first."
             return
         logger.info("reporting: Export pressed (period=%s)", report.period_label)
-        try:
-            from yeaboi.reporting.export import export_report
-
-            paths = export_report(report, theme=state["theme"])
-            logger.info("reporting: exported to %s (theme=%s)", paths["markdown"].parent, state["theme"])
-            state["message"] = f"Exported to {paths['markdown'].parent}  (Markdown + HTML + slides)"
-        except Exception as e:  # noqa: BLE001
-            logger.error("reporting export failed: %s", e, exc_info=True)
-            state["message"] = f"Export failed: {e}"
+        msg = _export_via_picker(
+            console,
+            live,
+            read_key,
+            frame_time,
+            supports_timeout,
+            mode="reporting",
+            files_export=_export_files,
+            get_document=_export_document,
+        )
+        if msg is not None:
+            state["message"] = msg
 
     def _cycle_theme() -> None:
         idx = (list(THEMES).index(state["theme"]) + 1) % len(THEMES) if state["theme"] in THEMES else 0
@@ -2922,19 +3337,41 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                     elif not remote["starting"]:
                         _start_remote()
                     scroll = 0
-                elif sel == 2:  # Export → Markdown + HTML
+                elif sel == 2:  # Export → pick a destination (files / Notion / Confluence)
                     logger.info("retro: Export pressed (session=%s)", session_id)
-                    try:
-                        from yeaboi.retro.export import export_retro
+
+                    def _retro_files() -> str:
+                        try:
+                            from yeaboi.retro.export import export_retro
+
+                            report = board_to_report(board, sprint_name=sprint_name)
+                            paths = export_retro(report, project_name=project_name or session_name)
+                            logger.info("retro: exported to %s", paths["markdown"].parent)
+                            return f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
+                        except Exception as e:
+                            logger.error("retro: export failed: %s", e, exc_info=True)
+                            return f"Export failed: {e}"
+
+                    def _retro_document() -> tuple[str, str]:
+                        from yeaboi.retro.export import build_retro_markdown
 
                         report = board_to_report(board, sprint_name=sprint_name)
-                        paths = export_retro(report, project_name=project_name or session_name)
-                        logger.info("retro: exported to %s", paths["markdown"].parent)
-                        message = f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
-                    except Exception as e:
-                        logger.error("retro: export failed: %s", e, exc_info=True)
-                        message = f"Export failed: {e}"
-                    scroll = 0
+                        name = project_name or session_name
+                        return f"Retro — {name}" if name else "Retro", build_retro_markdown(report)
+
+                    msg = _export_via_picker(
+                        console,
+                        live,
+                        read_key,
+                        frame_time,
+                        supports_timeout,
+                        mode="retro",
+                        files_export=_retro_files,
+                        get_document=_retro_document,
+                    )
+                    if msg is not None:
+                        message = msg
+                        scroll = 0
             elif k in ("esc", "q"):
                 break
             _render(_data(), scroll, sel)
@@ -3343,66 +3780,6 @@ def select_mode(
                         _is_profile = _ana_selected < len(_profiles_for_analysis)
                         _is_analysis_btn = _ana_selected >= len(_profiles_for_analysis)
 
-                        # ── Export submenu mode ───────────────────────────
-                        if _ana_export_submenu and key:
-                            if key == "left":
-                                _ana_sub_sel = max(0, _ana_sub_sel - 1)
-                                _ana_sub_html_fade = 1.0 if _ana_sub_sel == 0 else 0.0
-                                _ana_sub_md_fade = 1.0 if _ana_sub_sel == 1 else 0.0
-                            elif key == "right":
-                                _ana_sub_sel = min(1, _ana_sub_sel + 1)
-                                _ana_sub_html_fade = 1.0 if _ana_sub_sel == 0 else 0.0
-                                _ana_sub_md_fade = 1.0 if _ana_sub_sel == 1 else 0.0
-                            elif key == "enter":
-                                _sel_p = _profiles_for_analysis[_ana_selected]
-                                _tp_db = _ana_dbp
-                                _full_p = None
-                                _st_ex: dict | None = None
-                                if _tp_db.exists():
-                                    from yeaboi.team_profile import TeamProfileStore
-
-                                    with TeamProfileStore(_tp_db) as _s:
-                                        _full_p, _st_ex = _s.load_with_examples(_sel_p.team_id)
-                                if _full_p:
-                                    from yeaboi.agent.ceremony_history import gather_ceremony_context
-
-                                    _cer = gather_ceremony_context(_full_p.project_key)
-                                    if _ana_sub_sel == 0:
-                                        from yeaboi.team_profile_exporter import export_team_profile_html
-
-                                        _ep = export_team_profile_html(_full_p, examples=_st_ex, ceremony=_cer)
-                                    else:
-                                        from yeaboi.team_profile_exporter import export_team_profile_md
-
-                                        _ep = export_team_profile_md(_full_p, examples=_st_ex, ceremony=_cer)
-                                    w, h = console.size
-                                    live.update(
-                                        _build_project_export_success_screen(
-                                            str(_ep),
-                                            width=w,
-                                            height=h,
-                                            subtitle="Team profile exported",
-                                            mode="analysis",
-                                        )
-                                    )
-                                    _et = time.monotonic()
-                                    while True:
-                                        ek = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                        if time.monotonic() - _et > 1.5 and ek:
-                                            break
-                                _ana_export_submenu = False
-                                _ana_sub_visible_target = 0.0
-                                _ana_sub_html_fade = 0.0
-                                _ana_sub_md_fade = 0.0
-                                _ana_exp_fade = 1.0
-                            elif key in ("esc", "q"):
-                                _ana_export_submenu = False
-                                _ana_sub_visible_target = 0.0
-                                _ana_sub_html_fade = 0.0
-                                _ana_sub_md_fade = 0.0
-                                _ana_exp_fade = 1.0
-                            continue
-
                         # ── Delete confirmation popup ─────────────────
                         if _ana_del_popup_open and key:
                             if key == "enter":
@@ -3536,13 +3913,30 @@ def select_mode(
                                 _ana_del_pending = False
                                 continue
                             elif _is_profile and _ana_focus == 2:
-                                # Export → open submenu
-                                _ana_export_submenu = True
-                                _ana_sub_sel = 0
-                                _ana_sub_visible_target = 2.0
-                                _ana_sub_html_fade = 1.0
-                                _ana_sub_md_fade = 0.0
-                                _ana_exp_fade = 0.0
+                                # Export → shared destination picker (files / Notion / Confluence)
+                                _sel_p = _profiles_for_analysis[_ana_selected]
+                                _tp_db = _ana_dbp
+                                _full_p = None
+                                _st_ex: dict | None = None
+                                if _tp_db.exists():
+                                    from yeaboi.team_profile import TeamProfileStore
+
+                                    with TeamProfileStore(_tp_db) as _s:
+                                        _full_p, _st_ex = _s.load_with_examples(_sel_p.team_id)
+                                if _full_p:
+                                    from yeaboi.agent.ceremony_history import gather_ceremony_context
+
+                                    _team_profile_export_flow(
+                                        console,
+                                        live,
+                                        read_key,
+                                        _FRAME_TIME,
+                                        _supports_timeout,
+                                        profile=_full_p,
+                                        examples=_st_ex,
+                                        ceremony=gather_ceremony_context(_full_p.project_key),
+                                    )
+                                _ana_exp_fade = 1.0
                                 continue
                             elif _is_analysis_btn:
                                 # New analysis — if both boards, show picker popup
@@ -4162,22 +4556,13 @@ def select_mode(
                     elif sk == "left":
                         _s_sel = max(0, _s_sel - 1)
                     elif sk == "right":
-                        _s_sel = min(2, _s_sel + 1)
+                        _s_sel = min(3, _s_sel + 1)
                     elif sk in ("enter", " "):
                         if _s_sel == 0:
                             # Configure — launch setup wizard
                             logger.info("Settings: launching setup wizard")
-                            live.stop()
-                            from yeaboi.setup_wizard import run_setup_wizard
-
-                            run_setup_wizard(console)
-                            # Reload config after wizard completes
-                            from yeaboi.config import load_user_config
-
-                            load_user_config()
+                            _launch_setup_wizard(console, live)
                             _settings_data = _collect_settings_data()
-                            logger.info("Settings: config reloaded after wizard")
-                            live.start()
                         elif _s_sel == 1:
                             # Log Level — cycle, persist to .env, apply live
                             from yeaboi.config import get_log_level, set_log_level
@@ -4188,6 +4573,13 @@ def select_mode(
                             apply_level(_new_level)
                             _settings_data = _collect_settings_data()
                             logger.info("Settings: log level cycled to %s", _new_level)
+                        elif _s_sel == 2:
+                            # Data Dir — one prompt for YEABOI_HOME (+ optional move)
+                            logger.info("Settings: Data Dir editor opened")
+                            _dd_msg = _settings_data_dir_flow(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                            _settings_data = _collect_settings_data()
+                            if _dd_msg:
+                                _settings_data["_message"] = _dd_msg
                         else:
                             logger.info("Settings: user pressed Back")
                             break
@@ -4317,198 +4709,11 @@ def select_mode(
                 while True:
                     key = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
 
-                    # ── Export submenu mode ────────────────────────────────────
-                    # When the submenu is open, capture all keys here. Left/Right
-                    # switches between HTML and Markdown; Enter exports; Esc closes.
-                    # Build dynamic submenu index → action mapping
-                    _submenu_actions = ["html", "markdown"]
-                    if _jira_ok:
-                        _submenu_actions.append("jira")
-                    if _azdevops_ok:
-                        _submenu_actions.append("azdevops")
-
-                    def _update_submenu_fades():
-                        nonlocal submenu_html_fade_target, submenu_md_fade_target
-                        nonlocal submenu_jira_fade_target, submenu_azdevops_fade_target
-                        submenu_html_fade_target = 1.0 if submenu_sel == 0 else 0.0
-                        submenu_md_fade_target = 1.0 if submenu_sel == 1 else 0.0
-                        _jira_idx = _submenu_actions.index("jira") if "jira" in _submenu_actions else -1
-                        _azdo_idx = _submenu_actions.index("azdevops") if "azdevops" in _submenu_actions else -1
-                        submenu_jira_fade_target = 1.0 if submenu_sel == _jira_idx else 0.0
-                        submenu_azdevops_fade_target = 1.0 if submenu_sel == _azdo_idx else 0.0
-
-                    if export_submenu_open:
-                        if key == "left":
-                            submenu_sel = max(0, submenu_sel - 1)
-                            _update_submenu_fades()
-                        elif key == "right":
-                            submenu_sel = min(_submenu_max, submenu_sel + 1)
-                            _update_submenu_fades()
-                        elif key == "enter":
-                            project = projects[proj_selected]
-                            path = None
-                            _action = _submenu_actions[submenu_sel] if submenu_sel < len(_submenu_actions) else ""
-                            if _action == "html":
-                                from yeaboi.persistence import export_project_html
-
-                                path = export_project_html(project.id)
-                            elif _action == "markdown":
-                                from yeaboi.persistence import export_project_md
-
-                                path = export_project_md(project.id)
-                            elif _action in ("jira", "azdevops"):
-                                # Tracker export — full sync: Epic + Stories + Tasks + Sprints
-                                import threading
-
-                                from yeaboi.persistence import (
-                                    load_graph_state,
-                                    save_graph_state,
-                                    save_project_snapshot,
-                                )
-
-                                _tracker_label = "Jira" if _action == "jira" else "Azure DevOps"
-                                if _action == "jira":
-                                    from yeaboi.jira_sync import sync_all_to_jira as _sync_all_fn
-                                else:
-                                    from yeaboi.azdevops_sync import sync_all_to_azdevops as _sync_all_fn
-
-                                if True:
-                                    gs = load_graph_state(project.id)
-                                    if not gs:
-                                        path = "No saved state for this project"
-                                    else:
-                                        # Run sync in background thread with live progress
-                                        _sync_result_box: list = [None, None]  # [result, error]
-                                        _sync_state_box: list = [None]
-                                        _sync_done = threading.Event()
-                                        # Shared progress state: log of completed items + current active item
-                                        _sync_log: list[str] = []
-                                        _sync_current: list[str] = ["Starting..."]
-                                        _sync_counter: list[int] = [0, 0]  # [current, total]
-
-                                        def _on_sync_progress(current, total, desc):
-                                            _sync_counter[0] = current
-                                            _sync_counter[1] = total
-                                            if _sync_current[0] and _sync_current[0] != "Starting...":
-                                                _sync_log.append(f"  ✓ {_sync_current[0]}")
-                                            _sync_current[0] = desc
-
-                                        def _run_jira_sync():
-                                            try:
-                                                r, s = _sync_all_fn(gs, on_progress=_on_sync_progress)
-                                                _sync_result_box[0] = r
-                                                _sync_state_box[0] = s
-                                            except Exception as exc:
-                                                _sync_result_box[1] = exc
-                                            finally:
-                                                _sync_done.set()
-
-                                        _sync_thread = threading.Thread(target=_run_jira_sync, daemon=True)
-                                        _sync_thread.start()
-
-                                        # Show live scrolling log while the thread runs
-                                        while not _sync_done.is_set():
-                                            w, h = console.size
-                                            viewport_h = max(3, h - 12)
-                                            visible_log = _sync_log[-viewport_h:] if _sync_log else []
-                                            cur = _sync_counter[0]
-                                            tot = _sync_counter[1]
-                                            counter = f"[{cur}/{tot}]" if tot else ""
-                                            active = f"  ▸ {counter} {_sync_current[0]}"
-                                            display_lines = "\n".join([*visible_log, active])
-                                            live.update(
-                                                _build_project_export_success_screen(
-                                                    display_lines,
-                                                    width=w,
-                                                    height=h,
-                                                    subtitle=f"{_tracker_label} sync",
-                                                    hint="",
-                                                )
-                                            )
-                                            time.sleep(_FRAME_TIME)
-                                        _sync_thread.join()
-
-                                        if _sync_result_box[1] is not None:
-                                            from yeaboi.ui.session._utils import _classify_api_error
-
-                                            _sync_err = _classify_api_error(_sync_result_box[1])
-                                            path = f"{_tracker_label} sync failed: {_sync_err}"
-                                        elif _sync_result_box[0] is not None:
-                                            sr = _sync_result_box[0]
-                                            new_gs = _sync_state_box[0]
-                                            if new_gs:
-                                                save_graph_state(project.id, new_gs)
-                                                save_project_snapshot(project.id, new_gs)
-                                            _iters = getattr(sr, "sprints_created", None) or getattr(
-                                                sr, "iterations_created", {}
-                                            )
-                                            created = len(sr.stories_created) + len(sr.tasks_created) + len(_iters)
-                                            skipped = sr.skipped
-                                            errors = len(sr.errors)
-                                            parts = []
-                                            if created:
-                                                parts.append(f"{created} created")
-                                            if skipped:
-                                                parts.append(f"{skipped} skipped")
-                                            if errors:
-                                                parts.append(f"{errors} errors")
-                                            epic = getattr(sr, "epic_key", None) or getattr(sr, "epic_id", None) or ""
-                                            prefix = f"Epic: {epic} — " if epic else ""
-                                            summary = ", ".join(parts) or "Nothing to sync"
-                                            # Show first error for diagnosis
-                                            if sr.errors:
-                                                first_err = sr.errors[0][:80]
-                                                summary += f"\n{first_err}"
-                                                # Write all errors to log file for debugging
-                                                _err_path = Path.home() / ".scrum-agent" / "jira-sync-errors.log"
-                                                _err_path.write_text("\n".join(sr.errors), encoding="utf-8")
-                                            path = prefix + summary
-
-                            if path:
-                                w, h = console.size
-                                live.update(
-                                    _build_project_export_success_screen(
-                                        str(path),
-                                        width=w,
-                                        height=h,
-                                    )
-                                )
-                                # Show for at least 1.5s, then wait for a real keypress
-                                _export_t0 = time.monotonic()
-                                while True:
-                                    k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                    elapsed = time.monotonic() - _export_t0
-                                    if elapsed < 1.5:
-                                        continue  # enforce minimum display time
-                                    if k and k not in ("scroll_up", "scroll_down", ""):
-                                        break
-
-                            # Close submenu after export
-                            export_submenu_open = False
-                            submenu_visible_target = 0.0
-                            submenu_html_fade = 0.0
-                            submenu_md_fade = 0.0
-                            submenu_jira_fade = 0.0
-                            submenu_azdevops_fade = 0.0
-                            submenu_html_fade_target = 0.0
-                            submenu_md_fade_target = 0.0
-                            submenu_jira_fade_target = 0.0
-                            submenu_azdevops_fade_target = 0.0
-                            exp_fade_target = 1.0  # restore Export highlight
-                        elif key in ("esc", "q"):
-                            export_submenu_open = False
-                            submenu_visible_target = 0.0
-                            submenu_html_fade_target = 0.0
-                            submenu_md_fade_target = 0.0
-                            submenu_jira_fade_target = 0.0
-                            submenu_azdevops_fade_target = 0.0
-                            exp_fade_target = 1.0  # restore Export highlight
-
                     # ── Team analysis popup mode ──────────────────────────────
                     # Button selector: Left/Right navigates, Enter confirms.
                     # When both boards configured: [Jira] [AzDO] [Skip] (3 buttons)
                     # When one board configured:   [Yes, Analyse] [Skip] (2 buttons)
-                    elif team_popup_open:
+                    if team_popup_open:
                         _both_boards = _jira_ok and _azdevops_ok
                         _popup_btn_count = 3 if _both_boards else 2
                         if key == "left":
@@ -4593,14 +4798,75 @@ def select_mode(
                             delete_popup_target = 1.0
                             delete_popup_name = projects[proj_selected].name
 
-                        # ── Focus 2: Export → open submenu ────────────────
+                        # ── Focus 2: Export → shared destination picker ───
                         elif focus == 2 and _is_project_row():
-                            export_submenu_open = True
-                            submenu_sel = 0  # default to HTML
-                            submenu_visible_target = float(_submenu_max + 1)  # stagger-reveal all buttons
-                            submenu_html_fade_target = 1.0
-                            submenu_md_fade_target = 0.0
-                            exp_fade_target = 0.0  # grey out Export while submenu is active
+                            _extra = (["Jira"] if _jira_ok else []) + (["Azure DevOps"] if _azdevops_ok else [])
+                            _dest = _pick_dest(
+                                console,
+                                live,
+                                read_key,
+                                _FRAME_TIME,
+                                _supports_timeout,
+                                mode="planning",
+                                extra_options=_extra,
+                            )
+                            path = None
+                            if _dest is not None:
+                                project = projects[proj_selected]
+                                if _dest == "files":
+                                    from yeaboi.persistence import export_project_html, export_project_md
+
+                                    _hp = export_project_html(project.id)
+                                    _mp = export_project_md(project.id)
+                                    if _hp or _mp:
+                                        path = f"HTML  {_hp}\nMD    {_mp}"
+                                    else:
+                                        path = "No saved state for this project"
+                                elif _dest in ("jira", "azdevops"):
+                                    path = _project_tracker_sync(
+                                        console,
+                                        live,
+                                        read_key,
+                                        _FRAME_TIME,
+                                        _supports_timeout,
+                                        project.id,
+                                        _dest,
+                                    )
+                                else:  # notion / confluence
+                                    from yeaboi.persistence import load_graph_state
+
+                                    _gs = load_graph_state(project.id)
+                                    if not _gs:
+                                        path = "No saved state for this project"
+                                    else:
+                                        from yeaboi.export_targets import publish_markdown
+                                        from yeaboi.repl._io import build_plan_markdown
+
+                                        _pr = publish_markdown(
+                                            _dest,
+                                            title=f"Sprint Plan — {project.name}",
+                                            markdown=build_plan_markdown(_gs),
+                                        )
+                                        path = _pr.url or _pr.message
+                            if path:
+                                w, h = console.size
+                                live.update(
+                                    _build_project_export_success_screen(
+                                        str(path),
+                                        width=w,
+                                        height=h,
+                                    )
+                                )
+                                # Show for at least 1.5s, then wait for a real keypress
+                                _export_t0 = time.monotonic()
+                                while True:
+                                    k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
+                                    elapsed = time.monotonic() - _export_t0
+                                    if elapsed < 1.5:
+                                        continue  # enforce minimum display time
+                                    if k and k not in ("scroll_up", "scroll_down", ""):
+                                        break
+                            exp_fade_target = 1.0  # restore Export highlight
 
                         # ── Focus 0: Card (empty state / new project) ────
                         elif not projects or proj_selected == len(projects):

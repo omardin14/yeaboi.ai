@@ -159,6 +159,8 @@ src/yeaboi/
   formatters.py         — Rich Table/Panel rendering (dark/light themes)
   html_exporter.py      — Export plans to self-contained HTML
   json_exporter.py      — Export plans to clean JSON (for CI/CD pipelines)
+  markdown_convert.py   — Generated Markdown → Notion blocks / Confluence storage XHTML (pure, no SDK)
+  export_targets.py     — publish_to_notion/publish_to_confluence/publish_markdown (PublishResult; never raises)
   jira_sync.py          — Batch Jira creation (idempotent, cascade, progress callbacks)
   azdevops_sync.py      — Batch Azure DevOps creation (idempotent, cascade, progress callbacks)
   questionnaire_io.py   — Import/export questionnaire templates as Markdown
@@ -449,10 +451,13 @@ Rules:
 - `GITHUB_TOKEN`, `AZURE_DEVOPS_TOKEN` — optional, for repo context tools
 - `AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TEAM` — optional, for Azure DevOps board sync
 - `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` — optional, for Jira integration
-- `CONFLUENCE_SPACE_KEY` — optional, the space to scope searches to
+- `CONFLUENCE_SPACE_KEY` — optional, the space to scope searches to; the Export buttons publish Confluence reports here too
 - `CONFLUENCE_BASE_URL` / `CONFLUENCE_EMAIL` / `CONFLUENCE_API_TOKEN` — optional standalone Atlassian login for Confluence. Confluence reuses the Jira creds by default; these let it be configured **without** Jira (they win over `JIRA_*` when set — see `config.get_confluence_base_url`). The Docs setup step collects them inline when Jira wasn't configured.
 - `NOTION_TOKEN` — optional, Notion integration token (independent doc tool; its own auth, not shared with Jira/Confluence). Enables the 5 `notion_*` tools + analysis/standup context.
 - `NOTION_ROOT_PAGE_ID` — optional, default parent for created Notion pages; also gates the Notion source in the Daily Standup activity feed (the Confluence-space-key analog)
+- `YEABOI_HOME` — optional, relocates the whole data tree (exports, logs, sessions DB, scrum-docs…; default `~/.yeaboi`). Resolved once at import time in `paths.py` (`_resolve_root()`); `.env` itself always stays at `~/.yeaboi/.env` (the bootstrap file that holds this var). Editable in the TUI via Settings → Data Dir, which offers to move the existing tree (`paths.move_data_tree`) and notes a restart is needed to fully apply.
+- `NOTION_EXPORT_PARENT_PAGE_ID` — optional, a dedicated Notion page the Export buttons publish under; **falls back to `NOTION_ROOT_PAGE_ID`**. With neither set, Notion export shows a warning pointing at Setup (the Notion API can't create top-level pages).
+- `CONFLUENCE_EXPORT_PARENT_PAGE_ID` — optional page Confluence exports nest under; blank creates them at the root of `CONFLUENCE_SPACE_KEY` (no space key → warning pointing at Setup).
 - `STANDUP_USER_NAME` — optional, your display name for your own standup update (default: "Me")
 - `STANDUP_GITHUB_REPO` — optional, GitHub repo (owner/repo) scanned for Daily Standup code activity
 - `SLACK_WEBHOOK_URL` — optional, Slack incoming-webhook URL for Daily Standup delivery

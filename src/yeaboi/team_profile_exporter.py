@@ -1352,7 +1352,24 @@ def export_team_profile_md(
     out_dir = _project_export_dir(profile.project_key, output_dir)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out_path = out_dir / f"team-profile-{ts}.md"
+    md = build_team_profile_markdown(profile, examples=examples, sprint_names=sprint_names, ceremony=ceremony)
+    out_path.write_text(md, encoding="utf-8")
+    logger.info("Exported team profile Markdown to %s", out_path)
+    return out_path
 
+
+def build_team_profile_markdown(
+    profile: TeamProfile,
+    *,
+    examples: dict | None = None,
+    sprint_names: list[str] | None = None,
+    ceremony=None,
+) -> str:
+    """Build the team-profile Markdown report as a string.
+
+    Extracted from ``export_team_profile_md`` so the same content can be
+    published to Notion/Confluence (via export_targets) without touching disk.
+    """
     ex = examples or {}
     gen_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines: list[str] = [
@@ -2153,9 +2170,7 @@ def export_team_profile_md(
             lines.append(f"- **{title}:** {desc}")
         lines.append("")
 
-    out_path.write_text("\n".join(lines), encoding="utf-8")
-    logger.info("Exported team profile Markdown to %s", out_path)
-    return out_path
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
