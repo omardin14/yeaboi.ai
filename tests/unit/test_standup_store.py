@@ -270,6 +270,7 @@ class TestSkippedSourcesRoundTrip:
         assert latest is not None
         assert latest.skipped_sources == ()
 
+
 class TestMemberLinksRoundTrip:
     def test_round_trips(self, db_path):
         member = MemberUpdate(name="Alice", summary="login", links=(("PSOT-1", "https://j/browse/PSOT-1"),))

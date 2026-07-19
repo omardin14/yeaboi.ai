@@ -837,6 +837,7 @@ class TestSkippedSources:
         report = self._run(monkeypatch, db_path, seeded_session, bundle)
         assert not any(w.startswith("Not scanned:") for w in report.warnings)
 
+
 class TestMemberLinks:
     def test_dedupes_by_url_labels_by_key_and_caps(self):
         acts = [

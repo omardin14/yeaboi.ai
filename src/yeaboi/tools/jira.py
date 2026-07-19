@@ -896,8 +896,7 @@ def _wip_items(jira: JIRA, key: str, seen_keys: set[str]) -> list[dict]:
     search, which shares the client).
     """
     wip_jql = (
-        f'project = "{key}" AND sprint in openSprints() '
-        'AND statusCategory = "In Progress" AND assignee is not EMPTY'
+        f'project = "{key}" AND sprint in openSprints() AND statusCategory = "In Progress" AND assignee is not EMPTY'
     )
     fallback_jql = f'project = "{key}" AND statusCategory = "In Progress" AND assignee is not EMPTY AND updated >= -14d'
     for jql in (wip_jql, fallback_jql):

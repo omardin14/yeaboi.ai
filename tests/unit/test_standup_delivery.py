@@ -71,9 +71,7 @@ class TestRender:
         rep = StandupReport(
             date="2026-07-10",
             member_updates=(
-                MemberUpdate(
-                    name="Alice", summary="moved a ticket", links=(("PSOT-1", "https://j/browse/PSOT-1"),)
-                ),
+                MemberUpdate(name="Alice", summary="moved a ticket", links=(("PSOT-1", "https://j/browse/PSOT-1"),)),
             ),
         )
         # Plaintext: raw URL so Slack/email clients auto-link it.

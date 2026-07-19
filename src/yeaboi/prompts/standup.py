@@ -70,7 +70,7 @@ def get_standup_summary_prompt(
         "ongoing work: fold in-progress tickets into the summary as what they are (still) working on.\n"
         "- If a person has activity but no self_report, infer their summary from the activity alone. "
         "If a person has NO activity and NO self_report but has 'in_progress' items, summarize them as "
-        "continuing work on those tickets (e.g. \"Continuing work on X\") — never say 'No activity "
+        'continuing work on those tickets (e.g. "Continuing work on X") — never say \'No activity '
         "detected' for them. Only when all three are empty use 'No activity detected.' as the summary.\n"
         "- If their activity or self-report suggests a blocker (e.g. a PR stuck in review, a ticket "
         "flipped back to 'Blocked'), note it in 'blockers'; otherwise use an empty string.\n"
