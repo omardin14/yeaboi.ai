@@ -1543,3 +1543,131 @@ class TestNarrativeInParallelAnalysis:
         assert narrative["executive_summary"]
         assert len(narrative["sections"]) == 7
         assert "Writing plain-English summary…" in progress
+
+
+class TestInsightsPersistenceAndExport:
+    """examples["insights"] survives the store round-trip and lands in exports."""
+
+    _INSIGHTS = {
+        "start": [{"title": "Link PRs to tickets", "detail": "Add PR links.", "evidence": "10% PR linkage"}],
+        "stop": [{"title": "Overcommitting sprints", "detail": "Plan to capacity.", "evidence": "55% completion"}],
+        "keep": [{"title": "Given/When/Then ACs", "detail": "Keep the format.", "evidence": "GWT detected"}],
+        "try": [{"title": "WIP limits", "detail": "Cap in-progress work.", "evidence": "22% spillover"}],
+    }
+
+    def test_insights_survive_store_round_trip(self, tmp_path):
+        profile = _make_profile()
+        examples = {"team_size": 4, "insights": self._INSIGHTS}
+        with TeamProfileStore(tmp_path / "sessions.db") as store:
+            store.save(profile, examples=examples)
+            loaded, loaded_ex = store.load_with_examples("jira-PROJ")
+
+        assert loaded is not None
+        assert loaded_ex is not None
+        assert loaded_ex["insights"]["start"][0]["title"] == "Link PRs to tickets"
+        assert loaded_ex["insights"]["try"][0]["evidence"] == "22% spillover"
+
+    def test_examples_without_insights_still_render(self, tmp_path):
+        """Profiles saved before insights existed load and render fine."""
+        from yeaboi.ui.mode_select.screens._screens_secondary import (
+            _build_team_analysis_screen,
+            _build_team_insights_screen,
+        )
+
+        profile = _make_profile()
+        with TeamProfileStore(tmp_path / "sessions.db") as store:
+            store.save(profile, examples={"team_size": 4})
+            loaded, loaded_ex = store.load_with_examples("jira-PROJ")
+
+        assert "insights" not in (loaded_ex or {})
+        assert _build_team_analysis_screen(loaded, examples=loaded_ex, view="insights", width=80, height=24)
+        assert _build_team_insights_screen(loaded, examples=loaded_ex, width=80, height=24)
+
+    def test_html_export_includes_insights(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_html
+
+        profile = _make_extended_profile()
+        out = export_team_profile_html(profile, output_dir=tmp_path, examples={"insights": self._INSIGHTS})
+        content = out.read_text()
+        assert "Team Insights" in content
+        assert "Link PRs to tickets" in content
+        assert "Worth trying" in content
+        assert "22% spillover" in content
+
+    def test_html_export_escapes_insights(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_html
+
+        profile = _make_extended_profile()
+        hostile = {"start": [{"title": "<script>alert(1)</script>", "detail": "x", "evidence": ""}]}
+        content = export_team_profile_html(profile, output_dir=tmp_path, examples={"insights": hostile}).read_text()
+        assert "<script>alert(1)</script>" not in content
+        assert "&lt;script&gt;" in content
+
+    def test_md_export_includes_insights(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_md
+
+        profile = _make_extended_profile()
+        out = export_team_profile_md(profile, output_dir=tmp_path, examples={"insights": self._INSIGHTS})
+        content = out.read_text()
+        assert "## Team Insights" in content
+        assert "### Start doing" in content
+        assert "- **Link PRs to tickets** — Add PR links. *(10% PR linkage)*" in content
+
+    def test_md_export_without_insights_has_no_section(self, tmp_path):
+        from yeaboi.team_profile_exporter import export_team_profile_md
+
+        profile = _make_extended_profile()
+        content = export_team_profile_md(profile, output_dir=tmp_path, examples={}).read_text()
+        assert "Team Insights" not in content
+
+    def test_analysis_log_includes_insights(self, tmp_path, monkeypatch):
+        from yeaboi.team_profile_exporter import write_analysis_log
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        profile = _make_profile()
+        log_path = write_analysis_log(profile, examples={"insights": self._INSIGHTS})
+        content = log_path.read_text()
+        assert "Team Insights:" in content
+        assert "Link PRs to tickets" in content
+        assert "(22% spillover)" in content
+
+
+class TestInsightsInParallelAnalysis:
+    """_run_parallel_analysis always attaches insights (LLM or fallback)."""
+
+    def test_insights_attached_to_examples(self):
+        from unittest.mock import patch
+
+        from yeaboi.tools.team_learning import _run_parallel_analysis
+
+        sprint_data = [
+            {
+                "sprint_name": "Sprint 1",
+                "completed_points": 20.0,
+                "planned_count": 2,
+                "completed_count": 2,
+                "stories": [
+                    {
+                        "points": 3,
+                        "cycle_time_days": 2.0,
+                        "discipline": "backend",
+                        "task_count": 2,
+                        "ac_count": 3,
+                        "epic_key": "EP-1",
+                        "point_changed": False,
+                        "issue_key": "P-1",
+                        "issue_url": "",
+                        "summary": "Story A",
+                    },
+                ],
+            },
+        ]
+        progress: list[str] = []
+        # No LLM in unit tests — the fallback insights must still be attached.
+        with patch("yeaboi.agent.llm.get_llm", side_effect=RuntimeError("no key")):
+            _profile, examples = _run_parallel_analysis("jira", "PROJ", sprint_data, progress)
+
+        insights = examples.get("insights")
+        assert isinstance(insights, dict)
+        assert all(insights[k] for k in ("start", "stop", "keep", "try"))
+        assert "Coaching insights…" in progress

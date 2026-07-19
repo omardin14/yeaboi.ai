@@ -33,6 +33,7 @@ from yeaboi.ui.mode_select.screens._screens_secondary import (
     _build_sample_stories_screen,
     _build_sample_tasks_screen,
     _build_team_analysis_screen,
+    _build_team_insights_screen,
 )
 
 # ---------------------------------------------------------------------------
@@ -1048,9 +1049,23 @@ _NARRATIVE_EXAMPLES = {
             "recommendations": "Two small things to tighten up.",
         },
     },
+    "insights": {
+        "start": [
+            {
+                "title": "Link PRs to tickets",
+                "detail": "Add PR links to every story for traceability.",
+                "evidence": "40% PR linkage",
+            }
+        ],
+        "stop": [
+            {"title": "Overcommitting sprints", "detail": "Plan to actual capacity.", "evidence": "88% completion"}
+        ],
+        "keep": [{"title": "Given/When/Then ACs", "detail": "Structured ACs work well.", "evidence": "GWT detected"}],
+        "try": [{"title": "WIP limits", "detail": "Cap in-progress work.", "evidence": "12% spillover"}],
+    },
 }
 
-_ALL_CARD_KEYS = ("velocity", "team", "estimation", "workflow", "writing", "trends", "recommendations")
+_ALL_CARD_KEYS = ("velocity", "team", "estimation", "workflow", "writing", "trends", "recommendations", "insights")
 
 
 class TestAnalysisOverview:
@@ -1082,7 +1097,7 @@ class TestAnalysisOverview:
         # Selection auto-scrolls, so check the top half with card 0 selected
         # and the bottom half with the last card selected.
         top = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=0)
-        bottom = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=6)
+        bottom = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=7)
         combined = top + bottom
         for title in (
             "Velocity & Sprints",
@@ -1092,6 +1107,7 @@ class TestAnalysisOverview:
             "Writing Style",
             "Trends & Repos",
             "Recommendations",
+            "Team Insights",
         ):
             assert title in combined, title
 
@@ -1161,7 +1177,8 @@ class TestAnalysisSectionDetail:
         )
         assert isinstance(panel, Panel)
 
-    @pytest.mark.parametrize("card_key", _ALL_CARD_KEYS)
+    # The insights card is coaching content itself — it has no narrative key.
+    @pytest.mark.parametrize("card_key", tuple(k for k in _ALL_CARD_KEYS if k != "insights"))
     def test_narrative_block_shown(self, card_key):
         panel = _build_team_analysis_screen(
             _make_overview_profile(), examples=_NARRATIVE_EXAMPLES, view=card_key, width=100, height=50
@@ -1258,3 +1275,171 @@ class TestAnalysisSectionDetail:
         empty = TeamProfile(team_id="e", source="jira", project_key="X", sample_sprints=0, sample_stories=0)
         panel = _build_team_analysis_screen(empty, examples=None, view=card_key, width=80, height=24)
         assert isinstance(panel, Panel)
+
+
+# ---------------------------------------------------------------------------
+# Team insights screen (results → insights → generate-tickets confirm)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTeamInsightsScreen:
+    """The coaching-insights screen shown before the sample-ticket confirm."""
+
+    def _render_screen(self, examples=None, width=100, height=40, **kwargs):
+        panel = _build_team_insights_screen(
+            _make_overview_profile(),
+            examples=examples,
+            width=width,
+            height=height,
+            **kwargs,
+        )
+        assert isinstance(panel, Panel)
+        return _render(panel, width=width)
+
+    def test_returns_panel(self):
+        panel = _build_team_insights_screen(_make_overview_profile(), examples=_NARRATIVE_EXAMPLES)
+        assert isinstance(panel, Panel)
+
+    def test_intro_line_renders(self):
+        output = self._render_screen(examples=_NARRATIVE_EXAMPLES)
+        assert "How to improve this team" in output
+
+    def test_all_category_headers_render(self):
+        # Tall screen so all four categories fit the viewport at once.
+        output = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=60)
+        for header in ("START DOING", "STOP DOING", "KEEP DOING", "WORTH TRYING"):
+            assert header in output, header
+
+    def test_item_title_detail_evidence_render(self):
+        output = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=60)
+        assert "Link PRs to tickets" in output
+        assert "traceability" in output
+        assert "40% PR linkage" in output
+
+    def test_default_actions(self):
+        output = self._render_screen(examples=_NARRATIVE_EXAMPLES)
+        for action in ("Continue", "Export", "Back"):
+            assert action in output, action
+
+    def test_action_selection_highlights(self):
+        rendered = [self._render_screen(examples=_NARRATIVE_EXAMPLES, action_sel=i) for i in range(3)]
+        assert len(set(rendered)) == 1 or len(set(rendered)) > 1  # renders for every selection
+        for r in rendered:
+            assert "Continue" in r
+
+    def test_empty_examples_show_hint(self):
+        """Old saved profiles have no insights — screen must still render."""
+        output = self._render_screen(examples={})
+        assert "No insights saved" in output
+
+    def test_none_examples_show_hint(self):
+        output = self._render_screen(examples=None)
+        assert "No insights saved" in output
+
+    def test_scrollbar_on_overflow(self):
+        output = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=20)
+        assert "│" in output or "┃" in output
+
+    def test_scroll_clamps_and_keeps_buttons(self):
+        output = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=24, scroll_offset=9999)
+        assert "Continue" in output
+
+    def test_narrow_terminal_no_crash(self):
+        panel = _build_team_insights_screen(_make_overview_profile(), examples=_NARRATIVE_EXAMPLES, width=40, height=24)
+        assert isinstance(panel, Panel)
+
+    def test_short_terminal_no_crash(self):
+        panel = _build_team_insights_screen(_make_overview_profile(), examples=_NARRATIVE_EXAMPLES, width=80, height=10)
+        assert isinstance(panel, Panel)
+
+    def test_subtitle_renders(self):
+        output = self._render_screen(examples=_NARRATIVE_EXAMPLES, subtitle="jira/SCRUM  ·  Team Insights")
+        assert "Team Insights" in output
+
+    def test_insights_card_teaser_on_overview(self):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(),
+            examples=_NARRATIVE_EXAMPLES,
+            view="overview",
+            selected_card=7,
+            width=100,
+            height=40,
+        )
+        output = _render(panel, width=100)
+        assert "1 start" in output
+        assert "1 try" in output
+
+    def test_insights_card_detail_view(self):
+        panel = _build_team_analysis_screen(
+            _make_overview_profile(),
+            examples=_NARRATIVE_EXAMPLES,
+            view="insights",
+            width=100,
+            height=50,
+        )
+        output = _render(panel, width=100)
+        assert "START DOING" in output
+        assert "Link PRs to tickets" in output
+
+
+class TestRunTeamInsights:
+    """The driver loop for the insights screen (key handling)."""
+
+    class _FakeConsole:
+        size = (100, 30)
+
+    class _FakeLive:
+        def __init__(self):
+            self.frames = 0
+
+        def update(self, _panel):
+            self.frames += 1
+
+    @staticmethod
+    def _run(keys):
+        """Drive _run_team_insights with a scripted key sequence."""
+        from yeaboi.ui.mode_select import _run_team_insights
+
+        it = iter(keys)
+
+        def _read_key(timeout=None):
+            return next(it)
+
+        live = TestRunTeamInsights._FakeLive()
+        result = _run_team_insights(
+            live,
+            TestRunTeamInsights._FakeConsole(),
+            _read_key,
+            0.05,
+            True,
+            _make_overview_profile(),
+            _NARRATIVE_EXAMPLES,
+        )
+        return result, live
+
+    def test_enter_on_continue(self):
+        result, live = self._run(["enter"])
+        assert result == "continue"
+        assert live.frames >= 1
+
+    def test_back_button_returns_back(self):
+        # Continue → Export → Back, then Enter.
+        result, _ = self._run(["right", "right", "enter"])
+        assert result == "back"
+
+    def test_esc_returns_back(self):
+        result, _ = self._run(["esc"])
+        assert result == "back"
+
+    def test_q_returns_back(self):
+        result, _ = self._run(["q"])
+        assert result == "back"
+
+    def test_right_left_then_continue(self):
+        # Navigate to Export and back to Continue, then Enter.
+        result, _ = self._run(["right", "left", "enter"])
+        assert result == "continue"
+
+    def test_left_clamps_then_continue(self):
+        result, _ = self._run(["left", "left", "enter"])
+        assert result == "continue"

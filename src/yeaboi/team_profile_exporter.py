@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from yeaboi.team_profile import TeamProfile
-from yeaboi.tools.team_learning import ANALYSIS_GLOSSARY
+from yeaboi.tools.team_learning import ANALYSIS_GLOSSARY, INSIGHT_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +175,27 @@ def export_team_profile_html(
                 n_html += f"<ul>{n_items}</ul>"
         _nav("summary", "Summary")
         sections.append(_section("summary", "Executive Summary", n_html))
+
+    # ── Team Insights (AI coaching, generated at analysis time) ─────
+    insights = ex.get("insights", {})
+    if isinstance(insights, dict) and any(insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+        i_parts: list[str] = []
+        for ik, ilabel in INSIGHT_CATEGORIES:
+            i_items = insights.get(ik)
+            if not isinstance(i_items, list) or not i_items:
+                continue
+            i_lis = "".join(
+                f"<li><strong>{_e(str(it.get('title', '')))}</strong> &mdash; {_e(str(it.get('detail', '')))}"
+                + (f" <em>({_e(str(it['evidence']))})</em>" if it.get("evidence") else "")
+                + "</li>"
+                for it in i_items
+                if isinstance(it, dict) and it.get("title")
+            )
+            if i_lis:
+                i_parts.append(f'<div class="card"><strong>{_e(ilabel)}</strong><ul>{i_lis}</ul></div>')
+        if i_parts:
+            _nav("insights", "Insights")
+            sections.append(_section("insights", "Team Insights", "".join(i_parts)))
 
     # ── Team & Velocity ─────────────────────────────────────────────
     vel_rows: list[tuple[str, str]] = []
@@ -1413,6 +1434,24 @@ def build_team_profile_markdown(
                     lines.append(f"- **{title}:** {n_sections[nk]}")
             lines.append("")
 
+    # ── Team Insights (AI coaching, generated at analysis time) ─────
+    insights = ex.get("insights", {})
+    if isinstance(insights, dict) and any(insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+        lines.extend(["## Team Insights", ""])
+        for ik, ilabel in INSIGHT_CATEGORIES:
+            i_items = insights.get(ik)
+            if not isinstance(i_items, list) or not i_items:
+                continue
+            lines.extend([f"### {ilabel}", ""])
+            for it in i_items:
+                if not isinstance(it, dict) or not it.get("title"):
+                    continue
+                i_line = f"- **{it.get('title', '')}** — {it.get('detail', '')}"
+                if it.get("evidence"):
+                    i_line += f" *({it['evidence']})*"
+                lines.append(i_line)
+            lines.append("")
+
     # ── Recurring work ──────────────────────────────────────────────
     rec_count = ex.get("recurring_count", 0)
     del_count = ex.get("delivery_count", 0)
@@ -2316,6 +2355,15 @@ def write_analysis_log(
             sections.append(f"  Median tasks/story: {wp.median_task_count_per_story}")
         if wp.common_personas:
             sections.append(f"  Personas: {', '.join(wp.common_personas)}")
+
+    log_insights = examples.get("insights", {}) if examples else {}
+    if isinstance(log_insights, dict) and any(log_insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+        sections.extend(["", "Team Insights:"])
+        for ik, ilabel in INSIGHT_CATEGORIES:
+            for it in log_insights.get(ik) or []:
+                if isinstance(it, dict) and it.get("title"):
+                    ev = f" ({it['evidence']})" if it.get("evidence") else ""
+                    sections.append(f"  {ilabel.upper():<14s}{it['title']}{ev}")
 
     # Full profile JSON for machine-readable recovery
     sections.extend(["", "=" * 60, "", "Raw profile JSON:", ""])

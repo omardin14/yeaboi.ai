@@ -747,3 +747,184 @@ class TestGenerateAnalysisNarrative:
         )
         result = _fallback_narrative(empty, None)
         assert len(result["sections"]) == 7
+
+
+# ---------------------------------------------------------------------------
+# Team insights (start / stop / keep / try coaching)
+# ---------------------------------------------------------------------------
+
+_INSIGHTS_JSON = {
+    "start": [{"title": "Link PRs to tickets", "detail": "Add PR links to every story.", "evidence": "10% PR linkage"}],
+    "stop": [{"title": "Overcommitting sprints", "detail": "Plan to actual capacity.", "evidence": "55% completion"}],
+    "keep": [{"title": "Given/When/Then ACs", "detail": "Structured ACs work well.", "evidence": "GWT detected"}],
+    "try": [{"title": "WIP limits", "detail": "Cap in-progress work.", "evidence": "22% spillover"}],
+}
+
+_INSIGHT_KEYS = ("start", "stop", "keep", "try")
+
+
+class TestGenerateTeamInsights:
+    """One LLM call producing start/stop/keep/try coaching insights."""
+
+    @staticmethod
+    def _sent_prompt(mock_get_llm) -> str:
+        messages = mock_get_llm.return_value.invoke.call_args[0][0]
+        return messages[0].content
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_successful_generation(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_INSIGHTS_JSON))
+        result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+
+        assert set(result) == set(_INSIGHT_KEYS)
+        assert result["start"][0]["title"] == "Link PRs to tickets"
+        assert result["try"][0]["evidence"] == "22% spillover"
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_prompt_contains_metrics_digest(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(_INSIGHTS_JSON))
+        _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+
+        prompt = self._sent_prompt(mock_get_llm)
+        assert "Metrics digest" in prompt
+        assert "velocity 20.0±2.0" in prompt
+        assert "agile coach" in prompt
+        assert "Return ONLY a JSON object" in prompt
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_code_fences_stripped(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        fenced = "```json\n" + json.dumps(_INSIGHTS_JSON) + "\n```"
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(fenced)
+        result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert result["stop"][0]["title"] == "Overcommitting sprints"
+
+    def test_llm_error_returns_fallback(self):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        with patch("yeaboi.agent.llm.get_llm", side_effect=RuntimeError("no key")):
+            result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert all(result[k] for k in _INSIGHT_KEYS)
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_invalid_json_returns_fallback(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response("not json at all")
+        result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert all(result[k] for k in _INSIGHT_KEYS)
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_missing_categories_backfilled(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        partial = {"start": _INSIGHTS_JSON["start"]}
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(partial))
+        result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert result["start"][0]["title"] == "Link PRs to tickets"
+        assert result["stop"]  # deterministic back-fill
+        assert result["keep"]
+        assert result["try"]
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_malformed_items_filtered(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        noisy = dict(_INSIGHTS_JSON)
+        noisy["keep"] = ["not a dict", {"title": ""}, {"detail": "no title"}]
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(noisy))
+        result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+        # All keep items were malformed — category falls back deterministically
+        assert result["keep"]
+        assert all(it["title"] for it in result["keep"])
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_missing_detail_and_evidence_coerced(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        sparse = dict(_INSIGHTS_JSON)
+        sparse["try"] = [{"title": "Just a title"}]
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(sparse))
+        result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert result["try"][0] == {"title": "Just a title", "detail": "", "evidence": ""}
+
+    @patch("yeaboi.agent.llm.get_llm")
+    def test_items_capped_per_category(self, mock_get_llm):
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        overfull = dict(_INSIGHTS_JSON)
+        overfull["start"] = [{"title": f"Item {i}", "detail": "d", "evidence": "e"} for i in range(8)]
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(json.dumps(overfull))
+        result = _generate_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert len(result["start"]) == 4
+
+
+class TestFallbackTeamInsights:
+    """Deterministic coaching insights derived from recommendations + stats."""
+
+    def test_all_categories_non_empty(self):
+        from yeaboi.tools.team_learning import _fallback_team_insights
+
+        result = _fallback_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert all(result[k] for k in _INSIGHT_KEYS)
+
+    def test_warnings_map_to_stop(self):
+        from yeaboi.tools.team_learning import _fallback_team_insights
+
+        result = _fallback_team_insights(_make_profile(), _STATS_EXAMPLES)
+        stop_titles = " ".join(it["title"] for it in result["stop"])
+        assert "Low sprint completion" in stop_titles or "Frequent spillover" in stop_titles
+
+    def test_notices_map_to_start(self):
+        from yeaboi.tools.team_learning import _fallback_team_insights
+
+        result = _fallback_team_insights(_make_profile(), _STATS_EXAMPLES)
+        start_titles = " ".join(it["title"] for it in result["start"])
+        assert "Low PR linkage" in start_titles
+
+    def test_healthy_profile_still_fills_every_category(self):
+        from yeaboi.team_profile import DoDSignal, SpilloverStats, WritingPatterns
+        from yeaboi.tools.team_learning import _fallback_team_insights
+
+        healthy = _make_profile(
+            velocity_stddev=2.0,
+            sprint_completion_rate=90.0,
+            spillover=SpilloverStats(carried_over_pct=5.0),
+            dod_signal=DoDSignal(),
+            writing_patterns=WritingPatterns(uses_given_when_then=True),
+        )
+        result = _fallback_team_insights(healthy, None)
+        assert all(result[k] for k in _INSIGHT_KEYS)
+        keep_evidence = " ".join(it["evidence"] for it in result["keep"])
+        assert "90% average sprint completion" in keep_evidence
+
+    def test_spillover_triggers_wip_limit_experiment(self):
+        from yeaboi.tools.team_learning import _fallback_team_insights
+
+        result = _fallback_team_insights(_make_profile(), _STATS_EXAMPLES)
+        try_titles = " ".join(it["title"] for it in result["try"])
+        assert "WIP limits" in try_titles
+
+    def test_empty_profile_no_crash(self):
+        from yeaboi.tools.team_learning import _fallback_team_insights
+
+        empty = _make_profile(
+            velocity_avg=0.0,
+            velocity_stddev=0.0,
+            sprint_completion_rate=0.0,
+            sample_sprints=0,
+            point_calibrations=(),
+        )
+        result = _fallback_team_insights(empty, None)
+        assert all(result[k] for k in _INSIGHT_KEYS)
+
+    def test_items_capped(self):
+        from yeaboi.tools.team_learning import _fallback_team_insights
+
+        result = _fallback_team_insights(_make_profile(), _STATS_EXAMPLES)
+        assert all(len(result[k]) <= 4 for k in _INSIGHT_KEYS)

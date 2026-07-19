@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.18.0",
+      "date": "2026-07-19",
+      "summary": "Analysis mode now gives you actionable coaching on how to improve your team before it moves on to suggesting sample tickets. After you see your results, a new Team Insights page shows four categories - things to start doing, stop doing, keep doing, and things worth trying - covering team setup, ways of working, estimation, process, and work mix. Every suggestion comes with practical advice and points to the specific stat from your analysis that triggered it, and you can export the page just like any other report.",
+      "highlights": [
+        {"text": "New Team Insights page after analysis results: start/stop/keep doing plus worth-trying suggestions", "areas": ["analysis"]},
+        {"text": "Each insight includes practical advice and cites the specific stat that triggered it", "areas": ["analysis"]},
+        {"text": "Team Insights is exportable to Files, Notion, or Confluence like other analysis sections", "areas": ["analysis"]}
+      ]
+    },
+    {
       "version": "2.17.0",
       "date": "2026-07-19",
       "summary": "Every Export button across the app now opens a single destination picker so you can send your work straight to Files, Notion, or Confluence, with only the destinations you've actually set up shown. Notion and Confluence pages are no longer plain pasted markdown — they come out as properly formatted native pages with tables, task lists, callouts, and embedded charts, all branded with a yeaboi icon and footer, and grouped together under an auto-created yeaboi page if you haven't picked a specific spot for them. Team analysis and delivery reports can now include sprint velocity and delivered-work charts as images. There's also a single setting to change where yeaboi stores everything on your computer.",
