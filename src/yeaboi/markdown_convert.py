@@ -51,6 +51,15 @@ def split_title(md: str) -> tuple[str, str]:
     return "", md
 
 
+def md_table_cell(text: str) -> str:
+    """Sanitize free text for use inside a pipe-table cell.
+
+    Pipes would split the cell and newlines would break the row — used by the
+    build_*_markdown builders when tabulating user/tracker/LLM content.
+    """
+    return " ".join(str(text).replace("|", "\\").split())
+
+
 def extract_image_paths(md: str) -> list[str]:
     """Return the ordered, de-duplicated local paths of standalone image lines."""
     seen: list[str] = []

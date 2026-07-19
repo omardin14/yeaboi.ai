@@ -160,7 +160,7 @@ src/yeaboi/
   html_exporter.py      — Export plans to self-contained HTML
   json_exporter.py      — Export plans to clean JSON (for CI/CD pipelines)
   markdown_convert.py   — Generated Markdown → Notion blocks / Confluence storage XHTML (pure, no SDK; nested lists, hard breaks, links, native Confluence task lists, ⚠ Notices → callout/warning panels, ![alt](path) images via caller-supplied upload maps)
-  export_targets.py     — publish_to_notion/publish_to_confluence/publish_markdown (PublishResult; never raises); uploads referenced images (Notion File Upload API / Confluence attach_file) and localize_images() for portable .md folders
+  export_targets.py     — publish_to_notion/publish_to_confluence/publish_markdown (PublishResult; never raises); uploads referenced images (Notion File Upload API / Confluence attach_file), localize_images() for portable .md folders, and yeaboi branding (🤙 Notion page icon, `yeaboi` Confluence label, linked footer auto-appended)
   charts.py             — velocity/delivered-work PNG charts for exports (optional `charts` extra = matplotlib, lazy-imported; every function returns None gracefully)
   jira_sync.py          — Batch Jira creation (idempotent, cascade, progress callbacks)
   azdevops_sync.py      — Batch Azure DevOps creation (idempotent, cascade, progress callbacks)

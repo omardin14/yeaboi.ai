@@ -7,6 +7,7 @@ from yeaboi.markdown_convert import (
     extract_image_paths,
     markdown_to_confluence_storage,
     markdown_to_notion_blocks,
+    md_table_cell,
     split_title,
 )
 
@@ -139,6 +140,17 @@ class TestNotionBlocks:
         run = blocks[0]["paragraph"]["rich_text"][0]
         assert run["text"]["content"] == "[image: Velocity]"
         assert run["annotations"] == {"italic": True}
+
+
+class TestMdTableCell:
+    def test_pipes_and_newlines_sanitized(self):
+        assert md_table_cell("a | b\nc") == "a \\ b c"
+
+    def test_whitespace_collapsed(self):
+        assert md_table_cell("  spaced   out  ") == "spaced out"
+
+    def test_non_string_coerced(self):
+        assert md_table_cell(42) == "42"
 
 
 class TestExtractImagePaths:
