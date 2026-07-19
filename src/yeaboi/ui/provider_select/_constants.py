@@ -219,6 +219,30 @@ _NOTION_FIELDS: list[dict[str, Any]] = [
         "required": False,
         "hint": "The 32-char id at the end of the page's Notion URL",
     },
+    {
+        # Optional dedicated exports page — reports created by the Export
+        # buttons nest under it as subpages; blank falls back to the Root Page.
+        "env_var": "NOTION_EXPORT_PARENT_PAGE_ID",
+        "label": "Exports Page ID",
+        "placeholder": "",
+        "masked": False,
+        "required": False,
+        "hint": "Reports publish under this page — blank uses the Root Page",
+    },
+]
+
+# Confluence export-destination field, appended to both Confluence forms below.
+# Exports publish into CONFLUENCE_SPACE_KEY; this optional page nests them as
+# subpages — blank creates them at the space root.
+_CONFLUENCE_EXPORT_FIELDS: list[dict[str, Any]] = [
+    {
+        "env_var": "CONFLUENCE_EXPORT_PARENT_PAGE_ID",
+        "label": "Exports Page ID",
+        "placeholder": "",
+        "masked": False,
+        "required": False,
+        "hint": "Reports nest under this page — blank creates them at the space root",
+    },
 ]
 
 # Confluence fields — the Docs step's second sub-tool. Confluence reuses the Jira
@@ -232,8 +256,9 @@ _CONFLUENCE_FIELDS: list[dict[str, Any]] = [
         "placeholder": "MYSPACE",
         "masked": False,
         "required": False,
-        "hint": "The <KEY> in your space URL /wiki/spaces/<KEY> — reuses your Jira login",
+        "hint": "The <KEY> in your space URL /wiki/spaces/<KEY> — exports publish here; reuses your Jira login",
     },
+    *_CONFLUENCE_EXPORT_FIELDS,
 ]
 
 # Standalone Confluence fields — used when Jira was NOT configured in the Issue
@@ -275,6 +300,7 @@ _CONFLUENCE_STANDALONE_FIELDS: list[dict[str, Any]] = [
         "placeholder": "MYSPACE",
         "masked": False,
         "required": False,
-        "hint": "The <KEY> in your space URL /wiki/spaces/<KEY> — blank searches all spaces",
+        "hint": "The <KEY> in your space URL /wiki/spaces/<KEY> — exports publish here; blank searches all spaces",
     },
+    *_CONFLUENCE_EXPORT_FIELDS,
 ]

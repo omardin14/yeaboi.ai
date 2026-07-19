@@ -72,6 +72,17 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Edit": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Regenerate": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Export": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Export destination picker (shared across every mode's Export button).
+    "Files": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    "Notion": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    "Confluence": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Settings page: data-directory (YEABOI_HOME) editor.
+    "Data Dir": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Blocked-destination warning popup in the export picker.
+    "Open Setup": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Data-dir change: move the existing tree or leave it in place.
+    "Move": ("rgb(60,160,80)", "rgb(80,200,100)", "rgb(40,50,40)", "rgb(50,60,50)"),
+    "Leave": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Jira": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Azure DevOps": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Configure": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),

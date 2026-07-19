@@ -550,12 +550,13 @@ def export_project_html(project_id: str, output_dir: Path | None = None) -> Path
     Returns the output Path, or None if the project has no saved state.
     """
     from yeaboi.html_exporter import export_plan_html
+    from yeaboi.paths import get_planning_export_dir
 
     safe_name, graph_state = _safe_project_name(project_id)
     if graph_state is None:
         return None
 
-    out_dir = output_dir or Path.cwd()
+    out_dir = output_dir or get_planning_export_dir(safe_name)
     html_path = out_dir / f"{safe_name}-plan.html"
     return export_plan_html(graph_state, path=html_path)
 
@@ -568,13 +569,14 @@ def export_project_md(project_id: str, output_dir: Path | None = None) -> Path |
 
     Returns the output Path, or None if the project has no saved state.
     """
+    from yeaboi.paths import get_planning_export_dir
     from yeaboi.repl._io import _export_plan_markdown
 
     safe_name, graph_state = _safe_project_name(project_id)
     if graph_state is None:
         return None
 
-    out_dir = output_dir or Path.cwd()
+    out_dir = output_dir or get_planning_export_dir(safe_name)
     md_path = out_dir / f"{safe_name}-plan.md"
     return _export_plan_markdown(graph_state, path=md_path)
 

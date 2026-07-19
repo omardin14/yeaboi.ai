@@ -653,6 +653,15 @@ class TestStoryToTextRoundTrip:
         assert parsed.id == story.id
         assert parsed.feature_id == story.feature_id
 
+    def test_preserves_title(self):
+        # Title isn't part of the editable buffer — an edit must not reset it.
+        from dataclasses import replace
+
+        stories, _ = _make_test_stories()
+        story = replace(stories[0], title="Create Bookmark Endpoint")
+        parsed = _parse_edited_story(_story_to_text(story), story)
+        assert parsed.title == "Create Bookmark Endpoint"
+
 
 # ---------------------------------------------------------------------------
 # Editor key handling

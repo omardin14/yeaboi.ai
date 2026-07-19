@@ -163,7 +163,10 @@ def _parse_edited_story(text: str, original: UserStory) -> UserStory:
 
     return UserStory(
         id=original.id,
-        epic_id=original.epic_id,
+        feature_id=original.feature_id,
+        # title is not part of the editable buffer — carry it over so an edit
+        # doesn't silently reset it to the dataclass default.
+        title=original.title,
         persona=fields.get("persona", original.persona),
         goal=fields.get("goal", original.goal),
         benefit=fields.get("benefit", original.benefit),

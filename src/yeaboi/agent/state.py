@@ -306,6 +306,7 @@ class StandupReport:
     skipped_sources: tuple[tuple[str, str], ...] = ()  # (source, reason) for sources NOT scanned — visible, not silent
     my_name: str = ""  # the standup user's resolved display name (drives the "My Update" row)
     warnings: tuple[str, ...] = ()  # surfaced problems (missing API key, source 401/403) — shown, never silent
+    images: tuple[str, ...] = ()  # screenshot paths pasted into "My Update" — embedded in exports
 
 
 # See README: "Session Management" — Retro mode artifacts

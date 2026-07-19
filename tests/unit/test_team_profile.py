@@ -1118,6 +1118,47 @@ class TestTeamProfileExporter:
         path = export_team_profile_md(profile, output_dir=tmp_path)
         assert path.exists()
 
+    def test_build_markdown_returns_string(self):
+        """The string builder (used by Notion/Confluence export) matches the file content."""
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        md = build_team_profile_markdown(_make_extended_profile())
+        assert isinstance(md, str)
+        assert "# Team Profile" in md
+        assert "## Team & Velocity" in md
+
+    def test_build_markdown_minimal_profile(self):
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        md = build_team_profile_markdown(TeamProfile(team_id="x", source="jira", project_key="X"))
+        assert "# Team Profile" in md
+
+    def test_build_markdown_embeds_velocity_chart(self, tmp_path):
+        import pytest
+
+        pytest.importorskip("matplotlib")
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        examples = {
+            "sprint_details": [
+                {"name": "S1", "points": 20, "planned": 10, "completed": 9, "rate": 90, "done": True},
+                {"name": "S2", "points": 18, "planned": 12, "completed": 12, "rate": 100, "done": True},
+            ]
+        }
+        md = build_team_profile_markdown(_make_extended_profile(), examples=examples, charts_dir=tmp_path)
+        assert f"![Sprint velocity]({tmp_path / 'velocity.png'})" in md
+        assert (tmp_path / "velocity.png").exists()
+
+    def test_build_markdown_no_charts_dir_no_image(self):
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        examples = {
+            "sprint_details": [{"name": "S1", "points": 20, "planned": 10, "completed": 9, "rate": 90, "done": True}]
+        }
+        md = build_team_profile_markdown(_make_extended_profile(), examples=examples)
+        assert "![Sprint velocity]" not in md
+        assert "## Sprint Breakdown" in md
+
     def test_exports_sorted_into_project_subdirectory(self, tmp_path):
         """Exports land in a per-project subdirectory: {base}/{project_key}/."""
         from yeaboi.team_profile_exporter import export_team_profile_html, export_team_profile_md

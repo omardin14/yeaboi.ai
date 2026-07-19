@@ -2,6 +2,18 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.17.0",
+      "date": "2026-07-19",
+      "summary": "Every Export button across the app now opens a single destination picker so you can send your work straight to Files, Notion, or Confluence, with only the destinations you've actually set up shown. Notion and Confluence pages are no longer plain pasted markdown — they come out as properly formatted native pages with tables, task lists, callouts, and embedded charts, all branded with a yeaboi icon and footer, and grouped together under an auto-created yeaboi page if you haven't picked a specific spot for them. Team analysis and delivery reports can now include sprint velocity and delivered-work charts as images. There's also a single setting to change where yeaboi stores everything on your computer.",
+      "highlights": [
+        {"text": "Every Export button now opens one picker for Files, Notion, or Confluence, showing only configured destinations", "areas": ["general"]},
+        {"text": "Notion and Confluence exports are natively formatted with tables, task lists, and callouts instead of raw markdown", "areas": ["general"]},
+        {"text": "Exported pages carry yeaboi branding and group under an auto-created yeaboi page by default", "areas": ["general"]},
+        {"text": "Team analysis and delivery reports can embed sprint velocity and delivered-work charts", "areas": ["analysis", "reporting"]},
+        {"text": "New single setting to change where yeaboi stores its data on your computer", "areas": ["settings"]}
+      ]
+    },
+    {
       "version": "2.16.0",
       "date": "2026-07-19",
       "summary": "The standup roster is cleaner and the standup page itself is redesigned into a compact dashboard. Bot accounts and people who only commented on or edited a ticket no longer show up as team members — only people actually assigned work do. The standup view now leads with a pinned status strip showing sprint day, progress, and confidence at a glance, team member rows are easier to scan with clear active/quiet/self-reported markers, and duplicated information has been cleared out so more fits on screen at once.",

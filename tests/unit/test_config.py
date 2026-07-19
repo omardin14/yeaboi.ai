@@ -469,3 +469,69 @@ class TestNotionConfig:
 
         monkeypatch.delenv("NOTION_ROOT_PAGE_ID", raising=False)
         assert get_notion_root_page_id() is None
+
+
+class TestStorageAndExportConfig:
+    """Data-dir override + setup-owned publish destinations (with natural fallbacks)."""
+
+    def test_data_dir_empty_by_default(self, monkeypatch):
+        from yeaboi.config import get_data_dir
+
+        monkeypatch.delenv("YEABOI_HOME", raising=False)
+        assert get_data_dir() == ""
+
+    def test_data_dir_from_env(self, monkeypatch):
+        from yeaboi.config import get_data_dir
+
+        monkeypatch.setenv("YEABOI_HOME", "/tmp/yb-home")
+        assert get_data_dir() == "/tmp/yb-home"
+
+    def test_notion_export_page_wins_over_root(self, monkeypatch):
+        from yeaboi.config import get_notion_export_parent_page_id
+
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root123")
+        monkeypatch.setenv("NOTION_EXPORT_PARENT_PAGE_ID", "exp123")
+        assert get_notion_export_parent_page_id() == "exp123"
+
+    def test_notion_export_page_falls_back_to_root(self, monkeypatch):
+        from yeaboi.config import get_notion_export_parent_page_id
+
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root123")
+        monkeypatch.delenv("NOTION_EXPORT_PARENT_PAGE_ID", raising=False)
+        assert get_notion_export_parent_page_id() == "root123"
+
+    def test_notion_export_page_none_when_neither_set(self, monkeypatch):
+        from yeaboi.config import get_notion_export_parent_page_id
+
+        monkeypatch.delenv("NOTION_ROOT_PAGE_ID", raising=False)
+        monkeypatch.delenv("NOTION_EXPORT_PARENT_PAGE_ID", raising=False)
+        assert get_notion_export_parent_page_id() is None
+
+    def test_confluence_export_parent_optional(self, monkeypatch):
+        from yeaboi.config import get_confluence_export_parent_page_id
+
+        monkeypatch.delenv("CONFLUENCE_EXPORT_PARENT_PAGE_ID", raising=False)
+        assert get_confluence_export_parent_page_id() is None
+
+    def test_set_data_dir_persists_to_env_file(self, monkeypatch, tmp_path):
+        from yeaboi import config as cfg
+
+        # setenv (not delenv) so monkeypatch registers a teardown even when the
+        # var was previously absent — the setter writes os.environ directly, and
+        # delenv(raising=False) on a missing var records nothing to restore.
+        monkeypatch.setenv("YEABOI_HOME", "")
+        monkeypatch.setattr(cfg, "get_config_file", lambda: tmp_path / ".env")
+        cfg.set_data_dir("/tmp/yb-home")
+        content = (tmp_path / ".env").read_text()
+        assert "YEABOI_HOME" in content
+        assert os.environ["YEABOI_HOME"] == "/tmp/yb-home"
+
+    def test_set_data_dir_clears_with_empty_string(self, monkeypatch, tmp_path):
+        from yeaboi import config as cfg
+        from yeaboi.config import get_data_dir
+
+        monkeypatch.setenv("YEABOI_HOME", "")  # registers restore-to-absent (see above)
+        monkeypatch.setattr(cfg, "get_config_file", lambda: tmp_path / ".env")
+        cfg.set_data_dir("  ")
+        assert os.environ["YEABOI_HOME"] == ""
+        assert get_data_dir() == ""

@@ -678,6 +678,9 @@ def run_standup(
         skipped_sources=tuple(bundle.skipped),
         my_name=my_name,
         warnings=tuple(warnings),
+        # Screenshots pasted into "My Update" — carried on the report so the
+        # Markdown/HTML/Notion/Confluence exports can embed them.
+        images=tuple(p for paths in self_reported_images.values() for p in paths),
     )
 
     # 6. Deliver, then record the run (so delivery status is captured).
