@@ -81,7 +81,6 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Generate tickets": ("rgb(60,160,80)", "rgb(80,200,100)", "rgb(40,50,40)", "rgb(50,60,50)"),
     "Not now": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Generate": ("rgb(180,80,160)", "rgb(220,120,200)", "rgb(50,40,50)", "rgb(60,50,60)"),
-    "My Update": ("rgb(180,80,160)", "rgb(220,120,200)", "rgb(50,40,50)", "rgb(60,50,60)"),
     "Generate Action Items": ("rgb(50,170,170)", "rgb(90,220,220)", "rgb(40,52,52)", "rgb(50,62,62)"),
     "Close": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Share Remotely": ("rgb(50,170,170)", "rgb(90,220,220)", "rgb(40,52,52)", "rgb(50,62,62)"),
@@ -334,6 +333,9 @@ def build_scrollbar(
         sb = Text(justify="left")
         for _ in range(viewport_h):
             sb.append("\u2502\n", style="rgb(50,50,60)")
+        # A trailing newline would render as an extra row and push the last
+        # content row (the buttons' bottom border) off the fixed-height panel.
+        sb.rstrip()
         return sb
 
     thumb_size = max(1, round(viewport_h * viewport_h / max(total_lines, 1)))
@@ -346,6 +348,7 @@ def build_scrollbar(
             sb.append("\u2503\n", style="rgb(100,100,120)")
         else:
             sb.append("\u2502\n", style="rgb(50,50,60)")
+    sb.rstrip()  # same: keep the Text exactly viewport_h rows tall
     return sb
 
 

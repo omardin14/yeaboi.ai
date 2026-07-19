@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS standup_config (
     weekdays          TEXT NOT NULL DEFAULT '1-5',
     delivery_channels TEXT NOT NULL DEFAULT '["terminal"]',
     repo_path         TEXT NOT NULL DEFAULT '',
+    my_aliases        TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL
 );
@@ -94,11 +95,15 @@ def _dict_to_standup_report(d: dict) -> StandupReport:
             summary=m.get("summary", ""),
             blockers=m.get("blockers", ""),
             source=m.get("source", "inferred"),
+            self_report=m.get("self_report", ""),
+            # JSON turned each (label, url) tuple into a list — rebuild tuples.
+            links=tuple((str(li[0]), str(li[1])) for li in m.get("links", ()) if len(li) == 2),
         )
         for m in d.get("member_updates", ())
     )
     # JSON turned each (source, count) tuple into a [source, count] list — rebuild tuples.
     counts = tuple((str(c[0]), int(c[1])) for c in d.get("activity_counts", ()) if len(c) == 2)
+    skipped = tuple((str(s[0]), str(s[1])) for s in d.get("skipped_sources", ()) if len(s) == 2)
     return StandupReport(
         date=d.get("date", ""),
         session_id=d.get("session_id", ""),
@@ -111,6 +116,9 @@ def _dict_to_standup_report(d: dict) -> StandupReport:
         team_summary=d.get("team_summary", ""),
         member_updates=members,
         activity_counts=counts,
+        activity_window=d.get("activity_window", ""),
+        skipped_sources=skipped,
+        my_name=d.get("my_name", ""),
         warnings=tuple(d.get("warnings", ())),
     )
 
@@ -148,6 +156,12 @@ class StandupStore:
             self._conn.execute("ALTER TABLE standup_updates ADD COLUMN images_json TEXT NOT NULL DEFAULT '[]'")
         except sqlite3.OperationalError:
             pass  # column already exists
+        # Idempotent migration: the user's comma-separated identity aliases
+        # (GitHub handle, Jira display name, …) for alias-aware activity attribution.
+        try:
+            self._conn.execute("ALTER TABLE standup_config ADD COLUMN my_aliases TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -183,11 +197,14 @@ class StandupStore:
         lead_minutes: int = 10,
         timezone: str = "",
         repo_path: str = "",
+        my_aliases: str = "",
     ) -> None:
         """Insert or update the standup schedule/delivery config for a session.
 
         ``time`` is the STANDUP time (e.g. "10:00"); the scheduler fires
-        ``lead_minutes`` earlier.
+        ``lead_minutes`` earlier. ``my_aliases`` is the user's comma-separated
+        identity list across tools (GitHub handle, Jira display name, …) used
+        for alias-aware activity attribution.
         """
         now = self._now()
         channels_json = json.dumps(delivery_channels)
@@ -202,8 +219,8 @@ class StandupStore:
         self._conn.execute(
             """INSERT INTO standup_config
                    (session_id, enabled, time, lead_minutes, timezone, weekdays, delivery_channels,
-                    repo_path, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    repo_path, my_aliases, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(session_id) DO UPDATE SET
                    enabled = excluded.enabled,
                    time = excluded.time,
@@ -212,15 +229,28 @@ class StandupStore:
                    weekdays = excluded.weekdays,
                    delivery_channels = excluded.delivery_channels,
                    repo_path = excluded.repo_path,
+                   my_aliases = excluded.my_aliases,
                    updated_at = excluded.updated_at""",
-            (session_id, int(enabled), time, int(lead_minutes), timezone, weekdays, channels_json, repo_path, now, now),
+            (
+                session_id,
+                int(enabled),
+                time,
+                int(lead_minutes),
+                timezone,
+                weekdays,
+                channels_json,
+                repo_path,
+                my_aliases,
+                now,
+                now,
+            ),
         )
 
     def load_config(self, session_id: str) -> dict | None:
         """Return the standup config for a session as a dict, or None if unset."""
         row = self._conn.execute(
-            "SELECT session_id, enabled, time, timezone, weekdays, delivery_channels, repo_path, lead_minutes "
-            "FROM standup_config WHERE session_id = ?",
+            "SELECT session_id, enabled, time, timezone, weekdays, delivery_channels, repo_path, lead_minutes, "
+            "my_aliases FROM standup_config WHERE session_id = ?",
             (session_id,),
         ).fetchone()
         if row is None:
@@ -238,6 +268,7 @@ class StandupStore:
             "delivery_channels": channels,
             "repo_path": row[6],
             "lead_minutes": row[7] if row[7] is not None else 10,
+            "my_aliases": row[8] or "",
         }
 
     # ── Self-reported updates ─────────────────────────────────────────────

@@ -275,9 +275,11 @@ class MemberUpdate:
     """One team member's standup update for a given day."""
 
     name: str = ""
-    summary: str = ""  # what they did — inferred from activity or self-reported
+    summary: str = ""  # what they did — the activity-derived analysis (LLM or fallback)
     blockers: str = ""  # anything blocking them (empty if none)
-    source: str = "inferred"  # "inferred" (LLM from activity) | "self-reported" (user-typed)
+    source: str = "inferred"  # "inferred" (activity only) | "self-reported" (typed, no activity) | "combined" (both)
+    self_report: str = ""  # the member's own typed update, kept verbatim as supporting context
+    links: tuple[tuple[str, str], ...] = ()  # (label, url) refs from their activity — tuple-of-pairs stays frozen
 
 
 @dataclass(frozen=True)
@@ -299,6 +301,9 @@ class StandupReport:
     team_summary: str = ""  # LLM-synthesized team-level narrative
     member_updates: tuple[MemberUpdate, ...] = ()
     activity_counts: tuple[tuple[str, int], ...] = ()  # (source, count) — tuple so it stays frozen/serializable
+    activity_window: str = ""  # human-readable look-back window, e.g. "Fri 2026-07-17 00:00 → now"
+    skipped_sources: tuple[tuple[str, str], ...] = ()  # (source, reason) for sources NOT scanned — visible, not silent
+    my_name: str = ""  # the standup user's resolved display name (drives the "My Update" row)
     warnings: tuple[str, ...] = ()  # surfaced problems (missing API key, source 401/403) — shown, never silent
 
 

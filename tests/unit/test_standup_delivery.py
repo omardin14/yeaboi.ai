@@ -67,6 +67,24 @@ class TestRender:
         assert "Notices" in text
         assert "Jira: authentication failed" in text
 
+    def test_member_links_render_on_both_surfaces(self):
+        rep = StandupReport(
+            date="2026-07-10",
+            member_updates=(
+                MemberUpdate(name="Alice", summary="moved a ticket", links=(("PSOT-1", "https://j/browse/PSOT-1"),)),
+            ),
+        )
+        # Plaintext: raw URL so Slack/email clients auto-link it.
+        text = render.format_standup_plaintext(rep)
+        assert "🔗 PSOT-1: https://j/browse/PSOT-1" in text
+        # Rich: label rendered (OSC-8 hyperlink carries the URL invisibly).
+        from rich.console import Console
+
+        console = Console(width=90, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(render.format_standup_rich(rep))
+        assert "↗ PSOT-1" in cap.get()
+
 
 class TestTerminalDelivery:
     def test_prints_and_succeeds(self, capsys):

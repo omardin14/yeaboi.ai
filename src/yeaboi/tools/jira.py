@@ -19,6 +19,7 @@
 import json
 import logging
 import re
+from datetime import UTC, datetime, timedelta
 
 from jira import JIRA, JIRAError
 from langchain_core.tools import tool
@@ -679,13 +680,72 @@ def _raise_if_auth_error(e: JIRAError, source: str) -> None:
         raise StandupSourceError(source, "authentication failed — check JIRA_EMAIL / JIRA_API_TOKEN")
 
 
-def jira_recent_activity(project_key: str = "", days: int = 1) -> list[dict]:
-    """Return Jira issues updated within the last ``days`` days.
+def _activity_cutoff(days: int, since: datetime | None) -> datetime:
+    """Tz-aware window start for client-side timestamp filtering (since wins)."""
+    if since is not None:
+        return since.astimezone(UTC) if since.tzinfo else since.replace(tzinfo=UTC)
+    return datetime.now(UTC) - timedelta(days=int(days))
 
-    Each item: {author, kind, title, status, timestamp, key}. Returns [] when
-    Jira is unconfigured or the query fails (logged at warning).
+
+def _parse_jira_ts(ts: str) -> datetime | None:
+    """Parse a Jira ISO timestamp (e.g. '2026-07-17T14:23:45.000+0100'); None if unparseable."""
+    try:
+        parsed = datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _actor_fields(actor) -> tuple[str, str]:
+    """(displayName, emailAddress) from a Jira user object — email is often hidden (GDPR)."""
+    if actor is None:
+        return "", ""
+    return getattr(actor, "displayName", "") or "", getattr(actor, "emailAddress", "") or ""
+
+
+def _issue_url(issue_key: str) -> str:
+    """Browse URL for an issue key ("" when the base URL is unconfigured).
+
+    Carried on activity items so standup surfaces can link the ticket.
     """
-    logger.info("jira_recent_activity: project_key=%r days=%d", project_key, days)
+    base = (get_jira_base_url() or "").rstrip("/")
+    return f"{base}/browse/{issue_key}" if base and issue_key else ""
+
+
+# Per-issue / total caps for the enriched activity emissions — bound token cost
+# and keep counts honest even on very busy boards.
+_MAX_UPDATES_PER_ISSUE = 5
+_MAX_UPDATES_TOTAL = 100
+_MAX_COMMENTS_PER_ISSUE = 5
+_MAX_COMMENTS_TOTAL = 50
+
+
+def jira_recent_activity(
+    project_key: str = "",
+    days: int = 1,
+    since=None,
+    *,
+    include_changelog: bool = True,
+    include_comments: bool = True,
+    include_wip: bool = True,
+) -> list[dict]:
+    """Return Jira activity since the window start: updated issues, the people
+    who actually changed/commented on them, and in-progress (WIP) tickets.
+
+    The window is ``since → now`` when ``since`` (a datetime — always a midnight
+    for the standup, so a JQL date literal is exact) is given, else the last
+    ``days`` days. Each item: {author, kind, title, status?, timestamp, key,
+    author_email?}. Kinds emitted:
+
+    - ``issue``   — an updated issue, credited to its assignee (may be "" if unassigned)
+    - ``update``  — a changelog entry (status move or field edit), credited to the ACTOR
+    - ``comment`` — an in-window comment, credited to the comment author
+    - ``wip``     — an in-progress ticket in the open sprint, credited to its assignee,
+                    even if untouched in the window (so quiet in-flight work is visible)
+
+    Returns [] when Jira is unconfigured or the query fails (logged at warning).
+    """
+    logger.info("jira_recent_activity: project_key=%r days=%d since=%s", project_key, days, since)
     jira = _make_jira_client()
     if jira is None:
         logger.warning("jira_recent_activity skipped — Jira not configured")
@@ -696,27 +756,51 @@ def jira_recent_activity(project_key: str = "", days: int = 1) -> list[dict]:
         logger.warning("jira_recent_activity skipped — no project key")
         return []
 
+    cutoff = _activity_cutoff(days, since)
+    updated_clause = f'updated >= "{since:%Y-%m-%d}"' if since is not None else f"updated >= -{int(days)}d"
     try:
         issues = jira.search_issues(
-            f'project = "{key}" AND updated >= -{int(days)}d ORDER BY updated DESC',
+            f'project = "{key}" AND {updated_clause} ORDER BY updated DESC',
             maxResults=100,
-            fields="summary,assignee,status,updated",
+            fields="summary,assignee,status,updated,comment",
+            expand="changelog",
         )
         items: list[dict] = []
+        seen_keys: set[str] = set()
+        update_total = comment_total = 0
         for issue in issues:
             assignee = getattr(issue.fields, "assignee", None)
+            assignee_name, assignee_email = _actor_fields(assignee)
             status = getattr(issue.fields, "status", None)
+            summary = getattr(issue.fields, "summary", "")
+            seen_keys.add(issue.key)
             items.append(
                 {
-                    "author": getattr(assignee, "displayName", "") if assignee else "",
+                    "author": assignee_name,
+                    "author_email": assignee_email,
                     "kind": "issue",
-                    "title": getattr(issue.fields, "summary", ""),
+                    "title": summary,
                     "status": getattr(status, "name", "") if status else "",
                     "timestamp": (getattr(issue.fields, "updated", "") or "")[:19],
                     "key": issue.key,
+                    "url": _issue_url(issue.key),
                 }
             )
-        logger.info("jira_recent_activity: %d issue(s) updated in last %d day(s)", len(items), days)
+            if include_changelog and update_total < _MAX_UPDATES_TOTAL:
+                emitted = _changelog_items(issue, summary, assignee_name, cutoff)
+                emitted = emitted[: min(_MAX_UPDATES_PER_ISSUE, _MAX_UPDATES_TOTAL - update_total)]
+                update_total += len(emitted)
+                items.extend(emitted)
+            if include_comments and comment_total < _MAX_COMMENTS_TOTAL:
+                emitted = _comment_items(issue, summary, cutoff)
+                emitted = emitted[: min(_MAX_COMMENTS_PER_ISSUE, _MAX_COMMENTS_TOTAL - comment_total)]
+                comment_total += len(emitted)
+                items.extend(emitted)
+
+        if include_wip:
+            items.extend(_wip_items(jira, key, seen_keys))
+
+        logger.info("jira_recent_activity: %d item(s) (window since %s)", len(items), cutoff.isoformat())
         return items
     except JIRAError as e:
         _raise_if_auth_error(e, "jira")
@@ -725,6 +809,127 @@ def jira_recent_activity(project_key: str = "", days: int = 1) -> list[dict]:
     except Exception as e:
         logger.warning("jira_recent_activity unexpected error: %s", e)
         return []
+
+
+def _changelog_items(issue, summary: str, assignee_name: str, cutoff: datetime) -> list[dict]:
+    """Emit one item per in-window changelog event, credited to the ACTUAL actor.
+
+    Status transitions get a specific "moved … to <status>" title. All other
+    field edits collapse to at most one generic "updated …" item per author —
+    and that generic item is skipped for the assignee, who is already credited
+    via the ``issue`` item.
+    """
+    try:
+        histories = list(getattr(getattr(issue, "changelog", None), "histories", None) or [])
+    except Exception:  # unexpected changelog shape must not hide the issue items
+        logger.debug("jira: unreadable changelog on %s", getattr(issue, "key", "?"), exc_info=True)
+        return []
+    out: list[dict] = []
+    generic_authors: set[str] = set()
+    for history in histories:
+        when = _parse_jira_ts(getattr(history, "created", "") or "")
+        if when is None or when < cutoff:
+            continue  # filter by date only — history ordering varies by deployment
+        author_name, author_email = _actor_fields(getattr(history, "author", None))
+        if not author_name:
+            continue
+        status_to = ""
+        for change in getattr(history, "items", None) or []:
+            if getattr(change, "field", "") == "status":
+                status_to = getattr(change, "toString", "") or ""
+        base = {
+            "author": author_name,
+            "author_email": author_email,
+            "kind": "update",
+            "timestamp": (getattr(history, "created", "") or "")[:19],
+            "key": issue.key,
+            "url": _issue_url(issue.key),
+        }
+        if status_to:
+            out.append({**base, "title": f"moved {issue.key} '{summary}' to {status_to}", "status": status_to})
+        elif author_name != assignee_name and author_name not in generic_authors:
+            generic_authors.add(author_name)
+            out.append({**base, "title": f"updated {issue.key} '{summary}'"})
+    return out
+
+
+def _comment_items(issue, summary: str, cutoff: datetime) -> list[dict]:
+    """Emit one item per in-window comment, credited to the comment author.
+
+    Comment BODIES are deliberately excluded — they may contain sensitive text
+    and the standup only needs to know who engaged with what.
+    """
+    try:
+        comments = list(getattr(getattr(issue.fields, "comment", None), "comments", None) or [])
+    except Exception:  # unexpected comment shape must not hide the issue items
+        logger.debug("jira: unreadable comments on %s", getattr(issue, "key", "?"), exc_info=True)
+        return []
+    out: list[dict] = []
+    for comment in comments:
+        when = _parse_jira_ts(getattr(comment, "created", "") or "")
+        if when is None or when < cutoff:
+            continue
+        author_name, author_email = _actor_fields(getattr(comment, "author", None))
+        if not author_name:
+            continue
+        out.append(
+            {
+                "author": author_name,
+                "author_email": author_email,
+                "kind": "comment",
+                "title": f"commented on {issue.key} '{summary}'",
+                "timestamp": (getattr(comment, "created", "") or "")[:19],
+                "key": issue.key,
+                "url": _issue_url(issue.key),
+            }
+        )
+    return out
+
+
+def _wip_items(jira: JIRA, key: str, seen_keys: set[str]) -> list[dict]:
+    """Assigned in-progress tickets in the open sprint — the "what they're working on" signal.
+
+    Skips issues already emitted by the updated-in-window search (those carry a
+    fresher item). Best-effort: openSprints() needs Jira Software boards, so a
+    site without them falls back to a recently-updated statusCategory query, and
+    any failure degrades to [] (auth errors were already surfaced by the main
+    search, which shares the client).
+    """
+    wip_jql = (
+        f'project = "{key}" AND sprint in openSprints() AND statusCategory = "In Progress" AND assignee is not EMPTY'
+    )
+    fallback_jql = f'project = "{key}" AND statusCategory = "In Progress" AND assignee is not EMPTY AND updated >= -14d'
+    for jql in (wip_jql, fallback_jql):
+        try:
+            wip = jira.search_issues(jql, maxResults=50, fields="summary,assignee,status")
+        except JIRAError as e:
+            logger.warning("jira wip query failed (%s): %s", jql, _jira_error_msg(e))
+            continue
+        except Exception as e:
+            logger.warning("jira wip query unexpected error: %s", e)
+            return []
+        out: list[dict] = []
+        for issue in wip:
+            if issue.key in seen_keys:
+                continue
+            author_name, author_email = _actor_fields(getattr(issue.fields, "assignee", None))
+            if not author_name:
+                continue
+            status = getattr(issue.fields, "status", None)
+            out.append(
+                {
+                    "author": author_name,
+                    "author_email": author_email,
+                    "kind": "wip",
+                    "title": getattr(issue.fields, "summary", ""),
+                    "status": getattr(status, "name", "") if status else "",
+                    "timestamp": "",
+                    "key": issue.key,
+                    "url": _issue_url(issue.key),
+                }
+            )
+        return out
+    return []
 
 
 def jira_active_sprint_progress(project_key: str = "") -> dict:

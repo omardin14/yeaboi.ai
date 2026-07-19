@@ -18,7 +18,13 @@ def _report(**over) -> StandupReport:
         team_summary="steady progress",
         member_updates=(
             MemberUpdate(name="Alice", summary="login page", source="inferred"),
-            MemberUpdate(name="Bob", summary="paired on auth", blockers="waiting on review", source="self-reported"),
+            MemberUpdate(
+                name="Bob",
+                summary="paired on auth",
+                blockers="waiting on review",
+                source="combined",
+                self_report="paired with Alice on auth",
+            ),
         ),
         activity_counts=(("github", 2), ("jira", 1)),
         warnings=("Jira: authentication failed — check token",),
@@ -36,7 +42,8 @@ class TestMarkdown:
         assert "## ⚠ Notices" in md
         assert "Jira: authentication failed" in md
         assert "## Team Summary" in md
-        assert "### Bob _(you)_" in md
+        assert "### Bob _(✍ own update)_" in md
+        assert "> paired with Alice on auth" in md
         assert "**Blocker:** waiting on review" in md
         assert "github: 2, jira: 1" in md
 
@@ -44,6 +51,39 @@ class TestMarkdown:
         md = build_standup_markdown(StandupReport(date="2026-07-10"))
         assert "# Daily Standup" in md
         assert "_No individual updates._" in md
+
+
+class TestMemberLinks:
+    def test_markdown_links_rendered(self):
+        rep = _report(
+            member_updates=(
+                MemberUpdate(
+                    name="Alice",
+                    summary="moved PSOT-1 to review",
+                    links=(("PSOT-1", "https://x.atlassian.net/browse/PSOT-1"),),
+                ),
+            )
+        )
+        md = build_standup_markdown(rep)
+        assert "**Links:** [PSOT-1](https://x.atlassian.net/browse/PSOT-1)" in md
+
+    def test_html_links_are_anchors_and_escaped(self):
+        rep = _report(
+            member_updates=(
+                MemberUpdate(
+                    name="Alice",
+                    summary="work",
+                    links=(("<b>PSOT-1</b>", "https://x.atlassian.net/browse/PSOT-1?a=1&b=2"),),
+                ),
+            )
+        )
+        html = build_standup_html(rep)
+        assert "<a href='https://x.atlassian.net/browse/PSOT-1?a=1&amp;b=2'" in html
+        assert "&lt;b&gt;PSOT-1&lt;/b&gt;" in html  # label escaped, not injected
+
+    def test_no_links_no_section(self):
+        md = build_standup_markdown(_report())
+        assert "**Links:**" not in md
 
 
 class TestHtml:
@@ -87,3 +127,29 @@ class TestExportWrites:
     def test_slug_helper(self):
         assert export._slug("My Project!!") == "my-project"
         assert export._slug("") == "standup"
+
+
+class TestSkippedSourcesLine:
+    def test_markdown_lists_skipped_sources(self):
+        from yeaboi.standup.export import build_standup_markdown
+
+        md = build_standup_markdown(_report(skipped_sources=(("github", "STANDUP_GITHUB_REPO not set"),)))
+        assert "Sources skipped — github (STANDUP_GITHUB_REPO not set)" in md
+
+    def test_html_lists_skipped_sources(self):
+        from yeaboi.standup.export import build_standup_html
+
+        html = build_standup_html(_report(skipped_sources=(("notion", "NOTION_ROOT_PAGE_ID not set"),)))
+        assert "Sources skipped" in html
+        assert "NOTION_ROOT_PAGE_ID not set" in html
+
+    def test_plaintext_lists_skipped_sources(self):
+        from yeaboi.standup.render import format_standup_plaintext
+
+        text = format_standup_plaintext(_report(skipped_sources=(("confluence", "CONFLUENCE_SPACE_KEY not set"),)))
+        assert "Sources skipped — confluence (CONFLUENCE_SPACE_KEY not set)" in text
+
+    def test_no_skipped_sources_no_line(self):
+        from yeaboi.standup.render import format_standup_plaintext
+
+        assert "Sources skipped" not in format_standup_plaintext(_report())

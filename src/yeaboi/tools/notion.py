@@ -407,22 +407,24 @@ def notion_update_page(page_id: str, body: str, title: str = "") -> str:
 # See README: "Daily Standup" — recent-activity collection
 
 
-def notion_recent_pages(root_id: str = "", days: int = 1) -> list[dict]:
-    """Return Notion pages edited within the last ``days`` days.
+def notion_recent_pages(root_id: str = "", days: int = 1, since=None) -> list[dict]:
+    """Return Notion pages edited since the window start.
 
-    Each item: {author, kind='page', title, timestamp, key(id)}. Returns [] when
-    Notion is unconfigured or the search fails. The Notion search API has no
-    server-side date filter, so we sort by last_edited_time descending and filter
-    client-side. ``root_id`` is accepted for signature parity with the other
-    sources but Notion search is workspace-wide (scoped by integration grants).
+    The window is ``since → now`` when ``since`` (tz-aware datetime) is given,
+    else the last ``days`` days. Each item: {author, kind='page', title,
+    timestamp, key(id)}. Returns [] when Notion is unconfigured or the search
+    fails. The Notion search API has no server-side date filter, so we sort by
+    last_edited_time descending and filter client-side. ``root_id`` is accepted
+    for signature parity with the other sources but Notion search is
+    workspace-wide (scoped by integration grants).
     """
-    logger.info("notion_recent_pages: root=%r days=%d", root_id, days)
+    logger.info("notion_recent_pages: root=%r days=%d since=%s", root_id, days, since)
     client = _make_notion_client()
     if client is None:
         logger.warning("notion_recent_pages skipped — Notion not configured")
         return []
 
-    cutoff = datetime.now(UTC) - timedelta(days=int(days))
+    cutoff = since.astimezone(UTC) if since is not None else datetime.now(UTC) - timedelta(days=int(days))
     # Best-effort cache of user-id → display name so we don't refetch per page.
     _user_names: dict[str, str] = {}
 
@@ -468,6 +470,7 @@ def notion_recent_pages(root_id: str = "", days: int = 1) -> list[dict]:
                     "title": _page_title(page),
                     "timestamp": (edited or "")[:19],
                     "key": page.get("id", ""),
+                    "url": page.get("url", "") or "",
                 }
             )
         logger.info("notion_recent_pages: %d page(s) in last %d day(s)", len(items), days)

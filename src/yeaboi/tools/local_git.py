@@ -18,25 +18,29 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Unit-separator delimited format: author name, ISO date, subject.
+# Unit-separator delimited format: author name, author email, ISO date, subject.
 # %x1f is the ASCII unit separator — safe against commit messages containing
-# commas/pipes/tabs.
-_LOG_FORMAT = "%an%x1f%aI%x1f%s"
+# commas/pipes/tabs. The email lets the standup engine match this commit to a
+# tracker member whose display name differs from the git author name.
+_LOG_FORMAT = "%an%x1f%ae%x1f%aI%x1f%s"
 
 
-def local_git_recent_commits(repo_path: str, days: int = 1) -> list[dict]:
-    """Return commits in ``repo_path`` authored within the last ``days`` days.
+def local_git_recent_commits(repo_path: str, days: int = 1, since=None) -> list[dict]:
+    """Return commits in ``repo_path`` authored since the window start.
 
-    Each item: {author, kind='commit', title, timestamp, key(sha)}. Returns []
-    when the path is not a git repo, git is unavailable, or the command fails.
+    The window is ``since → now`` when ``since`` (a datetime) is given — git
+    parses the ISO form directly — else the last ``days`` days. Each item:
+    {author, kind='commit', title, timestamp, key(sha)}. Returns [] when the
+    path is not a git repo, git is unavailable, or the command fails.
     """
-    logger.info("local_git_recent_commits: repo_path=%r days=%d", repo_path, days)
+    logger.info("local_git_recent_commits: repo_path=%r days=%d since=%s", repo_path, days, since)
     if not repo_path:
         return []
     path = Path(repo_path).expanduser()
     if not path.is_dir():
         logger.warning("local_git_recent_commits skipped — not a directory: %s", path)
         return []
+    since_arg = f"--since={since.isoformat()}" if since is not None else f"--since={int(days)} days ago"
     try:
         proc = subprocess.run(
             [
@@ -44,7 +48,7 @@ def local_git_recent_commits(repo_path: str, days: int = 1) -> list[dict]:
                 "-C",
                 str(path),
                 "log",
-                f"--since={int(days)} days ago",
+                since_arg,
                 f"--pretty=format:{_LOG_FORMAT}",
                 "--no-merges",
             ],
@@ -67,12 +71,13 @@ def local_git_recent_commits(repo_path: str, days: int = 1) -> list[dict]:
         if not line.strip():
             continue
         parts = line.split("\x1f")
-        if len(parts) != 3:
+        if len(parts) != 4:
             continue
-        author, iso_date, subject = parts
+        author, email, iso_date, subject = parts
         items.append(
             {
                 "author": author,
+                "author_email": email,
                 "kind": "commit",
                 "title": subject,
                 "timestamp": iso_date[:19],

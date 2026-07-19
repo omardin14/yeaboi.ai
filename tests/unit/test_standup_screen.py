@@ -74,7 +74,7 @@ class TestBuildStandupScreen:
 
     def test_action_selection_variants(self):
         data = {"report": _report(), "schedule": {}}
-        for sel in range(5):  # Generate, My Update, Configure, Export, Back
+        for sel in range(3):  # Generate, Configure, Back
             assert isinstance(_build_standup_screen(data, width=80, height=24, action_sel=sel), Panel)
 
     def test_report_renders_as_themed_rows_not_emoji(self):
@@ -91,7 +91,7 @@ class TestBuildStandupScreen:
         assert "At risk" in out
         assert "🟡" not in out and "🟢" not in out  # no emoji in the TUI dashboard
 
-    def test_warnings_render_as_notices(self):
+    def test_warnings_render_in_notices_detail(self):
         from rich.console import Console
 
         rep = StandupReport(
@@ -101,7 +101,9 @@ class TestBuildStandupScreen:
                 "AI summary unavailable — ANTHROPIC_API_KEY not set",
             ),
         )
-        panel = _build_standup_screen({"report": rep, "schedule": {"installed": False}}, width=100, height=60)
+        panel = _build_standup_screen(
+            {"report": rep, "schedule": {"installed": False}}, width=100, height=60, view="notices"
+        )
         console = Console(width=110, file=open("/dev/null", "w"))
         with console.capture() as cap:
             console.print(panel)
@@ -110,7 +112,19 @@ class TestBuildStandupScreen:
         assert "authentication failed" in out
         assert "ANTHROPIC_API_KEY not set" in out
 
-    def test_schedule_shows_standup_time_and_runs_at(self):
+    def test_notices_section_listed_on_overview(self):
+        from rich.console import Console
+
+        rep = StandupReport(date="2026-07-10", warnings=("Jira: authentication failed",))
+        panel = _build_standup_screen({"report": rep, "schedule": {}}, width=100, height=60)
+        console = Console(width=110, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Notices" in out
+        assert "1 notice" in out
+
+    def test_schedule_detail_shows_standup_time_and_runs_at(self):
         from rich.console import Console
 
         data = {
@@ -124,13 +138,174 @@ class TestBuildStandupScreen:
             "schedule": {"installed": True, "platform": "launchd"},
             "report": None,
         }
-        panel = _build_standup_screen(data, width=100, height=60)
+        panel = _build_standup_screen(data, width=100, height=60, view="schedule")
         console = Console(width=110, file=open("/dev/null", "w"))
         with console.capture() as cap:
             console.print(panel)
         out = cap.get()
         assert "Standup time:" in out and "10:00" in out
         assert "Runs at:" in out and "09:50" in out
+
+    def test_overview_shows_my_update_and_collapsed_team_row(self):
+        from rich.console import Console
+
+        data = {"report": _report(), "schedule": {}, "my_name": "Bob"}
+        panel = _build_standup_screen(data, width=110, height=60)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Sections" in out
+        assert "Team Summary" in out
+        assert "Sprint & Confidence" in out
+        assert "My Update" in out
+        assert "1 member update" in out and "Enter to expand" in out  # collapsed Team row
+        assert "Alice" not in out  # members hidden until the Team row is expanded
+
+    def test_overview_expanded_team_shows_member_subrows(self):
+        from rich.console import Console
+
+        data = {"report": _report(), "schedule": {}, "my_name": "Bob", "team_expanded": True}
+        panel = _build_standup_screen(data, width=110, height=60)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Enter to collapse" in out
+        assert "└ Alice" in out  # tree guide on the (only, hence last) sub-row
+
+    def test_member_detail_shows_self_report_and_analysis(self):
+        from rich.console import Console
+
+        rep = _report()
+        rep = StandupReport(
+            date=rep.date,
+            member_updates=(
+                MemberUpdate(
+                    name="Bob",
+                    summary="Merged the auth PR.",
+                    blockers="waiting on review",
+                    source="combined",
+                    self_report="Paired with Alice.\nStarting on tokens next.",
+                ),
+            ),
+        )
+        panel = _build_standup_screen({"report": rep, "schedule": {}}, width=100, height=60, view="member:Bob")
+        console = Console(width=110, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "In their words" in out
+        assert "Paired with Alice." in out
+        assert "Starting on tokens next." in out  # Alt+Enter paragraph break preserved
+        assert "Activity analysis" in out
+        assert "Merged the auth PR." in out
+        assert "Blocker: waiting on review" in out
+
+    def test_detail_views_all_build(self):
+        from yeaboi.ui.mode_select.screens._standup_sections import standup_card_order
+
+        rep = StandupReport(date="2026-07-10", member_updates=_report().member_updates, warnings=("w",))
+        data = {
+            "report": rep,
+            "schedule": {},
+            "config": {"enabled": False, "time": "10:00"},
+            "my_name": "Bob",
+            "team_expanded": True,
+        }
+        for key in standup_card_order(data):
+            assert isinstance(_build_standup_screen(data, width=80, height=24, view=key), Panel)
+
+    def test_card_order_no_report(self):
+        from yeaboi.ui.mode_select.screens._standup_sections import standup_card_order
+
+        assert standup_card_order({"report": None}) == ["schedule"]
+
+    def test_card_order_collapsed_and_expanded(self):
+        from yeaboi.ui.mode_select.screens._standup_sections import standup_card_order
+
+        rep = StandupReport(date="2026-07-10", member_updates=_report().member_updates, warnings=("w",))
+        data = {"report": rep, "my_name": "Bob"}
+        assert standup_card_order(data) == ["summary", "sprint", "my_update", "team", "activity", "schedule", "notices"]
+        data["team_expanded"] = True
+        # Sub-rows insert right after "team"; my own card never appears there.
+        assert standup_card_order(data) == [
+            "summary",
+            "sprint",
+            "my_update",
+            "team",
+            "member:Alice",
+            "activity",
+            "schedule",
+            "notices",
+        ]
+
+    def test_teasers_for_my_update_and_team(self):
+        from yeaboi.ui.mode_select.screens._standup_sections import standup_card_teaser
+
+        rep = StandupReport(
+            date="2026-07-10",
+            member_updates=(
+                MemberUpdate(name="Bob", summary="auth work", self_report="shipped auth", source="combined"),
+                MemberUpdate(name="Alice", summary="login page", source="inferred"),
+            ),
+        )
+        data = {"report": rep, "my_name": "Bob"}
+        assert standup_card_teaser("my_update", data) == "auth work · ✍ update"
+        assert standup_card_teaser("team", data) == "1 member update · Enter to expand"
+        data["team_expanded"] = True
+        assert standup_card_teaser("team", data) == "1 member update · Enter to collapse"
+        # No member matching my_name → nudge towards Generate (which asks for it).
+        data["my_name"] = "Zed"
+        assert standup_card_teaser("my_update", data) == "No update yet — Generate asks for it"
+        assert standup_card_teaser("team", data) == "2 member updates · Enter to collapse"
+
+    def test_member_detail_shows_links(self):
+        from rich.console import Console
+
+        rep = StandupReport(
+            date="2026-07-10",
+            member_updates=(
+                MemberUpdate(
+                    name="Bob",
+                    summary="moved PSOT-1 to review",
+                    links=(("PSOT-1", "https://x.atlassian.net/browse/PSOT-1"),),
+                ),
+            ),
+        )
+        panel = _build_standup_screen({"report": rep, "schedule": {}}, width=110, height=40, view="member:Bob")
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Links" in out
+        assert "↗ PSOT-1" in out
+        assert "browse/PSOT-1" in out  # truncated URL shown alongside the label
+
+    def test_my_update_detail_renders_my_member_card(self):
+        from rich.console import Console
+
+        rep = StandupReport(
+            date="2026-07-10",
+            member_updates=(MemberUpdate(name="Bob", summary="Merged auth.", self_report="hi", source="combined"),),
+        )
+        panel = _build_standup_screen(
+            {"report": rep, "schedule": {}, "my_name": "Bob"}, width=100, height=40, view="my_update"
+        )
+        console = Console(width=110, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "In their words" in out
+        assert "Merged auth." in out
+
+    def test_overview_selection_auto_scrolls(self):
+        # Selecting the last of many expanded member sub-rows in a short viewport must not crash.
+        members = tuple(MemberUpdate(name=f"Dev {i}", summary="work") for i in range(20))
+        rep = StandupReport(date="2026-07-10", member_updates=members)
+        data = {"report": rep, "schedule": {}, "team_expanded": True}
+        panel = _build_standup_screen(data, width=80, height=14, selected_card=23)
+        assert isinstance(panel, Panel)
 
 
 class TestBuildStandupInputScreen:
@@ -156,6 +331,28 @@ class TestBuildStandupInputScreen:
         assert "Ali" in out
         assert "Esc to cancel" in out
 
+    def test_multirow_box_honours_newlines(self):
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_input_screen
+
+        panel = _build_standup_input_screen(
+            "Your update for today",
+            "shipped auth\nnext: tokens",
+            step="My update  (2/2)",
+            width=90,
+            height=30,
+            box_rows=6,
+        )
+        console = Console(width=100, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "shipped auth" in out
+        assert "next: tokens" in out  # rendered on its own row, not glued to line 1
+        assert "shipped authnext" not in out
+        assert "Alt+Enter" in out  # newline hint shown for the large box
+
 
 class TestSettingsMasksStandupSecrets:
     def test_slack_and_smtp_password_masked(self):
@@ -178,3 +375,93 @@ class TestSettingsMasksStandupSecrets:
         assert "SECRET123456" not in out
         assert "supersecretpw" not in out
         assert "smtp.example.com" in out  # non-secret shown
+
+
+class TestButtonRowNotClipped:
+    def test_scrollbar_has_no_trailing_newline(self):
+        from yeaboi.ui.shared._components import build_scrollbar
+
+        for kwargs in ({"always_show": True}, {}):
+            sb = build_scrollbar(10, 30, 0, 20, **kwargs)
+            assert sb is not None
+            assert not sb.plain.endswith("\n")
+            assert sb.plain.count("\n") == 9  # exactly viewport_h rows
+
+    def test_button_bottom_border_renders(self):
+        # The scrollbar's old trailing newline pushed the buttons' bottom border
+        # off the fixed-height panel — the "overlapping buttons" bug.
+        from rich.console import Console
+
+        data = {"report": _report(), "schedule": {}}
+        for height in (24, 30, 40):
+            panel = _build_standup_screen(data, width=100, height=height)
+            console = Console(width=110, height=height + 2, file=open("/dev/null", "w"))
+            with console.capture() as cap:
+                console.print(panel)
+            out = cap.get()
+            assert "╰──" in out.splitlines()[-3]  # button bottom border is on-screen
+
+    def test_no_button_highlighted_when_sections_focused(self):
+        # action_sel=-1 (sections focus) must render without error and without
+        # crashing on the "no selected button" case.
+        data = {"report": _report(), "schedule": {}}
+        assert isinstance(_build_standup_screen(data, width=100, height=30, action_sel=-1), Panel)
+
+    def test_overview_has_three_buttons_and_focus_hint(self):
+        from rich.console import Console
+
+        panel = _build_standup_screen({"report": _report(), "schedule": {}}, width=110, height=40)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Open" not in out  # Enter opens sections directly now
+        for label in ("Generate", "Configure", "Back"):
+            assert label in out
+        # The My Update button is gone — Generate collects the user's update itself.
+        assert "│ My Update │" not in out
+        assert "Enter to open" in out and "←/→ buttons" in out
+
+    def test_activity_detail_shows_window(self):
+        from rich.console import Console
+
+        rep = StandupReport(
+            date="2026-07-20",
+            activity_counts=(("jira", 3),),
+            activity_window="Fri 2026-07-17 00:00 → now",
+        )
+        panel = _build_standup_screen({"report": rep, "schedule": {}}, width=100, height=40, view="activity")
+        console = Console(width=110, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Fri 2026-07-17 00:00" in out
+
+
+class TestStandupProgressScreen:
+    def test_returns_panel_with_steps(self):
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_progress_screen
+
+        panel = _build_standup_progress_screen(
+            ["Collecting recent activity", "Writing summaries with AI"],
+            width=100,
+            height=30,
+            elapsed=12.0,
+            anim_tick=1.5,
+        )
+        assert isinstance(panel, Panel)
+        console = Console(width=110, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Generating standup" in out
+        assert "✓ Collecting recent activity" in out  # completed phase
+        assert "Writing summaries with AI" in out  # current phase
+        assert "12s" in out  # elapsed
+
+    def test_empty_progress_and_small_height(self):
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_progress_screen
+
+        assert isinstance(_build_standup_progress_screen([], width=60, height=12), Panel)

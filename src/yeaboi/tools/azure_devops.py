@@ -848,14 +848,52 @@ def add_work_items_to_iteration(work_item_ids: list[str], iteration_path: str, p
 # See README: "Daily Standup" — recent-activity collection
 
 
-def azdevops_recent_activity(project: str = "", days: int = 1) -> list[dict]:
-    """Return work items changed within the last ``days`` days.
+def _identity_fields(raw) -> tuple[str, str]:
+    """(displayName, email) from an AzDO identity value.
 
-    Each item: {author, kind='work_item', title, status, timestamp, key(#id)}.
+    Cloud returns an IdentityRef dict {displayName, uniqueName(email)}; some
+    server versions return a plain "Name <email>" string — parse both shapes.
+    """
+    if not raw:
+        return "", ""
+    if isinstance(raw, dict):
+        return raw.get("displayName", "") or "", raw.get("uniqueName", "") or ""
+    text = str(raw)
+    if "<" in text and text.rstrip().endswith(">"):
+        name, _, rest = text.partition("<")
+        return name.strip(), rest.rstrip(">").strip()
+    return text.strip(), ""
+
+
+def _work_item_url(project: str, wi_id: str) -> str:
+    """Browser URL for a work item ("" when the org URL is unconfigured).
+
+    Carried on activity items so standup surfaces can link the ticket.
+    """
+    base = (get_azure_devops_org_url() or "").rstrip("/")
+    if not base or not wi_id:
+        return ""
+    from urllib.parse import quote
+
+    return f"{base}/{quote(project)}/_workitems/edit/{wi_id}"
+
+
+def azdevops_recent_activity(project: str = "", days: int = 1, since=None) -> list[dict]:
+    """Return work items changed since the window start, plus in-progress (WIP) items.
+
+    The window is ``since → now`` when ``since`` (a datetime — always a midnight
+    for the standup) is given: WIQL's ``@Today - N`` is midnight-based, so the
+    whole-day delta maps exactly. Else the last ``days`` days.
+
+    Each changed item ({author, kind='work_item', title, status, timestamp,
+    key(#id), author_email}) is credited to the person who actually made the
+    change (System.ChangedBy), falling back to the assignee. WIP items
+    (kind='wip') are assigned in-progress tickets untouched in the window —
+    credited to their assignee — so quiet in-flight work stays visible.
     Returns [] when Azure DevOps is unconfigured or the WIQL query fails.
     """
     project = project or get_azure_devops_project() or ""
-    logger.info("azdevops_recent_activity: project=%r days=%d", project, days)
+    logger.info("azdevops_recent_activity: project=%r days=%d since=%s", project, days, since)
     if not project:
         logger.warning("azdevops_recent_activity skipped — no project configured")
         return []
@@ -864,48 +902,61 @@ def azdevops_recent_activity(project: str = "", days: int = 1) -> list[dict]:
 
         wit_client, _ = _make_azdo_clients()
         # WIQL has no bind parameters: escape single quotes in `project` (config-derived)
-        # and force `days` to int so neither can alter the query. See _normalize_work_item_state.
+        # and force the day delta to int so neither can alter the query. See
+        # _normalize_work_item_state.
         safe_project = project.replace("'", "''")
+        if since is not None:
+            from datetime import date as _date
+
+            days_back = max(0, (_date.today() - since.date()).days)
+        else:
+            days_back = int(days)
         wiql = Wiql(
             query=(
                 "SELECT [System.Id] FROM WorkItems"  # noqa: S608 - read-only WIQL; inputs escaped/int-cast above
                 f" WHERE [System.TeamProject] = '{safe_project}'"
-                f" AND [System.ChangedDate] >= @Today - {int(days)}"
+                f" AND [System.ChangedDate] >= @Today - {days_back}"
                 " ORDER BY [System.ChangedDate] DESC"
             )
         )
-        result = wit_client.query_by_wiql(wiql, top=100)
-        if not result.work_items:
-            logger.info("azdevops_recent_activity: 0 work items in last %d day(s)", days)
-            return []
-        ids = [wi.id for wi in result.work_items]
         fields = [
             "System.Id",
             "System.Title",
             "System.State",
             "System.AssignedTo",
+            "System.ChangedBy",
             "System.ChangedDate",
         ]
-        work_items = wit_client.get_work_items(ids, fields=fields)
+        result = wit_client.query_by_wiql(wiql, top=100)
         items: list[dict] = []
-        for item in work_items:
-            f = item.fields
-            assigned_raw = f.get("System.AssignedTo")
-            if isinstance(assigned_raw, dict):
-                author = assigned_raw.get("displayName", "")
-            else:
-                author = str(assigned_raw) if assigned_raw else ""
-            items.append(
-                {
-                    "author": author,
-                    "kind": "work_item",
-                    "title": f.get("System.Title", ""),
-                    "status": f.get("System.State", ""),
-                    "timestamp": str(f.get("System.ChangedDate", ""))[:19],
-                    "key": f"#{f.get('System.Id', '')}",
-                }
-            )
-        logger.info("azdevops_recent_activity: %d work item(s) in last %d day(s)", len(items), days)
+        seen_ids: set[str] = set()
+        if result.work_items:
+            ids = [wi.id for wi in result.work_items]
+            work_items = wit_client.get_work_items(ids, fields=fields)
+            for item in work_items:
+                f = item.fields
+                assigned_name, assigned_email = _identity_fields(f.get("System.AssignedTo"))
+                changed_name, changed_email = _identity_fields(f.get("System.ChangedBy"))
+                # Credit the actual actor; the assignee is only a fallback.
+                author, author_email = (
+                    (changed_name, changed_email) if changed_name else (assigned_name, assigned_email)
+                )
+                wi_id = str(f.get("System.Id", ""))
+                seen_ids.add(wi_id)
+                items.append(
+                    {
+                        "author": author,
+                        "author_email": author_email,
+                        "kind": "work_item",
+                        "title": f.get("System.Title", ""),
+                        "status": f.get("System.State", ""),
+                        "timestamp": str(f.get("System.ChangedDate", ""))[:19],
+                        "key": f"#{wi_id}",
+                        "url": _work_item_url(project, wi_id),
+                    }
+                )
+        items.extend(_azdo_wip_items(wit_client, project, safe_project, seen_ids, fields))
+        logger.info("azdevops_recent_activity: %d item(s) in last %d day(s)", len(items), days_back)
         return items
     except ValueError as e:
         logger.warning("azdevops_recent_activity skipped: %s", e)
@@ -916,6 +967,209 @@ def azdevops_recent_activity(project: str = "", days: int = 1) -> list[dict]:
         return []
     except Exception as e:
         logger.warning("azdevops_recent_activity unexpected error: %s", e)
+        return []
+
+
+def _azdo_wip_items(wit_client, project: str, safe_project: str, seen_ids: set[str], fields: list[str]) -> list[dict]:
+    """Assigned in-progress work items — best-effort, degrades to [] on any failure."""
+    try:
+        from azure.devops.v7_1.work_item_tracking.models import Wiql
+
+        wiql = Wiql(
+            query=(
+                "SELECT [System.Id] FROM WorkItems"  # noqa: S608 - read-only WIQL; project escaped by caller
+                f" WHERE [System.TeamProject] = '{safe_project}'"
+                " AND [System.State] IN ('Active', 'In Progress', 'Doing', 'Committed')"
+                " AND [System.AssignedTo] <> ''"
+                " ORDER BY [System.ChangedDate] DESC"
+            )
+        )
+        result = wit_client.query_by_wiql(wiql, top=50)
+        if not result.work_items:
+            return []
+        ids = [wi.id for wi in result.work_items]
+        out: list[dict] = []
+        for item in wit_client.get_work_items(ids, fields=fields):
+            f = item.fields
+            wi_id = str(f.get("System.Id", ""))
+            if wi_id in seen_ids:
+                continue  # already emitted with a fresher changed-in-window item
+            assigned_name, assigned_email = _identity_fields(f.get("System.AssignedTo"))
+            if not assigned_name:
+                continue
+            out.append(
+                {
+                    "author": assigned_name,
+                    "author_email": assigned_email,
+                    "kind": "wip",
+                    "title": f.get("System.Title", ""),
+                    "status": f.get("System.State", ""),
+                    "timestamp": str(f.get("System.ChangedDate", ""))[:19],
+                    "key": f"#{wi_id}",
+                    "url": _work_item_url(project, wi_id),
+                }
+            )
+        return out
+    except Exception as e:  # WIP is a bonus signal — never let it break the main query's results
+        logger.warning("azdevops wip query failed: %s", e)
+        return []
+
+
+# Caps for the repo-activity scan: bound the number of sequential API calls so
+# a large org can't stall the standup (2 calls per repo).
+_MAX_ACTIVITY_REPOS = 10
+_MAX_REPO_COMMITS = 100
+_MAX_REPO_PRS = 100
+
+
+def _make_git_client(org_url: str | None = None, token: str | None = None):
+    """Create an authenticated Git client — same connection pattern as _make_azdo_clients."""
+    org_url = org_url or get_azure_devops_org_url()
+    token = token or get_azure_devops_token()
+    if not org_url:
+        raise ValueError("AZURE_DEVOPS_ORG_URL is not set. Add it to your .env file.")
+    return _make_connection(org_url, token).clients.get_git_client()
+
+
+def _repo_activity_cutoff(days: int, since):
+    """Tz-aware UTC window start (since wins, else now − days)."""
+    from datetime import UTC, datetime, timedelta
+
+    if since is not None:
+        return since.astimezone(UTC) if since.tzinfo else since.replace(tzinfo=UTC)
+    return datetime.now(UTC) - timedelta(days=int(days))
+
+
+def _aware(dt):
+    """Coerce an SDK datetime to tz-aware UTC for safe comparison; None stays None."""
+    from datetime import UTC
+
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def azdevops_recent_commits(project: str = "", days: int = 1, since=None) -> list[dict]:
+    """Return commits pushed to the project's repos since the window start.
+
+    Scans up to the first _MAX_ACTIVITY_REPOS repositories in the project (all
+    branches are NOT walked — the commit search covers the default branch per
+    repo, which is where merged work lands). Each item: {author, author_email,
+    kind='commit', title(first line + repo name), timestamp, key(sha[:8])}.
+    Returns [] when Azure DevOps is unconfigured or the API fails.
+    """
+    project = project or get_azure_devops_project() or ""
+    logger.info("azdevops_recent_commits: project=%r days=%d since=%s", project, days, since)
+    if not project:
+        return []
+    try:
+        from azure.devops.v7_1.git.models import GitQueryCommitsCriteria
+
+        git_client = _make_git_client()
+        cutoff = _repo_activity_cutoff(days, since)
+        criteria = GitQueryCommitsCriteria(from_date=cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"), top=50)
+        items: list[dict] = []
+        for repo in (git_client.get_repositories(project) or [])[:_MAX_ACTIVITY_REPOS]:
+            if len(items) >= _MAX_REPO_COMMITS:
+                break
+            try:
+                commits = git_client.get_commits(repository_id=repo.id, search_criteria=criteria, project=project)
+            except Exception as e:  # one bad/empty repo must not hide the others
+                logger.warning("azdevops_recent_commits: repo %s failed: %s", getattr(repo, "name", "?"), e)
+                continue
+            repo_web = (getattr(repo, "web_url", "") or "").rstrip("/")
+            for commit in commits or []:
+                author = getattr(commit, "author", None)
+                message = (getattr(commit, "comment", "") or "").splitlines()
+                sha = getattr(commit, "commit_id", "") or ""
+                items.append(
+                    {
+                        "author": getattr(author, "name", "") or "",
+                        "author_email": getattr(author, "email", "") or "",
+                        "kind": "commit",
+                        "title": f"{message[0] if message else ''} ({repo.name})",
+                        "timestamp": str(getattr(author, "date", "") or "")[:19],
+                        "key": sha[:8],
+                        "url": f"{repo_web}/commit/{sha}" if repo_web and sha else "",
+                    }
+                )
+                if len(items) >= _MAX_REPO_COMMITS:
+                    break
+        logger.info("azdevops_recent_commits: %d commit(s)", len(items))
+        return items
+    except ValueError as e:
+        logger.warning("azdevops_recent_commits skipped: %s", e)
+        return []
+    except AzureDevOpsServiceError as e:
+        _raise_if_azdo_auth(e)
+        logger.warning("azdevops_recent_commits failed: %s", _azdo_error_msg(e))
+        return []
+    except Exception as e:
+        logger.warning("azdevops_recent_commits unexpected error: %s", e)
+        return []
+
+
+def azdevops_recent_prs(project: str = "", days: int = 1, since=None) -> list[dict]:
+    """Return pull requests created or closed in the project's repos since the window start.
+
+    The v7_1 PR search criteria has no time filters, so PRs are fetched
+    newest-first per repo (top 25) and filtered client-side by creation/closed
+    date. Each item: {author, author_email, kind='pr', title(+repo name),
+    status, timestamp, key(!id)}. Returns [] on missing config or API failure.
+    """
+    project = project or get_azure_devops_project() or ""
+    logger.info("azdevops_recent_prs: project=%r days=%d since=%s", project, days, since)
+    if not project:
+        return []
+    try:
+        from azure.devops.v7_1.git.models import GitPullRequestSearchCriteria
+
+        git_client = _make_git_client()
+        cutoff = _repo_activity_cutoff(days, since)
+        criteria = GitPullRequestSearchCriteria(status="all")
+        items: list[dict] = []
+        for repo in (git_client.get_repositories(project) or [])[:_MAX_ACTIVITY_REPOS]:
+            if len(items) >= _MAX_REPO_PRS:
+                break
+            try:
+                prs = git_client.get_pull_requests(repo.id, criteria, project=project, top=25)
+            except Exception as e:
+                logger.warning("azdevops_recent_prs: repo %s failed: %s", getattr(repo, "name", "?"), e)
+                continue
+            for pr in prs or []:
+                created = _aware(getattr(pr, "creation_date", None))
+                closed = _aware(getattr(pr, "closed_date", None))
+                if not ((created and created >= cutoff) or (closed and closed >= cutoff)):
+                    continue
+                creator = getattr(pr, "created_by", None)
+                status = getattr(pr, "status", "") or ""
+                pr_id = getattr(pr, "pull_request_id", "")
+                repo_web = (getattr(repo, "web_url", "") or "").rstrip("/")
+                items.append(
+                    {
+                        "author": getattr(creator, "display_name", "") or "",
+                        "author_email": getattr(creator, "unique_name", "") or "",
+                        "kind": "pr",
+                        "title": f"{getattr(pr, 'title', '') or ''} ({repo.name})",
+                        "status": "merged" if status == "completed" else status,
+                        "timestamp": str(closed or created or "")[:19],
+                        "key": f"!{pr_id}",
+                        "url": f"{repo_web}/pullrequest/{pr_id}" if repo_web and pr_id else "",
+                    }
+                )
+                if len(items) >= _MAX_REPO_PRS:
+                    break
+        logger.info("azdevops_recent_prs: %d PR(s)", len(items))
+        return items
+    except ValueError as e:
+        logger.warning("azdevops_recent_prs skipped: %s", e)
+        return []
+    except AzureDevOpsServiceError as e:
+        _raise_if_azdo_auth(e)
+        logger.warning("azdevops_recent_prs failed: %s", _azdo_error_msg(e))
+        return []
+    except Exception as e:
+        logger.warning("azdevops_recent_prs unexpected error: %s", e)
         return []
 
 

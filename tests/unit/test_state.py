@@ -848,13 +848,21 @@ class TestMemberUpdate:
             m.name = "Bob"  # type: ignore[misc]
 
     def test_asdict(self):
-        m = MemberUpdate(name="Alice", summary="Shipped login", blockers="none", source="self-reported")
+        m = MemberUpdate(
+            name="Alice", summary="Shipped login", blockers="none", source="combined", self_report="shipped it"
+        )
         assert asdict(m) == {
             "name": "Alice",
             "summary": "Shipped login",
             "blockers": "none",
-            "source": "self-reported",
+            "source": "combined",
+            "self_report": "shipped it",
+            "links": (),
         }
+
+    def test_self_report_defaults_empty(self):
+        """Old serialized reports (no self_report key) deserialize with ''."""
+        assert MemberUpdate().self_report == ""
 
 
 class TestStandupReport:

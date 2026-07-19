@@ -65,17 +65,28 @@ def format_standup_lines(report: StandupReport) -> list[str]:
     if report.member_updates:
         lines.append("Updates:")
         for m in report.member_updates:
-            tag = "✍️" if m.source == "self-reported" else "•"
+            tag = "✍️" if m.self_report else "•"
             lines.append(f"  {tag} {m.name}: {m.summary}")
+            # Their own typed words ride alongside the activity analysis, never replace it.
+            for i, sr_line in enumerate(m.self_report.splitlines()):
+                prefix = "✍ In their words: " if i == 0 else "  "
+                lines.append(f"      {prefix}{sr_line}")
             if m.blockers:
                 lines.append(f"      ⚠ Blocker: {m.blockers}")
+            # Raw URLs — Slack/email clients auto-link them.
+            for label, url in getattr(m, "links", ()):
+                lines.append(f"      🔗 {label}: {url}")
     else:
         lines.append("No individual updates.")
 
     if report.activity_counts:
         counts = ", ".join(f"{src}: {n}" for src, n in report.activity_counts)
+        window = f"  ({report.activity_window})" if report.activity_window else ""
         lines.append("")
-        lines.append(f"Activity examined — {counts}")
+        lines.append(f"Activity examined — {counts}{window}")
+    if report.skipped_sources:
+        skipped = ", ".join(f"{src} ({reason})" for src, reason in report.skipped_sources)
+        lines.append(f"Sources skipped — {skipped}")
     return lines
 
 
@@ -126,13 +137,22 @@ def format_standup_rich(report: StandupReport, *, accent: str = "rgb(200,100,180
         body.append(Text("Updates", style=f"bold {accent}"))
         for m in report.member_updates:
             row = Text()
-            tag = "✍" if m.source == "self-reported" else "•"
+            tag = "✍" if m.self_report else "•"
             row.append(f"  {tag} ", style="dim")
             row.append(f"{m.name}: ", style="bold")
             row.append(m.summary or "(no activity)")
             body.append(row)
+            # Their own typed words ride alongside the activity analysis, never replace it.
+            for i, sr_line in enumerate(m.self_report.splitlines()):
+                prefix = "✍ In their words: " if i == 0 else "  "
+                body.append(Text(f"      {prefix}{sr_line}", style="italic dim"))
             if m.blockers:
                 body.append(Text(f"      ⚠ Blocker: {m.blockers}", style="rgb(220,180,60)"))
+            for label, url in getattr(m, "links", ()):
+                link = Text("      ↗ ", style="dim")
+                # OSC-8 hyperlink — clickable in supporting terminals, plain elsewhere.
+                link.append(label, style=f"underline {accent} link {url}")
+                body.append(link)
     else:
         body.append(Text("No individual updates.", style="dim"))
 
