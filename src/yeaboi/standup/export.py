@@ -92,6 +92,9 @@ def build_standup_markdown(report: StandupReport) -> str:
             if m.blockers:
                 lines.append("")
                 lines.append(f"**Blocker:** {m.blockers}")
+            if getattr(m, "links", ()):
+                lines.append("")
+                lines.append("**Links:** " + " · ".join(f"[{label}]({url})" for label, url in m.links))
             lines.append("")
     else:
         lines.append("_No individual updates._")
@@ -158,6 +161,11 @@ def build_standup_html(report: StandupReport) -> str:
                 update_cell += (
                     f"<br><em style='color:var(--text-muted)'>✍ In their words: {sr_html}</em>"
                 )
+            if getattr(m, "links", ()):
+                anchors = " · ".join(
+                    f"<a href='{_e(url, quote=True)}' target='_blank'>{_e(label or url)}</a>" for label, url in m.links
+                )
+                update_cell += f"<br><span style='font-size:.85rem'>🔗 {anchors}</span>"
             parts.append(
                 f"<tr><td><strong>{_e(m.name)}</strong>{tag}</td>"
                 f"<td>{update_cell}</td>"

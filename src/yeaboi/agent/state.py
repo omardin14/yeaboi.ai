@@ -279,6 +279,7 @@ class MemberUpdate:
     blockers: str = ""  # anything blocking them (empty if none)
     source: str = "inferred"  # "inferred" (activity only) | "self-reported" (typed, no activity) | "combined" (both)
     self_report: str = ""  # the member's own typed update, kept verbatim as supporting context
+    links: tuple[tuple[str, str], ...] = ()  # (label, url) refs from their activity — tuple-of-pairs stays frozen
 
 
 @dataclass(frozen=True)

@@ -73,6 +73,9 @@ def format_standup_lines(report: StandupReport) -> list[str]:
                 lines.append(f"      {prefix}{sr_line}")
             if m.blockers:
                 lines.append(f"      ⚠ Blocker: {m.blockers}")
+            # Raw URLs — Slack/email clients auto-link them.
+            for label, url in getattr(m, "links", ()):
+                lines.append(f"      🔗 {label}: {url}")
     else:
         lines.append("No individual updates.")
 
@@ -145,6 +148,11 @@ def format_standup_rich(report: StandupReport, *, accent: str = "rgb(200,100,180
                 body.append(Text(f"      {prefix}{sr_line}", style="italic dim"))
             if m.blockers:
                 body.append(Text(f"      ⚠ Blocker: {m.blockers}", style="rgb(220,180,60)"))
+            for label, url in getattr(m, "links", ()):
+                link = Text("      ↗ ", style="dim")
+                # OSC-8 hyperlink — clickable in supporting terminals, plain elsewhere.
+                link.append(label, style=f"underline {accent} link {url}")
+                body.append(link)
     else:
         body.append(Text("No individual updates.", style="dim"))
 

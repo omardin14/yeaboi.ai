@@ -53,6 +53,39 @@ class TestMarkdown:
         assert "_No individual updates._" in md
 
 
+class TestMemberLinks:
+    def test_markdown_links_rendered(self):
+        rep = _report(
+            member_updates=(
+                MemberUpdate(
+                    name="Alice",
+                    summary="moved PSOT-1 to review",
+                    links=(("PSOT-1", "https://x.atlassian.net/browse/PSOT-1"),),
+                ),
+            )
+        )
+        md = build_standup_markdown(rep)
+        assert "**Links:** [PSOT-1](https://x.atlassian.net/browse/PSOT-1)" in md
+
+    def test_html_links_are_anchors_and_escaped(self):
+        rep = _report(
+            member_updates=(
+                MemberUpdate(
+                    name="Alice",
+                    summary="work",
+                    links=(("<b>PSOT-1</b>", "https://x.atlassian.net/browse/PSOT-1?a=1&b=2"),),
+                ),
+            )
+        )
+        html = build_standup_html(rep)
+        assert "<a href='https://x.atlassian.net/browse/PSOT-1?a=1&amp;b=2'" in html
+        assert "&lt;b&gt;PSOT-1&lt;/b&gt;" in html  # label escaped, not injected
+
+    def test_no_links_no_section(self):
+        md = build_standup_markdown(_report())
+        assert "**Links:**" not in md
+
+
 class TestHtml:
     def test_selfcontained_and_escaped(self):
         rep = _report(team_summary="<script>alert(1)</script>")

@@ -196,6 +196,25 @@ def standup_card_teaser(key: str, data: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _link_row(ctx: _StandupCtx, label: str, url: str) -> None:
+    """One height-1 link row: clickable label (OSC-8 hyperlink) + truncated dim URL.
+
+    The URL is truncated to keep the row a single terminal line — the detail
+    viewport slices height-1 Text rows, so a wrapped line would break the
+    scroll math. Both segments carry the ``link`` style, so terminals that
+    support hyperlinks make them clickable; others still show the address.
+    """
+    theme = ctx.theme
+    row = Text(PAD + "      ", justify="left")
+    row.append("↗ ", style=theme.dim)
+    row.append(label or url, style=f"underline {theme.accent_bright} link {url}")
+    room = ctx.width - len(PAD) - 10 - len(label or url)
+    if room > 16:
+        shown = url if len(url) <= room else url[: room - 1] + "…"
+        row.append(f"  {shown}", style=f"{theme.dim} link {url}")
+    ctx.add(row)
+
+
 def _detail_summary(ctx: _StandupCtx, data: dict) -> None:
     report = data["report"]
     theme = ctx.theme
@@ -236,6 +255,11 @@ def _detail_member(ctx: _StandupCtx, data: dict, name: str) -> None:
     if m.blockers:
         ctx.blank()
         ctx.wrapped(f"⚠ Blocker: {m.blockers}", theme.warn, indent="      ")
+    if getattr(m, "links", ()):
+        ctx.blank()
+        ctx.line("Links", theme.accent_bright)
+        for label, url in m.links:
+            _link_row(ctx, label, url)
     ctx.blank()
     source_label = {
         "combined": "self-report + tracked activity",

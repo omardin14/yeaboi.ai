@@ -724,6 +724,33 @@ class TestWipFlow:
         assert [a["title"] for a in alice["activity"]] == ["login page"]
         assert [a["title"] for a in alice["in_progress"]] == ["Ship exports"]
 
+    def test_llm_payload_strips_urls_and_keys(self, monkeypatch, db_path, seeded_session):
+        items = [
+            {
+                "author": "Alice",
+                "kind": "commit",
+                "title": "login page",
+                "source": "github",
+                "key": "abc123",
+                "url": "https://github.com/o/r/commit/abc123",
+            },
+        ]
+        _patch_common(monkeypatch, items=items, counts=[("github", 1)])
+        captured: dict = {}
+
+        def fake_prompt(**kwargs):
+            captured.update(kwargs)
+            return "PROMPT"
+
+        monkeypatch.setattr("yeaboi.prompts.standup.get_standup_summary_prompt", fake_prompt)
+        monkeypatch.setattr(
+            "yeaboi.agent.llm.invoke_with_images", lambda llm, prompt, images: _FakeResp('{"members": []}')
+        )
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **kw: object())
+        engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        alice = next(m for m in captured["members"] if m["name"] == "Alice")
+        assert "url" not in alice["activity"][0] and "key" not in alice["activity"][0]
+
     def test_confidence_excludes_wip_from_activity_count(self, monkeypatch, db_path, seeded_session):
         items = [
             {"author": "Alice", "kind": "commit", "title": "c", "source": "github"},
@@ -809,3 +836,33 @@ class TestSkippedSources:
         bundle = ActivityBundle(items=[], counts=[("jira", 2)], skipped=[])
         report = self._run(monkeypatch, db_path, seeded_session, bundle)
         assert not any(w.startswith("Not scanned:") for w in report.warnings)
+
+class TestMemberLinks:
+    def test_dedupes_by_url_labels_by_key_and_caps(self):
+        acts = [
+            {"kind": "update", "title": "moved PSOT-1", "key": "PSOT-1", "url": "https://j/browse/PSOT-1"},
+            {"kind": "comment", "title": "commented on PSOT-1", "key": "PSOT-1", "url": "https://j/browse/PSOT-1"},
+            {"kind": "commit", "title": "a really long commit message that goes on", "key": "", "url": "https://g/c1"},
+            {"kind": "wip", "title": "no url here"},
+        ] + [{"kind": "pr", "title": f"pr {i}", "key": f"#{i}", "url": f"https://g/pr/{i}"} for i in range(10)]
+        links = engine._member_links(acts)
+        assert links[0] == ("PSOT-1", "https://j/browse/PSOT-1")  # deduped: one entry for the ticket
+        assert links[1][0] == "a really long commit message that goes on"[:40]  # keyless → truncated title label
+        assert len(links) == 6  # capped
+
+    def test_links_land_on_fallback_member_updates(self, monkeypatch, db_path, seeded_session):
+        items = [
+            {
+                "author": "Alice",
+                "kind": "update",
+                "title": "moved PSOT-9 to Done",
+                "source": "jira",
+                "key": "PSOT-9",
+                "url": "https://x.atlassian.net/browse/PSOT-9",
+            },
+        ]
+        _patch_common(monkeypatch, items=items, counts=[("jira", 1)])
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        report = engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        alice = next(m for m in report.member_updates if m.name == "Alice")
+        assert alice.links == (("PSOT-9", "https://x.atlassian.net/browse/PSOT-9"),)

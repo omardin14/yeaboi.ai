@@ -398,6 +398,7 @@ def github_recent_commits(repo_url: str, days: int = 1, since=None) -> list[dict
                     "title": msg,
                     "timestamp": ts,
                     "key": c.sha[:8],
+                    "url": getattr(c, "html_url", "") or "",
                 }
             )
         logger.info("github_recent_commits: %d commit(s) in last %d day(s)", len(items), days)
@@ -444,6 +445,7 @@ def _pr_branch_commit_items(pr, cutoff) -> list[dict]:
                 "title": f"{msg} (PR #{pr.number})",
                 "timestamp": commit.author.date.isoformat()[:19],
                 "key": c.sha[:8],
+                "url": getattr(c, "html_url", "") or "",
             }
         )
     return items
@@ -482,6 +484,7 @@ def github_recent_prs(repo_url: str, days: int = 1, since=None) -> list[dict]:
                     "status": status,
                     "timestamp": ts,
                     "key": f"#{pr.number}",
+                    "url": getattr(pr, "html_url", "") or "",
                 }
             )
             if status in ("open", "merged") and commit_lookups < _MAX_PR_COMMIT_LOOKUPS:

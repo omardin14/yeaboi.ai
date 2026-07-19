@@ -256,9 +256,32 @@ def _group_activity_by_author(
                     "title": item.get("title", ""),
                     "status": item.get("status", ""),
                     "source": item.get("source", ""),
+                    "key": item.get("key", ""),
+                    "url": item.get("url", ""),
                 }
             )
     return grouped
+
+
+def _member_links(acts: list[dict]) -> tuple[tuple[str, str], ...]:
+    """Distinct (label, url) references from a member's grouped activity.
+
+    Label is the item key (ticket id / PR number / sha) when present, else a
+    truncated title. Deduped by URL preserving order, capped so a busy member's
+    card stays readable.
+    """
+    seen: set[str] = set()
+    links: list[tuple[str, str]] = []
+    for a in acts:
+        url = (a.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        label = (a.get("key") or "").strip() or (a.get("title") or "")[:40]
+        links.append((label, url))
+        if len(links) >= 6:
+            break
+    return tuple(links)
 
 
 def _member_source(has_self_report: bool, has_activity: bool) -> str:
@@ -300,6 +323,7 @@ def _build_fallback_member_updates(grouped: dict[str, list[dict]], self_reported
                 summary=summary,
                 self_report=self_reported.get(name, ""),
                 source=_member_source(name in self_reported, bool(acts)),
+                links=_member_links(acts),
             )
         )
     # Self-reporters missing from the grouping (shouldn't happen — run_standup
@@ -347,13 +371,19 @@ def _summarize_members(
         the model can fold what they show into the team summary.
     """
     grouped = _group_activity_by_author(bundle.items, members, alias_map)
+
+    def _for_llm(acts: list[dict]) -> list[dict]:
+        # URLs (and the keys they duplicate — titles already carry ticket ids)
+        # are for rendering links, not reasoning; strip them to keep the prompt lean.
+        return [{k: v for k, v in a.items() if k not in ("url", "key")} for a in acts]
+
     # WIP (assigned in-progress tickets, possibly untouched in the window) is a
     # separate payload list so the LLM can distinguish "did" from "is doing".
     member_payload = [
         {
             "name": name,
-            "activity": [a for a in grouped.get(name, []) if a.get("kind") != "wip"],
-            "in_progress": [a for a in grouped.get(name, []) if a.get("kind") == "wip"],
+            "activity": _for_llm([a for a in grouped.get(name, []) if a.get("kind") != "wip"]),
+            "in_progress": _for_llm([a for a in grouped.get(name, []) if a.get("kind") == "wip"]),
             "self_report": self_reported.get(name, ""),
         }
         for name in members
@@ -431,6 +461,7 @@ def _summarize_members(
                 blockers=(m.get("blockers") or "").strip(),
                 self_report=self_reported.get(name, ""),
                 source=_member_source(name in self_reported, bool(acts)),
+                links=_member_links(acts),
             )
         )
 

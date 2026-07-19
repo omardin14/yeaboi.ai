@@ -865,6 +865,19 @@ def _identity_fields(raw) -> tuple[str, str]:
     return text.strip(), ""
 
 
+def _work_item_url(project: str, wi_id: str) -> str:
+    """Browser URL for a work item ("" when the org URL is unconfigured).
+
+    Carried on activity items so standup surfaces can link the ticket.
+    """
+    base = (get_azure_devops_org_url() or "").rstrip("/")
+    if not base or not wi_id:
+        return ""
+    from urllib.parse import quote
+
+    return f"{base}/{quote(project)}/_workitems/edit/{wi_id}"
+
+
 def azdevops_recent_activity(project: str = "", days: int = 1, since=None) -> list[dict]:
     """Return work items changed since the window start, plus in-progress (WIP) items.
 
@@ -939,9 +952,10 @@ def azdevops_recent_activity(project: str = "", days: int = 1, since=None) -> li
                         "status": f.get("System.State", ""),
                         "timestamp": str(f.get("System.ChangedDate", ""))[:19],
                         "key": f"#{wi_id}",
+                        "url": _work_item_url(project, wi_id),
                     }
                 )
-        items.extend(_azdo_wip_items(wit_client, safe_project, seen_ids, fields))
+        items.extend(_azdo_wip_items(wit_client, project, safe_project, seen_ids, fields))
         logger.info("azdevops_recent_activity: %d item(s) in last %d day(s)", len(items), days_back)
         return items
     except ValueError as e:
@@ -956,7 +970,7 @@ def azdevops_recent_activity(project: str = "", days: int = 1, since=None) -> li
         return []
 
 
-def _azdo_wip_items(wit_client, safe_project: str, seen_ids: set[str], fields: list[str]) -> list[dict]:
+def _azdo_wip_items(wit_client, project: str, safe_project: str, seen_ids: set[str], fields: list[str]) -> list[dict]:
     """Assigned in-progress work items — best-effort, degrades to [] on any failure."""
     try:
         from azure.devops.v7_1.work_item_tracking.models import Wiql
@@ -992,6 +1006,7 @@ def _azdo_wip_items(wit_client, safe_project: str, seen_ids: set[str], fields: l
                     "status": f.get("System.State", ""),
                     "timestamp": str(f.get("System.ChangedDate", ""))[:19],
                     "key": f"#{wi_id}",
+                    "url": _work_item_url(project, wi_id),
                 }
             )
         return out
@@ -1062,9 +1077,11 @@ def azdevops_recent_commits(project: str = "", days: int = 1, since=None) -> lis
             except Exception as e:  # one bad/empty repo must not hide the others
                 logger.warning("azdevops_recent_commits: repo %s failed: %s", getattr(repo, "name", "?"), e)
                 continue
+            repo_web = (getattr(repo, "web_url", "") or "").rstrip("/")
             for commit in commits or []:
                 author = getattr(commit, "author", None)
                 message = (getattr(commit, "comment", "") or "").splitlines()
+                sha = getattr(commit, "commit_id", "") or ""
                 items.append(
                     {
                         "author": getattr(author, "name", "") or "",
@@ -1072,7 +1089,8 @@ def azdevops_recent_commits(project: str = "", days: int = 1, since=None) -> lis
                         "kind": "commit",
                         "title": f"{message[0] if message else ''} ({repo.name})",
                         "timestamp": str(getattr(author, "date", "") or "")[:19],
-                        "key": (getattr(commit, "commit_id", "") or "")[:8],
+                        "key": sha[:8],
+                        "url": f"{repo_web}/commit/{sha}" if repo_web and sha else "",
                     }
                 )
                 if len(items) >= _MAX_REPO_COMMITS:
@@ -1125,6 +1143,8 @@ def azdevops_recent_prs(project: str = "", days: int = 1, since=None) -> list[di
                     continue
                 creator = getattr(pr, "created_by", None)
                 status = getattr(pr, "status", "") or ""
+                pr_id = getattr(pr, "pull_request_id", "")
+                repo_web = (getattr(repo, "web_url", "") or "").rstrip("/")
                 items.append(
                     {
                         "author": getattr(creator, "display_name", "") or "",
@@ -1133,7 +1153,8 @@ def azdevops_recent_prs(project: str = "", days: int = 1, since=None) -> list[di
                         "title": f"{getattr(pr, 'title', '') or ''} ({repo.name})",
                         "status": "merged" if status == "completed" else status,
                         "timestamp": str(closed or created or "")[:19],
-                        "key": f"!{getattr(pr, 'pull_request_id', '')}",
+                        "key": f"!{pr_id}",
+                        "url": f"{repo_web}/pullrequest/{pr_id}" if repo_web and pr_id else "",
                     }
                 )
                 if len(items) >= _MAX_REPO_PRS:

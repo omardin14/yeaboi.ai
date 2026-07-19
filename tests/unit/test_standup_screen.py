@@ -260,6 +260,28 @@ class TestBuildStandupScreen:
         assert standup_card_teaser("my_update", data) == "No update yet — Generate asks for it"
         assert standup_card_teaser("team", data) == "2 member updates · Enter to collapse"
 
+    def test_member_detail_shows_links(self):
+        from rich.console import Console
+
+        rep = StandupReport(
+            date="2026-07-10",
+            member_updates=(
+                MemberUpdate(
+                    name="Bob",
+                    summary="moved PSOT-1 to review",
+                    links=(("PSOT-1", "https://x.atlassian.net/browse/PSOT-1"),),
+                ),
+            ),
+        )
+        panel = _build_standup_screen({"report": rep, "schedule": {}}, width=110, height=40, view="member:Bob")
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Links" in out
+        assert "↗ PSOT-1" in out
+        assert "browse/PSOT-1" in out  # truncated URL shown alongside the label
+
     def test_my_update_detail_renders_my_member_card(self):
         from rich.console import Console
 

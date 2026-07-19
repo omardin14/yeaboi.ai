@@ -703,6 +703,15 @@ def _actor_fields(actor) -> tuple[str, str]:
     return getattr(actor, "displayName", "") or "", getattr(actor, "emailAddress", "") or ""
 
 
+def _issue_url(issue_key: str) -> str:
+    """Browse URL for an issue key ("" when the base URL is unconfigured).
+
+    Carried on activity items so standup surfaces can link the ticket.
+    """
+    base = (get_jira_base_url() or "").rstrip("/")
+    return f"{base}/browse/{issue_key}" if base and issue_key else ""
+
+
 # Per-issue / total caps for the enriched activity emissions — bound token cost
 # and keep counts honest even on very busy boards.
 _MAX_UPDATES_PER_ISSUE = 5
@@ -774,6 +783,7 @@ def jira_recent_activity(
                     "status": getattr(status, "name", "") if status else "",
                     "timestamp": (getattr(issue.fields, "updated", "") or "")[:19],
                     "key": issue.key,
+                    "url": _issue_url(issue.key),
                 }
             )
             if include_changelog and update_total < _MAX_UPDATES_TOTAL:
@@ -833,6 +843,7 @@ def _changelog_items(issue, summary: str, assignee_name: str, cutoff: datetime) 
             "kind": "update",
             "timestamp": (getattr(history, "created", "") or "")[:19],
             "key": issue.key,
+            "url": _issue_url(issue.key),
         }
         if status_to:
             out.append({**base, "title": f"moved {issue.key} '{summary}' to {status_to}", "status": status_to})
@@ -869,6 +880,7 @@ def _comment_items(issue, summary: str, cutoff: datetime) -> list[dict]:
                 "title": f"commented on {issue.key} '{summary}'",
                 "timestamp": (getattr(comment, "created", "") or "")[:19],
                 "key": issue.key,
+                "url": _issue_url(issue.key),
             }
         )
     return out
@@ -914,6 +926,7 @@ def _wip_items(jira: JIRA, key: str, seen_keys: set[str]) -> list[dict]:
                     "status": getattr(status, "name", "") if status else "",
                     "timestamp": "",
                     "key": issue.key,
+                    "url": _issue_url(issue.key),
                 }
             )
         return out

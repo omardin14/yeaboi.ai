@@ -857,6 +857,7 @@ class TestMemberUpdate:
             "blockers": "none",
             "source": "combined",
             "self_report": "shipped it",
+            "links": (),
         }
 
     def test_self_report_defaults_empty(self):

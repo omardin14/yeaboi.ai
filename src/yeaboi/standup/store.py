@@ -96,6 +96,8 @@ def _dict_to_standup_report(d: dict) -> StandupReport:
             blockers=m.get("blockers", ""),
             source=m.get("source", "inferred"),
             self_report=m.get("self_report", ""),
+            # JSON turned each (label, url) tuple into a list — rebuild tuples.
+            links=tuple((str(li[0]), str(li[1])) for li in m.get("links", ()) if len(li) == 2),
         )
         for m in d.get("member_updates", ())
     )

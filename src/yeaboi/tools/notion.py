@@ -470,6 +470,7 @@ def notion_recent_pages(root_id: str = "", days: int = 1, since=None) -> list[di
                     "title": _page_title(page),
                     "timestamp": (edited or "")[:19],
                     "key": page.get("id", ""),
+                    "url": page.get("url", "") or "",
                 }
             )
         logger.info("notion_recent_pages: %d page(s) in last %d day(s)", len(items), days)

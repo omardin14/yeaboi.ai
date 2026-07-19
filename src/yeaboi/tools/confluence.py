@@ -425,7 +425,23 @@ def _page_cutoff(days: int, since):
     return datetime.now(UTC) - timedelta(days=int(days))
 
 
-def _version_editor_items(conf, page_id: str, title: str, cutoff, exclude: set[str]) -> list[dict]:
+def _page_link(content: dict, page_id: str) -> str:
+    """Browser URL for a page ("" when the base URL is unconfigured).
+
+    Prefers the API's own webui link (correct space/pretty path); falls back to
+    the id-based viewpage URL, which works on both Cloud and Server.
+    """
+    base = (get_confluence_base_url() or "").rstrip("/")
+    if not base or not page_id:
+        return ""
+    links = content.get("_links", {}) if isinstance(content, dict) else {}
+    webui = links.get("webui", "") if isinstance(links, dict) else ""
+    if webui:
+        return f"{base}/wiki{webui}" if not webui.startswith("/wiki") else f"{base}{webui}"
+    return f"{base}/wiki/pages/viewpage.action?pageId={page_id}"
+
+
+def _version_editor_items(conf, page_id: str, title: str, cutoff, exclude: set[str], url: str = "") -> list[dict]:
     """One item per DISTINCT in-window editor of a page beyond those already credited.
 
     The CQL result only exposes the LAST editor; the version history exposes
@@ -458,6 +474,7 @@ def _version_editor_items(conf, page_id: str, title: str, cutoff, exclude: set[s
                 "title": f"edited '{title}'",
                 "timestamp": (version.get("when", "") or "")[:19],
                 "key": page_id,
+                "url": url,
             }
         )
     return out
@@ -505,6 +522,7 @@ def confluence_recent_pages(space_key: str = "", days: int = 1, since=None) -> l
             author = by.get("displayName", "") if isinstance(by, dict) else ""
             title = content.get("title", page.get("title", "Untitled"))
             page_id = content.get("id", page.get("id", ""))
+            page_url = _page_link(content if isinstance(content, dict) else {}, page_id)
             items.append(
                 {
                     "author": author,
@@ -513,6 +531,7 @@ def confluence_recent_pages(space_key: str = "", days: int = 1, since=None) -> l
                     "title": title,
                     "timestamp": (last_updated.get("when", "") or "")[:19] if isinstance(last_updated, dict) else "",
                     "key": page_id,
+                    "url": page_url,
                 }
             )
             credited = {author} if author else set()
@@ -530,13 +549,14 @@ def confluence_recent_pages(space_key: str = "", days: int = 1, since=None) -> l
                             "title": f"created '{title}'",
                             "timestamp": (history.get("createdDate", "") or "")[:19],
                             "key": page_id,
+                            "url": page_url,
                         }
                     )
                 credited.add(creator)
             # Earlier in-window editors hidden behind the last modifier.
             if page_id and version_lookups < _MAX_VERSION_LOOKUPS:
                 version_lookups += 1
-                items.extend(_version_editor_items(conf, page_id, title, cutoff, credited))
+                items.extend(_version_editor_items(conf, page_id, title, cutoff, credited, url=page_url))
         logger.info("confluence_recent_pages: %d item(s) from %d page(s)", len(items), len(pages))
         return items
     except HTTPError as e:

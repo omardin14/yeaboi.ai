@@ -36,6 +36,7 @@ class TestJiraRecentActivity:
         client.search_issues.return_value = [issue]
         monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: client)
         monkeypatch.setattr("yeaboi.tools.jira.get_jira_project_key", lambda: "PROJ")
+        monkeypatch.setattr("yeaboi.tools.jira.get_jira_base_url", lambda: "https://x.atlassian.net")
 
         items = jira_recent_activity("PROJ", days=2)
         assert items == [
@@ -47,6 +48,7 @@ class TestJiraRecentActivity:
                 "status": "In Progress",
                 "timestamp": "2026-07-10T09:00:00",
                 "key": "PROJ-12",
+                "url": "https://x.atlassian.net/browse/PROJ-12",
             }
         ]
 
@@ -538,7 +540,7 @@ class TestAzdoRepoActivity:
     def test_commits_normalized(self, monkeypatch):
         from yeaboi.tools.azure_devops import azdevops_recent_commits
 
-        repo = SimpleNamespace(id="r1", name="api")
+        repo = SimpleNamespace(id="r1", name="api", web_url="https://dev.azure.com/org/Proj/_git/api")
         git = self._git_client(monkeypatch, [repo])
         git.get_commits.return_value = [
             SimpleNamespace(
@@ -556,6 +558,7 @@ class TestAzdoRepoActivity:
                 "title": "add endpoint (api)",
                 "timestamp": "2026-07-17T08:00:00",
                 "key": "abcdef12",
+                "url": "https://dev.azure.com/org/Proj/_git/api/commit/abcdef1234567890",
             }
         ]
         criteria = git.get_commits.call_args.kwargs["search_criteria"]
