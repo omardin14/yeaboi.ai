@@ -10,6 +10,7 @@ from yeaboi.ui.shared._components import (
     PLANNING_THEME,
     Theme,
     build_action_buttons,
+    build_meter,
     build_progress_dots,
     build_scrollbar,
     calc_viewport,
@@ -134,6 +135,29 @@ class TestBuildProgressDots:
         t = Theme(accent="red", accent_bright="bold red")
         result = build_progress_dots(["A", "B"], 0, theme=t)
         assert isinstance(result, Text)
+
+
+class TestBuildMeter:
+    def test_returns_text(self):
+        assert isinstance(build_meter(3, 10), Text)
+
+    def test_glyph_counts_for_known_ratio(self):
+        assert build_meter(8, 10, width=10).plain == "▰" * 8 + "▱" * 2
+
+    def test_zero_filled_is_empty_track(self):
+        assert build_meter(0, 10, width=8).plain == "▱" * 8
+
+    def test_total_zero_does_not_crash(self):
+        # Total clamps to 1, filled clamps to total → a full bar, no ZeroDivisionError.
+        assert build_meter(5, 0, width=6).plain == "▰" * 6
+
+    def test_filled_over_total_clamps_full(self):
+        assert build_meter(20, 10, width=10).plain == "▰" * 10
+
+    def test_custom_theme_and_style(self):
+        t = Theme(accent="red", accent_bright="bold red")
+        assert isinstance(build_meter(1, 2, theme=t), Text)
+        assert isinstance(build_meter(1, 2, style="green"), Text)
 
 
 class TestUsageScreen:

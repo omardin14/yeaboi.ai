@@ -867,3 +867,26 @@ class TestMemberLinks:
         report = engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
         alice = next(m for m in report.member_updates if m.name == "Alice")
         assert alice.links == (("PSOT-9", "https://x.atlassian.net/browse/PSOT-9"),)
+
+
+class TestActivityCount:
+    def test_fallback_updates_count_attributed_items(self):
+        grouped = {
+            "Alice": [{"kind": "update", "title": "a"}, {"kind": "commit", "title": "b"}],
+            "Quentin": [],
+        }
+        updates = engine._build_fallback_member_updates(grouped, {})
+        by_name = {u.name: u for u in updates}
+        assert by_name["Alice"].activity_count == 2
+        assert by_name["Quentin"].activity_count == 0
+
+    def test_llm_path_sets_activity_count(self, monkeypatch, db_path, seeded_session):
+        items = [
+            {"author": "Alice", "kind": "update", "title": "moved PSOT-9", "source": "jira", "key": "PSOT-9"},
+            {"author": "Alice", "kind": "comment", "title": "commented on PSOT-9", "source": "jira", "key": "PSOT-9"},
+        ]
+        _patch_common(monkeypatch, items=items, counts=[("jira", 2)])
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        report = engine.run_standup(seeded_session, db_path=db_path, dry_run=True, deliver=False)
+        alice = next(m for m in report.member_updates if m.name == "Alice")
+        assert alice.activity_count == 2

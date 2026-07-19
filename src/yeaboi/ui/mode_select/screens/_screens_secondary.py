@@ -1662,14 +1662,16 @@ def _build_standup_screen(
     selected_card: int = 0,
     actions: list[str] | None = None,
 ) -> Panel:
-    """Build the Daily Standup screen (overview + expandable section cards).
+    """Build the Daily Standup screen (compact dashboard + expandable section cards).
 
-    Follows the team-analysis pattern: the overview shows headline stats plus a
-    selectable list of sections (Team Summary, Sprint & Confidence, My Update,
-    Team — which expands inline into per-member sub-rows — Activity, Schedule,
-    Notices); ``view`` set to a card key from ``standup_card_order`` renders
-    that section's detail. Uses STANDUP_THEME (magenta) with shared buttons,
-    scrollbar, and viewport.
+    A pinned status strip under the subtitle carries the sprint/day/confidence
+    facts as meters (visible on every view, never scrolls away), with an
+    optional one-row notice banner (transient message or first warning). The
+    overview body is just the selectable section list (Team Summary, My
+    Update, Team — which expands inline into per-member sub-rows — Activity,
+    Schedule, Notices); ``view`` set to a card key from ``standup_card_order``
+    renders that section's detail. Uses STANDUP_THEME (magenta) with shared
+    buttons, scrollbar, meters, and viewport.
 
     standup_data keys: session_name, my_name, config (dict|None), schedule
     (dict), report (StandupReport|None), message (str, transient status line),
@@ -1678,21 +1680,64 @@ def _build_standup_screen(
     # See README: "Daily Standup" — TUI page
     """
     from yeaboi.ui.mode_select.screens._standup_sections import (
+        _confidence_style,
         _StandupCtx,
         build_standup_detail,
         build_standup_overview,
         standup_card_title,
     )
-    from yeaboi.ui.shared._components import STANDUP_THEME, build_reveal_subtitle, standup_title
+    from yeaboi.ui.shared._components import STANDUP_THEME, build_meter, build_reveal_subtitle, standup_title
 
     theme = STANDUP_THEME
     title = standup_title(shimmer_tick)
     session_name = standup_data.get("session_name", "")
     if view == "overview":
-        sub_text = f"Daily standup for {session_name}" if session_name else "Daily standup"
+        base = f"Daily standup for {session_name}" if session_name else "Daily standup"
+        sub_text = f"{base}  ·  ↑/↓ sections · Enter open · ←/→ buttons"
+        if len(_PAD) + len(sub_text) > width - 6:  # hint doesn't fit → keep just the base
+            sub_text = base
     else:
         sub_text = f"Overview › {standup_card_title(view, standup_data)}"
     sub = build_reveal_subtitle(sub_text, sub_reveal, pad=_PAD)
+    sub.no_wrap = True  # the header row budget counts the subtitle as one row
+    sub.overflow = "ellipsis"
+
+    report = standup_data.get("report")
+    # Pinned status strip: the sprint facts stay visible while the body scrolls.
+    # no_wrap on strip + banner is load-bearing: header_h counts each as ONE row,
+    # so a wrap would push the button bottom border off the fixed-height panel.
+    strip = Text(_PAD, justify="left", no_wrap=True, overflow="ellipsis")
+    if report is not None:
+        strip.append(f"Sprint {report.sprint_name or 'unknown'}", style=theme.value)
+        if report.sprint_total_days:
+            strip.append("   ")
+            strip.append(f"Day {report.sprint_day}/{report.sprint_total_days} ", style=theme.muted)
+            strip.append_text(build_meter(report.sprint_day, report.sprint_total_days, theme=theme))
+        if report.confidence_label:
+            conf_style = _confidence_style(theme, report.confidence_label)
+            strip.append("   ")
+            strip.append(f"{report.confidence_label} ", style=conf_style)
+            if report.confidence_label != "Insufficient data":
+                strip.append_text(build_meter(report.confidence_pct, 100, theme=theme, style=conf_style))
+                strip.append(f" {report.confidence_pct}%", style=conf_style)
+    else:
+        strip.append("No standup yet — Generate creates today's standup", style=theme.muted)
+
+    # One-row banner: a transient status message wins, else the first warning.
+    message = standup_data.get("message", "")
+    warnings = tuple(getattr(report, "warnings", ()) or ()) if report is not None else ()
+    banner: Text | None = None
+    if message:
+        banner = Text(_PAD + message, style=theme.accent_bright, justify="left", no_wrap=True, overflow="ellipsis")
+    elif warnings:
+        n = len(warnings)
+        prefix = f"⚠ {n} notice{'s' if n != 1 else ''} · "
+        # Panel border (2) + padding (4) leave width-6 columns for content.
+        room = max(16, (width - 6) - len(_PAD) - len(prefix) - 1)
+        gist = warnings[0]
+        if len(gist) > room:
+            gist = gist[: room - 1] + "…"
+        banner = Text(_PAD + prefix + gist, style=theme.warn, justify="left", no_wrap=True, overflow="ellipsis")
 
     ctx = _StandupCtx(theme, width)
     if view == "overview":
@@ -1702,15 +1747,28 @@ def _build_standup_screen(
     body_lines = ctx.lines
 
     # ── Layout using shared components ────────────────────────────
-    viewport_h = calc_viewport(height, header_h=10, action_h=4)
+    # header_h must match the Group rows above the viewport exactly (blank +
+    # 6-row title + blank + sub + blank + strip + optional banner + blank),
+    # else the button bottom border falls off the fixed-height panel.
+    header_h = 12 + (1 if banner is not None else 0)
+    if (height - 4) - header_h - 4 < 3:
+        # Terminal too short for the strip — drop it rather than push the
+        # buttons off the panel (same floor as before the strip existed).
+        strip = None
+        banner = None
+        header_h = 10
+    viewport_h = calc_viewport(height, header_h=header_h, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
-    # On the overview, keep the selected section row visible (auto-scroll).
-    if view == "overview" and ctx.first_card_row is not None:
-        row_top = ctx.first_card_row + selected_card
-        if row_top + 1 > scroll_offset + viewport_h:
-            scroll_offset = row_top + 1 - viewport_h
-        elif row_top < scroll_offset:
+    # On the overview, keep the selected card fully visible (auto-scroll). A
+    # card may span more than one row (summary), so scroll its last row into
+    # view first, then let its first row win.
+    if view == "overview" and ctx.card_rows and selected_card < len(ctx.card_rows):
+        row_top = ctx.card_rows[selected_card]
+        row_bot = ctx.card_rows[selected_card + 1] - 1 if selected_card + 1 < len(ctx.card_rows) else total_lines - 1
+        if row_bot + 1 > scroll_offset + viewport_h:
+            scroll_offset = row_bot + 1 - viewport_h
+        if row_top < scroll_offset:
             scroll_offset = row_top
     actual_scroll = min(scroll_offset, max_scroll)
     publish_geometry(scroll_meta, max_scroll, viewport_h)
@@ -1743,11 +1801,15 @@ def _build_standup_screen(
     else:
         viewport_renderable = Group(*padded_lines)
 
+    header_rows: list = [] if strip is None else [Text(""), strip]
+    if banner is not None:
+        header_rows.append(banner)
     content = Group(
         Text(""),
         title,
         Text(""),
         sub,
+        *header_rows,
         Text(""),
         viewport_renderable,
         Text(""),

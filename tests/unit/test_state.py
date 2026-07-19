@@ -858,6 +858,7 @@ class TestMemberUpdate:
             "source": "combined",
             "self_report": "shipped it",
             "links": (),
+            "activity_count": 0,
         }
 
     def test_self_report_defaults_empty(self):

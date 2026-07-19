@@ -78,8 +78,8 @@ class TestBuildStandupScreen:
             assert isinstance(_build_standup_screen(data, width=80, height=24, action_sel=sel), Panel)
 
     def test_report_renders_as_themed_rows_not_emoji(self):
-        # The dashboard should use clean label/value rows, not the plaintext
-        # emoji dump used for Slack/email delivery.
+        # The dashboard should use the status strip (meters) and clean rows,
+        # not the plaintext emoji dump used for Slack/email delivery.
         from rich.console import Console
 
         panel = _build_standup_screen({"report": _report(), "schedule": {"installed": False}}, width=100, height=60)
@@ -87,9 +87,56 @@ class TestBuildStandupScreen:
         with console.capture() as cap:
             console.print(panel)
         out = cap.get()
-        assert "Confidence:" in out
         assert "At risk" in out
+        assert "▰" in out  # status-strip meters
         assert "🟡" not in out and "🟢" not in out  # no emoji in the TUI dashboard
+
+    def test_status_strip_shows_sprint_day_and_confidence(self):
+        from rich.console import Console
+
+        panel = _build_standup_screen({"report": _report(), "schedule": {}}, width=110, height=40)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Sprint Sprint 5" in out
+        assert "Day 3/10" in out
+        assert "82%" in out
+        # The old duplicated header block is gone.
+        assert "Latest Standup" not in out
+        assert "Sections" not in out
+
+    def test_status_strip_no_report(self):
+        from rich.console import Console
+
+        panel = _build_standup_screen({"report": None, "schedule": {}}, width=100, height=30)
+        console = Console(width=110, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        assert "No standup yet" in cap.get()
+
+    def test_banner_shows_first_warning(self):
+        from rich.console import Console
+
+        rep = StandupReport(date="2026-07-10", warnings=("Jira: authentication failed", "second"))
+        panel = _build_standup_screen({"report": rep, "schedule": {}}, width=110, height=40)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "⚠ 2 notices · Jira: authentication failed" in out
+
+    def test_banner_message_wins_over_warnings(self):
+        from rich.console import Console
+
+        rep = StandupReport(date="2026-07-10", warnings=("Jira: authentication failed",))
+        panel = _build_standup_screen({"report": rep, "schedule": {}, "message": "Generated."}, width=110, height=40)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "Generated." in out
+        assert "⚠ 1 notice ·" not in out
 
     def test_warnings_render_in_notices_detail(self):
         from rich.console import Console
@@ -155,11 +202,11 @@ class TestBuildStandupScreen:
         with console.capture() as cap:
             console.print(panel)
         out = cap.get()
-        assert "Sections" in out
         assert "Team Summary" in out
-        assert "Sprint & Confidence" in out
+        assert "Sprint & Confidence" not in out  # sprint facts live in the strip now
         assert "My Update" in out
-        assert "1 member update" in out and "Enter to expand" in out  # collapsed Team row
+        # Collapsed Team row: count teaser with active/quiet glyphs.
+        assert "1 update · 1 active ● 0 quiet ○" in out
         assert "Alice" not in out  # members hidden until the Team row is expanded
 
     def test_overview_expanded_team_shows_member_subrows(self):
@@ -171,8 +218,9 @@ class TestBuildStandupScreen:
         with console.capture() as cap:
             console.print(panel)
         out = cap.get()
-        assert "Enter to collapse" in out
-        assert "└ Alice" in out  # tree guide on the (only, hence last) sub-row
+        assert "▾" in out  # expanded chevron on the Team row
+        assert "└ ●" in out  # tree guide + active glyph on the (only, hence last) sub-row
+        assert "Alice" in out
 
     def test_member_detail_shows_self_report_and_analysis(self):
         from rich.console import Console
@@ -226,12 +274,11 @@ class TestBuildStandupScreen:
 
         rep = StandupReport(date="2026-07-10", member_updates=_report().member_updates, warnings=("w",))
         data = {"report": rep, "my_name": "Bob"}
-        assert standup_card_order(data) == ["summary", "sprint", "my_update", "team", "activity", "schedule", "notices"]
+        assert standup_card_order(data) == ["summary", "my_update", "team", "activity", "schedule", "notices"]
         data["team_expanded"] = True
         # Sub-rows insert right after "team"; my own card never appears there.
         assert standup_card_order(data) == [
             "summary",
-            "sprint",
             "my_update",
             "team",
             "member:Alice",
@@ -252,13 +299,70 @@ class TestBuildStandupScreen:
         )
         data = {"report": rep, "my_name": "Bob"}
         assert standup_card_teaser("my_update", data) == "auth work · ✍ update"
-        assert standup_card_teaser("team", data) == "1 member update · Enter to expand"
-        data["team_expanded"] = True
-        assert standup_card_teaser("team", data) == "1 member update · Enter to collapse"
+        # Alice has a real summary (legacy report, activity_count 0) → counted active.
+        assert standup_card_teaser("team", data) == "1 update · 1 active ● 0 quiet ○"
         # No member matching my_name → nudge towards Generate (which asks for it).
         data["my_name"] = "Zed"
         assert standup_card_teaser("my_update", data) == "No update yet — Generate asks for it"
-        assert standup_card_teaser("team", data) == "2 member updates · Enter to collapse"
+        assert standup_card_teaser("team", data) == "2 updates · 2 active ● 0 quiet ○"
+
+    def test_member_teaser_glyphs_and_gist(self):
+        from yeaboi.ui.mode_select.screens._standup_sections import standup_card_teaser
+
+        rep = StandupReport(
+            date="2026-07-10",
+            member_updates=(
+                MemberUpdate(
+                    name="Ada",
+                    summary="moved PSOT-9 to review",
+                    activity_count=2,
+                    links=(("PSOT-9", "https://x/browse/PSOT-9"),),
+                ),
+                MemberUpdate(name="Quiet Quentin", summary="No activity detected.", activity_count=0),
+            ),
+        )
+        data = {"report": rep, "my_name": "Me"}
+        # Active member leads with the first ticket reference.
+        assert standup_card_teaser("member:Ada", data) == "PSOT-9 · moved PSOT-9 to review"
+        assert standup_card_teaser("member:Quiet Quentin", data) == "no activity detected"
+        assert standup_card_teaser("team", data) == "2 updates · 1 active ● 1 quiet ○"
+
+    def test_expanded_member_rows_show_quiet_glyph(self):
+        from rich.console import Console
+
+        rep = StandupReport(
+            date="2026-07-10",
+            member_updates=(
+                MemberUpdate(name="Ada", summary="shipped auth", activity_count=1),
+                MemberUpdate(name="Quentin", summary="No activity detected.", activity_count=0),
+            ),
+        )
+        data = {"report": rep, "schedule": {}, "my_name": "Me", "team_expanded": True}
+        panel = _build_standup_screen(data, width=110, height=40)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        out = cap.get()
+        assert "├ ●" in out  # active member glyph
+        assert "└ ○" in out  # quiet member glyph on the last sub-row
+        assert "no activity detected" in out
+
+    def test_summary_teaser_wraps_to_two_rows(self):
+        from rich.console import Console
+
+        long_summary = (
+            "The sprint is in a critical position at day 8, with only 25% confidence. "
+            "Auth0 log streaming is complete but GuardDuty and Teleport remain in flight."
+        )
+        rep = StandupReport(date="2026-07-10", team_summary=long_summary)
+        panel = _build_standup_screen({"report": rep, "schedule": {}}, width=110, height=40)
+        console = Console(width=120, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        lines = [ln for ln in cap.get().splitlines() if "critical position" in ln or "Auth0" in ln]
+        # First chunk on the card row, continuation (ellipsized) on the next row.
+        assert len(lines) == 2
+        assert "…" in lines[1]
 
     def test_member_detail_shows_links(self):
         from rich.console import Console
@@ -420,7 +524,22 @@ class TestButtonRowNotClipped:
             assert label in out
         # The My Update button is gone — Generate collects the user's update itself.
         assert "│ My Update │" not in out
-        assert "Enter to open" in out and "←/→ buttons" in out
+        # The key hint moved into the subtitle line (no standalone hint row).
+        assert "↑/↓ sections" in out and "←/→ buttons" in out
+
+    def test_button_bottom_border_renders_with_banner(self):
+        # A warning banner adds a header row — the height budget must absorb it
+        # or the button bottom border falls off the fixed-height panel.
+        from rich.console import Console
+
+        rep = StandupReport(date="2026-07-10", warnings=("Jira: authentication failed",))
+        data = {"report": rep, "schedule": {}}
+        for height in (24, 30, 40):
+            panel = _build_standup_screen(data, width=100, height=height)
+            console = Console(width=110, height=height + 2, file=open("/dev/null", "w"))
+            with console.capture() as cap:
+                console.print(panel)
+            assert "╰──" in cap.get().splitlines()[-3]
 
     def test_activity_detail_shows_window(self):
         from rich.console import Console

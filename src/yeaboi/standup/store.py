@@ -98,6 +98,7 @@ def _dict_to_standup_report(d: dict) -> StandupReport:
             self_report=m.get("self_report", ""),
             # JSON turned each (label, url) tuple into a list — rebuild tuples.
             links=tuple((str(li[0]), str(li[1])) for li in m.get("links", ()) if len(li) == 2),
+            activity_count=int(m.get("activity_count", 0)),
         )
         for m in d.get("member_updates", ())
     )
