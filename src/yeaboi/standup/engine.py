@@ -324,6 +324,7 @@ def _build_fallback_member_updates(grouped: dict[str, list[dict]], self_reported
                 self_report=self_reported.get(name, ""),
                 source=_member_source(name in self_reported, bool(acts)),
                 links=_member_links(acts),
+                activity_count=len(acts),
             )
         )
     # Self-reporters missing from the grouping (shouldn't happen — run_standup
@@ -462,6 +463,7 @@ def _summarize_members(
                 self_report=self_reported.get(name, ""),
                 source=_member_source(name in self_reported, bool(acts)),
                 links=_member_links(acts),
+                activity_count=len(acts),
             )
         )
 

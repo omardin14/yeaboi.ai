@@ -280,6 +280,7 @@ class MemberUpdate:
     source: str = "inferred"  # "inferred" (activity only) | "self-reported" (typed, no activity) | "combined" (both)
     self_report: str = ""  # the member's own typed update, kept verbatim as supporting context
     links: tuple[tuple[str, str], ...] = ()  # (label, url) refs from their activity — tuple-of-pairs stays frozen
+    activity_count: int = 0  # attributed activity items today — drives the ●/○ active/quiet glyphs in the TUI
 
 
 @dataclass(frozen=True)

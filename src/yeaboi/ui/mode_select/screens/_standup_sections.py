@@ -6,15 +6,18 @@ detail view per card. Unlike analysis, the card list is COMPUTED per report —
 each team member gets their own card — so the registry is a set of functions
 over the standup data dict, not a static table.
 
-Card keys: ``"summary"``, ``"sprint"``, ``"my_update"`` (the standup user's own
-card), ``"team"`` (one row for everyone else — expands inline into
+Card keys: ``"summary"``, ``"my_update"`` (the standup user's own card),
+``"team"`` (one row for everyone else — expands inline into
 ``"member:<name>"`` sub-rows when ``data["team_expanded"]`` is set),
 ``"activity"``, ``"schedule"``, and ``"notices"`` (only when the report carries
-warnings).
+warnings). Sprint/day/confidence facts live in the pinned status strip built
+by ``_build_standup_screen``, not in a card.
 
 All colours come from ``STANDUP_THEME`` (no hardcoded values) and all rows are
 height-1 ``Text`` lines, so the viewport is a plain list slice — no need for
-the analysis module's height-aware packer.
+the analysis module's height-aware packer. Cards may span more than one row
+(the summary teaser wraps to two); ``_StandupCtx.card_rows`` records each
+card's first row so the auto-scroll never assumes one row per card.
 
 # See README: "Daily Standup" — TUI page
 """
@@ -28,20 +31,22 @@ from rich.text import Text
 from yeaboi.ui.shared._components import PAD, Theme
 
 _TEASER_W = 46  # max teaser length on an overview section row
+_TITLE_W = 22  # section-title column width — teasers align to it, as does the summary continuation row
 
 
 class _StandupCtx:
     """Tiny line accumulator for standup screens (all rows are height 1).
 
-    Tracks ``first_card_row`` so the overview can auto-scroll the selected
-    section row into view (same idea as _TaCtx.overview_first_card_row).
+    Tracks ``card_rows`` (the body-row index where each overview card starts)
+    so the auto-scroll can bring a selected card fully into view even when a
+    card spans more than one row (the summary teaser wraps to two).
     """
 
     def __init__(self, theme: Theme, width: int) -> None:
         self.lines: list[Text] = []
         self.theme = theme
         self.width = width
-        self.first_card_row: int | None = None
+        self.card_rows: list[int] = []
 
     def add(self, line: Text) -> None:
         self.lines.append(line)
@@ -71,7 +76,9 @@ class _StandupCtx:
         preserve_newlines keeps the user's own paragraph breaks (multi-line
         self-reports typed with Alt+Enter) instead of collapsing them.
         """
-        wrap_w = max(24, self.width - len(PAD) - len(indent) - 6)
+        # -7: panel border+padding (6) plus the scrollbar column (1) — one char
+        # over and the row wraps, silently eating a viewport row.
+        wrap_w = max(24, self.width - len(PAD) - len(indent) - 7)
         paragraphs = text.splitlines() if preserve_newlines else [text]
         for para in paragraphs or [""]:
             for chunk in textwrap.wrap(para, width=wrap_w) or [""]:
@@ -95,7 +102,7 @@ def standup_card_order(data: dict) -> list[str]:
     report = data.get("report")
     if report is None:
         return ["schedule"]
-    order = ["summary", "sprint", "my_update", "team"]
+    order = ["summary", "my_update", "team"]
     if data.get("team_expanded"):
         order += [f"member:{m.name}" for m in _team_members(data)]
     order += ["activity", "schedule"]
@@ -115,6 +122,18 @@ def _team_members(data: dict) -> list:
 
 def _confidence_style(theme: Theme, label: str) -> str:
     return {"On track": theme.good, "At risk": theme.warn, "Behind": theme.bad}.get(label, theme.muted)
+
+
+def _member_is_active(m) -> bool:
+    """True when the member has attributed activity today.
+
+    Reports saved before ``activity_count`` existed deserialize with 0 for
+    everyone — fall back to the summary text so old standups don't render the
+    whole team as quiet.
+    """
+    if getattr(m, "activity_count", 0):
+        return True
+    return bool(m.summary) and m.summary != "No activity detected."
 
 
 def _member(data: dict, name: str):
@@ -137,7 +156,6 @@ def standup_card_title(key: str, data: dict) -> str:
         return key[len("member:") :]
     return {
         "summary": "Team Summary",
-        "sprint": "Sprint & Confidence",
         "my_update": "My Update",
         "team": "Team",
         "activity": "Activity",
@@ -153,11 +171,6 @@ def standup_card_teaser(key: str, data: dict) -> str:
     if key == "summary":
         text = (report.team_summary if report else "") or "No summary yet"
         return text[: _TEASER_W - 1] + "…" if len(text) > _TEASER_W else text
-    if key == "sprint":
-        if report is None:
-            return ""
-        day = f"Day {report.sprint_day}/{report.sprint_total_days}" if report.sprint_total_days else ""
-        return "  ·  ".join(x for x in (day, _confidence_text(report)) if x)
     if key == "my_update":
         m = _member(data, data.get("my_name", ""))
         if m is None:
@@ -165,17 +178,23 @@ def standup_card_teaser(key: str, data: dict) -> str:
         gist = (m.summary or "No activity detected.")[:_TEASER_W]
         return f"{gist} · ✍ update" if m.self_report else gist
     if key == "team":
-        n = len(_team_members(data))
-        if n == 0:
+        members = _team_members(data)
+        if not members:
             return "No member updates"
-        hint = "Enter to collapse" if data.get("team_expanded") else "Enter to expand"
-        return f"{n} member update{'s' if n != 1 else ''} · {hint}"
+        active = sum(1 for m in members if _member_is_active(m))
+        quiet = len(members) - active
+        return f"{len(members)} update{'s' if len(members) != 1 else ''} · {active} active ● {quiet} quiet ○"
     if key.startswith("member:"):
         m = _member(data, key[len("member:") :])
         if m is None:
             return ""
-        gist = (m.summary or "No activity detected.")[:_TEASER_W]
-        return f"{gist} · ✍ update" if m.self_report else gist
+        if not _member_is_active(m) and not m.self_report:
+            return "no activity detected"
+        gist = m.summary or "No activity detected."
+        # Lead with the first ticket/PR reference so who-is-on-what scans at a glance.
+        if getattr(m, "links", ()):
+            gist = f"{m.links[0][0]} · {gist}"
+        return gist[: _TEASER_W - 1] + "…" if len(gist) > _TEASER_W else gist
     if key == "activity":
         if report is None or not report.activity_counts:
             return "no sources"
@@ -220,16 +239,7 @@ def _detail_summary(ctx: _StandupCtx, data: dict) -> None:
     theme = ctx.theme
     ctx.heading(f"Team Summary — {report.date}")
     ctx.wrapped(report.team_summary or "No team summary was produced.", theme.value)
-    if report.confidence_rationale:
-        ctx.blank()
-        ctx.row("Confidence", _confidence_text(report), _confidence_style(theme, report.confidence_label))
-        ctx.wrapped(report.confidence_rationale, theme.dim, indent="      ")
-
-
-def _detail_sprint(ctx: _StandupCtx, data: dict) -> None:
-    report = data["report"]
-    theme = ctx.theme
-    ctx.heading("Sprint & Confidence")
+    ctx.blank()
     ctx.row("Sprint", report.sprint_name or "unknown")
     if report.sprint_total_days:
         ctx.row("Day", f"{report.sprint_day} of {report.sprint_total_days}")
@@ -348,7 +358,6 @@ def build_standup_detail(ctx: _StandupCtx, key: str, data: dict) -> None:
         return
     builder = {
         "summary": _detail_summary,
-        "sprint": _detail_sprint,
         "activity": _detail_activity,
         "schedule": _detail_schedule,
         "notices": _detail_notices,
@@ -365,44 +374,79 @@ def build_standup_detail(ctx: _StandupCtx, key: str, data: dict) -> None:
 
 
 def build_standup_overview(ctx: _StandupCtx, data: dict, selected_card: int) -> None:
-    """Append the overview lines: headline stats + the selectable section list."""
+    """Append the overview lines: just the selectable section list.
+
+    The headline stats (sprint/day/confidence) and transient message live in
+    the pinned status strip + banner built by ``_build_standup_screen``, so
+    the body starts straight at the cards.
+    """
     theme = ctx.theme
     report = data.get("report")
-    config = data.get("config") or {}
-
-    message = data.get("message", "")
-    if message:
-        ctx.add(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
-
-    if report is not None:
-        ctx.heading(f"Latest Standup — {report.date}")
-        ctx.row("Sprint", report.sprint_name or "unknown")
-        if report.sprint_total_days:
-            ctx.row("Day", f"{report.sprint_day} of {report.sprint_total_days}")
-        ctx.row("Confidence", _confidence_text(report), _confidence_style(theme, report.confidence_label))
-    else:
-        ctx.heading("Latest Standup")
-        ctx.line("No standup generated yet. Press Generate to create one.", theme.muted)
-        if not config:
-            ctx.line("Schedule not configured — press Configure to set a time.", theme.muted)
-
-    ctx.heading("Sections")
-    ctx.add(Text(PAD + "    ↑/↓ section  ·  Enter to open  ·  ←/→ buttons", style=theme.dim, justify="left"))
-    ctx.first_card_row = len(ctx.lines)
     order = standup_card_order(data)
     for i, key in enumerate(order):
+        ctx.card_rows.append(len(ctx.lines))
         selected = i == selected_card
-        row = Text(PAD + "  ", justify="left")
+        # no_wrap keeps every card row height-1 on narrow terminals — the
+        # card_rows auto-scroll math counts rows, so a wrap would corrupt it.
+        row = Text(PAD + "  ", justify="left", no_wrap=True, overflow="ellipsis")
         row.append("▸ " if selected else "  ", style=theme.accent if selected else theme.dim)
         title = standup_card_title(key, data)
         if key == "team":  # trailing chevron shows the inline expand state
             title += "  ▾" if data.get("team_expanded") else "  ▸"
-        elif key.startswith("member:"):
-            # Member sub-rows nest under Team with tree guides (└ on the last).
-            nxt = order[i + 1] if i + 1 < len(order) else ""
-            title = f"  {'├' if nxt.startswith('member:') else '└'} {title}"
-        row.append(f"{title:<22s}", style=f"bold {theme.accent}" if selected else theme.value)
+        if key.startswith("member:"):
+            _member_row(ctx, row, data, order, i, selected)
+            continue
+        row.append(f"{title:<{_TITLE_W}s}", style=f"bold {theme.accent}" if selected else theme.value)
+        if key == "summary" and report is not None and report.team_summary:
+            _summary_rows(ctx, row, report.team_summary, selected)
+            continue
         teaser = standup_card_teaser(key, data)
         if teaser:
             row.append(f"  {teaser}", style=theme.muted if selected else theme.dim)
         ctx.add(row)
+
+
+def _summary_rows(ctx: _StandupCtx, row: Text, text: str, selected: bool) -> None:
+    """Emit the Team Summary card as up to two height-1 rows.
+
+    The teaser wraps onto a continuation row aligned under the teaser column;
+    anything beyond two rows is ellipsized (the detail view has the full text).
+    """
+    theme = ctx.theme
+    chunks = textwrap.wrap(text, width=_TEASER_W) or [text]
+    row.append(f"  {chunks[0]}", style=theme.muted if selected else theme.dim)
+    ctx.add(row)
+    if len(chunks) > 1:
+        cont = chunks[1] + ("…" if len(chunks) > 2 else "")
+        indent = PAD + "  " + "  " + " " * _TITLE_W + "  "  # marker + title columns
+        style = theme.muted if selected else theme.dim
+        ctx.add(Text(indent + cont, style=style, justify="left", no_wrap=True, overflow="ellipsis"))
+
+
+def _member_row(ctx: _StandupCtx, row: Text, data: dict, order: list[str], i: int, selected: bool) -> None:
+    """Emit one expanded Team sub-row: tree guide + activity glyph + name + gist.
+
+    ``●`` marks members with attributed activity today, ``○`` quiet ones (their
+    whole row dims so the active people pop), and ``✍`` rides along when they
+    typed their own update.
+    """
+    theme = ctx.theme
+    key = order[i]
+    name = key[len("member:") :]
+    m = _member(data, name)
+    nxt = order[i + 1] if i + 1 < len(order) else ""
+    guide = "├" if nxt.startswith("member:") else "└"
+    active = _member_is_active(m) if m is not None else False
+    wrote = bool(m.self_report) if m is not None else False
+    row.append(f"  {guide} ", style=theme.dim)
+    # Fixed 2-char glyph cell keeps the name column aligned with or without ✍.
+    row.append("●" if active else "○", style=theme.good if active else theme.dim)
+    row.append("✍" if wrote else " ", style=theme.accent_bright)
+    row.append(" ")
+    name_w = max(1, _TITLE_W - 7)  # guide "  ├ " (4) + glyph cell (2) + gap (1)
+    quiet_style = theme.dim if not (active or wrote) else theme.value
+    row.append(f"{name:<{name_w}s}", style=f"bold {theme.accent}" if selected else quiet_style)
+    teaser = standup_card_teaser(key, data)
+    if teaser:
+        row.append(f"  {teaser}", style=theme.muted if selected else theme.dim)
+    ctx.add(row)

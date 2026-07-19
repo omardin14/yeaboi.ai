@@ -291,3 +291,25 @@ class TestMemberLinksRoundTrip:
             store._conn.execute("UPDATE standup_history SET report_json = ?", (json.dumps(d),))
             latest = store.get_latest_report("s1")
         assert latest.member_updates[0].links == ()
+
+
+class TestActivityCountRoundTrip:
+    def test_round_trips(self, db_path):
+        member = MemberUpdate(name="Alice", summary="login", activity_count=3)
+        with StandupStore(db_path) as store:
+            store.record_run(_make_report(member_updates=(member,)))
+            latest = store.get_latest_report("s1")
+        assert latest.member_updates[0].activity_count == 3
+
+    def test_old_member_without_count_deserializes(self, db_path):
+        import json
+
+        with StandupStore(db_path) as store:
+            store.record_run(_make_report())
+            (raw,) = store._conn.execute("SELECT report_json FROM standup_history").fetchone()
+            d = json.loads(raw)
+            for m in d["member_updates"]:
+                m.pop("activity_count", None)
+            store._conn.execute("UPDATE standup_history SET report_json = ?", (json.dumps(d),))
+            latest = store.get_latest_report("s1")
+        assert latest.member_updates[0].activity_count == 0
