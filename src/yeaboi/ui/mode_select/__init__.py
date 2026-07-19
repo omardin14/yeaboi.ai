@@ -1284,10 +1284,13 @@ def _collect_standup_data(message: str = "") -> dict:
     session name, saved standup config, OS-schedule status, and the latest
     generated StandupReport (if any).
     """
+    from yeaboi.config import get_standup_user_name
+
     data: dict = {
         "message": message,
         "session_id": "",
         "session_name": "",
+        "my_name": get_standup_user_name(),
         "config": None,
         "report": None,
         "schedule": {},
@@ -1313,6 +1316,10 @@ def _collect_standup_data(message: str = "") -> dict:
         with StandupStore(_ana_dbp) as store:
             data["config"] = store.load_config(session_id)
             data["report"] = store.get_latest_report(session_id)
+        # The engine resolves "Me" to the user's real tracker identity (e.g. their
+        # Jira displayName) — the report's my_name drives the "My Update" row.
+        if data["report"] is not None and data["report"].my_name:
+            data["my_name"] = data["report"].my_name
     except Exception:
         logger.warning("standup: failed to load standup store data", exc_info=True)
     try:
@@ -1324,12 +1331,12 @@ def _collect_standup_data(message: str = "") -> dict:
     return data
 
 
-def _standup_generate(session_id: str) -> str:
+def _standup_generate(session_id: str, on_progress=None) -> str:
     """Run a standup for preview (no delivery) and return a status message."""
     try:
         from yeaboi.standup.engine import run_standup
 
-        report = run_standup(session_id, deliver=False, dry_run=True)
+        report = run_standup(session_id, deliver=False, dry_run=True, on_progress=on_progress)
         warn = f" · {len(report.warnings)} notice(s)" if report.warnings else ""
         logger.info(
             "standup: generated report — day %s/%s, %d notice(s) (session=%s)",
@@ -1388,6 +1395,7 @@ def _standup_generate_flow(
         prompt="Your update for today (Enter to skip)",
         step="Generate standup  —  add your update",
         default="",
+        box_rows=6,
         attachments=attachments,
         scope_id=session_id or "standup",
     )
@@ -1405,7 +1413,38 @@ def _standup_generate_flow(
                 images=referenced_images(update, attachments),
             )
         logger.info("standup generate: self-update saved (session=%s)", session_id)
-    return _standup_generate(session_id)
+
+    # Run the pipeline on a worker thread while the frame loop shows live
+    # progress — collection + the LLM call can take many seconds, and without
+    # this the input box just sat frozen (same pattern as the analysis pages).
+    import threading
+
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_progress_screen
+
+    progress: list[str] = ["Starting"]
+    result_box: list = [None]
+
+    def _worker() -> None:
+        result_box[0] = _standup_generate(session_id, on_progress=progress.append)
+
+    thread = threading.Thread(target=_worker, name="standup-generate", daemon=True)
+    thread.start()
+    start = time.monotonic()
+    while thread.is_alive():
+        elapsed = time.monotonic() - start
+        w, h = console.size
+        live.update(
+            _build_standup_progress_screen(
+                list(progress),
+                width=w,
+                height=max(10, h - 1),
+                elapsed=elapsed,
+                anim_tick=elapsed,
+            )
+        )
+        time.sleep(1 / 30)
+    thread.join()
+    return result_box[0]
 
 
 def _ask_regen_feedback(console: Console, live, read_key, frame_time, supports_timeout, label: str) -> str | None:
@@ -1536,7 +1575,12 @@ def _standup_read_line(
             return value.strip() or default
         if k == "esc":
             return None
-        if k == "backspace":
+        if k == "alt+enter":
+            # Alt+Enter / Ctrl+N inserts a newline — only meaningful in the large
+            # multi-row box; the single-row field keeps ignoring it.
+            if box_rows > 1:
+                value += "\n"
+        elif k == "backspace":
             value = value[:-1]
         elif k == "clear":  # Ctrl+U
             value = ""
@@ -1581,6 +1625,7 @@ def _standup_configure(console: Console, live, read_key, frame_time, supports_ti
     cur_days = existing.get("weekdays", "1-5")
     cur_channels = ", ".join(existing.get("delivery_channels", ["terminal"]))
     cur_repo = existing.get("repo_path", "")
+    cur_aliases = existing.get("my_aliases", "")
     cur_enabled = "yes" if existing.get("enabled") else "no"
 
     def _ask(prompt: str, step: str, default: str) -> str | None:
@@ -1592,22 +1637,31 @@ def _standup_configure(console: Console, live, read_key, frame_time, supports_ti
         return value
 
     # Ask for the STANDUP time (when it happens); the job fires a few minutes before.
-    time_in = _ask("Standup time (HH:MM) — the meeting time", "Configure standup  (1/6)", cur_time)
+    time_in = _ask("Standup time (HH:MM) — the meeting time", "Configure standup  (1/7)", cur_time)
     if time_in is None:
         return "Configure cancelled."
-    lead_in = _ask("Run how many minutes before the standup?", "Configure standup  (2/6)", cur_lead)
+    lead_in = _ask("Run how many minutes before the standup?", "Configure standup  (2/7)", cur_lead)
     if lead_in is None:
         return "Configure cancelled."
-    days_in = _ask("Weekdays (e.g. 1-5 or 1,3,5)", "Configure standup  (3/6)", cur_days)
+    days_in = _ask("Weekdays (e.g. 1-5 or 1,3,5)", "Configure standup  (3/7)", cur_days)
     if days_in is None:
         return "Configure cancelled."
-    channels_in = _ask("Delivery channels (terminal, desktop, slack, email)", "Configure standup  (4/6)", cur_channels)
+    channels_in = _ask("Delivery channels (terminal, desktop, slack, email)", "Configure standup  (4/7)", cur_channels)
     if channels_in is None:
         return "Configure cancelled."
-    repo_in = _ask("Local git repo path (optional)", "Configure standup  (5/6)", cur_repo)
+    repo_in = _ask("Local git repo path (optional)", "Configure standup  (5/7)", cur_repo)
     if repo_in is None:
         return "Configure cancelled."
-    enable_in = _ask("Enable scheduled runs? (yes/no)", "Configure standup  (6/6)", cur_enabled)
+    # Aliases let your activity (GitHub handle, Jira display name, commit email)
+    # attach to YOUR standup card even when the names don't match exactly.
+    aliases_in = _ask(
+        "Your aliases across tools (comma-separated, e.g. GitHub handle, Jira name)",
+        "Configure standup  (6/7)",
+        cur_aliases,
+    )
+    if aliases_in is None:
+        return "Configure cancelled."
+    enable_in = _ask("Enable scheduled runs? (yes/no)", "Configure standup  (7/7)", cur_enabled)
     if enable_in is None:
         return "Configure cancelled."
 
@@ -1627,52 +1681,12 @@ def _standup_configure(console: Console, live, read_key, frame_time, supports_ti
             weekdays=days_in,
             delivery_channels=channels,
             repo_path=repo_in,
+            my_aliases=aliases_in.strip(),
         )
 
     msg = install_schedule(session_id, time_in, days_in, lead_minutes) if enabled else remove_schedule(session_id)
     logger.info("standup configure: session=%s enabled=%s -> %s", session_id, enabled, msg)
     return msg
-
-
-def _standup_my_update(console: Console, live, read_key, frame_time, supports_timeout, session_id: str) -> str:
-    """Collect a self-reported update in-TUI and save it for today. Returns a status message."""
-    from datetime import date
-
-    from yeaboi.standup.store import StandupStore
-    from yeaboi.ui.shared._attachments import referenced_images
-
-    member = _standup_read_line(
-        console, live, read_key, frame_time, supports_timeout, prompt="Your name", step="My update  (1/2)", default="Me"
-    )
-    if member is None:
-        logger.info("standup my-update: cancelled (session=%s)", session_id)
-        return "Update cancelled."
-    # Ctrl+V attaches screenshots (e.g. a burndown chart) to the update; surviving
-    # [image #N] chips resolve to files the summary LLM call receives as image blocks.
-    attachments: list[str] = []
-    text = _standup_read_line(
-        console,
-        live,
-        read_key,
-        frame_time,
-        supports_timeout,
-        prompt="Your update for today",
-        step="My update  (2/2)",
-        attachments=attachments,
-        scope_id=session_id or "standup",
-    )
-    if text is None:
-        logger.info("standup my-update: cancelled (session=%s)", session_id)
-        return "Update cancelled."
-    if not text.strip():
-        logger.info("standup my-update: no update entered (session=%s)", session_id)
-        return "No update entered."
-    images = referenced_images(text, attachments)
-    with StandupStore(_ana_dbp) as store:
-        store.save_my_update(session_id, date.today().isoformat(), member, text.strip(), images=images)
-    logger.info("standup my-update: saved (session=%s, images=%d)", session_id, len(images))
-    suffix = f" (+{len(images)} image{'s' if len(images) != 1 else ''})" if images else ""
-    return f"Saved update for {member}.{suffix}"
 
 
 def _run_changelog_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
@@ -1728,20 +1742,61 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
 
 
 def _run_standup_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
-    """Event loop for the Daily Standup dashboard page.
+    """Event loop for the Daily Standup page (overview + expandable sections).
 
-    Buttons: [Generate, My Update, Configure, Back]. Up/Down scrolls the report,
-    Left/Right selects a button, Enter activates it. My Update/Configure open
+    Follows the team-analysis pattern: the overview lists selectable section
+    cards (Team Summary, Sprint & Confidence, My Update, Team, Activity,
+    Schedule, Notices) with a two-zone focus model: Up/Down focuses the list
+    and moves the selection, Enter opens the selected section directly —
+    except the Team row, where Enter toggles the inline member sub-rows;
+    Left/Right moves focus to the button row (Generate / Configure / Back),
+    where Enter presses the highlighted button. A detail view free-scrolls
+    with Up/Down; Back/Esc returns to the overview. Generate/Configure open
     themed in-TUI input screens (driven by read_key, so no raw prompt and no
-    mouse-escape leakage), then refresh the dashboard.
+    mouse-escape leakage), then refresh. Generate collects the user's own
+    update first, so there is no separate My Update button.
     """
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_screen
+    from yeaboi.ui.mode_select.screens._standup_sections import standup_card_order
 
+    team_expanded = False  # inline Team-row expansion; survives data refreshes
     data = _collect_standup_data()
-    scroll, sel = 0, 0
+    data["team_expanded"] = team_expanded
+    view = "overview"
+    focus = "sections"  # overview focus zone: "sections" | "buttons"
+    card_idx, scroll, sel = 0, 0, 0
     _scroll_meta: dict = {}
-    n_buttons = 5  # Generate, My Update, Configure, Export, Back
     anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
+
+    def _actions() -> list[str]:
+        return ["Generate", "Configure", "Back"] if view == "overview" else ["Back", "Export"]
+
+    def _open_section() -> None:
+        nonlocal view, scroll, sel, team_expanded
+        order = standup_card_order(data)
+        if not order:
+            return
+        key = order[card_idx % len(order)]
+        if key == "team":  # Team row toggles its inline sub-rows, no detail view
+            team_expanded = not team_expanded
+            data["team_expanded"] = team_expanded
+            logger.info("standup: team row %s", "expanded" if team_expanded else "collapsed")
+            return
+        view = key
+        scroll = 0
+        sel = 0
+        logger.info("standup: opened section %s", view)
+
+    def _reset_to_overview() -> None:
+        nonlocal view, scroll, sel, card_idx, focus
+        view = "overview"
+        focus = "sections"
+        scroll = 0
+        sel = 0
+        # Refreshes rebuild the data dict, so re-apply the expansion flag here
+        # (every refresh is followed by this reset).
+        data["team_expanded"] = team_expanded
+        card_idx = min(card_idx, max(0, len(standup_card_order(data)) - 1))
 
     def _render() -> None:
         w, h = console.size
@@ -1755,61 +1810,82 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                 scroll_meta=_scroll_meta,
                 width=w,
                 height=max(10, h - 1),
-                action_sel=sel,
+                # No button is highlighted while the section list has focus.
+                action_sel=-1 if (view == "overview" and focus == "sections") else sel,
                 shimmer_tick=elapsed,
                 sub_reveal=elapsed * _HEADER_SUB_SPEED,
+                view=view,
+                selected_card=card_idx,
+                actions=_actions(),
             )
         )
 
     _render()
     while True:
         k = read_key(timeout=frame_time) if supports_timeout else read_key()
-        if k in SCROLL_KEYS:
+        if view == "overview" and k in SCROLL_KEYS:
+            # On the overview, Up/Down focuses the section list and moves the
+            # selection (the screen auto-scrolls the selected row into view).
+            focus = "sections"
+            order = standup_card_order(data)
+            if order:
+                card_idx += 1 if k in ("down", "scroll_down", "pagedown") else -1
+                card_idx %= len(order)
+        elif k in SCROLL_KEYS:
             _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
             if _ns == scroll:
                 continue
             scroll = _ns
         elif k == "left":
-            sel = max(0, sel - 1)
+            if view == "overview" and focus != "buttons":
+                focus = "buttons"  # first Left/Right only moves focus to the row
+            else:
+                sel = max(0, sel - 1)
         elif k == "right":
-            sel = min(n_buttons - 1, sel + 1)
+            if view == "overview" and focus != "buttons":
+                focus = "buttons"
+            else:
+                sel = min(len(_actions()) - 1, sel + 1)
         elif k in ("enter", " "):
             session_id = data.get("session_id", "")
-            if sel == 4 or not session_id:  # Back (or nothing to act on)
-                if not session_id:
-                    logger.info("standup: no session available — returning to mode select")
+            if not session_id:
+                logger.info("standup: no session available — returning to mode select")
                 break
-            if sel == 0:  # Generate — ask for the user's own update first, then run
+            if view == "overview" and focus == "sections":
+                _open_section()
+                _render()
+                continue
+            act = _actions()[sel]
+            if act == "Back":
+                if view == "overview":
+                    break
+                _reset_to_overview()
+            elif act == "Generate":  # ask for the user's own update first, then run
                 logger.info("standup: Generate pressed (session=%s)", session_id)
                 try:
                     proceed = _standup_generate_flow(console, live, read_key, frame_time, supports_timeout, session_id)
                 except Exception as e:  # never let a prompt crash the TUI
                     logger.error("standup generate failed: %s", e, exc_info=True)
                     proceed = f"Generate failed: {e}"
-                if proceed is not None:  # None = user cancelled at the update prompt
-                    data = _collect_standup_data(message=proceed)
-                    scroll = 0
-                else:
-                    data = _collect_standup_data()
-            elif sel == 3:  # Export — write the latest report as Markdown + HTML
+                data = _collect_standup_data(message=proceed if proceed is not None else "")
+                _reset_to_overview()
+            elif act == "Export":  # write the latest report as Markdown + HTML
                 logger.info("standup: Export pressed (session=%s)", session_id)
                 data = _collect_standup_data(message=_standup_export(session_id, data))
-                scroll = 0
-            else:  # My Update / Configure — in-TUI themed input (stays inside Live)
+                _reset_to_overview()
+            else:  # Configure — in-TUI themed input (stays inside Live)
                 try:
-                    if sel == 1:
-                        logger.info("standup: My Update pressed (session=%s)", session_id)
-                        msg = _standup_my_update(console, live, read_key, frame_time, supports_timeout, session_id)
-                    else:
-                        logger.info("standup: Configure pressed (session=%s)", session_id)
-                        msg = _standup_configure(console, live, read_key, frame_time, supports_timeout, session_id)
+                    logger.info("standup: Configure pressed (session=%s)", session_id)
+                    msg = _standup_configure(console, live, read_key, frame_time, supports_timeout, session_id)
                 except Exception as e:  # never let a prompt crash the TUI
                     logger.error("standup action failed: %s", e, exc_info=True)
                     msg = f"Action failed: {e}"
                 data = _collect_standup_data(message=msg)
-                scroll = 0
+                _reset_to_overview()
         elif k in ("esc", "q"):
-            break
+            if view == "overview":
+                break
+            _reset_to_overview()
         _render()
     logger.info("standup: page closed (session=%s)", data.get("session_id", ""))
 

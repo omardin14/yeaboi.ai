@@ -310,9 +310,6 @@ def _build_team_analysis_screen(
     # Build viewport with optional scrollbar
     _body_group = Group(*_vis_items, *[Text("") for _ in range(remaining)])
     if _sb_text is not None:
-        # The scrollbar Text ends with a newline, which renders as an extra row
-        # and would push the buttons' bottom border off the fixed-height panel.
-        _sb_text.rstrip()
         from rich.table import Table as _SbTable
 
         _vp_table = _SbTable(
@@ -1661,136 +1658,60 @@ def _build_standup_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    view: str = "overview",
+    selected_card: int = 0,
+    actions: list[str] | None = None,
 ) -> Panel:
-    """Build the Daily Standup dashboard screen using shared TUI components.
+    """Build the Daily Standup screen (overview + expandable section cards).
 
-    Shows the schedule status, the latest generated standup (sprint day,
-    confidence, team + member updates), and activity counts. Uses STANDUP_THEME
-    (magenta) with shared buttons, scrollbar, and viewport.
+    Follows the team-analysis pattern: the overview shows headline stats plus a
+    selectable list of sections (Team Summary, Sprint & Confidence, My Update,
+    Team — which expands inline into per-member sub-rows — Activity, Schedule,
+    Notices); ``view`` set to a card key from ``standup_card_order`` renders
+    that section's detail. Uses STANDUP_THEME (magenta) with shared buttons,
+    scrollbar, and viewport.
 
-    standup_data keys: session_name, config (dict|None), schedule (dict),
-    report (StandupReport|None), message (str, transient status line).
+    standup_data keys: session_name, my_name, config (dict|None), schedule
+    (dict), report (StandupReport|None), message (str, transient status line),
+    team_expanded (bool, inline Team-row expansion).
 
     # See README: "Daily Standup" — TUI page
     """
+    from yeaboi.ui.mode_select.screens._standup_sections import (
+        _StandupCtx,
+        build_standup_detail,
+        build_standup_overview,
+        standup_card_title,
+    )
     from yeaboi.ui.shared._components import STANDUP_THEME, build_reveal_subtitle, standup_title
 
     theme = STANDUP_THEME
     title = standup_title(shimmer_tick)
     session_name = standup_data.get("session_name", "")
-    sub_text = f"Daily standup for {session_name}" if session_name else "Daily standup"
+    if view == "overview":
+        sub_text = f"Daily standup for {session_name}" if session_name else "Daily standup"
+    else:
+        sub_text = f"Overview › {standup_card_title(view, standup_data)}"
     sub = build_reveal_subtitle(sub_text, sub_reveal, pad=_PAD)
 
-    body_lines: list = []
-
-    def _heading(text: str) -> None:
-        body_lines.append(Text(""))
-        h = Text(_PAD + "  ", justify="left")
-        h.append(text, style=f"bold {theme.accent}")
-        body_lines.append(h)
-        body_lines.append(Text(_PAD + "  " + "─" * min(len(text), 40), style=theme.sep, justify="left"))
-
-    def _row(label: str, value: str, value_style: str = "") -> None:
-        r = Text(_PAD + "    ", justify="left")
-        r.append(f"{label}:  ", style=theme.muted)
-        r.append(str(value), style=value_style or theme.value)
-        body_lines.append(r)
-
-    def _line(text: str, style: str = "") -> None:
-        body_lines.append(Text(_PAD + "    " + text, style=style or theme.value, justify="left"))
-
-    def _wrapped(text: str, style: str, *, indent: str = "    ") -> None:
-        """Append word-wrapped lines for a long value, keeping the viewport tidy."""
-        import textwrap
-
-        wrap_w = max(24, width - len(_PAD) - len(indent) - 6)
-        for chunk in textwrap.wrap(text, width=wrap_w) or [""]:
-            body_lines.append(Text(_PAD + indent + chunk, style=style, justify="left"))
-
-    def _confidence_style(label: str) -> str:
-        return {
-            "On track": theme.good,
-            "At risk": theme.warn,
-            "Behind": theme.bad,
-        }.get(label, theme.muted)
-
-    # ── Transient status message (e.g. after Generate) ────────────
-    message = standup_data.get("message", "")
-    if message:
-        body_lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
-
-    # ── Schedule ──────────────────────────────────────────────────
-    _heading("Schedule")
-    config = standup_data.get("config") or {}
-    schedule = standup_data.get("schedule") or {}
-    if config:
-        _row("Enabled", "yes" if config.get("enabled") else "no", theme.good if config.get("enabled") else theme.muted)
-        standup_time = config.get("time", "—")
-        lead = config.get("lead_minutes", 10)
-        _row("Standup time", standup_time)
-        if standup_time and standup_time != "—":
-            from yeaboi.standup.scheduler import run_time_str
-
-            _row("Runs at", f"{run_time_str(standup_time, lead)}  ({lead} min before)")
-        _row("Weekdays", config.get("weekdays", "—"))
-        _row("Channels", ", ".join(config.get("delivery_channels", [])) or "—")
+    ctx = _StandupCtx(theme, width)
+    if view == "overview":
+        build_standup_overview(ctx, standup_data, selected_card)
     else:
-        _line("Not configured — press Configure to set a time and delivery.", theme.muted)
-    installed = schedule.get("installed")
-    if installed is not None:
-        _row(
-            "OS schedule",
-            f"installed ({schedule.get('platform', '?')})" if installed else "not installed",
-            theme.good if installed else theme.muted,
-        )
-
-    # ── Latest standup ────────────────────────────────────────────
-    report = standup_data.get("report")
-    if report is not None:
-        # Notices first — auth/API-key problems must be seen, never silently empty.
-        if report.warnings:
-            _heading("⚠ Notices")
-            for w in report.warnings:
-                _wrapped(w, theme.warn, indent="    ")
-        _heading(f"Latest Standup — {report.date}")
-        _row("Sprint", report.sprint_name or "unknown")
-        if report.sprint_total_days:
-            _row("Day", f"{report.sprint_day} of {report.sprint_total_days}")
-        conf = report.confidence_label or "unknown"
-        if report.confidence_label and report.confidence_label != "Insufficient data":
-            conf = f"{report.confidence_label}  ·  {report.confidence_pct}%"
-        _row("Confidence", conf, _confidence_style(report.confidence_label))
-        if report.confidence_rationale:
-            _wrapped(report.confidence_rationale, theme.dim, indent="      ")
-        if report.activity_counts:
-            _row("Activity", ", ".join(f"{src}: {n}" for src, n in report.activity_counts))
-
-        if report.team_summary:
-            _heading("Team Summary")
-            _wrapped(report.team_summary, theme.value)
-
-        _heading("Updates")
-        if report.member_updates:
-            for m in report.member_updates:
-                tag = "  (you)" if m.source == "self-reported" else ""
-                name_row = Text(_PAD + "    ", justify="left")
-                name_row.append(m.name, style=f"bold {theme.value}")
-                if tag:
-                    name_row.append(tag, style=theme.dim)
-                body_lines.append(name_row)
-                _wrapped(m.summary or "No activity detected.", theme.desc, indent="      ")
-                if m.blockers:
-                    _wrapped(f"Blocker: {m.blockers}", theme.warn, indent="      ")
-        else:
-            _line("No individual updates.", theme.muted)
-    else:
-        _heading("Latest Standup")
-        _line("No standup generated yet. Press Generate to create one.", theme.muted)
+        build_standup_detail(ctx, view, standup_data)
+    body_lines = ctx.lines
 
     # ── Layout using shared components ────────────────────────────
     viewport_h = calc_viewport(height, header_h=10, action_h=4)
     total_lines = len(body_lines)
     max_scroll = max(0, total_lines - viewport_h)
+    # On the overview, keep the selected section row visible (auto-scroll).
+    if view == "overview" and ctx.first_card_row is not None:
+        row_top = ctx.first_card_row + selected_card
+        if row_top + 1 > scroll_offset + viewport_h:
+            scroll_offset = row_top + 1 - viewport_h
+        elif row_top < scroll_offset:
+            scroll_offset = row_top
     actual_scroll = min(scroll_offset, max_scroll)
     publish_geometry(scroll_meta, max_scroll, viewport_h)
     visible = body_lines[actual_scroll : actual_scroll + viewport_h]
@@ -1800,9 +1721,9 @@ def _build_standup_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(
-        ["Generate", "My Update", "Configure", "Export", "Back"], action_sel
-    )
+    if actions is None:
+        actions = ["Generate", "Configure", "Back"] if view == "overview" else ["Back", "Export"]
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions, action_sel)
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable
@@ -2584,6 +2505,61 @@ def _build_retro_screen(
     )
 
 
+def _build_standup_progress_screen(
+    progress: list[str],
+    *,
+    width: int = 80,
+    height: int = 24,
+    elapsed: float = 0.0,
+    anim_tick: float = 0.0,
+) -> Panel:
+    """Build the Daily Standup generation progress screen (spinner + phase steps).
+
+    Shown while ``run_standup`` runs on a worker thread — the pipeline makes
+    tracker + LLM network calls that can take many seconds, so the user must see
+    live progress instead of a frozen input box. Mirrors the analysis progress
+    screen's layout with STANDUP_THEME colours.
+    """
+    from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
+
+    theme = STANDUP_THEME
+    title = standup_title()
+
+    _spinners = ["◐", "◓", "◑", "◒"]
+    spinner = _spinners[int(anim_tick * 4) % len(_spinners)]
+    mins, secs = int(elapsed) // 60, int(elapsed) % 60
+    time_str = f"{mins}:{secs:02d}" if mins > 0 else f"{secs}s"
+
+    body: list = [
+        Text(_PAD + f"{spinner}  Generating standup", style=f"bold {theme.accent_bright}", justify="left"),
+        Text(_PAD + f"   Elapsed: {time_str}", style=theme.dim, justify="left"),
+        Text(""),
+    ]
+
+    # Completed phases get a check; the current phase gets animated dots.
+    done_steps = progress[:-1] if len(progress) > 1 else []
+    current = progress[-1] if progress else ""
+    for step in done_steps:
+        body.append(Text(_PAD + f"  ✓ {step}", style=theme.good, justify="left"))
+    if current:
+        dots = "." * (int(anim_tick * 2) % 4)
+        body.append(Text(_PAD + f"  ▸ {current}{dots}", style=f"bold {theme.value}", justify="left"))
+
+    inner_h = height - 4
+    remaining = max(0, inner_h - 8 - len(body))
+    body.extend(Text("") for _ in range(remaining))
+
+    content = Group(Text(""), title, Text(""), *body)
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _build_standup_input_screen(
     prompt: str,
     value: str,
@@ -2609,9 +2585,9 @@ def _build_standup_input_screen(
     Other pages reuse this screen with their own branding by passing ``theme``
     (a Theme constant) and ``title`` (a rendered ASCII-art title); defaults
     keep the standup look. ``box_rows > 1`` renders a large multi-row text box
-    (the value wraps across rows; the cursor row always stays visible) for
-    longer free-text answers like regenerate feedback — the input is still one
-    logical line, Enter confirms.
+    (the value wraps across rows and honours explicit ``\\n`` newlines from
+    Alt+Enter; the cursor row always stays visible) for longer free-text
+    answers like standup updates — Enter confirms.
 
     # See README: "Daily Standup" — TUI page
     # See README: "TUI system" — voice input overlay
@@ -2646,7 +2622,11 @@ def _build_standup_input_screen(
         inner_w = max(46, min(width - len(_PAD) - 12, 110))
         text_w = inner_w - 2  # one space of padding each side
         raw = value + "█"
-        chunks = [raw[i : i + text_w] for i in range(0, len(raw), text_w)]
+        # Newline-aware chunking: split on explicit newlines (Alt+Enter) first,
+        # then width-wrap each segment; an empty segment still takes one row.
+        chunks = []
+        for seg in raw.split("\n"):
+            chunks.extend([seg[i : i + text_w] for i in range(0, len(seg), text_w)] or [""])
         chunks = chunks[-rows:]  # keep the cursor row visible when the text overflows
         while len(chunks) < rows:
             chunks.append("")
@@ -2662,7 +2642,13 @@ def _build_standup_input_screen(
     if status:
         hint_line = Text(_PAD + "  " + status, style=box_style or theme.accent, justify="left")
     else:
-        hints = "Enter to confirm  ·  Esc to cancel" + _voice_hint() + (_image_hint() if show_image_hint else "")
+        newline_hint = "  ·  Alt+Enter (or Ctrl+N) for a new line" if box_rows > 1 else ""
+        hints = (
+            "Enter to confirm  ·  Esc to cancel"
+            + newline_hint
+            + _voice_hint()
+            + (_image_hint() if show_image_hint else "")
+        )
         hint_line = Text(_PAD + "  " + hints, style=theme.dim, justify="left")
 
     # Vertically pad the middle so the field sits in the upper-third like the dashboard.
