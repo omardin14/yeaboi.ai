@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.15.0",
+      "date": "2026-07-19",
+      "summary": "Daily Standup now sees a lot more of what your team actually did — status changes, comments, and in-progress tickets all count, not just who was assigned a task, so quiet team members get a real update instead of \"No activity detected.\" When a source like GitHub or Confluence isn't connected, the report now tells you plainly instead of just going quiet. The standup overview is also decluttered: your own update gets its own row, and the rest of the team collapses into a single expandable row.",
+      "highlights": [
+        {"text": "Standup now credits status changes, comments, and in-progress tickets across Jira, Azure DevOps, Confluence, and GitHub, not just assignments", "areas": ["standup"]},
+        {"text": "Reports now call out which sources weren't scanned and why, so you know what to connect", "areas": ["standup"]},
+        {"text": "Overview redesigned: your update is its own row, teammates collapse into one expandable Team row", "areas": ["standup"]}
+      ]
+    },
+    {
       "version": "2.14.0",
       "date": "2026-07-18",
       "summary": "You can now paste a screenshot straight from your clipboard into any text box with Ctrl+V, just like Claude Code. A small chip shows where the image landed in your text, and it travels with your message so the AI can see and reason about what you pasted — in project descriptions, feedback when regenerating, chat, standup updates, and 1:1 transcripts.",
