@@ -14,8 +14,11 @@ Every function here is best-effort and NEVER raises — failures become a
 from __future__ import annotations
 
 import logging
+import mimetypes
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 from yeaboi.config import (
     get_confluence_base_url,
@@ -23,13 +26,21 @@ from yeaboi.config import (
     get_confluence_space_key,
     get_notion_export_parent_page_id,
 )
-from yeaboi.markdown_convert import markdown_to_confluence_storage, markdown_to_notion_blocks
+from yeaboi.markdown_convert import (
+    extract_image_paths,
+    markdown_to_confluence_storage,
+    markdown_to_notion_blocks,
+)
 
 logger = logging.getLogger(__name__)
 
 # Notion rejects pages.create / blocks.children.append calls with more than
 # 100 children — long documents (plans, team profiles) are appended in chunks.
 _NOTION_BLOCK_BATCH = 100
+
+# Images above this size are skipped rather than uploaded/copied — matches the
+# paste-time cap in ui/shared/_attachments.py with headroom for charts.
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 DEST_NOTION = "notion"
 DEST_CONFLUENCE = "confluence"
@@ -50,6 +61,83 @@ class PublishResult:
     url: str = ""
 
 
+def _publishable_images(markdown: str) -> list[Path]:
+    """Existing, size-guarded image files referenced by ``![alt](path)`` lines."""
+    out: list[Path] = []
+    for raw in extract_image_paths(markdown):
+        p = Path(raw)
+        if not p.is_file():
+            logger.warning("Export image missing on disk, skipping: %s", raw)
+            continue
+        if p.stat().st_size > _MAX_IMAGE_BYTES:
+            logger.warning("Export image over %d bytes, skipping: %s", _MAX_IMAGE_BYTES, raw)
+            continue
+        out.append(p)
+    return out
+
+
+def _unique_names(paths: list[Path]) -> dict[str, str]:
+    """Map each path to a collision-free attachment filename."""
+    names: dict[str, str] = {}
+    used: set[str] = set()
+    for p in paths:
+        name, i = p.name, 1
+        while name in used:
+            name = f"{p.stem}-{i}{p.suffix}"
+            i += 1
+        used.add(name)
+        names[str(p)] = name
+    return names
+
+
+def _upload_notion_images(client, markdown: str) -> dict[str, str]:
+    """Upload referenced images via the Notion File Upload API → {path: upload id}.
+
+    Best-effort per image — a failed upload logs a warning and the image
+    degrades to a placeholder paragraph in the converted blocks.
+    """
+    ids: dict[str, str] = {}
+    for p in _publishable_images(markdown):
+        mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+        try:
+            upload = client.file_uploads.create(mode="single_part", filename=p.name, content_type=mime)
+            with p.open("rb") as fh:
+                client.file_uploads.send(file_upload_id=upload["id"], file=(p.name, fh, mime))
+            ids[str(p)] = upload["id"]
+            logger.info("Notion image uploaded: %s (%s)", p.name, upload["id"])
+        except Exception as e:  # noqa: BLE001 — image upload is best-effort
+            logger.warning("Notion image upload failed for %s: %s", p, e)
+    return ids
+
+
+def localize_images(markdown: str, dest_dir: Path) -> str:
+    """Copy referenced images into ``dest_dir/images/`` and relink relatively.
+
+    Used by the .md file exports so the export folder is self-contained (the
+    original screenshots live in ~/.yeaboi/attachments and may be pruned).
+    Best-effort: a missing/failed image keeps its original absolute link.
+    """
+    paths = _publishable_images(markdown)
+    if not paths:
+        return markdown
+    names = _unique_names(paths)
+    img_dir = dest_dir / "images"
+    for p in paths:
+        name = names[str(p)]
+        try:
+            if p.is_relative_to(dest_dir):
+                # Already inside the export folder (e.g. a freshly rendered
+                # chart) — just relink relatively, no copy needed.
+                markdown = markdown.replace(f"]({p})", f"]({p.relative_to(dest_dir)})")
+                continue
+            img_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, img_dir / name)
+            markdown = markdown.replace(f"]({p})", f"](images/{name})")
+        except Exception as e:  # noqa: BLE001 — localizing is best-effort
+            logger.warning("Could not localize export image %s: %s", p, e)
+    return markdown
+
+
 def publish_to_notion(title: str, markdown: str) -> PublishResult:
     """Create a Notion page with the markdown content under the exports page (or the root page)."""
     logger.info("Notion export requested: %r", title)
@@ -67,7 +155,9 @@ def publish_to_notion(title: str, markdown: str) -> PublishResult:
         logger.warning("Notion export blocked: NOTION_TOKEN not configured")
         return PublishResult(ok=False, message="Notion is not configured — set NOTION_TOKEN in Settings")
 
-    blocks = markdown_to_notion_blocks(markdown)
+    # Upload screenshots/charts first so the blocks can reference them natively.
+    image_ids = _upload_notion_images(client, markdown)
+    blocks = markdown_to_notion_blocks(markdown, image_ids=image_ids)
     try:
         page = client.pages.create(
             parent={"page_id": parent},
@@ -117,14 +207,25 @@ def publish_to_confluence(title: str, markdown: str) -> PublishResult:
     # Confluence rejects duplicate titles within a space, and re-exporting the
     # same report is the normal case — timestamp the title to keep it unique.
     stamped_title = f"{title} · {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    # Attachments can only be uploaded once the page exists, so the body is
+    # created with <ri:attachment> macros first and the files attached after —
+    # Confluence resolves the macros as soon as the named attachments arrive.
+    images = _publishable_images(markdown)
+    image_names = _unique_names(images)
     try:
         page = conf.create_page(
             space=space,
             title=stamped_title,
-            body=markdown_to_confluence_storage(markdown),
+            body=markdown_to_confluence_storage(markdown, image_filenames=image_names),
             parent_id=get_confluence_export_parent_page_id() or None,
         )
         page_id = page.get("id", "")
+        for p in images:
+            try:
+                conf.attach_file(str(p), name=image_names[str(p)], page_id=page_id)
+                logger.info("Confluence image attached: %s -> page %s", image_names[str(p)], page_id)
+            except Exception as e:  # noqa: BLE001 — attachment is best-effort, page already exists
+                logger.warning("Confluence image attach failed for %s: %s", p, e)
         base_url = (get_confluence_base_url() or "").rstrip("/")
         web_ui = page.get("_links", {}).get("webui", f"/wiki/pages/{page_id}")
         url = f"{base_url}{web_ui}"

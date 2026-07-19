@@ -50,8 +50,36 @@ def _title(report: DeliveryReport) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_report_markdown(report: DeliveryReport) -> str:
-    """Return the delivery report as a Markdown document."""
+def _delivered_counts(report: DeliveryReport) -> list[tuple[str, int]]:
+    """Delivered-item counts for the chart: by person, else by status."""
+    by_person: dict[str, int] = {}
+    for it in report.delivered_items:
+        by_person[it.assignee or "Unassigned"] = by_person.get(it.assignee or "Unassigned", 0) + 1
+    if len(by_person) > 1 or (by_person and "Unassigned" not in by_person):
+        return sorted(by_person.items(), key=lambda kv: -kv[1])
+    by_status: dict[str, int] = {}
+    for it in report.delivered_items:
+        by_status[it.status or "Done"] = by_status.get(it.status or "Done", 0) + 1
+    return sorted(by_status.items(), key=lambda kv: -kv[1])
+
+
+def _delivered_chart(report: DeliveryReport, charts_dir: Path | None) -> Path | None:
+    """Render the delivered-work chart PNG (optional charts extra), or None."""
+    if charts_dir is None or not report.delivered_items:
+        return None
+    from yeaboi.charts import delivered_chart
+
+    return delivered_chart(_delivered_counts(report), charts_dir / "delivered.png", title="Delivered items")
+
+
+def build_report_markdown(report: DeliveryReport, *, charts_dir: Path | None = None) -> str:
+    """Return the delivery report as a Markdown document.
+
+    When ``charts_dir`` is set (and matplotlib is installed), a delivered-work
+    chart PNG is rendered there and embedded above the item list — the
+    ``![alt](path)`` line flows through file/Notion/Confluence exports via
+    export_targets.
+    """
     lines: list[str] = [
         f"# {_emoji(report, 'headline')}{_title(report)}",
         "",
@@ -79,6 +107,9 @@ def build_report_markdown(report: DeliveryReport) -> str:
         lines += [""]
     if report.delivered_items:
         lines += ["## Delivered items", ""]
+        chart = _delivered_chart(report, charts_dir)
+        if chart is not None:
+            lines += [f"![Delivered items]({chart})", ""]
         for it in report.delivered_items:
             who = f" — _{it.assignee}_" if it.assignee else ""
             lines.append(f"- `{it.key}` {it.title} ({it.status}){who}")
@@ -100,9 +131,13 @@ def _html_list(items: tuple[str, ...]) -> str:
     return "<ul>" + "".join(f"<li>{_e(it)}</li>" for it in items) + "</ul>"
 
 
-def build_report_html(report: DeliveryReport) -> str:
-    """Return the delivery report as a self-contained HTML document (reuses plan CSS)."""
-    from yeaboi.html_exporter import _CSS
+def build_report_html(report: DeliveryReport, *, chart_path: Path | None = None) -> str:
+    """Return the delivery report as a self-contained HTML document (reuses plan CSS).
+
+    ``chart_path`` (a PNG rendered by the markdown builder) is base64-embedded
+    so the HTML stays offline-openable.
+    """
+    from yeaboi.html_exporter import _CSS, img_b64_tag
 
     parts: list[str] = [
         '<div class="container">',
@@ -137,9 +172,11 @@ def build_report_html(report: DeliveryReport) -> str:
             f"<td>{_e(it.status)}</td><td>{_e(it.assignee)}</td></tr>"
             for it in report.delivered_items
         )
+        chart_tag = img_b64_tag(chart_path, "Delivered items") if chart_path else ""
         parts.append(
             "<h2>Delivered items</h2>"
-            "<table><thead><tr><th>Key</th><th>Title</th><th>Status</th><th>Delivered by</th></tr></thead>"
+            + chart_tag
+            + "<table><thead><tr><th>Key</th><th>Title</th><th>Status</th><th>Delivered by</th></tr></thead>"
             f"<tbody>{rows}</tbody></table>"
         )
     if report.warnings:
@@ -185,8 +222,14 @@ def export_report(report: DeliveryReport, *, project_name: str = "", theme: str 
     md_path = out_dir / f"{stem}.md"
     html_path = out_dir / f"{stem}.html"
     slides_path = out_dir / f"{stem}-slides.html"
-    md_path.write_text(build_report_markdown(report), encoding="utf-8")
-    html_path.write_text(build_report_html(report), encoding="utf-8")
+    from yeaboi.export_targets import localize_images
+
+    md = build_report_markdown(report, charts_dir=out_dir)
+    md_path.write_text(localize_images(md, out_dir), encoding="utf-8")
+    chart_path = out_dir / "delivered.png"
+    html_path.write_text(
+        build_report_html(report, chart_path=chart_path if chart_path.is_file() else None), encoding="utf-8"
+    )
     slides_path.write_text(build_presentation_html(report, theme=theme), encoding="utf-8")
     logger.info("Reporting exported: %s , %s , %s", md_path, html_path, slides_path)
     return {"markdown": md_path, "html": html_path, "slides": slides_path}

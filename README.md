@@ -1055,10 +1055,27 @@ yeaboi --export-only --quick
 
 ### HTML
 
-Self-contained single-file HTML report with embedded CSS, collapsible sections, and a table of contents. No external dependencies.
+Self-contained single-file HTML report with embedded CSS, collapsible sections, and a table of contents. No external dependencies. Screenshots pasted into the session and generated charts are base64-embedded so the file stays offline-openable.
 
 ```bash
 yeaboi --non-interactive --description "Build a todo app" --output html
+```
+
+### Notion & Confluence
+
+Every Export button can publish straight to Notion or Confluence with **native, first-class formatting** — not a markdown dump:
+
+- Headings, nested bullet lists, numbered lists, tables, quotes, links, bold/italic/code
+- Checkboxes become Notion **to-dos** / Confluence **task lists** (checkable in the page)
+- ⚠ Notices sections render as a Notion **callout** / Confluence **warning panel**
+- **Images are uploaded and embedded**: screenshots you pasted into the TUI (standup updates, planning sessions) and generated charts travel with the page (Notion File Upload API / Confluence attachments)
+
+### Chart images
+
+With the optional `charts` extra installed, exports include rendered PNG charts — sprint **velocity** (planned vs done) in team-analysis exports and a **delivered-work** breakdown in delivery reports. Without the extra, exports simply omit the charts.
+
+```bash
+uv sync --extra charts   # or: uv tool install "yeaboi[charts]"
 ```
 
 ### JSON

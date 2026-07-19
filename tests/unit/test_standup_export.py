@@ -52,6 +52,23 @@ class TestMarkdown:
         assert "# Daily Standup" in md
         assert "_No individual updates._" in md
 
+    def test_images_embedded_under_self_update(self):
+        md = build_standup_markdown(_report(images=("/tmp/shot1.png", "/tmp/shot2.png")))
+        # Under Bob's (self-reported) section, before the next member/footer.
+        bob = md.split("### Bob _(you)_", 1)[1]
+        assert "![Screenshot](/tmp/shot1.png)" in bob
+        assert "![Screenshot](/tmp/shot2.png)" in bob
+        assert "### Screenshots" not in md  # placed inline, no fallback section
+
+    def test_images_fallback_section_without_self_member(self):
+        rep = _report(
+            member_updates=(MemberUpdate(name="Alice", summary="x", source="inferred"),),
+            images=("/tmp/shot.png",),
+        )
+        md = build_standup_markdown(rep)
+        assert "### Screenshots" in md
+        assert "![Screenshot](/tmp/shot.png)" in md
+
 
 class TestMemberLinks:
     def test_markdown_links_rendered(self):
@@ -103,6 +120,17 @@ class TestHtml:
         html = build_standup_html(StandupReport(date="2026-07-10"))
         assert "No individual updates." in html
 
+    def test_images_base64_embedded(self, tmp_path):
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"\x89PNG fake")
+        html = build_standup_html(_report(images=(str(img),)))
+        assert "Screenshots" in html
+        assert "data:image/png;base64," in html
+
+    def test_missing_image_skipped(self):
+        html = build_standup_html(_report(images=("/nope/gone.png",)))
+        assert "data:image" not in html
+
 
 class TestExportWrites:
     def test_writes_md_and_html(self, tmp_path, monkeypatch):
@@ -127,6 +155,15 @@ class TestExportWrites:
     def test_slug_helper(self):
         assert export._slug("My Project!!") == "my-project"
         assert export._slug("") == "standup"
+
+    def test_images_localized_into_export_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("yeaboi.paths.STANDUP_EXPORTS_DIR", tmp_path / "exports" / "standup")
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"png")
+        paths = export_standup(_report(images=(str(img),)), project_name="Demo")
+        md = paths["markdown"].read_text()
+        assert "![Screenshot](images/shot.png)" in md
+        assert (paths["markdown"].parent / "images" / "shot.png").exists()
 
 
 class TestSkippedSourcesLine:

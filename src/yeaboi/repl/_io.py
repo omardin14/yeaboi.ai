@@ -379,7 +379,10 @@ def _export_plan_markdown(graph_state: dict, path: Path | None = None) -> Path:
     """
     output_path = path or Path("scrum-plan.md")
     logger.debug("_export_plan_markdown: path=%s", output_path)
-    output_path.write_text(build_plan_markdown(graph_state))
+    from yeaboi.export_targets import localize_images
+
+    # Pasted screenshots are copied next to the .md so the folder is portable.
+    output_path.write_text(localize_images(build_plan_markdown(graph_state), output_path.parent))
     section_counts = {
         "features": len(graph_state.get("features", [])),
         "stories": len(graph_state.get("stories", [])),
@@ -539,6 +542,23 @@ def build_plan_markdown(graph_state: dict) -> str:
             for sid in sprint.story_ids:
                 lines.append(f"- {sid}")
             lines.append("")
+
+    # Attachments — screenshots pasted into the session (intake, review
+    # feedback, chat). Only paths still on disk; the export pipeline embeds
+    # them (Notion/Confluence upload, HTML base64, file copy).
+    from pathlib import Path as _Path
+
+    attachments: list[str] = []
+    for key in ("pasted_images", "review_feedback_images", "chat_images"):
+        for p in graph_state.get(key) or []:
+            if p not in attachments and _Path(p).is_file():
+                attachments.append(p)
+    if attachments:
+        lines.append("# Attachments")
+        lines.append("")
+        for i, p in enumerate(attachments, start=1):
+            lines.append(f"![Screenshot {i}]({p})")
+        lines.append("")
 
     return "\n".join(lines)
 

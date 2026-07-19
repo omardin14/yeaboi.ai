@@ -121,6 +121,7 @@ def _dict_to_standup_report(d: dict) -> StandupReport:
         skipped_sources=skipped,
         my_name=d.get("my_name", ""),
         warnings=tuple(d.get("warnings", ())),
+        images=tuple(d.get("images", ())),
     )
 
 

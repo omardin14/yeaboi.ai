@@ -41,6 +41,29 @@ class TestMarkdown:
         md = export.build_report_markdown(DeliveryReport(period_label="Last month (~2 sprints)"))
         assert "Delivery Report" in md
 
+    def test_chart_embedded_with_charts_dir(self, tmp_path):
+        import pytest
+
+        pytest.importorskip("matplotlib")
+        md = export.build_report_markdown(_report(), charts_dir=tmp_path)
+        assert f"![Delivered items]({tmp_path / 'delivered.png'})" in md
+        assert (tmp_path / "delivered.png").exists()
+
+    def test_no_charts_dir_no_image(self):
+        md = export.build_report_markdown(_report())
+        assert "![Delivered items]" not in md
+
+    def test_delivered_counts_by_person_then_status(self):
+        by_person = export._delivered_counts(_report())
+        assert by_person == [("Ada", 1)]
+        unassigned = DeliveryReport(
+            delivered_items=(
+                DeliveredItem(key="A-1", title="x", status="Done", source="jira"),
+                DeliveredItem(key="A-2", title="y", status="Closed", source="jira"),
+            )
+        )
+        assert sorted(export._delivered_counts(unassigned)) == [("Closed", 1), ("Done", 1)]
+
 
 class TestHtml:
     def test_self_contained_and_escaped(self):
@@ -66,3 +89,15 @@ class TestExportReport:
         for p in paths.values():
             assert p.exists() and p.read_text(encoding="utf-8")
         assert paths["slides"].name.endswith("-slides.html")
+
+    def test_chart_written_and_embedded(self, tmp_path, monkeypatch):
+        import pytest
+
+        pytest.importorskip("matplotlib")
+        monkeypatch.setattr("yeaboi.paths.get_reporting_export_dir", lambda key: tmp_path)
+        paths = export.export_report(_report(), theme="aurora")
+        # Markdown links the chart relatively (it lives beside the .md)…
+        assert "![Delivered items](delivered.png)" in paths["markdown"].read_text(encoding="utf-8")
+        assert (tmp_path / "delivered.png").exists()
+        # …and the HTML embeds it base64 so it stays self-contained.
+        assert "data:image/png;base64," in paths["html"].read_text(encoding="utf-8")

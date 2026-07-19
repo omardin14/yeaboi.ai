@@ -78,6 +78,7 @@ def build_standup_markdown(report: StandupReport) -> str:
         lines += ["", "## Team Summary", "", report.team_summary]
 
     lines += ["", "## Updates", ""]
+    images_placed = False
     if report.member_updates:
         for m in report.member_updates:
             tag = " _(✍ own update)_" if m.self_report else ""
@@ -95,9 +96,18 @@ def build_standup_markdown(report: StandupReport) -> str:
             if getattr(m, "links", ()):
                 lines.append("")
                 lines.append("**Links:** " + " · ".join(f"[{label}]({url})" for label, url in m.links))
+            if report.images and not images_placed and m.source == "self-reported":
+                # Screenshots pasted into "My Update" belong with the user's section.
+                images_placed = True
+                lines.append("")
+                lines.extend(f"![Screenshot]({p})" for p in report.images)
             lines.append("")
     else:
         lines.append("_No individual updates._")
+    if report.images and not images_placed:
+        lines += ["### Screenshots", ""]
+        lines.extend(f"![Screenshot]({p})" for p in report.images)
+        lines.append("")
 
     if report.activity_counts:
         counts = ", ".join(f"{src}: {n}" for src, n in report.activity_counts)
@@ -171,6 +181,13 @@ def build_standup_html(report: StandupReport) -> str:
     else:
         parts.append("<p style='color:var(--text-muted)'>No individual updates.</p>")
 
+    if report.images:
+        from yeaboi.html_exporter import img_b64_tag
+
+        tags = "".join(img_b64_tag(p, "Screenshot") for p in report.images)
+        if tags:
+            parts.append(f"<h2>Screenshots</h2>{tags}")
+
     if report.activity_counts:
         counts = ", ".join(f"{_e(src)}: {n}" for src, n in report.activity_counts)
         parts.append(f"<p style='color:var(--text-muted);font-size:.85rem'>Activity examined — {counts}</p>")
@@ -217,7 +234,10 @@ def export_standup(report: StandupReport, *, project_name: str = "") -> dict[str
     stem = f"standup-{report.date or 'latest'}"
     md_path = out_dir / f"{stem}.md"
     html_path = out_dir / f"{stem}.html"
-    md_path.write_text(build_standup_markdown(report), encoding="utf-8")
+    from yeaboi.export_targets import localize_images
+
+    # Screenshots are copied next to the .md so the export folder is portable.
+    md_path.write_text(localize_images(build_standup_markdown(report), out_dir), encoding="utf-8")
     html_path.write_text(build_standup_html(report), encoding="utf-8")
     logger.info("Standup exported: %s , %s", md_path, html_path)
     return {"markdown": md_path, "html": html_path}

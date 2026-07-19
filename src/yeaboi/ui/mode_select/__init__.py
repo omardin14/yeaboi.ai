@@ -1552,9 +1552,18 @@ def _team_profile_export_flow(
         subtitle = "Team profile exported (HTML + MD)"
     else:
         from yeaboi.export_targets import publish_markdown
+        from yeaboi.paths import get_analysis_export_dir
         from yeaboi.team_profile_exporter import build_team_profile_markdown
 
-        md = build_team_profile_markdown(profile, examples=examples, sprint_names=sprint_names, ceremony=ceremony)
+        # charts_dir gives the velocity chart a real on-disk home so the
+        # publish layer can upload it alongside the page.
+        md = build_team_profile_markdown(
+            profile,
+            examples=examples,
+            sprint_names=sprint_names,
+            ceremony=ceremony,
+            charts_dir=get_analysis_export_dir(profile.project_key),
+        )
         result = publish_markdown(dest, title=f"Team Profile — {profile.source}/{profile.project_key}", markdown=md)
         body = result.url or result.message
         subtitle = result.message if result.ok else f"Export failed — {result.message}"
@@ -3008,10 +3017,14 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
             return f"Export failed: {e}"
 
     def _export_document() -> tuple[str, str] | str:
-        from yeaboi.reporting.export import _title, build_report_markdown
+        from yeaboi.paths import get_reporting_export_dir
+        from yeaboi.reporting.export import _slug, _title, build_report_markdown
 
         report = state.get("report")
-        return _title(report), build_report_markdown(report)
+        # charts_dir gives the delivered-work chart an on-disk home so the
+        # publish layer can upload it alongside the page.
+        charts_dir = get_reporting_export_dir(_slug(report.project_name or "report"))
+        return _title(report), build_report_markdown(report, charts_dir=charts_dir)
 
     def _export() -> None:
         report = state.get("report")

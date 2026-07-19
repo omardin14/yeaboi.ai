@@ -62,6 +62,9 @@ bedrock = ["langchain-aws", "boto3"]
 # macOS/Windows (self-contained); Linux also needs the system lib
 # (`apt install libportaudio2`). A Whisper model downloads once on first use.
 voice = ["sounddevice", "faster-whisper"]
+# Chart images embedded in exports (velocity / delivered-work PNGs). Lazy-
+# imported in charts.py — without the extra, exports simply skip the charts.
+charts = ["matplotlib>=3.8"]
 all-providers = ["langchain-openai", "langchain-google-genai", "langchain-aws", "boto3"]
 dev = [
     "pytest",
@@ -69,6 +72,8 @@ dev = [
     "pytest-recording",
     "ruff",
     "pre-commit",
+    # so CI exercises the chart-generation tests
+    "matplotlib>=3.8",
 ]
 
 [project.urls]

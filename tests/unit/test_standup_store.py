@@ -177,6 +177,22 @@ class TestRunHistory:
         assert latest.date == "2026-07-10"
         assert latest.confidence_pct == 90
 
+    def test_report_images_round_trip(self, db_path):
+        # New tuple field must survive JSON serialization (list → tuple rebuild).
+        report = _make_report(images=("/tmp/a.png", "/tmp/b.png"))
+        with StandupStore(db_path) as store:
+            store.record_run(report)
+            latest = store.get_latest_report("s1")
+        assert latest.images == ("/tmp/a.png", "/tmp/b.png")
+
+    def test_old_report_without_images_deserializes(self, db_path):
+        # Reports recorded before the images field existed must still load.
+        report = _make_report()
+        with StandupStore(db_path) as store:
+            store.record_run(report)
+            latest = store.get_latest_report("s1")
+        assert latest.images == ()
+
     def test_get_history(self, db_path):
         with StandupStore(db_path) as store:
             store.record_run(_make_report(date="2026-07-09"))

@@ -241,6 +241,33 @@ def _e(text: str) -> str:
     return html.escape(str(text), quote=True)
 
 
+# Matches the export-image cap in export_targets._MAX_IMAGE_BYTES — anything
+# bigger would bloat the self-contained HTML beyond usefulness.
+_MAX_EMBED_BYTES = 5 * 1024 * 1024
+
+
+def img_b64_tag(path: str | Path, alt: str = "") -> str:
+    """Return an <img> tag with the file base64-embedded as a data: URI.
+
+    Keeps exported HTML self-contained/offline (screenshots in ~/.yeaboi may be
+    pruned later). Best-effort: missing/oversized/unreadable files return ''.
+    """
+    import base64
+    import mimetypes
+
+    p = Path(path)
+    try:
+        if not p.is_file() or p.stat().st_size > _MAX_EMBED_BYTES:
+            logging.getLogger(__name__).warning("Skipping HTML image embed (missing or too large): %s", p)
+            return ""
+        mime = mimetypes.guess_type(p.name)[0] or "image/png"
+        data = base64.b64encode(p.read_bytes()).decode("ascii")
+        return f'<img src="data:{mime};base64,{data}" alt="{_e(alt)}" style="max-width:100%;border-radius:8px" />'
+    except Exception as exc:  # noqa: BLE001 — embedding is best-effort decoration
+        logging.getLogger(__name__).warning("Could not embed image %s: %s", p, exc)
+        return ""
+
+
 def _badge(label: str, extra_class: str = "badge-tag") -> str:
     return f'<span class="badge {_e(extra_class)}">{_e(label)}</span>'
 
@@ -674,6 +701,19 @@ def _build_sprints_section(graph_state: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _build_attachments_section(graph_state: dict) -> str:
+    """Screenshots pasted into the session, base64-embedded so the file stays offline."""
+    seen: list[str] = []
+    for key in ("pasted_images", "review_feedback_images", "chat_images"):
+        for p in graph_state.get(key) or []:
+            if p not in seen:
+                seen.append(p)
+    tags = "".join(img_b64_tag(p, f"Screenshot {i}") for i, p in enumerate(seen, start=1))
+    if not tags:
+        return ""
+    return f'<section id="attachments"><h2>Attachments</h2>{tags}</section>'
+
+
 def _build_nav(graph_state: dict) -> str:
     """Build a sticky top-nav with links to available sections."""
     links: list[str] = []
@@ -778,6 +818,7 @@ def build_export_html(graph_state: dict, stage: str = "complete") -> str:
         _build_stories_section(graph_state),
         _build_tasks_section(graph_state),
         _build_sprints_section(graph_state),
+        _build_attachments_section(graph_state),
     ]
     body_content = "".join(s for s in sections if s)
 
