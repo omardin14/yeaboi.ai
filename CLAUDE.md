@@ -160,7 +160,7 @@ src/yeaboi/
   html_exporter.py      — Export plans to self-contained HTML
   json_exporter.py      — Export plans to clean JSON (for CI/CD pipelines)
   markdown_convert.py   — Generated Markdown → Notion blocks / Confluence storage XHTML (pure, no SDK; nested lists, hard breaks, links, native Confluence task lists, ⚠ Notices → callout/warning panels, ![alt](path) images via caller-supplied upload maps)
-  export_targets.py     — publish_to_notion/publish_to_confluence/publish_markdown (PublishResult; never raises); uploads referenced images (Notion File Upload API / Confluence attach_file), localize_images() for portable .md folders, and yeaboi branding (🤙 Notion page icon, `yeaboi` Confluence label, linked footer auto-appended)
+  export_targets.py     — publish_to_notion/publish_to_confluence/publish_markdown (PublishResult; never raises); uploads referenced images (Notion File Upload API / Confluence attach_file), localize_images() for portable .md folders, and yeaboi branding (🤙 Notion page icon, `yeaboi` Confluence label, linked footer auto-appended); with no exports page configured, docs group under an auto-created "🤙 yeaboi" container page (find-or-create, session-cached, best-effort fallback to root/space root)
   charts.py             — velocity/delivered-work PNG charts for exports (optional `charts` extra = matplotlib, lazy-imported; every function returns None gracefully)
   jira_sync.py          — Batch Jira creation (idempotent, cascade, progress callbacks)
   azdevops_sync.py      — Batch Azure DevOps creation (idempotent, cascade, progress callbacks)
@@ -457,8 +457,8 @@ Rules:
 - `NOTION_TOKEN` — optional, Notion integration token (independent doc tool; its own auth, not shared with Jira/Confluence). Enables the 5 `notion_*` tools + analysis/standup context.
 - `NOTION_ROOT_PAGE_ID` — optional, default parent for created Notion pages; also gates the Notion source in the Daily Standup activity feed (the Confluence-space-key analog)
 - `YEABOI_HOME` — optional, relocates the whole data tree (exports, logs, sessions DB, scrum-docs…; default `~/.yeaboi`). Resolved once at import time in `paths.py` (`_resolve_root()`); `.env` itself always stays at `~/.yeaboi/.env` (the bootstrap file that holds this var). Editable in the TUI via Settings → Data Dir, which offers to move the existing tree (`paths.move_data_tree`) and notes a restart is needed to fully apply.
-- `NOTION_EXPORT_PARENT_PAGE_ID` — optional, a dedicated Notion page the Export buttons publish under; **falls back to `NOTION_ROOT_PAGE_ID`**. With neither set, Notion export shows a warning pointing at Setup (the Notion API can't create top-level pages).
-- `CONFLUENCE_EXPORT_PARENT_PAGE_ID` — optional page Confluence exports nest under; blank creates them at the root of `CONFLUENCE_SPACE_KEY` (no space key → warning pointing at Setup).
+- `NOTION_EXPORT_PARENT_PAGE_ID` — optional, a dedicated Notion page the Export buttons publish under; **blank groups exports under an auto-created "yeaboi" page (🤙 icon) inside `NOTION_ROOT_PAGE_ID`**. With neither set, Notion export shows a warning pointing at Setup (the Notion API can't create top-level pages).
+- `CONFLUENCE_EXPORT_PARENT_PAGE_ID` — optional page Confluence exports nest under; blank groups them under an auto-created "🤙 yeaboi" page at the root of `CONFLUENCE_SPACE_KEY` (no space key → warning pointing at Setup).
 - `STANDUP_USER_NAME` — optional, your display name for your own standup update (default: "Me")
 - `STANDUP_GITHUB_REPO` — optional, GitHub repo (owner/repo) scanned for Daily Standup code activity
 - `SLACK_WEBHOOK_URL` — optional, Slack incoming-webhook URL for Daily Standup delivery

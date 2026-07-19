@@ -328,15 +328,20 @@ def get_notion_export_parent_page_id() -> str | None:
     """Return the Notion page ID exports publish under, or None when unavailable.
 
     The dedicated exports page (NOTION_EXPORT_PARENT_PAGE_ID, optional in the
-    Notion setup step) wins; otherwise falls back to NOTION_ROOT_PAGE_ID. The
-    Notion API can't create top-level pages, so None (neither set) blocks
-    Notion export with a warning pointing at Setup.
+    Notion setup step) wins; otherwise falls back to NOTION_ROOT_PAGE_ID —
+    where the publisher groups docs under an auto-created "yeaboi" container
+    page (🤙 icon). The Notion API can't create top-level pages, so None
+    (neither set) blocks Notion export with a warning pointing at Setup.
     """
     return os.getenv("NOTION_EXPORT_PARENT_PAGE_ID") or get_notion_root_page_id()
 
 
 def get_confluence_export_parent_page_id() -> str | None:
-    """Return the optional Confluence parent page ID for exports (blank = space root)."""
+    """Return the optional Confluence parent page ID for exports.
+
+    Blank means exports group under an auto-created "🤙 yeaboi" container page
+    at the root of the space (see export_targets._ensure_confluence_brand_parent).
+    """
     return os.getenv("CONFLUENCE_EXPORT_PARENT_PAGE_ID") or None
 
 

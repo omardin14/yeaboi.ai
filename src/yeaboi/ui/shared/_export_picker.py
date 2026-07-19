@@ -12,10 +12,12 @@ Destinations:
 plus any lowercased ``extra_options`` the caller adds (e.g. "jira").
 
 Publish destinations come from provider setup: Notion pages go under the
-exports page (falling back to the root page), Confluence pages into
-CONFLUENCE_SPACE_KEY (optionally nested under an exports page). A warning
-popup only appears when publishing is impossible — Notion with no page at all,
-Confluence with no space key — and offers to open the setup wizard.
+exports page, Confluence pages under the exports page in CONFLUENCE_SPACE_KEY.
+With no exports page configured, docs are grouped under an auto-created
+**🤙 yeaboi** container page (under the Notion root page / at the space root)
+so everything yeaboi publishes stays together. A warning popup only appears
+when publishing is impossible — Notion with no page at all, Confluence with no
+space key — and offers to open the setup wizard.
 """
 
 from __future__ import annotations
@@ -99,16 +101,18 @@ def _dest_description(key: str, label: str, mode: str) -> str:
         return f"Markdown + HTML → {base}/{mode}"
     if key == DEST_NOTION:
         # The exports page (raw env — the getter already folds in the root-page
-        # fallback) vs the root page, so the hint names the actual target.
+        # fallback) vs the 🤙 yeaboi container, so the hint names the target.
         if os.getenv("NOTION_EXPORT_PARENT_PAGE_ID"):
             return "Publish a page under your Notion exports page"
         if get_notion_export_parent_page_id():
-            return "Publish a page under your Notion root page"
+            return "Publish under the 🤙 yeaboi page in Notion"
         return "Needs a Notion page — press Enter to set it up"
     if key == DEST_CONFLUENCE:
         space = get_confluence_space_key()
+        if space and os.getenv("CONFLUENCE_EXPORT_PARENT_PAGE_ID"):
+            return f"Publish under your Confluence exports page in {space}"
         if space:
-            return f"Publish a page in Confluence space {space}"
+            return f"Publish under the 🤙 yeaboi page in space {space}"
         return "Needs a Confluence space key — press Enter to set it up"
     if key == "back":
         return "Return without exporting"

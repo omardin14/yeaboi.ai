@@ -127,13 +127,24 @@ class TestDestDescription:
         monkeypatch.setenv("NOTION_EXPORT_PARENT_PAGE_ID", "pg1")
         assert _dest_description("notion", "Notion", "retro") == "Publish a page under your Notion exports page"
 
-    def test_notion_root_page_fallback_named(self, monkeypatch):
+    def test_notion_root_page_fallback_names_yeaboi_container(self, monkeypatch):
         monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root1")
-        assert _dest_description("notion", "Notion", "retro") == "Publish a page under your Notion root page"
+        assert _dest_description("notion", "Notion", "retro") == "Publish under the 🤙 yeaboi page in Notion"
 
-    def test_confluence_configured_names_space(self, monkeypatch):
+    def test_confluence_fallback_names_yeaboi_container(self, monkeypatch):
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "TEAM")
-        assert _dest_description("confluence", "Confluence", "planning") == "Publish a page in Confluence space TEAM"
+        assert (
+            _dest_description("confluence", "Confluence", "planning")
+            == "Publish under the 🤙 yeaboi page in space TEAM"
+        )
+
+    def test_confluence_exports_page_configured(self, monkeypatch):
+        monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "TEAM")
+        monkeypatch.setenv("CONFLUENCE_EXPORT_PARENT_PAGE_ID", "999")
+        assert (
+            _dest_description("confluence", "Confluence", "planning")
+            == "Publish under your Confluence exports page in TEAM"
+        )
 
     def test_confluence_unconfigured_points_at_setup(self):
         assert "set it up" in _dest_description("confluence", "Confluence", "planning")

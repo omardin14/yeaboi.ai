@@ -10,6 +10,7 @@ from yeaboi.export_targets import (
     CONFLUENCE_PATH_HINT,
     NOTION_PATH_HINT,
     PublishResult,
+    _brand_parent_cache,
     localize_images,
     publish_markdown,
     publish_to_confluence,
@@ -29,6 +30,15 @@ def _clean_env(monkeypatch):
         "JIRA_BASE_URL",
     ):
         monkeypatch.delenv(var, raising=False)
+    # The container-page resolution is cached per session — isolate tests.
+    _brand_parent_cache.clear()
+
+
+def _confluence_client(container_id: str = "cont-1") -> MagicMock:
+    """A Confluence mock whose 🤙 yeaboi container lookup finds *container_id*."""
+    conf = MagicMock()
+    conf.get_page_by_title.return_value = {"id": container_id}
+    return conf
 
 
 class TestPublishToNotion:
@@ -37,15 +47,20 @@ class TestPublishToNotion:
         assert result.ok is False
         assert result.message == NOTION_PATH_HINT
 
-    def test_root_page_fallback_publishes(self, monkeypatch):
-        # No dedicated exports page — the root page from setup is the parent.
+    def test_root_page_fallback_publishes_under_container(self, monkeypatch):
+        # No dedicated exports page — docs group under the 🤙 yeaboi container.
         monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root-1")
         client = MagicMock()
-        client.pages.create.return_value = {"id": "pg", "url": ""}
+        client.blocks.children.list.return_value = {"results": [], "has_more": False}
+        client.pages.create.side_effect = [{"id": "cont-1", "url": ""}, {"id": "pg", "url": ""}]
         with patch("yeaboi.tools.notion._make_notion_client", return_value=client):
             result = publish_to_notion("T", "body")
         assert result.ok is True
-        assert client.pages.create.call_args.kwargs["parent"] == {"page_id": "root-1"}
+        container, doc = client.pages.create.call_args_list
+        assert container.kwargs["parent"] == {"page_id": "root-1"}
+        assert container.kwargs["properties"]["title"][0]["text"]["content"] == "yeaboi"
+        assert container.kwargs["icon"] == {"type": "emoji", "emoji": "🤙"}
+        assert doc.kwargs["parent"] == {"page_id": "cont-1"}
 
     def test_missing_client_blocks(self, monkeypatch):
         monkeypatch.setenv("NOTION_EXPORT_PARENT_PAGE_ID", "abc123")
@@ -129,6 +144,97 @@ class TestPublishToNotion:
         client.file_uploads.create.assert_not_called()
 
 
+class TestNotionBrandContainer:
+    """Find-or-create of the 🤙 yeaboi container page under the root page."""
+
+    def test_existing_container_reused(self, monkeypatch):
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root-1")
+        client = MagicMock()
+        client.blocks.children.list.return_value = {
+            "results": [
+                {"id": "b1", "type": "paragraph"},
+                {"id": "cont-9", "type": "child_page", "child_page": {"title": "yeaboi"}},
+            ],
+            "has_more": False,
+        }
+        client.pages.create.return_value = {"id": "pg", "url": ""}
+        with patch("yeaboi.tools.notion._make_notion_client", return_value=client):
+            result = publish_to_notion("T", "body")
+        assert result.ok is True
+        client.pages.create.assert_called_once()  # doc only, no container create
+        assert client.pages.create.call_args.kwargs["parent"] == {"page_id": "cont-9"}
+
+    def test_lookup_paginates(self, monkeypatch):
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root-1")
+        client = MagicMock()
+        client.blocks.children.list.side_effect = [
+            {"results": [{"id": "b1", "type": "paragraph"}], "has_more": True, "next_cursor": "c2"},
+            {
+                "results": [{"id": "cont-9", "type": "child_page", "child_page": {"title": "yeaboi"}}],
+                "has_more": False,
+            },
+        ]
+        client.pages.create.return_value = {"id": "pg", "url": ""}
+        with patch("yeaboi.tools.notion._make_notion_client", return_value=client):
+            result = publish_to_notion("T", "body")
+        assert result.ok is True
+        assert client.blocks.children.list.call_count == 2
+        assert client.blocks.children.list.call_args.kwargs["start_cursor"] == "c2"
+        assert client.pages.create.call_args.kwargs["parent"] == {"page_id": "cont-9"}
+
+    def test_explicit_exports_page_skips_container(self, monkeypatch):
+        # A user-chosen exports page wins — no container lookup at all.
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root-1")
+        monkeypatch.setenv("NOTION_EXPORT_PARENT_PAGE_ID", "chosen-1")
+        client = MagicMock()
+        client.pages.create.return_value = {"id": "pg", "url": ""}
+        with patch("yeaboi.tools.notion._make_notion_client", return_value=client):
+            result = publish_to_notion("T", "body")
+        assert result.ok is True
+        client.blocks.children.list.assert_not_called()
+        assert client.pages.create.call_args.kwargs["parent"] == {"page_id": "chosen-1"}
+
+    def test_container_failure_falls_back_to_root(self, monkeypatch):
+        # Grouping is best-effort — a broken lookup publishes under the root.
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root-1")
+        client = MagicMock()
+        client.blocks.children.list.side_effect = RuntimeError("api down")
+        client.pages.create.return_value = {"id": "pg", "url": ""}
+        with patch("yeaboi.tools.notion._make_notion_client", return_value=client):
+            result = publish_to_notion("T", "body")
+        assert result.ok is True
+        client.pages.create.assert_called_once()
+        assert client.pages.create.call_args.kwargs["parent"] == {"page_id": "root-1"}
+
+    def test_container_cached_across_publishes(self, monkeypatch):
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root-1")
+        client = MagicMock()
+        client.blocks.children.list.return_value = {
+            "results": [{"id": "cont-9", "type": "child_page", "child_page": {"title": "yeaboi"}}],
+            "has_more": False,
+        }
+        client.pages.create.return_value = {"id": "pg", "url": ""}
+        with patch("yeaboi.tools.notion._make_notion_client", return_value=client):
+            publish_to_notion("One", "body")
+            publish_to_notion("Two", "body")
+        client.blocks.children.list.assert_called_once()
+
+    def test_publish_failure_pops_cache(self, monkeypatch):
+        # A failed publish may mean the cached container was deleted —
+        # the next attempt must re-resolve it.
+        monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root-1")
+        client = MagicMock()
+        client.blocks.children.list.return_value = {
+            "results": [{"id": "cont-9", "type": "child_page", "child_page": {"title": "yeaboi"}}],
+            "has_more": False,
+        }
+        client.pages.create.side_effect = [RuntimeError("gone"), {"id": "pg", "url": ""}]
+        with patch("yeaboi.tools.notion._make_notion_client", return_value=client):
+            assert publish_to_notion("One", "body").ok is False
+            assert publish_to_notion("Two", "body").ok is True
+        assert client.blocks.children.list.call_count == 2
+
+
 class TestPublishToConfluence:
     def test_missing_space_blocks_with_hint(self):
         result = publish_to_confluence("T", "body")
@@ -151,6 +257,8 @@ class TestPublishToConfluence:
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
             result = publish_to_confluence("Retro — proj", "## Went well\n\n- a")
         assert result.ok is True
+        # A user-chosen exports page wins — no container lookup at all.
+        conf.get_page_by_title.assert_not_called()
         kwargs = conf.create_page.call_args.kwargs
         assert kwargs["space"] == "SP"
         assert kwargs["parent_id"] == "999"
@@ -160,18 +268,20 @@ class TestPublishToConfluence:
         assert "<h2>Went well</h2>" in kwargs["body"]
         assert result.url == "https://org.atlassian.net/wiki/x"
 
-    def test_no_parent_defaults_to_none(self, monkeypatch):
+    def test_no_parent_groups_under_yeaboi_container(self, monkeypatch):
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
-        conf = MagicMock()
+        conf = _confluence_client("cont-5")
         conf.create_page.return_value = {"id": "42", "_links": {}}
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
             result = publish_to_confluence("T", "body")
         assert result.ok is True
-        assert conf.create_page.call_args.kwargs["parent_id"] is None
+        conf.get_page_by_title.assert_called_once_with("SP", "🤙 yeaboi")
+        conf.create_page.assert_called_once()  # doc only — container reused
+        assert conf.create_page.call_args.kwargs["parent_id"] == "cont-5"
 
     def test_error_never_raises(self, monkeypatch):
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
-        conf = MagicMock()
+        conf = _confluence_client()
         conf.create_page.side_effect = RuntimeError("down")
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
             result = publish_to_confluence("T", "body")
@@ -182,7 +292,7 @@ class TestPublishToConfluence:
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
         img = tmp_path / "shot.png"
         img.write_bytes(b"x")
-        conf = MagicMock()
+        conf = _confluence_client()
         conf.create_page.return_value = {"id": "77", "_links": {}}
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
             result = publish_to_confluence("T", f"![Screenshot]({img})")
@@ -198,7 +308,7 @@ class TestPublishToConfluence:
         one, two = tmp_path / "a" / "img.png", tmp_path / "b" / "img.png"
         one.write_bytes(b"1")
         two.write_bytes(b"2")
-        conf = MagicMock()
+        conf = _confluence_client()
         conf.create_page.return_value = {"id": "77", "_links": {}}
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
             publish_to_confluence("T", f"![a]({one})\n![b]({two})")
@@ -209,12 +319,61 @@ class TestPublishToConfluence:
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
         img = tmp_path / "shot.png"
         img.write_bytes(b"x")
-        conf = MagicMock()
+        conf = _confluence_client()
         conf.create_page.return_value = {"id": "77", "_links": {}}
         conf.attach_file.side_effect = RuntimeError("attach down")
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
             result = publish_to_confluence("T", f"![Screenshot]({img})")
         assert result.ok is True
+
+
+class TestConfluenceBrandContainer:
+    """Find-or-create of the 🤙 yeaboi container page at the space root."""
+
+    def test_container_created_when_missing(self, monkeypatch):
+        monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
+        conf = MagicMock()
+        conf.get_page_by_title.return_value = None
+        conf.create_page.side_effect = [{"id": "cont-6"}, {"id": "42", "_links": {}}]
+        with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
+            result = publish_to_confluence("T", "body")
+        assert result.ok is True
+        container, doc = conf.create_page.call_args_list
+        assert container.kwargs["title"] == "🤙 yeaboi"
+        assert container.kwargs["space"] == "SP"
+        assert doc.kwargs["parent_id"] == "cont-6"
+
+    def test_container_failure_falls_back_to_space_root(self, monkeypatch):
+        # Grouping is best-effort — a broken lookup publishes at the space root.
+        monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
+        conf = MagicMock()
+        conf.get_page_by_title.side_effect = RuntimeError("api down")
+        conf.create_page.return_value = {"id": "42", "_links": {}}
+        with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
+            result = publish_to_confluence("T", "body")
+        assert result.ok is True
+        conf.create_page.assert_called_once()
+        assert conf.create_page.call_args.kwargs["parent_id"] is None
+
+    def test_container_cached_across_publishes(self, monkeypatch):
+        monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
+        conf = _confluence_client()
+        conf.create_page.return_value = {"id": "42", "_links": {}}
+        with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
+            publish_to_confluence("One", "body")
+            publish_to_confluence("Two", "body")
+        conf.get_page_by_title.assert_called_once()
+
+    def test_publish_failure_pops_cache(self, monkeypatch):
+        # A failed publish may mean the cached container was deleted —
+        # the next attempt must re-resolve it.
+        monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
+        conf = _confluence_client()
+        conf.create_page.side_effect = [RuntimeError("gone"), {"id": "42", "_links": {}}]
+        with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
+            assert publish_to_confluence("One", "body").ok is False
+            assert publish_to_confluence("Two", "body").ok is True
+        assert conf.get_page_by_title.call_count == 2
 
 
 class TestLocalizeImages:
@@ -281,7 +440,7 @@ class TestBranding:
 
     def test_confluence_page_gets_yeaboi_label(self, monkeypatch):
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
-        conf = MagicMock()
+        conf = _confluence_client()
         conf.create_page.return_value = {"id": "77", "_links": {}}
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
             result = publish_to_confluence("T", "body")
@@ -290,7 +449,7 @@ class TestBranding:
 
     def test_label_failure_keeps_page(self, monkeypatch):
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "SP")
-        conf = MagicMock()
+        conf = _confluence_client()
         conf.create_page.return_value = {"id": "77", "_links": {}}
         conf.set_page_label.side_effect = RuntimeError("labels down")
         with patch("yeaboi.tools.confluence._make_confluence_client", return_value=conf):
