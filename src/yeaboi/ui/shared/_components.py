@@ -378,6 +378,30 @@ def build_progress_dots(
     return progress
 
 
+def build_meter(
+    filled: int,
+    total: int,
+    *,
+    width: int = 10,
+    theme: Theme | None = None,
+    style: str = "",
+) -> Text:
+    """Build a compact horizontal meter: ▰▰▰▰▰▰▰▰▱▱ (filled/total scaled to width).
+
+    Used for at-a-glance ratios (sprint day, confidence %) where a bar reads
+    faster than digits. ``style`` overrides the filled colour (e.g. a
+    confidence meter coloured good/warn/bad); the empty track matches the
+    hollow-dot colour of build_progress_dots.
+    """
+    _theme = theme or ANALYSIS_THEME
+    total = max(1, total)
+    n = round(max(0, min(filled, total)) / total * width)
+    meter = Text(justify="left")
+    meter.append("▰" * n, style=style or _theme.accent)
+    meter.append("▱" * (width - n), style="rgb(60,60,70)")
+    return meter
+
+
 def calc_viewport(height: int, *, header_h: int = 11, action_h: int = 4) -> int:
     """Calculate viewport height from terminal height.
 

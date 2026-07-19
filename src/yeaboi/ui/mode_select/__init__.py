@@ -1744,8 +1744,9 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
 def _run_standup_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
     """Event loop for the Daily Standup page (overview + expandable sections).
 
-    Follows the team-analysis pattern: the overview lists selectable section
-    cards (Team Summary, Sprint & Confidence, My Update, Team, Activity,
+    Follows the team-analysis pattern: a pinned status strip carries the
+    sprint/day/confidence meters, and the overview lists selectable section
+    cards (Team Summary, My Update, Team, Activity,
     Schedule, Notices) with a two-zone focus model: Up/Down focuses the list
     and moves the selection, Enter opens the selected section directly —
     except the Team row, where Enter toggles the inline member sub-rows;
