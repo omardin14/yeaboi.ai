@@ -235,7 +235,7 @@ ollama pull qwen3:8b
 echo "LLM_PROVIDER=ollama" >> ~/.yeaboi/.env
 ```
 
-The setup wizard's **Ollama (Local)** card pre-fills `http://localhost:11434`, verifies the server is running, and lists every model you've pulled (live from `/api/tags`). You don't even need step 2's `ollama pull` — pick any preset and the wizard offers to **download it for you** (press `P` on the "Model not pulled" notice) with live progress, straight from the Ollama server API.
+The setup wizard's **Ollama (Local)** card pre-fills `http://localhost:11434`, verifies the server is running, and lists the models you've pulled (live from `/api/tags`) **plus the recommended presets you haven't**, each tagged "· not pulled". You don't even need step 2's `ollama pull` — pick any not-pulled preset and the wizard offers to **download it for you** (press `P`) with live progress, straight from the Ollama server API. (Cloud providers get the same merged view: your key's available models plus the recommended ones.)
 
 ### Choosing a model
 

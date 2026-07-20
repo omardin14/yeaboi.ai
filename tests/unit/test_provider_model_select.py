@@ -15,7 +15,7 @@ from rich.panel import Panel
 
 from yeaboi.agent.llm import _PROVIDER_DEFAULTS
 from yeaboi.setup_wizard import _PROVIDERS, run_setup_wizard
-from yeaboi.ui.provider_select import _existing_model_for
+from yeaboi.ui.provider_select import _existing_model_for, _merge_model_presets
 from yeaboi.ui.provider_select._config import _save_progress
 from yeaboi.ui.provider_select._constants import (
     _AZDEVOPS_TRACKING_FIELDS,
@@ -515,6 +515,50 @@ class TestExistingModelFor:
     def test_no_config(self):
         assert _existing_model_for(None, "ollama") == ""
         assert _existing_model_for({}, "anthropic") == ""
+
+
+class TestMergeModelPresets:
+    """Live-discovered models merge with curated recommendations (all providers)."""
+
+    CURATED = ["qwen3:8b", "qwen3:14b", "qwen2.5:14b", "llama3.1:8b"]
+
+    def test_ollama_one_installed_keeps_recommendations(self):
+        # The reported case: only qwen3:8b pulled — the others must still show,
+        # tagged as not-pulled, instead of vanishing.
+        presets, unpulled = _merge_model_presets(["qwen3:8b"], self.CURATED, cap=8, is_ollama=True)
+        assert presets == ["qwen3:8b", "qwen3:14b", "qwen2.5:14b", "llama3.1:8b"]
+        assert unpulled == {"qwen3:14b", "qwen2.5:14b", "llama3.1:8b"}
+        assert "qwen3:8b" not in unpulled  # installed → no "not pulled" tag
+
+    def test_ollama_nothing_installed_all_unpulled(self):
+        presets, unpulled = _merge_model_presets([], self.CURATED, cap=8, is_ollama=True)
+        assert presets == self.CURATED
+        assert unpulled == set(self.CURATED)
+
+    def test_ollama_extra_installed_model_listed_first(self):
+        # A model the user pulled that isn't a curated preset still appears.
+        presets, unpulled = _merge_model_presets(["mistral:7b", "qwen3:8b"], self.CURATED, cap=8, is_ollama=True)
+        assert presets[:2] == ["mistral:7b", "qwen3:8b"]
+        assert "mistral:7b" not in unpulled
+        assert "qwen3:8b" not in unpulled
+        assert unpulled == {"qwen3:14b", "qwen2.5:14b", "llama3.1:8b"}
+
+    def test_cloud_merges_without_unpulled_flag(self):
+        curated = ["claude-sonnet-4-6", "claude-opus-4-8"]
+        presets, unpulled = _merge_model_presets(["claude-sonnet-4-6"], curated, cap=8, is_ollama=False)
+        assert presets == ["claude-sonnet-4-6", "claude-opus-4-8"]  # recommendation retained
+        assert unpulled == set()  # cloud has no "not pulled" concept
+
+    def test_cap_limits_discovered_but_keeps_curated(self):
+        discovered = [f"m{i}" for i in range(10)]
+        curated = ["reco-a", "reco-b"]
+        presets, _ = _merge_model_presets(discovered, curated, cap=3, is_ollama=False)
+        assert presets == ["m0", "m1", "m2", "reco-a", "reco-b"]
+
+    def test_no_duplicate_when_discovered_matches_curated(self):
+        presets, _ = _merge_model_presets(["qwen3:8b", "qwen3:14b"], self.CURATED, cap=8, is_ollama=True)
+        assert presets == ["qwen3:8b", "qwen3:14b", "qwen2.5:14b", "llama3.1:8b"]
+        assert presets.count("qwen3:8b") == 1
 
 
 # ---------------------------------------------------------------------------
