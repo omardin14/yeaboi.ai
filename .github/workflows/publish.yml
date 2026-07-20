@@ -23,7 +23,7 @@ jobs:
       should_release: ${{ steps.v.outputs.should_release }}
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # need full history + tags to check for an existing release
       - id: v
@@ -44,7 +44,7 @@ jobs:
     if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.12
       - run: uv sync --extra dev
@@ -60,7 +60,7 @@ jobs:
     permissions:
       id-token: write # PyPI trusted publishing (OIDC)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.12
       - run: uv build
@@ -77,7 +77,7 @@ jobs:
     permissions:
       contents: write # create the tag + GitHub Release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Create tag and GitHub Release
         uses: softprops/action-gh-release@v2
         with:
