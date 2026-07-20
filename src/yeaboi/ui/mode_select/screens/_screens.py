@@ -290,6 +290,9 @@ def _build_version_row(width: int) -> Text:
     row.append("  ·  ", style=dim)
     row.append("c", style=key_style)
     row.append(" changelog", style=dim)
+    row.append("  ·  ", style=dim)
+    row.append("f", style=key_style)
+    row.append(" feedback", style=dim)
     return row
 
 
