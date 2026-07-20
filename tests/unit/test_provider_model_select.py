@@ -266,8 +266,30 @@ class TestValidateKeyOllama:
         assert _validate_key(_card("ollama"), "")[0] == "empty"
 
 
+@pytest.fixture
+def ollama_pkg_installed(monkeypatch):
+    """Pretend langchain-ollama is importable.
+
+    CI runs without the optional ``ollama`` extra, so these tests must not
+    depend on the real environment: any test exercising the post-install
+    verification paths stubs the package check to "installed" here (and
+    the missing-package test stubs it to None), making both paths
+    deterministic everywhere.
+    """
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        if name == "langchain_ollama":
+            return object()  # any non-None value means "installed"
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+
 class TestVerifyApiKeyOllama:
-    def test_server_up_with_models(self, monkeypatch):
+    def test_server_up_with_models(self, monkeypatch, ollama_pkg_installed):
         import httpx
 
         from yeaboi.ui.provider_select._verification import _verify_api_key
@@ -277,7 +299,7 @@ class TestVerifyApiKeyOllama:
         assert ok is True
         assert "verified" in msg.lower()
 
-    def test_server_up_no_models_still_ok_with_pull_hint(self, monkeypatch):
+    def test_server_up_no_models_still_ok_with_pull_hint(self, monkeypatch, ollama_pkg_installed):
         import httpx
 
         from yeaboi.ui.provider_select._verification import _verify_api_key
@@ -287,7 +309,7 @@ class TestVerifyApiKeyOllama:
         assert ok is True
         assert "ollama pull" in msg
 
-    def test_server_down_actionable_message(self, monkeypatch):
+    def test_server_down_actionable_message(self, monkeypatch, ollama_pkg_installed):
         import httpx
 
         from yeaboi.ui.provider_select._verification import _verify_api_key
@@ -375,9 +397,9 @@ class TestOllamaPackageCheck:
         assert ok is False
         assert "uv sync --extra ollama" in msg
 
-    def test_installed_package_proceeds_to_server_check(self, monkeypatch):
-        # langchain-ollama IS installed in the test env — the check passes
-        # through to the normal /api/tags verification.
+    def test_installed_package_proceeds_to_server_check(self, monkeypatch, ollama_pkg_installed):
+        # With the package present, the check passes through to the normal
+        # /api/tags verification.
         import httpx
 
         from yeaboi.ui.provider_select._verification import _verify_api_key
@@ -388,7 +410,7 @@ class TestOllamaPackageCheck:
 
 
 class TestOllamaInstallGuidance:
-    def test_unreachable_message_says_how_to_install(self, monkeypatch):
+    def test_unreachable_message_says_how_to_install(self, monkeypatch, ollama_pkg_installed):
         import httpx
 
         from yeaboi.ui.provider_select._verification import _verify_api_key
