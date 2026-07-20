@@ -24,7 +24,7 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.11
       - run: uv sync --extra dev
@@ -38,7 +38,7 @@ jobs:
     name: Integration & contract tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.11
       - run: uv sync --extra dev
@@ -51,7 +51,7 @@ jobs:
     name: Golden evaluators
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.11
       - run: uv sync --extra dev
@@ -62,7 +62,7 @@ jobs:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.11
       - run: uv sync --extra dev
@@ -72,7 +72,7 @@ jobs:
     name: Format check (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.11
       - run: uv sync --extra dev
@@ -86,7 +86,7 @@ jobs:
     name: Security scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so gitleaks can scan all commits on a PR, not just the tip.
           fetch-depth: 0
