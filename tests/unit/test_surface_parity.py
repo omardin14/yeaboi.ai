@@ -67,7 +67,7 @@ class Exempt(NamedTuple):
 CAPABILITIES: dict[str, dict] = {
     "planning": {
         "engines": {("yeaboi.agent.headless", "run_planning_pipeline")},
-        "mcp_tools": {"plan_generate", "intake_questions", "plan_get", "plan_export", "plan_publish"},
+        "mcp_tools": {"plan_generate", "intake_questions", "plan_get", "plan_export", "plan_publish", "plan_sync"},
         "tui_mode": "project-planning",
         "cli": {
             "--non-interactive",
@@ -85,7 +85,7 @@ CAPABILITIES: dict[str, dict] = {
     },
     "sessions": {
         "engines": Exempt("thin SessionStore reads — no pipeline to extract"),
-        "mcp_tools": {"sessions_list", "session_get"},
+        "mcp_tools": {"sessions_list", "session_get", "session_delete"},
         "tui_mode": Exempt("sessions are surfaced inside the planning-mode screens, no dedicated card"),
         "cli": {"--list-sessions", "--resume", "--clear-sessions"},
         "skill": Exempt("agents call the session tools directly — no guided workflow needed"),
@@ -123,9 +123,9 @@ CAPABILITIES: dict[str, dict] = {
     },
     "retro-board": {
         "engines": {("yeaboi.retro.engine", "generate_action_items")},
-        "mcp_tools": {"retro_history"},
+        "mcp_tools": {"retro_history", "retro_export"},
         "tui_mode": "retro",
-        "cli": Exempt("browser-collaborative LAN board needs a live TTY host — TUI-only by design"),
+        "cli": {"retro"},  # history read-back + export; the live LAN board itself stays TUI-hosted
         "skill": Exempt("live board is TUI-only by design; history stays readable via retro_history"),
     },
     "team-learning": {
@@ -144,9 +144,9 @@ CAPABILITIES: dict[str, dict] = {
     },
     "usage": {
         "engines": Exempt("TUI utility page — reads the local token_usage table"),
-        "mcp_tools": Exempt("TUI utility page"),
+        "mcp_tools": {"usage_get"},
         "tui_mode": "usage",
-        "cli": Exempt("TUI utility page"),
+        "cli": Exempt("TUI utility page; headless callers read usage_get over MCP"),
         "skill": Exempt("TUI utility page"),
     },
     "settings": {

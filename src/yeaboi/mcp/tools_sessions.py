@@ -72,6 +72,35 @@ def _get_session(session_id: str) -> dict:
     }
 
 
+def _delete_session(session_id: str) -> dict:
+    if not session_id.strip():
+        raise ValueError("session_id is required — deletion never defaults to the latest session.")
+    from yeaboi.paths import get_db_path
+    from yeaboi.sessions import SessionStore
+
+    with SessionStore(get_db_path()) as store:
+        deleted = store.delete_session(session_id.strip())
+    if not deleted:
+        raise ValueError(f"Session not found: {session_id}")
+    return {"session_id": session_id.strip(), "deleted": True}
+
+
+def _usage_get() -> dict:
+    from yeaboi.paths import get_db_path
+    from yeaboi.sessions import SessionStore
+
+    db_path = get_db_path()
+    if not db_path.exists():
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "call_count": 0}
+    else:
+        with SessionStore(db_path) as store:
+            usage = store.get_lifetime_usage()
+    # MCP sampling responses carry no token counts — the host pays for those
+    # calls and yeaboi's ledger intentionally skips them.
+    usage["note"] = "Sampling-mode LLM calls are billed to the host agent and not counted here."
+    return usage
+
+
 def register(app) -> None:
     """Attach the session tools to the FastMCP app."""
 
@@ -84,3 +113,16 @@ def register(app) -> None:
     async def session_get(session_id: str = "") -> dict:
         """Get one session's metadata and artifact counts. Blank session_id = most recent session."""
         return await run_readonly(_get_session, session_id)
+
+    @app.tool()
+    async def session_delete(session_id: str) -> dict:
+        """Permanently delete one saved session (its plan, standup/retro history links, logs
+        pointer). DESTRUCTIVE and irreversible — requires an exact session_id from
+        sessions_list and explicit user confirmation; never guess the id."""
+        return await run_readonly(_delete_session, session_id)
+
+    @app.tool()
+    async def usage_get() -> dict:
+        """Get lifetime LLM token usage recorded by yeaboi (input/output tokens, call count)
+        across all sessions and modes. Sampling-mode calls (host-billed) are not counted."""
+        return await run_readonly(_usage_get)

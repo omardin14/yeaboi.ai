@@ -618,7 +618,7 @@ See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full 
 
 ```
 yeaboi [OPTIONS]
-yeaboi <command> [OPTIONS]     # headless mode runners: report, standup, perf, analyze
+yeaboi <command> [OPTIONS]     # headless mode runners: report, standup, perf, retro, analyze
 ```
 
 ### Subcommands (headless mode runners)
@@ -634,6 +634,7 @@ Every TUI mode has a headless CLI path over the same engine:
 | `yeaboi perf complete <engineer> --transcript @notes.txt [--images ...] [--deliver]` | Turn a held 1:1 into a summary + tracked action items |
 | `yeaboi perf review <engineer> [--months N]` | Draft a periodic performance review |
 | `yeaboi perf note <engineer> --text "..."` | Record a note (feeds future preps/reviews) |
+| `yeaboi retro [--limit N] [--export] [--format json]` | Read past retrospectives / export the latest (the live board runs in the TUI) |
 | `yeaboi analyze [--source jira\|azdevops] [--sprints N] [--samples] [--format json]` | Analyse board history into a team calibration profile |
 
 `--format json` keeps stdout machine-clean (warnings and progress go to stderr) for piping into CI or other tools. Add `--strict` to any runner to exit 3 on a degraded run (warnings present, or an empty report) — by default degraded runs still exit 0 with warnings on stderr.
@@ -1074,12 +1075,14 @@ claude mcp add yeaboi-dev -- uv run --project /path/to/yeaboi.ai --extra mcp yea
 | `plan_generate` | Full planning pipeline: analysis → epics → stories → tasks → sprints; saves a resumable session | ✅ |
 | `intake_questions` | The 30-question intake contract (essentials, defaults, choice options) so the host agent runs the interview | — |
 | `plan_get` / `plan_export` / `plan_publish` | Read a saved plan as JSON / export Markdown or HTML / publish to Notion or Confluence | — |
-| `sessions_list` / `session_get` | Browse saved sessions and artifact progress | — |
+| `plan_sync` | Push a plan into the tracker — creates the real epic/stories/tasks/sprints in Jira or Azure DevOps (idempotent; the tool docstring requires user confirmation) | — |
+| `sessions_list` / `session_get` / `session_delete` | Browse saved sessions and artifact progress; delete one by exact id (destructive, confirmation required) | — |
+| `usage_get` | Lifetime LLM token usage recorded by yeaboi (sampling-mode calls are host-billed and not counted) | — |
 | `standup_run` / `standup_history` | Daily standup (activity + confidence + summaries, per-run channel override); past runs | ✅ / — |
 | `standup_config_get` / `standup_config_set` | Read/update the standup config (time, weekdays, channels, aliases) | — |
 | `report_delivery` | Stakeholder delivery report for last sprint / month / quarter (with explicit sprint windowing) | ✅ |
 | `perf_roster`, `perf_one_on_one_prep`, `perf_one_on_one_complete`, `perf_six_month_review`, `perf_note_add` | Performance mode workflows + engineer notes | ✅ (roster/notes: —) |
-| `retro_history` | Past retrospectives (the live retro board stays in the TUI — it's a real-time LAN page) | — |
+| `retro_history` / `retro_export` | Past retrospectives, and Markdown/HTML export of the latest (the live retro board stays in the TUI — it's a real-time LAN page) | — |
 | `team_analyze` | Full board-history analysis into a calibration profile (heavy — several LLM calls) | ✅ |
 | `team_profile_get` / `team_compare_plan_to_actuals` | Calibration profiles; plan-vs-actuals comparison | — |
 

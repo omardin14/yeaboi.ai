@@ -27,6 +27,27 @@ def _retro_history(session_id: str, limit: int) -> dict:
     return {"session_id": resolved, "history": history, "latest_report": latest}
 
 
+def _retro_export(session_id: str) -> dict:
+    from yeaboi.mcp.tools_sessions import resolve_session_id
+    from yeaboi.paths import get_db_path
+    from yeaboi.retro.export import export_retro
+    from yeaboi.retro.store import RetroStore
+
+    resolved = resolve_session_id(session_id)
+    with RetroStore(get_db_path()) as store:
+        report = store.get_latest_report(resolved)
+    if report is None:
+        raise ValueError(f"No retro recorded for session {resolved!r} — run a retro board from the yeaboi TUI first.")
+    paths = export_retro(report)
+    logger.info("Retro exported via MCP: session=%s date=%s", resolved, report.date)
+    return {
+        "session_id": resolved,
+        "retro_date": report.date,
+        "markdown": str(paths["markdown"]),
+        "html": str(paths["html"]),
+    }
+
+
 def register(app) -> None:
     """Attach the retro tools to the FastMCP app."""
 
@@ -35,3 +56,9 @@ def register(app) -> None:
         """Get past sprint retrospectives (cards, reactions, action items) for a session.
         Blank session_id = most recent session. Running a live retro board requires the yeaboi TUI."""
         return await run_readonly(_retro_history, session_id, limit)
+
+    @app.tool()
+    async def retro_export(session_id: str = "") -> dict:
+        """Export the most recent retrospective as Markdown + HTML files (under
+        ~/.yeaboi/exports/retro/) and return their paths. Blank session_id = most recent session."""
+        return await run_readonly(_retro_export, session_id)

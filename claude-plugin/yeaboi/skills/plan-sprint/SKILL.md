@@ -48,6 +48,10 @@ moving, never rush.
    - export it to a file (`plan_export`, markdown or HTML),
    - publish it to the user's docs (`plan_publish`, `destination: "notion"` or
      `"confluence"` — confirm before publishing),
+   - push it into the tracker (`plan_sync`, `destination: "jira"` or
+     `"azdevops"` — this creates REAL epics/stories/tasks on the board, so
+     always confirm with the user first; it's idempotent, a retry skips
+     what already exists),
    - adjust and regenerate (gather the changes, call `plan_generate` again),
    - or leave it — it's resumable in the yeaboi TUI and usable by the other
      yeaboi tools (standup_run, report_delivery, perf_*).

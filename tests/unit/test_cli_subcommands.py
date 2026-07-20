@@ -327,6 +327,56 @@ class TestPerfCommand:
             assert store.get_notes("Sam")[0]["note_text"] == "shipped the migration solo"
 
 
+class TestRetroCommand:
+    def test_no_session_exits_2(self, monkeypatch):
+        from yeaboi.cli import _cmd_retro
+
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: None)
+        args = build_parser().parse_args(["retro"])
+        assert _cmd_retro(args, _console()) == 2
+
+    def test_history_json(self, monkeypatch, tmp_path, capsys):
+        import json
+
+        from yeaboi.agent.state import RetroReport
+        from yeaboi.cli import _cmd_retro
+        from yeaboi.retro.store import RetroStore
+
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        with RetroStore(db) as store:
+            store.record_run(RetroReport(date="2026-07-18", session_id="sid", project_name="P"))
+        args = build_parser().parse_args(["retro", "--format", "json"])
+        assert _cmd_retro(args, _console()) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["history"][0]["retro_date"] == "2026-07-18"
+
+    def test_export_writes_files(self, monkeypatch, tmp_path):
+        from yeaboi.agent.state import RetroReport
+        from yeaboi.cli import _cmd_retro
+        from yeaboi.retro.store import RetroStore
+
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+        monkeypatch.setattr("yeaboi.paths.get_retro_export_dir", lambda key: tmp_path / "out")
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        (tmp_path / "out").mkdir()
+        with RetroStore(db) as store:
+            store.record_run(RetroReport(date="2026-07-18", session_id="sid", project_name="P"))
+        args = build_parser().parse_args(["retro", "--export"])
+        assert _cmd_retro(args, _console()) == 0
+        assert (tmp_path / "out" / "retro-2026-07-18.md").exists()
+
+    def test_export_without_retro_exits_2(self, monkeypatch, tmp_path):
+        from yeaboi.cli import _cmd_retro
+
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        args = build_parser().parse_args(["retro", "--export"])
+        assert _cmd_retro(args, _console()) == 2
+
+
 class TestAnalyzeCommand:
     def test_passthrough_and_summary(self, monkeypatch, capsys):
         from yeaboi.team_profile import TeamProfile

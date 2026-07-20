@@ -26,8 +26,11 @@ EXPECTED_TOOLS = {
     "plan_get",
     "plan_export",
     "plan_publish",
+    "plan_sync",
     "sessions_list",
     "session_get",
+    "session_delete",
+    "usage_get",
     "standup_run",
     "standup_history",
     "standup_config_get",
@@ -39,6 +42,7 @@ EXPECTED_TOOLS = {
     "perf_six_month_review",
     "perf_note_add",
     "retro_history",
+    "retro_export",
     "team_profile_get",
     "team_compare_plan_to_actuals",
     "team_analyze",
@@ -407,6 +411,112 @@ class TestEngineTools:
         payload = call_tool("team_compare_plan_to_actuals")
         assert payload["ok"] is True
         assert payload["data"]["accuracy_pct"] == 82
+
+
+class TestPlanSync:
+    def test_sync_to_jira(self, seeded_session, monkeypatch):
+        from types import SimpleNamespace
+
+        captured: dict = {}
+
+        def fake_sync(state, on_progress=None):
+            captured["stories_in_state"] = len(state.get("stories") or [])
+            if on_progress:
+                on_progress(1, 3, "Creating epic")
+            result = SimpleNamespace(
+                epic_key="PROJ-1",
+                stories_created={"s1": "PROJ-2"},
+                tasks_created={},
+                sprints_created={"sp1": "17"},
+                errors=["Sprint 2 board missing"],
+                skipped=1,
+            )
+            return result, dict(state, jira_epic_key="PROJ-1")
+
+        monkeypatch.setattr("yeaboi.jira_sync.sync_all_to_jira", fake_sync)
+        payload = call_tool("plan_sync", {"destination": "jira"})
+        assert payload["ok"] is True
+        assert payload["data"]["epic"] == "PROJ-1"
+        assert payload["data"]["stories_created"] == {"s1": "PROJ-2"}
+        assert payload["data"]["skipped_existing"] == 1
+        assert payload["warnings"] == ["Sprint 2 board missing"]
+        assert captured["stories_in_state"] > 0
+
+        # The updated state (created keys) must persist so a re-sync skips them.
+        from yeaboi.paths import get_db_path
+        from yeaboi.sessions import SessionStore
+
+        with SessionStore(get_db_path()) as store:
+            assert store.load_state(seeded_session)["jira_epic_key"] == "PROJ-1"
+
+    def test_sync_bad_destination(self, seeded_session):
+        payload = call_tool("plan_sync", {"destination": "linear"})
+        assert payload["ok"] is False
+        assert "jira" in payload["error"]["message"]
+
+    def test_sync_no_sessions_errors(self, tmp_db):
+        payload = call_tool("plan_sync", {"destination": "jira"})
+        assert payload["ok"] is False
+
+
+class TestRetroExport:
+    def test_no_retro_recorded_errors(self, seeded_session):
+        payload = call_tool("retro_export")
+        assert payload["ok"] is False
+        assert "No retro recorded" in payload["error"]["message"]
+
+    def test_exports_latest_report(self, seeded_session, monkeypatch, tmp_path):
+        from yeaboi.agent.state import RetroReport
+        from yeaboi.paths import get_db_path
+        from yeaboi.retro.store import RetroStore
+
+        with RetroStore(get_db_path()) as store:
+            store.record_run(RetroReport(date="2026-07-18", session_id=seeded_session, project_name="Test Project"))
+        monkeypatch.setattr("yeaboi.paths.get_retro_export_dir", lambda key: tmp_path)
+        payload = call_tool("retro_export")
+        assert payload["ok"] is True
+        assert payload["data"]["retro_date"] == "2026-07-18"
+        from pathlib import Path
+
+        assert Path(payload["data"]["markdown"]).exists()
+        assert Path(payload["data"]["html"]).exists()
+
+
+class TestSessionDelete:
+    def test_deletes_by_exact_id(self, seeded_session):
+        payload = call_tool("session_delete", {"session_id": seeded_session})
+        assert payload["ok"] is True
+        assert payload["data"]["deleted"] is True
+        assert call_tool("sessions_list")["data"] == []
+
+    def test_blank_id_refused(self, seeded_session):
+        payload = call_tool("session_delete", {"session_id": "  "})
+        assert payload["ok"] is False
+        assert "never defaults" in payload["error"]["message"]
+
+    def test_unknown_id_errors(self, tmp_db):
+        payload = call_tool("session_delete", {"session_id": "new-ffffffff-2026-01-01"})
+        assert payload["ok"] is False
+        assert "not found" in payload["error"]["message"].lower()
+
+
+class TestUsageGet:
+    def test_no_db_returns_zeros(self, tmp_db):
+        payload = call_tool("usage_get")
+        assert payload["ok"] is True
+        assert payload["data"]["total_tokens"] == 0
+        assert "host agent" in payload["data"]["note"]
+
+    def test_reads_recorded_usage(self, seeded_session, tmp_db):
+        from yeaboi.sessions import SessionStore
+
+        with SessionStore(tmp_db) as store:
+            store.record_token_usage(100, 50, model="model-x", provider="anthropic")
+        payload = call_tool("usage_get")
+        assert payload["ok"] is True
+        assert payload["data"]["input_tokens"] == 100
+        assert payload["data"]["output_tokens"] == 50
+        assert payload["data"]["call_count"] == 1
 
 
 class TestInputValidation:

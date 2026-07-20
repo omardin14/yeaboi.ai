@@ -482,7 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
     # optional, so bare `yeaboi` and `yeaboi --<flag>` parse unchanged).
     # See CLAUDE.md "REQUIRED: Surface Parity" — each mode needs a CLI path;
     # these run the same engines the TUI and the MCP server use.
-    subparsers = parser.add_subparsers(dest="command", metavar="{report,standup,perf,analyze}")
+    subparsers = parser.add_subparsers(dest="command", metavar="{report,standup,perf,retro,analyze}")
 
     report_p = subparsers.add_parser("report", help="Generate a stakeholder delivery report (Reporting mode)")
     report_p.add_argument("--period", choices=["last_sprint", "last_month", "quarter"], default="last_sprint")
@@ -548,6 +548,12 @@ def build_parser() -> argparse.ArgumentParser:
     note_p = perf_sub.add_parser("note", help="Record a note about an engineer")
     note_p.add_argument("engineer", help="Engineer name")
     note_p.add_argument("--text", required=True, help="The note text")
+
+    retro_p = subparsers.add_parser("retro", help="Read past retrospectives (the live board runs in the TUI)")
+    retro_p.add_argument("--session", default="", metavar="ID", help="Session to read (default: most recent)")
+    retro_p.add_argument("--limit", type=int, default=10, help="Number of past retros to show (default 10)")
+    retro_p.add_argument("--export", action="store_true", help="Also export the latest retro to Markdown + HTML")
+    retro_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     analyze_p = subparsers.add_parser("analyze", help="Analyse team board history into a calibration profile")
     analyze_p.add_argument("--source", choices=["jira", "azdevops"], default="", help="Tracker (default: auto)")
@@ -996,7 +1002,13 @@ def _run_subcommand(args: argparse.Namespace) -> int:
     to_json = getattr(args, "format", "text") == "json"
     # JSON mode keeps stdout machine-clean: human chatter goes to stderr.
     console = Console(stderr=to_json)
-    handlers = {"report": _cmd_report, "standup": _cmd_standup, "perf": _cmd_perf, "analyze": _cmd_analyze}
+    handlers = {
+        "report": _cmd_report,
+        "standup": _cmd_standup,
+        "perf": _cmd_perf,
+        "retro": _cmd_retro,
+        "analyze": _cmd_analyze,
+    }
     try:
         return handlers[args.command](args, console)
     except Exception as e:
@@ -1170,6 +1182,45 @@ def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
     with PerformanceStore(get_db_path()) as store:
         store.add_note(args.engineer, args.text)
     console.print(f"[green]Note recorded for {args.engineer}[/green]")
+    return 0
+
+
+def _cmd_retro(args: argparse.Namespace, console: "Console") -> int:
+    """Read-back of past retro boards. The live collaborative board needs a TTY
+    host and stays in the TUI (see the surface-parity registry)."""
+    import json
+
+    from yeaboi.paths import get_db_path
+    from yeaboi.retro.store import RetroStore
+
+    session_id = _resolve_cli_session(args.session)
+    if not session_id:
+        print("Error: no session found to read retros for.", file=sys.stderr)
+        return 2
+    with RetroStore(get_db_path()) as store:
+        history = store.get_history(session_id, limit=args.limit)
+        latest = store.get_latest_report(session_id) if args.export else None
+    exported: dict = {}
+    if args.export:
+        if latest is None:
+            print("Error: no retro recorded yet — run a retro board from the TUI first.", file=sys.stderr)
+            return 2
+        from yeaboi.retro.export import export_retro
+
+        exported = {k: str(v) for k, v in export_retro(latest).items()}
+    if args.format == "json":
+        print(json.dumps({"session_id": session_id, "history": history, "exported": exported}, indent=2))
+        return 0
+    if not history:
+        console.print("[yellow]No retros recorded for this session yet — run one from the TUI Retro page.[/yellow]")
+        return 0
+    for row in history:
+        console.print(
+            f"  • {row['retro_date'] or row['run_at'][:10]}  {row['project_name'] or session_id}"
+            f"  — {row['card_count']} cards"
+        )
+    for kind, path in exported.items():
+        console.print(f"  Exported {kind}: {path}")
     return 0
 
 

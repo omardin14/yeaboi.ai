@@ -171,6 +171,36 @@ def _plan_publish(session_id: str, destination: str) -> dict:
     return {"session_id": resolved, "destination": destination, "url": result.url, "message": result.message}
 
 
+def _plan_sync(session_id: str, destination: str, on_progress=None) -> dict:
+    if destination not in ("jira", "azdevops"):
+        raise ValueError(f"Unsupported destination {destination!r} — use 'jira' or 'azdevops'.")
+    resolved, state = _load_state(session_id)
+    if destination == "jira":
+        from yeaboi.jira_sync import sync_all_to_jira as sync_all
+    else:
+        from yeaboi.azdevops_sync import sync_all_to_azdevops as sync_all
+
+    result, updated_state = sync_all(state, on_progress)
+    # Persist the created-key mappings so a re-run skips what already exists
+    # (the sync modules are idempotent through these state fields).
+    from yeaboi.paths import get_db_path
+    from yeaboi.sessions import SessionStore
+
+    with SessionStore(get_db_path()) as store:
+        store.save_state(resolved, updated_state)
+    logger.info("Plan synced via MCP: session=%s dest=%s errors=%d", resolved, destination, len(result.errors))
+    return {
+        "session_id": resolved,
+        "destination": destination,
+        "epic": result.epic_key if destination == "jira" else result.epic_id,
+        "stories_created": dict(result.stories_created),
+        "tasks_created": dict(result.tasks_created),
+        "sprints_created": dict(result.sprints_created if destination == "jira" else result.iterations_created),
+        "skipped_existing": result.skipped,
+        "warnings": list(result.errors),
+    }
+
+
 def register(app) -> None:
     """Attach the planning tools to the FastMCP app."""
 
@@ -233,3 +263,21 @@ def register(app) -> None:
         in an external workspace — confirm with the user before calling. Blank session_id =
         most recent session."""
         return await run_readonly(_plan_publish, session_id, destination)
+
+    @app.tool()
+    async def plan_sync(ctx: Context, session_id: str = "", destination: str = "jira") -> dict:
+        """Push a saved plan into the user's issue tracker (destination: 'jira' or 'azdevops'):
+        creates the epic, stories, tasks and sprints/iterations as REAL tickets on the
+        configured board — always confirm with the user before calling. Idempotent: items
+        created by an earlier sync are skipped, so a partial run can be safely retried.
+        Blank session_id = most recent session."""
+
+        def report(current: int, total: int, label: str) -> None:
+            # Called from the sync's worker thread — bridge the async progress
+            # notification back to the server's event loop.
+            try:
+                anyio.from_thread.run(ctx.report_progress, current, total or None, label)
+            except Exception:
+                logger.debug("sync progress report failed (continuing)", exc_info=True)
+
+        return await run_engine(ctx, _plan_sync, session_id, destination, report, needs_llm=False)
