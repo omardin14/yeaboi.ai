@@ -43,7 +43,16 @@ class TestFormView:
         from yeaboi.changelog import AREA_COLORS
 
         panel = _build_feedback_screen("form", area_idx=2, field_sel=1, width=100, height=40)
-        console = Console(file=io.StringIO(), width=100, height=45, legacy_windows=False, force_terminal=True)
+        # color_system pinned: CI terminals lack COLORTERM, and Rich would
+        # otherwise downgrade rgb() styles below truecolor.
+        console = Console(
+            file=io.StringIO(),
+            width=100,
+            height=45,
+            legacy_windows=False,
+            force_terminal=True,
+            color_system="truecolor",
+        )
         console.print(panel)
         out = console.file.getvalue()
         r, g, b = (110, 140, 220)  # planning blue from AREA_COLORS
