@@ -627,11 +627,11 @@ Every TUI mode has a headless CLI path over the same engine:
 
 | Command | Description |
 |---------|-------------|
-| `yeaboi report [--period last_sprint\|last_month\|quarter] [--format json]` | Stakeholder delivery report from the tracker |
-| `yeaboi standup [--deliver] [--channels slack email ...] [--days N] [--format json]` | Run a Daily Standup (print, or deliver to channels) |
+| `yeaboi report [--period last_sprint\|last_month\|quarter] [--window-start/--window-end YYYY-MM-DD] [--sprint-names A,B] [--label "Q3 2026"] [--format json]` | Stakeholder delivery report from the tracker (quarter reports take explicit sprint windowing) |
+| `yeaboi standup [--deliver] [--channels slack email ...] [--days N] [--schedule install\|remove\|status] [--format json]` | Run a Daily Standup (print/deliver), or manage the OS schedule that runs it daily |
 | `yeaboi perf roster` | List the engineer roster from recent tracker assignees |
 | `yeaboi perf prep <engineer>` | 1:1 prep — talking points from real delivery data |
-| `yeaboi perf complete <engineer> --transcript @notes.txt [--deliver]` | Turn a held 1:1 into a summary + tracked action items |
+| `yeaboi perf complete <engineer> --transcript @notes.txt [--images ...] [--deliver]` | Turn a held 1:1 into a summary + tracked action items |
 | `yeaboi perf review <engineer> [--months N]` | Draft a periodic performance review |
 | `yeaboi perf note <engineer> --text "..."` | Record a note (feeds future preps/reviews) |
 | `yeaboi analyze [--source jira\|azdevops] [--sprints N] [--samples] [--format json]` | Analyse board history into a team calibration profile |

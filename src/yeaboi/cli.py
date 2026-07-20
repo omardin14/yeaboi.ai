@@ -487,6 +487,16 @@ def build_parser() -> argparse.ArgumentParser:
     report_p = subparsers.add_parser("report", help="Generate a stakeholder delivery report (Reporting mode)")
     report_p.add_argument("--period", choices=["last_sprint", "last_month", "quarter"], default="last_sprint")
     report_p.add_argument("--session", default="", metavar="ID", help="Session to use (default: most recent)")
+    report_p.add_argument(
+        "--window-start", default="", metavar="YYYY-MM-DD", help="Explicit window start (quarter sprint windowing)"
+    )
+    report_p.add_argument("--window-end", default="", metavar="YYYY-MM-DD", help="Explicit window end")
+    report_p.add_argument(
+        "--sprint-names", default="", metavar="A,B", help="Comma-separated sprint names framing a quarter report"
+    )
+    report_p.add_argument("--label", default="", metavar="TEXT", help='Period label override (e.g. "Q3 2026")')
+    report_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
+    report_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
     report_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     standup_p = subparsers.add_parser("standup", help="Run a Daily Standup (alias of --standup-run, more knobs)")
@@ -496,6 +506,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--channels", nargs="+", choices=["terminal", "desktop", "slack", "email"], help="Override delivery channels"
     )
     standup_p.add_argument("--days", type=int, default=0, help="Activity look-back window override")
+    standup_p.add_argument(
+        "--schedule",
+        choices=["install", "remove", "status"],
+        help="Manage the OS schedule (launchd/cron) that runs the standup daily, instead of running one now",
+    )
     standup_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     perf_p = subparsers.add_parser("perf", help="Performance mode: 1:1 prep/completion, reviews, notes")
@@ -503,15 +518,28 @@ def build_parser() -> argparse.ArgumentParser:
     perf_sub.add_parser("roster", help="List the engineer roster from recent tracker assignees")
     prep_p = perf_sub.add_parser("prep", help="Prepare a 1:1 for an engineer")
     prep_p.add_argument("engineer", help="Engineer name (see `yeaboi perf roster`)")
+    prep_p.add_argument("--session", default="", metavar="ID", help="Session for team context (default: most recent)")
+    prep_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
+    prep_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
     complete_p = perf_sub.add_parser("complete", help="Complete a held 1:1 from its transcript")
     complete_p.add_argument("engineer", help="Engineer name")
     complete_p.add_argument(
         "--transcript", required=True, metavar="TEXT", help="Transcript text; @file.txt reads from file"
     )
     complete_p.add_argument("--deliver", action="store_true", help="Email the summary via the configured SMTP")
+    complete_p.add_argument("--session", default="", metavar="ID", help="Session for team context")
+    complete_p.add_argument(
+        "--images", nargs="+", default=[], metavar="PATH", help="Whiteboard/notes photos to attach to the summary"
+    )
+    complete_p.add_argument(
+        "--recipients", nargs="+", default=None, metavar="EMAIL", help="Email recipients override (with --deliver)"
+    )
     review_p = perf_sub.add_parser("review", help="Draft a periodic performance review")
     review_p.add_argument("engineer", help="Engineer name")
     review_p.add_argument("--months", type=int, default=6, help="Review period in months (default 6)")
+    review_p.add_argument("--session", default="", metavar="ID", help="Session for team context")
+    review_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
+    review_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
     note_p = perf_sub.add_parser("note", help="Record a note about an engineer")
     note_p.add_argument("engineer", help="Engineer name")
     note_p.add_argument("--text", required=True, help="The note text")
@@ -967,7 +995,17 @@ def _cmd_report(args: argparse.Namespace, console: "Console") -> int:
     from yeaboi.reporting.render import format_report_rich
 
     console.print(f"[bold cyan]Generating {args.period.replace('_', ' ')} delivery report...[/bold cyan]")
-    report = run_delivery_report(args.period, session_id=_resolve_cli_session(args.session) or "")
+    sprint_names = tuple(s.strip() for s in args.sprint_names.split(",") if s.strip())
+    report = run_delivery_report(
+        args.period,
+        session_id=_resolve_cli_session(args.session) or "",
+        jira_project=args.jira_project,
+        azdo_project=args.azdo_project,
+        window_start=args.window_start,
+        window_end=args.window_end,
+        sprint_names=sprint_names,
+        period_label_override=args.label,
+    )
     for warning in report.warnings:
         print(f"⚠ {warning}", file=sys.stderr)
     if args.format == "json":
@@ -985,6 +1023,8 @@ def _cmd_standup(args: argparse.Namespace, console: "Console") -> int:
     if not session_id:
         print("Error: no session found to run a standup for.", file=sys.stderr)
         return 2
+    if args.schedule:
+        return _cmd_standup_schedule(args, console, session_id)
     report = run_standup(session_id, deliver=args.deliver, days=args.days or None, channels=args.channels)
     for warning in report.warnings:
         print(f"⚠ {warning}", file=sys.stderr)
@@ -992,6 +1032,42 @@ def _cmd_standup(args: argparse.Namespace, console: "Console") -> int:
         print(_json_dump(report))
     else:
         console.print(format_standup_rich(report))
+    return 0
+
+
+def _cmd_standup_schedule(args: argparse.Namespace, console: "Console", session_id: str) -> int:
+    """`yeaboi standup --schedule install|remove|status` — manage the OS-native daily job.
+
+    Uses the session's saved standup config (time/weekdays/lead) — set it via the
+    TUI Configure screen or the MCP standup_config_set tool.
+    """
+    import json
+
+    from yeaboi.standup.scheduler import get_schedule_status, install_schedule, remove_schedule
+
+    logging.getLogger("yeaboi.cli").info("standup schedule %s: session=%s", args.schedule, session_id)
+    if args.schedule == "status":
+        status = get_schedule_status(session_id)
+        if args.format == "json":
+            print(json.dumps(status, indent=2))
+        else:
+            state = "installed" if status.get("installed") else "not installed"
+            suffix = f" ({status.get('path')})" if status.get("path") else ""
+            console.print(f"Schedule for [bold]{session_id}[/bold] [{status.get('platform', '?')}]: {state}{suffix}")
+        return 0
+    if args.schedule == "remove":
+        console.print(remove_schedule(session_id))
+        return 0
+    # install — from the saved config (defaults mirror standup/store.py)
+    from yeaboi.paths import get_db_path
+    from yeaboi.standup.store import StandupStore
+
+    with StandupStore(get_db_path()) as store:
+        config = store.load_config(session_id) or {}
+    standup_time = config.get("time") or "10:00"
+    weekdays = config.get("weekdays") or "1-5"
+    lead_minutes = int(config.get("lead_minutes", 10))
+    console.print(install_schedule(session_id, standup_time, weekdays, lead_minutes))
     return 0
 
 
@@ -1011,7 +1087,12 @@ def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
         from yeaboi.performance.engine import run_one_on_one_prep
         from yeaboi.performance.render import format_prep_rich
 
-        prep = run_one_on_one_prep(args.engineer)
+        prep = run_one_on_one_prep(
+            args.engineer,
+            session_id=_resolve_cli_session(args.session) or "",
+            jira_project=args.jira_project,
+            azdo_project=args.azdo_project,
+        )
         for warning in prep.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         console.print(format_prep_rich(prep))
@@ -1028,7 +1109,14 @@ def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
         from yeaboi.performance.engine import complete_one_on_one
         from yeaboi.performance.render import format_completion_rich
 
-        record = complete_one_on_one(args.engineer, transcript, deliver=args.deliver)
+        record = complete_one_on_one(
+            args.engineer,
+            transcript,
+            session_id=_resolve_cli_session(args.session) or "",
+            deliver=args.deliver,
+            recipients=args.recipients,
+            images=tuple(args.images),
+        )
         for warning in record.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         console.print(format_completion_rich(record))
@@ -1038,7 +1126,13 @@ def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
         from yeaboi.performance.engine import run_six_month_review
         from yeaboi.performance.render import format_review_rich
 
-        review = run_six_month_review(args.engineer, period_months=args.months)
+        review = run_six_month_review(
+            args.engineer,
+            session_id=_resolve_cli_session(args.session) or "",
+            jira_project=args.jira_project,
+            azdo_project=args.azdo_project,
+            period_months=args.months,
+        )
         for warning in review.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         console.print(format_review_rich(review))

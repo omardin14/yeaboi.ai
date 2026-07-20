@@ -202,6 +202,57 @@ TOOL_ONLY_PARAMS: dict[str, set[str]] = {
     "plan_generate": {"description", "answers", "team_size", "sprint_length_weeks", "project_context"},
 }
 
+# ---------------------------------------------------------------------------
+# Param parity: CLI subcommand ↔ engine signature (the same drift guard as
+# PARAM_PAIRS, for the `yeaboi <command>` surface — CLI-only gaps shipped
+# because only the MCP side was enforced).
+# ---------------------------------------------------------------------------
+
+# Which engine each headless subcommand drives ("perf prep" = nested path).
+# The planning capability's CLI is the flat --non-interactive flag set, which
+# predates subcommands and maps through QuestionnaireState — not pairable here.
+CLI_PARAM_PAIRS: dict[str, tuple[str, str]] = {
+    "report": ("yeaboi.reporting.engine", "run_delivery_report"),
+    "standup": ("yeaboi.standup.engine", "run_standup"),
+    "perf prep": ("yeaboi.performance.engine", "run_one_on_one_prep"),
+    "perf complete": ("yeaboi.performance.engine", "complete_one_on_one"),
+    "perf review": ("yeaboi.performance.engine", "run_six_month_review"),
+    "analyze": ("yeaboi.analysis.engine", "run_team_analysis"),
+}
+
+# CLI dest → engine param renames (the CLI keeps short ergonomic flag names).
+CLI_RENAMES: dict[str, dict[str, str]] = {
+    "report": {"session": "session_id", "label": "period_label_override"},
+    "standup": {"session": "session_id"},
+    "perf prep": {"session": "session_id"},
+    "perf complete": {"session": "session_id"},
+    "perf review": {"session": "session_id", "months": "period_months"},
+    "analyze": {
+        "project": "project_key",
+        "sprints": "sprint_count",
+        "samples": "generate_samples",
+        "no_insights": "include_insights",  # inverted store_true flag
+    },
+}
+
+# CLI dests with no engine counterpart — output/dispatch concerns.
+CLI_ONLY_DESTS: dict[str, set[str]] = {
+    "report": {"format"},
+    "standup": {"format", "schedule"},  # --schedule drives standup/scheduler.py, not run_standup
+    "perf prep": set(),
+    "perf complete": set(),
+    "perf review": set(),
+    "analyze": {"format"},
+}
+
+# Engine params deliberately without a CLI flag. Reasoned; staleness-checked.
+CLI_HIDDEN: dict[str, dict[str, str]] = {
+    "analyze": {
+        "progress": "live shared-list progress feed for the TUI frame loop — the CLI prints a banner instead",
+        "team_name": "AzDO team label; auto-resolved from the configured AZURE_DEVOPS_TEAM",
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -461,3 +512,84 @@ class TestParamParity:
             tool_params = _tool_params(app, tool_name)
             stale = extras - tool_params
             assert not stale, f"{tool_name}: TOOL_ONLY_PARAMS lists params the tool doesn't have: {sorted(stale)}"
+
+
+# ---------------------------------------------------------------------------
+# 7. Param parity — the engine's keyword surface must reach the CLI subcommand
+# ---------------------------------------------------------------------------
+
+
+def _cli_subparser(path: str):
+    """Resolve 'report' or 'perf prep' to its argparse sub-parser."""
+    import argparse
+
+    from yeaboi.cli import build_parser
+
+    p = build_parser()
+    for part in path.split():
+        action = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
+        p = action.choices[part]
+    return p
+
+
+def _cli_dests(path: str) -> set[str]:
+    """The argument dests a subcommand defines (its own flags + positionals)."""
+    import argparse
+
+    return {
+        a.dest
+        for a in _cli_subparser(path)._actions
+        if a.dest != "help" and not isinstance(a, argparse._SubParsersAction)
+    }
+
+
+class TestCliParamParity:
+    def test_engine_params_reach_the_cli(self):
+        problems: list[str] = []
+        for path, (mod, fn) in CLI_PARAM_PAIRS.items():
+            renames = CLI_RENAMES.get(path, {})
+            mapped = {renames.get(d, d) for d in _cli_dests(path) - CLI_ONLY_DESTS[path]}
+            engine_params = _engine_params(mod, fn)
+            hidden = set(CLI_HIDDEN.get(path, {}))
+            unexposed = engine_params - mapped - HIDDEN_ALWAYS - hidden
+            if unexposed:
+                problems.append(
+                    f"yeaboi {path}: engine {mod}.{fn} has params the CLI doesn't expose: {sorted(unexposed)} — "
+                    f"add flags in cli.py build_parser() or a CLI_HIDDEN entry with a reason"
+                )
+        assert not problems, "\n".join(problems) + f"\n{_HOW_TO}"
+
+    def test_cli_dests_map_to_the_engine(self):
+        problems: list[str] = []
+        for path, (mod, fn) in CLI_PARAM_PAIRS.items():
+            renames = CLI_RENAMES.get(path, {})
+            mapped = {renames.get(d, d) for d in _cli_dests(path) - CLI_ONLY_DESTS[path]}
+            phantom = mapped - _engine_params(mod, fn)
+            if phantom:
+                problems.append(
+                    f"yeaboi {path}: CLI args with no engine counterpart (typo'd rename?): {sorted(phantom)}"
+                )
+        assert not problems, "\n".join(problems) + f"\n{_HOW_TO}"
+
+    def test_cli_registry_entries_are_real(self):
+        """Renames/CLI-only/hidden entries must not go stale as flags evolve."""
+        assert set(CLI_ONLY_DESTS) == set(CLI_PARAM_PAIRS), "CLI_ONLY_DESTS must cover exactly CLI_PARAM_PAIRS"
+        for path in CLI_PARAM_PAIRS:
+            dests = _cli_dests(path)
+            stale_renames = set(CLI_RENAMES.get(path, {})) - dests
+            assert not stale_renames, (
+                f"yeaboi {path}: CLI_RENAMES names dests that don't exist: {sorted(stale_renames)}"
+            )
+            stale_only = CLI_ONLY_DESTS[path] - dests
+            assert not stale_only, f"yeaboi {path}: CLI_ONLY_DESTS names dests that don't exist: {sorted(stale_only)}"
+
+    def test_cli_hidden_params_still_exist_on_engines(self):
+        for path, hidden in CLI_HIDDEN.items():
+            mod, fn = CLI_PARAM_PAIRS[path]
+            stale = set(hidden) - _engine_params(mod, fn)
+            assert not stale, (
+                f"yeaboi {path}: CLI_HIDDEN lists params the engine {mod}.{fn} no longer has: "
+                f"{sorted(stale)} — delete the stale exemptions"
+            )
+            for param, reason in hidden.items():
+                assert len(reason) > 10, f"{path}.{param}: hidden param needs a real reason"
