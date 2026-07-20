@@ -1,12 +1,28 @@
-"""MCP tools: team-learning reads (calibration profiles)."""
+"""MCP tools: team-learning (calibration profiles + full board analysis)."""
 
 from __future__ import annotations
 
 import logging
 
-from yeaboi.mcp.runtime import run_readonly
+# Context must be importable from module globals — FastMCP evaluates the
+# stringified type hints (PEP 563) of tool functions against this namespace.
+from mcp.server.fastmcp import Context
+
+from yeaboi.mcp.runtime import run_engine, run_readonly
 
 logger = logging.getLogger(__name__)
+
+
+def _team_analyze(source: str, project_key: str, sprint_count: int, generate_samples: bool, include_insights: bool):
+    from yeaboi.analysis import run_team_analysis
+
+    return run_team_analysis(
+        source=source,
+        project_key=project_key,
+        sprint_count=sprint_count,
+        generate_samples=generate_samples,
+        include_insights=include_insights,
+    )
 
 
 def _team_profile_get() -> dict:
@@ -37,6 +53,25 @@ def _compare_plan_to_actuals(session_id: str, source: str, project_key: str) -> 
 
 def register(app) -> None:
     """Attach the team-learning tools to the FastMCP app."""
+
+    @app.tool()
+    async def team_analyze(
+        ctx: Context,
+        source: str = "",
+        project_key: str = "",
+        sprint_count: int = 8,
+        generate_samples: bool = False,
+        include_insights: bool = True,
+    ) -> dict:
+        """Analyse the team's tracker history (closed sprints) into a calibration profile:
+        velocity, story-point calibration, writing style, DoD signals, plus coaching insights
+        and headline stats. The profile is saved and feeds future planning. HEAVY: several LLM
+        calls plus tracker API paging — takes minutes; warn the user before running.
+        source: 'jira' or 'azdevops' (blank auto-detects); generate_samples additionally drafts
+        sample tickets in the team's style (more LLM calls)."""
+        return await run_engine(
+            ctx, _team_analyze, source, project_key, sprint_count, generate_samples, include_insights
+        )
 
     @app.tool()
     async def team_profile_get() -> dict:

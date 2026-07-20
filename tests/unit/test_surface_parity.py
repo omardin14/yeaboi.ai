@@ -136,11 +136,11 @@ CAPABILITIES: dict[str, dict] = {
         "skill": Exempt("no plugin skill yet — tracked gap"),
     },
     "team-analysis": {
-        "engines": Exempt("analysis orchestration not yet extracted from the TUI — tracked gap"),
-        "mcp_tools": Exempt("TUI-only today — tracked gap"),
+        "engines": {("yeaboi.analysis.engine", "run_team_analysis")},
+        "mcp_tools": {"team_analyze"},
         "tui_mode": "team-analysis",
-        "cli": Exempt("TUI-only today — tracked gap (--learn stores a lossier profile via team-learning)"),
-        "skill": Exempt("TUI-only today — tracked gap"),
+        "cli": Exempt("no dedicated flag yet (--learn drives the engine) — lands with the CLI subcommands"),
+        "skill": Exempt("no plugin skill yet — tracked gap"),
     },
     "usage": {
         "engines": Exempt("TUI utility page — reads the local token_usage table"),
@@ -175,6 +175,7 @@ PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "perf_one_on_one_prep": ("yeaboi.performance.engine", "run_one_on_one_prep"),
     "perf_one_on_one_complete": ("yeaboi.performance.engine", "complete_one_on_one"),
     "perf_six_month_review": ("yeaboi.performance.engine", "run_six_month_review"),
+    "team_analyze": ("yeaboi.analysis.engine", "run_team_analysis"),
 }
 
 # Injection/test seams that are never exposed on any wire surface.
@@ -188,6 +189,10 @@ HIDDEN_PARAMS: dict[str, dict[str, str]] = {
         "session_id": "plan_generate always mints a fresh session; the id is returned in data",
         "save_session": "MCP plans are always persisted — the session id IS the handle",
         "max_steps": "internal runaway-loop guard, not a user knob",
+    },
+    "team_analyze": {
+        "progress": "a live shared list the TUI frame loop reads — MCP has no incremental channel for it",
+        "team_name": "AzDO team label; MCP auto-resolves it from the configured AZURE_DEVOPS_TEAM",
     },
 }
 

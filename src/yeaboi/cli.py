@@ -873,68 +873,26 @@ def _install_skill(target_arg: str) -> None:
 
 
 def _run_learn(console: "Console") -> None:
-    """Run analyze_team_history, store the result, and print a summary."""
-    from pathlib import Path
+    """Run the full team analysis via the analysis engine and print a summary.
 
+    Delegates to analysis/engine.py:run_team_analysis — the same pipeline the
+    TUI Analysis mode and the MCP team_analyze tool use — so the CLI stores the
+    identical rich profile (with examples) in the real sessions DB.
+    """
     from rich.table import Table
-
-    from yeaboi.team_profile import TeamProfileStore
-    from yeaboi.tools.team_learning import analyze_team_history
 
     console.print("[bold cyan]Analysing team history...[/bold cyan]")
     try:
-        result = analyze_team_history.invoke({})
-        import json
+        from yeaboi.analysis import run_team_analysis
 
-        data = json.loads(result)
+        result = run_team_analysis(include_insights=False)
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         return
 
-    if "error" in data:
-        console.print(f"[red]{data['error']}[/red]")
-        return
-
-    # Persist the profile
-    db_dir = Path.home() / ".scrum-agent"
-    db_dir.mkdir(parents=True, exist_ok=True)
-    db_path = db_dir / "sessions.db"
-
-    from yeaboi.team_profile import (
-        EpicPattern,
-        StoryPointCalibration,
-        StoryShapePattern,
-        TeamProfile,
-    )
-
-    calibrations = tuple(StoryPointCalibration(**c) for c in data.get("point_calibrations", []))
-    shapes = tuple(StoryShapePattern(**s) for s in data.get("story_shapes", []))
-    ep = data.get("epic_pattern", {})
-    rng = ep.get("typical_story_count_range", [0, 0])
-    epic_pattern = EpicPattern(
-        avg_stories_per_epic=ep.get("avg_stories_per_epic", 0.0),
-        avg_points_per_epic=ep.get("avg_points_per_epic", 0.0),
-        typical_story_count_range=tuple(rng) if len(rng) == 2 else (0, 0),
-        sample_count=ep.get("sample_count", 0),
-    )
-
-    profile = TeamProfile(
-        team_id=data["team_id"],
-        source=data["source"],
-        project_key=data["project_key"],
-        sample_sprints=data.get("sample_sprints", 0),
-        sample_stories=data.get("sample_stories", 0),
-        velocity_avg=data.get("velocity_avg", 0.0),
-        velocity_stddev=data.get("velocity_stddev", 0.0),
-        point_calibrations=calibrations,
-        story_shapes=shapes,
-        epic_pattern=epic_pattern,
-        estimation_accuracy_pct=data.get("estimation_accuracy_pct", 0.0),
-        sprint_completion_rate=data.get("sprint_completion_rate", 0.0),
-    )
-
-    with TeamProfileStore(db_path) as store:
-        store.save(profile)
+    profile = result["profile"]
+    for warning in result["warnings"]:
+        console.print(f"[yellow]⚠ {warning}[/yellow]")
 
     console.print(f"[green]Team profile saved for {profile.source}/{profile.project_key}[/green]")
     console.print(

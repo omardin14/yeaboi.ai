@@ -41,6 +41,7 @@ EXPECTED_TOOLS = {
     "retro_history",
     "team_profile_get",
     "team_compare_plan_to_actuals",
+    "team_analyze",
 }
 
 
@@ -376,6 +377,22 @@ class TestEngineTools:
         )
         assert payload["ok"] is True
         assert captured["images"] == ("/tmp/board.png",)
+
+    def test_team_analyze(self, tmp_db, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_analysis(**kwargs):
+            captured.update(kwargs)
+            return {"source": "jira", "profile": {"velocity_avg": 30.0}, "warnings": ["log skipped"]}
+
+        # Patch the package re-export — tools_team imports from yeaboi.analysis.
+        monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
+        payload = call_tool("team_analyze", {"sprint_count": 4, "generate_samples": True})
+        assert payload["ok"] is True
+        assert payload["data"]["source"] == "jira"
+        assert payload["warnings"] == ["log skipped"]
+        assert captured["sprint_count"] == 4
+        assert captured["generate_samples"] is True
 
     def test_team_compare_plan_to_actuals(self, tmp_db, monkeypatch):
         from types import SimpleNamespace
