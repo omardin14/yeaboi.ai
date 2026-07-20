@@ -306,6 +306,14 @@ def get_llm(model: str | None = None, temperature: float = 0.0, json_mode: bool 
             client_kwargs={"timeout": 300},
             # format="json" is Ollama's constrained decoding — see json_mode docs.
             format="json" if json_mode else "",
+            # Thinking models (qwen3) spend generation budget on a reasoning
+            # pass BEFORE the constrained JSON — on a big planning prompt that
+            # can consume the entire num_predict and return EMPTY content after
+            # minutes of local compute. JSON calls therefore disable thinking
+            # (reasoning=False → "think": false); prose calls keep the model's
+            # default (thinking improves prose; strip_think_tags() handles the
+            # tags). None = omit the option entirely for maximum server compat.
+            reasoning=False if json_mode else None,
         )
         logger.info(
             "LLM ready: provider=ollama, model=%s, base_url=%s, num_ctx=%d, json_mode=%s",
@@ -460,9 +468,9 @@ def strip_think_tags(text: str) -> str:
     constrained decoding (format="json"), but prose paths — the conversational
     agent, llm_tools, the guardrail classifier — would show the raw tags to the
     user. Stripping at the consumption point is the zero-risk fix: cloud models
-    never emit these, and we deliberately do NOT set ChatOllama(reasoning=False)
-    because Ollama server versions differ on rejecting the think option for
-    non-think models (and qwen3's thinking improves prose quality anyway).
+    never emit these, and prose calls deliberately keep the model's default
+    thinking (it improves prose quality; JSON calls disable it in get_llm —
+    see the reasoning= comment there).
     """
     import re
 

@@ -254,6 +254,15 @@ class TestGetLlmOllama:
         assert get_llm(json_mode=True).format == "json"
         assert get_llm().format in ("", None)
 
+    def test_ollama_json_mode_disables_thinking(self, monkeypatch):
+        """Thinking models (qwen3) can burn the whole num_predict budget on a
+        reasoning pass and return EMPTY constrained-JSON content — JSON calls
+        must send think:false. Prose calls keep the model default (None)."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert get_llm(json_mode=True).reasoning is False
+        assert get_llm().reasoning is None
+
     def test_ollama_num_ctx_from_env(self, monkeypatch):
         """OLLAMA_NUM_CTX must be wired through (default 16384)."""
         pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
