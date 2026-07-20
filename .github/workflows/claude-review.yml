@@ -106,4 +106,6 @@ jobs:
             If there are no significant findings, post one line saying the review passed.
             Do not comment on style that ruff already enforces. Do not request changes on
             nitpicks. This review is advisory — never attempt to approve, merge, or block.
-          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment ${{ steps.pr.outputs.number }}:*),Bash(gh run view:*),Read,Grep,Glob"'
+          # Review stays on the default (Opus-tier) model — judgment quality is
+          # the point, and volume is already gated to green PRs by workflow_run.
+          claude_args: '--max-turns 25 --allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment ${{ steps.pr.outputs.number }}:*),Bash(gh run view:*),Read,Grep,Glob"'

@@ -92,7 +92,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "Bash,Read,Edit,Write"'
+          # Semver classification is mechanical (labels always win; the bump is a
+          # script; the changelog paragraph is short) — routed to Haiku for cost.
+          # If wrong-level bumps appear, promote to claude-sonnet-5 (one line).
+          claude_args: '--model claude-haiku-4-5 --max-turns 15 --allowedTools "Bash,Read,Edit,Write"'
           prompt: |
             You are the release-versioning bot for this repository. Pull request #${{ github.event.pull_request.number }} is open; decide whether and how to bump the project version. The version lives only in pyproject.toml. Changelog-only mode: ${{ steps.guard.outputs.changelog_only || 'false' }}.
 
@@ -122,7 +125,7 @@ jobs:
             5. Commit the pyproject.toml and changelog_data.json changes together (changelog-only mode: just changelog_data.json) to this PR branch and push. Use commit message:
                  chore: bump version to <new-version> [auto]
                with trailer:
-                 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+                 Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
 
             6. Post one short PR comment naming the level, the new version, and a one-sentence reason.
 
