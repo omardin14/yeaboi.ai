@@ -18,11 +18,19 @@ moving, never rush.
 2. **Run the conversational intake.** Ask the user the `smart_essentials`
    questions (plus the project description, Q1, if they haven't already given
    one). Rules:
-   - Ask 1-2 questions per message, not a wall of questions.
+   - **Never show the question numbers.** The `Q1`/`Q6`/`Q8` numbering is
+     internal — it's only the key for the `answers` map. Ask each question in
+     plain prose or as a bold line, with no leading `1.`/`2.` on the question
+     itself.
+   - Ask 1-2 questions per message, not a wall of questions — **but a question
+     that has choice options gets its own message**, so its numbered option
+     list is the only numbered list on screen (otherwise the question numbers
+     and the option numbers collide and read as gibberish).
+   - For choice questions, present the options from `choice_metadata` as a
+     numbered list (`1.` / `2.` / `3.`) and invite the user to reply with a
+     number or the option text.
    - If the user's initial message already answers a question (e.g. they named
      the tech stack), don't re-ask it — confirm it in passing instead.
-   - For choice questions, present the options from `choice_metadata` as a
-     numbered list.
    - The user may skip anything; skipped questions fall back to sensible
      defaults, and you should say so.
    - Anything extra the user mentions (constraints, deadlines, integrations,
