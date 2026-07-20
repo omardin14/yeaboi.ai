@@ -110,6 +110,7 @@ REPORTING_LOGS_DIR = LOGS_DIR / "reporting"
 ROADMAP_LOGS_DIR = LOGS_DIR / "roadmap"
 ANALYSIS_LOGS_DIR = LOGS_DIR / "analysis"
 PLANNING_LOGS_DIR = LOGS_DIR / "planning"
+MCP_LOGS_DIR = LOGS_DIR / "mcp"
 
 # Legacy log paths
 LEGACY_TUI_LOG = ROOT_DIR / "scrum-agent.log"
@@ -328,6 +329,12 @@ def get_roadmap_log_dir() -> Path:
     """Return the Roadmap-intake logs directory, creating it if needed."""
     ROADMAP_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return ROADMAP_LOGS_DIR
+
+
+def get_mcp_log_dir() -> Path:
+    """Return the MCP server logs directory, creating it if needed."""
+    MCP_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return MCP_LOGS_DIR
 
 
 def get_bin_dir() -> Path:

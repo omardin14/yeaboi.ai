@@ -16,12 +16,51 @@ get_llm() is called with that provider.
 """
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from langchain_core.language_models import BaseChatModel
 
 from yeaboi.config import get_llm_model, get_llm_provider
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# LLM override — inject a caller-supplied model into every get_llm() call
+# ---------------------------------------------------------------------------
+#
+# # See README: "MCP Server" — sampling (host-model) mode
+# The MCP server can route yeaboi's LLM calls through the *client's* model
+# (MCP "sampling") instead of the user's own API key. Engines and nodes all
+# obtain their model via get_llm(), so the override must live here — modules
+# import get_llm by name (`from yeaboi.agent.llm import get_llm`), which means
+# swapping the module attribute from outside would not reach them.
+#
+# A ContextVar (not a plain global) scopes the override to the current
+# execution context: concurrent MCP tool calls each see only their own
+# override, and contextvars propagate into worker threads started with
+# anyio.to_thread.run_sync (anyio copies the caller's context), so setting
+# the override in an async handler is visible to the sync engine running in
+# its worker thread.
+
+_llm_override: ContextVar[BaseChatModel | None] = ContextVar("yeaboi_llm_override", default=None)
+
+
+@contextmanager
+def llm_override(model: BaseChatModel):
+    """Make get_llm() return `model` for the duration of the block.
+
+    While active, get_llm()'s `model`/`temperature` arguments are ignored —
+    the injected model is returned as-is for every call. Used by the MCP
+    server to substitute a sampling-backed model; tests may use it to inject
+    fakes without monkeypatching four provider branches.
+    """
+    token = _llm_override.set(model)
+    try:
+        yield
+    finally:
+        _llm_override.reset(token)
+
 
 # ---------------------------------------------------------------------------
 # Token usage tracking — accumulates across all LLM calls in this process
@@ -246,6 +285,13 @@ def get_llm(model: str | None = None, temperature: float = 0.0, json_mode: bool 
         OSError: If the required API key for the selected provider is not set.
         ValueError: If LLM_PROVIDER is set to an unknown value.
     """
+    # MCP sampling / test injection — an active override short-circuits
+    # provider selection entirely (see llm_override() above).
+    override = _llm_override.get()
+    if override is not None:
+        logger.debug("get_llm: returning injected override model (%s)", type(override).__name__)
+        return override
+
     provider = get_llm_provider()
     resolved_model = model or get_llm_model() or _PROVIDER_DEFAULTS.get(provider, "")
     logger.debug("get_llm: provider=%s, model=%s, temperature=%s", provider, resolved_model, temperature)
