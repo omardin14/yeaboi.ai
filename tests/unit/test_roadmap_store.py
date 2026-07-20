@@ -97,10 +97,11 @@ class TestHistory:
 
 
 class TestSchemaMigration:
-    def test_current_version_is_11(self):
+    def test_current_version_covers_roadmap(self):
         from yeaboi.sessions import CURRENT_SCHEMA_VERSION
 
-        assert CURRENT_SCHEMA_VERSION == 11
+        # Roadmap tables landed at v11; later migrations only add.
+        assert CURRENT_SCHEMA_VERSION >= 11
 
     def test_session_store_creates_roadmap_tables(self, db_path):
         import sqlite3
@@ -116,7 +117,9 @@ class TestSchemaMigration:
         assert "roadmap_config" in names
         assert "roadmap_history" in names
         assert "roadmaps" in names
-        assert version == 11
+        from yeaboi.sessions import CURRENT_SCHEMA_VERSION
+
+        assert version == CURRENT_SCHEMA_VERSION
 
     def test_v9_database_migrates_without_data_loss(self, db_path):
         """A pre-roadmap (v9) DB gains the roadmap tables and keeps existing rows."""
@@ -140,7 +143,7 @@ class TestSchemaMigration:
         conn.close()
 
         with SessionStore(db_path):
-            pass  # v9 → v10 → v11 migrations run
+            pass  # v9 → v10 → v11 → … migrations run
 
         conn = sqlite3.connect(str(db_path))
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
@@ -148,7 +151,9 @@ class TestSchemaMigration:
         kept = conn.execute("SELECT COUNT(*) FROM reporting_history").fetchone()[0]
         conn.close()
         assert "roadmap_config" in names and "roadmap_history" in names and "roadmaps" in names
-        assert version == 11
+        from yeaboi.sessions import CURRENT_SCHEMA_VERSION
+
+        assert version == CURRENT_SCHEMA_VERSION
         assert kept == 1
 
     def test_v10_database_seeds_roadmaps_row(self, db_path):

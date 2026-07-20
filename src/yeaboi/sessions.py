@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See README: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 11  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list  # noqa: E501
+CURRENT_SCHEMA_VERSION = 12  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token_usage perf columns  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -576,13 +576,49 @@ class SessionStore:
                     logger.info("Migration v11: seeded roadmaps row from v10 singleton (type=%s)", src[0])
             logger.info("Migration v11: created roadmaps table")
 
+        if from_version < 12:
+            # v12: local-model performance metrics on token_usage. Nullable, so
+            # cloud rows (which have no timing data) simply stay NULL. Additive
+            # ALTERs are idempotent via the OperationalError guard — a fresh DB
+            # runs the v5 CREATE then these ALTERs in the same migration pass.
+            for col in ("duration_ms", "eval_duration_ms", "load_duration_ms", "tokens_per_sec"):
+                try:
+                    self._conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} REAL")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+            logger.info("Migration v12: added token_usage performance columns")
+
     # ── Token usage persistence ──────────────────────────────────────────
 
-    def record_token_usage(self, input_tokens: int, output_tokens: int, model: str = "", provider: str = "") -> None:
-        """Record a single LLM call's token usage to persistent storage."""
+    def record_token_usage(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        model: str = "",
+        provider: str = "",
+        *,
+        duration_ms: float | None = None,
+        eval_duration_ms: float | None = None,
+        load_duration_ms: float | None = None,
+        tokens_per_sec: float | None = None,
+    ) -> None:
+        """Record a single LLM call's token usage (+ optional local timing)."""
         self._conn.execute(
-            "INSERT INTO token_usage (timestamp, input_tokens, output_tokens, model, provider) VALUES (?, ?, ?, ?, ?)",
-            (self._now(), input_tokens, output_tokens, model, provider),
+            "INSERT INTO token_usage "
+            "(timestamp, input_tokens, output_tokens, model, provider, "
+            "duration_ms, eval_duration_ms, load_duration_ms, tokens_per_sec) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                self._now(),
+                input_tokens,
+                output_tokens,
+                model,
+                provider,
+                duration_ms,
+                eval_duration_ms,
+                load_duration_ms,
+                tokens_per_sec,
+            ),
         )
 
     def get_lifetime_usage(self) -> dict:
@@ -613,6 +649,35 @@ class SessionStore:
                 "call_count": calls,
             }
         return usage
+
+    def get_local_perf_summary(self) -> dict:
+        """Aggregate local-model (Ollama) throughput/latency across all calls.
+
+        Powers the Usage page's "Local Model Performance" section. Returns {}
+        when no local call has recorded timing yet (cloud-only history), so the
+        UI can simply hide the section.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*), AVG(tokens_per_sec), MAX(tokens_per_sec), AVG(duration_ms), AVG(load_duration_ms) "
+            "FROM token_usage WHERE provider = 'ollama' AND tokens_per_sec IS NOT NULL"
+        ).fetchone()
+        if not row or not row[0]:
+            return {}
+        calls, avg_tps, max_tps, avg_dur, avg_load = row
+        last = self._conn.execute(
+            "SELECT model, tokens_per_sec, duration_ms FROM token_usage "
+            "WHERE provider = 'ollama' AND tokens_per_sec IS NOT NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        summary = {
+            "calls": calls,
+            "avg_tps": avg_tps or 0.0,
+            "max_tps": max_tps or 0.0,
+            "avg_duration_ms": avg_dur or 0.0,
+            "avg_load_ms": avg_load or 0.0,
+        }
+        if last:
+            summary["last"] = {"model": last[0], "tps": last[1] or 0.0, "duration_ms": last[2] or 0.0}
+        return summary
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 

@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.22.0",
+      "date": "2026-07-20",
+      "summary": "Several fixes and small additions for local Ollama mode. Switching from a local model back to a cloud AI provider no longer leaves the old local model name lingering in your settings. When you quit the app with a local model server running, you'll now be offered a quick way to stop it or free up the memory it was using. And the Usage page now shows performance details for local models, like response speed and tokens per second, so you can see how your local setup is actually performing.",
+      "highlights": [
+        {"text": "Fixed the old local model name sticking around after switching to a cloud AI provider", "areas": ["settings"]},
+        {"text": "On quit, offer to stop the local Ollama server or free up its memory", "areas": ["general"]},
+        {"text": "Usage page now shows local model performance: response speed and tokens per second", "areas": ["usage"]}
+      ]
+    },
+    {
       "version": "2.21.0",
       "date": "2026-07-20",
       "summary": "Planning now has a fourth way to start a project: point it at your quarterly roadmap — a Confluence or Notion page, or a local document — and it reads through it to pull out the concrete candidate projects, ranks them by suggested start order, and sizes each as small or large. Pick one and its description is pre-filled into the normal planning flow, so you skip re-typing what's already written down. Saved roadmap analyses show up right alongside your other projects, tagged so you can tell them apart, and can be exported the same way as everything else.",

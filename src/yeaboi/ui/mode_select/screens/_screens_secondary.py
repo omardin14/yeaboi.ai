@@ -1610,6 +1610,21 @@ def _build_usage_screen(
             )
         )
 
+    # ── Local Model Performance ───────────────────────────────────
+    # Only present once a local (Ollama) call has recorded timing — hidden
+    # entirely for cloud-only histories.
+    perf = usage_data.get("local_performance", {})
+    if perf:
+        _heading("Local Model Performance")
+        _row("Ollama calls", f"{perf.get('calls', 0):,}")
+        _row("Avg speed", f"{perf.get('avg_tps', 0):.1f} tok/s")
+        _row("Max speed", f"{perf.get('max_tps', 0):.1f} tok/s")
+        _row("Avg call duration", f"{perf.get('avg_duration_ms', 0) / 1000:.1f}s")
+        _row("Avg model load", f"{perf.get('avg_load_ms', 0) / 1000:.1f}s")
+        last_call = perf.get("last") or {}
+        if last_call:
+            _row("Last call", f"{last_call.get('model', '?')} · {last_call.get('tps', 0):.1f} tok/s")
+
     # ── Session History ───────────────────────────────────────────
     _heading("Session History")
     sessions = usage_data.get("sessions", {})

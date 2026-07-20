@@ -1281,10 +1281,12 @@ def main(argv: list[str] | None = None) -> None:
         enter_raw_mode()
         enable_mouse_tracking()
         _tui_error: Exception | None = None
+        _kb_interrupt = False
         try:
             mode_result = select_mode(console, dry_run=args.dry_run)
         except KeyboardInterrupt:
             mode_result = None
+            _kb_interrupt = True
         except Exception as _exc:
             logging.getLogger(__name__).exception("Unhandled exception in TUI")
             _tui_error = _exc
@@ -1305,6 +1307,21 @@ def main(argv: list[str] | None = None) -> None:
 
             console.print(f"[red]{_classify_api_error(_tui_error)}[/red]")
             console.print("[dim]See ~/.scrum-agent/logs/tui/yeaboi.log for details.[/dim]")
+        # Ctrl-C unwinds past the menu's own quit popup, so offer the same
+        # stop-Ollama courtesy here — but only now that the finally above has
+        # restored the terminal (raw mode off, alt-screen closed), so a plain
+        # console.input() echoes normally. The esc/q path handles its own
+        # prompt in-TUI and never sets _kb_interrupt, so this can't double-fire.
+        if _kb_interrupt:
+            try:
+                from yeaboi.ollama_control import should_offer_ollama_stop, stop_ollama_server
+
+                if sys.stdin.isatty() and should_offer_ollama_stop():
+                    if console.input("Stop the local Ollama server? [y/N] ").strip().lower() == "y":
+                        _stopped, _msg = stop_ollama_server()
+                        console.print(f"[dim]{_msg}[/dim]")
+            except Exception:
+                pass
         if mode_result is None:
             return
         # mode_result is non-None only for offline import (questionnaire path)

@@ -15,7 +15,8 @@ from rich.panel import Panel
 
 from yeaboi.agent.llm import _PROVIDER_DEFAULTS
 from yeaboi.setup_wizard import _PROVIDERS, run_setup_wizard
-from yeaboi.ui.provider_select import _existing_model_for
+from yeaboi.ui.provider_select import _existing_model_for, _merge_model_presets
+from yeaboi.ui.provider_select._config import _save_progress
 from yeaboi.ui.provider_select._constants import (
     _AZDEVOPS_TRACKING_FIELDS,
     _CONFLUENCE_FIELDS,
@@ -410,19 +411,38 @@ class TestOllamaPackageCheck:
 
 
 class TestOllamaInstallGuidance:
-    def test_unreachable_message_says_how_to_install(self, monkeypatch, ollama_pkg_installed):
+    def test_not_installed_message_says_how_to_install(self, monkeypatch, ollama_pkg_installed):
         import httpx
 
+        import yeaboi.ollama_control as ollama_control
         from yeaboi.ui.provider_select._verification import _verify_api_key
 
         def _boom(*a, **kw):
             raise httpx.ConnectError("connection refused")
 
         monkeypatch.setattr(httpx, "get", _boom)
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: False)
         _, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
         assert "https://ollama.com" in msg
+        assert "ollama serve" in msg
         _, msg = _verify_model(_card("ollama"), "http://localhost:11434", "qwen3:8b")
         assert "https://ollama.com" in msg
+
+    def test_installed_but_down_message_says_start_not_install(self, monkeypatch, ollama_pkg_installed):
+        import httpx
+
+        import yeaboi.ollama_control as ollama_control
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: True)
+        _, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert "not running" in msg
+        assert "ollama serve" in msg
+        assert "https://ollama.com" not in msg
 
 
 class _FakePullStream:
@@ -514,6 +534,50 @@ class TestExistingModelFor:
     def test_no_config(self):
         assert _existing_model_for(None, "ollama") == ""
         assert _existing_model_for({}, "anthropic") == ""
+
+
+class TestMergeModelPresets:
+    """Live-discovered models merge with curated recommendations (all providers)."""
+
+    CURATED = ["qwen3:8b", "qwen3:14b", "qwen2.5:14b", "llama3.1:8b"]
+
+    def test_ollama_one_installed_keeps_recommendations(self):
+        # The reported case: only qwen3:8b pulled — the others must still show,
+        # tagged as not-pulled, instead of vanishing.
+        presets, unpulled = _merge_model_presets(["qwen3:8b"], self.CURATED, cap=8, is_ollama=True)
+        assert presets == ["qwen3:8b", "qwen3:14b", "qwen2.5:14b", "llama3.1:8b"]
+        assert unpulled == {"qwen3:14b", "qwen2.5:14b", "llama3.1:8b"}
+        assert "qwen3:8b" not in unpulled  # installed → no "not pulled" tag
+
+    def test_ollama_nothing_installed_all_unpulled(self):
+        presets, unpulled = _merge_model_presets([], self.CURATED, cap=8, is_ollama=True)
+        assert presets == self.CURATED
+        assert unpulled == set(self.CURATED)
+
+    def test_ollama_extra_installed_model_listed_first(self):
+        # A model the user pulled that isn't a curated preset still appears.
+        presets, unpulled = _merge_model_presets(["mistral:7b", "qwen3:8b"], self.CURATED, cap=8, is_ollama=True)
+        assert presets[:2] == ["mistral:7b", "qwen3:8b"]
+        assert "mistral:7b" not in unpulled
+        assert "qwen3:8b" not in unpulled
+        assert unpulled == {"qwen3:14b", "qwen2.5:14b", "llama3.1:8b"}
+
+    def test_cloud_merges_without_unpulled_flag(self):
+        curated = ["claude-sonnet-4-6", "claude-opus-4-8"]
+        presets, unpulled = _merge_model_presets(["claude-sonnet-4-6"], curated, cap=8, is_ollama=False)
+        assert presets == ["claude-sonnet-4-6", "claude-opus-4-8"]  # recommendation retained
+        assert unpulled == set()  # cloud has no "not pulled" concept
+
+    def test_cap_limits_discovered_but_keeps_curated(self):
+        discovered = [f"m{i}" for i in range(10)]
+        curated = ["reco-a", "reco-b"]
+        presets, _ = _merge_model_presets(discovered, curated, cap=3, is_ollama=False)
+        assert presets == ["m0", "m1", "m2", "reco-a", "reco-b"]
+
+    def test_no_duplicate_when_discovered_matches_curated(self):
+        presets, _ = _merge_model_presets(["qwen3:8b", "qwen3:14b"], self.CURATED, cap=8, is_ollama=True)
+        assert presets == ["qwen3:8b", "qwen3:14b", "qwen2.5:14b", "llama3.1:8b"]
+        assert presets.count("qwen3:8b") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1202,6 +1266,69 @@ class TestWizardModelPropagation:
         run_setup_wizard(console)
         content = config_file.read_text()
         assert "LLM_MODEL" not in content
+
+    def test_provider_switch_drops_stale_model(self, monkeypatch, tmp_path):
+        """Ollama→Anthropic without a model choice must not keep qwen3:8b on disk."""
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        monkeypatch.setenv("LLM_MODEL", "qwen3:8b")
+        result = dict(_PROVIDERS["1"])  # anthropic
+        result["api_key"] = "sk-ant-key"  # no llm_model key — model phase abandoned
+        monkeypatch.setattr("yeaboi.setup_wizard.select_provider", lambda *a, **kw: result)
+        console = Console(file=StringIO(), highlight=False)
+        run_setup_wizard(console)
+        content = config_file.read_text()
+        assert "LLM_PROVIDER=anthropic" in content
+        assert "LLM_MODEL" not in content
+        import os
+
+        assert "LLM_MODEL" not in os.environ
+
+
+# ---------------------------------------------------------------------------
+# _save_progress — the incremental .env writer must never leave a model from
+# a different provider on disk (the "(current)" ghost-entry bug)
+# ---------------------------------------------------------------------------
+
+
+class TestSaveProgressProviderSwitch:
+    def _patch_config_file(self, monkeypatch, tmp_path):
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+        return config_file
+
+    def test_switch_clears_model_from_file_and_env(self, monkeypatch, tmp_path):
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        monkeypatch.setenv("LLM_MODEL", "qwen3:8b")
+        _save_progress({"LLM_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "sk-ant-x"})
+        content = config_file.read_text()
+        assert "LLM_PROVIDER=anthropic" in content
+        assert "LLM_MODEL" not in content
+        import os
+
+        assert "LLM_MODEL" not in os.environ
+
+    def test_same_provider_keeps_model(self, monkeypatch, tmp_path):
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        _save_progress({"LLM_PROVIDER": "ollama", "OLLAMA_BASE_URL": "http://localhost:11434"})
+        assert "LLM_MODEL=qwen3:8b" in config_file.read_text()
+
+    def test_switch_with_explicit_model_keeps_new_model(self, monkeypatch, tmp_path):
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        _save_progress({"LLM_PROVIDER": "anthropic", "LLM_MODEL": "claude-opus-4-8"})
+        content = config_file.read_text()
+        assert "LLM_MODEL=claude-opus-4-8" in content
+        assert "qwen3:8b" not in content
+
+    def test_no_provider_in_data_keeps_model(self, monkeypatch, tmp_path):
+        """Writes that don't touch the provider (e.g. Jira creds) leave the model alone."""
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        _save_progress({"JIRA_BASE_URL": "https://x.atlassian.net"})
+        assert "LLM_MODEL=qwen3:8b" in config_file.read_text()
 
 
 # ---------------------------------------------------------------------------

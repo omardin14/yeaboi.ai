@@ -136,9 +136,23 @@ class TestLocalLlmHint:
         assert "ollama pull qwen3:8b" in hint
 
     def test_connection_refused_gets_serve_hint(self, monkeypatch):
+        import yeaboi.ollama_control as ollama_control
+
         monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: True)
         hint = _local_llm_hint(ConnectionRefusedError("refused"))
         assert hint is not None
+        assert "ollama serve" in hint
+        assert "https://ollama.com" not in hint  # installed → don't tell them to install
+
+    def test_connection_refused_when_not_installed_says_install(self, monkeypatch):
+        import yeaboi.ollama_control as ollama_control
+
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: False)
+        hint = _local_llm_hint(ConnectionRefusedError("refused"))
+        assert hint is not None
+        assert "https://ollama.com" in hint
         assert "ollama serve" in hint
 
     def test_read_timeout_gets_slowness_hint(self, monkeypatch):
@@ -286,6 +300,56 @@ class TestToolsUnsupportedDegradation:
         node = make_call_model([])
         with pytest.raises(RuntimeError, match="boom"):
             node({"messages": [HumanMessage(content="hi")]})
+
+
+class TestProseInvokesTrackUsage:
+    """Prose chat invokes must feed track_usage so local timing/tokens are counted."""
+
+    def test_call_model_tracks(self, monkeypatch):
+        calls = []
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="hi")
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.track_usage", lambda resp: calls.append(resp))
+        call_model({"messages": [HumanMessage(content="hello")]})
+        assert len(calls) == 1
+
+    def test_bound_path_tracks(self, monkeypatch):
+        calls = []
+
+        class _Llm:
+            def bind_tools(self, tools):
+                class _Bound:
+                    def invoke(self, messages):
+                        return AIMessage(content="bound reply")
+
+                return _Bound()
+
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: _Llm())
+        monkeypatch.setattr("yeaboi.agent.nodes.track_usage", lambda resp: calls.append(resp))
+        node = make_call_model([])
+        node({"messages": [HumanMessage(content="hi")]})
+        assert len(calls) == 1
+
+    def test_degraded_path_tracks(self, monkeypatch):
+        calls = []
+
+        class _Llm:
+            def invoke(self, messages):
+                return AIMessage(content="plain reply")
+
+            def bind_tools(self, tools):
+                class _Bound:
+                    def invoke(self, messages):
+                        raise RuntimeError("model does not support tools")
+
+                return _Bound()
+
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: _Llm())
+        monkeypatch.setattr("yeaboi.agent.nodes.track_usage", lambda resp: calls.append(resp))
+        node = make_call_model([])
+        node({"messages": [HumanMessage(content="hi")]})
+        assert len(calls) == 1  # tracked once on the degraded plain invoke, not double
 
 
 # ── Core behaviour ───────────────────────────────────────────────────

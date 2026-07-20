@@ -1219,8 +1219,11 @@ def _collect_usage_data() -> dict:
                 }
             else:
                 data["lifetime_tokens"] = {}
+            # Local-model throughput/latency (empty for cloud-only histories).
+            data["local_performance"] = store.get_local_perf_summary()
     except Exception:
         data["lifetime_tokens"] = {}
+        data["local_performance"] = {}
 
     return data
 
@@ -1375,6 +1378,52 @@ def _confirm_move_data(console: Console, live, read_key, frame_time, supports_ti
         )
         lines.append(Text(""))
         btn_top, btn_mid, btn_bot = build_action_buttons(["Move", "Leave"], sel)
+        lines += [btn_top, btn_mid, btn_bot]
+        live.update(Panel(Group(*lines), height=h, padding=(1, 2), border_style=SETTINGS_THEME.sep))
+        try:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        except TypeError:
+            k = read_key()
+        if not k:  # idle tick / consumed mouse event
+            continue
+        if k == "left":
+            sel = 0
+        elif k == "right":
+            sel = 1
+        elif k in ("enter", " "):
+            return sel == 0
+        elif k in ("esc", "q"):
+            return False
+
+
+def _confirm_stop_ollama(console: Console, live, read_key, frame_time, supports_timeout) -> bool:
+    """Stop/Leave popup shown when quitting with a local Ollama server up.
+
+    True = stop the server. yeaboi didn't start the server, so this is an
+    offer, never automatic — Esc/q leaves it running.
+    """
+    from rich.align import Align
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from yeaboi.ui.shared._components import SETTINGS_THEME, build_action_buttons, build_popup
+
+    sel = 0
+    while True:
+        w, h = console.size
+        lines: list = [Text("")] * max(1, (h - 12) // 2)
+        lines.append(
+            Align.center(
+                build_popup(
+                    "The local Ollama server is still running.\nStop it before quitting? (frees ~5 GB RAM)",
+                    width=min(w - 8, 56),
+                    border_style=SETTINGS_THEME.warn,
+                )
+            )
+        )
+        lines.append(Text(""))
+        btn_top, btn_mid, btn_bot = build_action_buttons(["Stop", "Leave"], sel)
         lines += [btn_top, btn_mid, btn_bot]
         live.update(Panel(Group(*lines), height=h, padding=(1, 2), border_style=SETTINGS_THEME.sep))
         try:
@@ -4421,6 +4470,19 @@ def select_mode(
                         break
                     continue
                 elif key in ("q", "esc"):
+                    # Courtesy on quit: offer to stop a running local Ollama
+                    # server (gated on provider/localhost/reachable — cloud
+                    # exits stay instant). Never let this block quitting.
+                    try:
+                        from yeaboi.ollama_control import should_offer_ollama_stop, stop_ollama_server
+
+                        if should_offer_ollama_stop() and _confirm_stop_ollama(
+                            console, live, read_key, _FRAME_TIME, _supports_timeout
+                        ):
+                            _stopped, _msg = stop_ollama_server()
+                            logger.info("ollama stop on quit: %s", _msg)
+                    except Exception:
+                        logger.debug("ollama exit prompt failed", exc_info=True)
                     return None
                 elif key == "t":
                     # Toggle the rotating tips on/off and persist the choice. The

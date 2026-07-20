@@ -78,6 +78,78 @@ class TestLifetimeUsageByProvider:
         assert lt["estimated_cost"] == 18.0
 
 
+class TestLocalPerformanceSection:
+    def _seed_perf(self, db_path):
+        from yeaboi.sessions import SessionStore
+
+        with SessionStore(db_path) as store:
+            store.record_token_usage(
+                200,
+                100,
+                model="qwen3:8b",
+                provider="ollama",
+                duration_ms=2000.0,
+                load_duration_ms=300.0,
+                tokens_per_sec=45.0,
+            )
+
+    def test_local_performance_present_for_ollama_rows(self, monkeypatch, tmp_path):
+        db = tmp_path / "usage-test.db"
+        self._seed_perf(db)
+        data = _collect(monkeypatch, tmp_path, "ollama")
+        perf = data["local_performance"]
+        assert perf["calls"] == 1
+        assert perf["avg_tps"] == 45.0
+        assert perf["last"]["model"] == "qwen3:8b"
+
+    def test_local_performance_empty_for_cloud_only(self, monkeypatch, tmp_path):
+        from yeaboi.sessions import SessionStore
+
+        db = tmp_path / "usage-test.db"
+        with SessionStore(db) as store:
+            store.record_token_usage(100, 50, model="claude-sonnet-4-6", provider="anthropic")
+        data = _collect(monkeypatch, tmp_path, "anthropic", ANTHROPIC_API_KEY="sk-ant-x")
+        assert data["local_performance"] == {}
+
+    def test_screen_renders_section_when_data_present(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
+
+        usage_data = {
+            "provider": "ollama",
+            "model": "qwen3:8b",
+            "local_performance": {
+                "calls": 3,
+                "avg_tps": 42.0,
+                "max_tps": 55.0,
+                "avg_duration_ms": 1800.0,
+                "avg_load_ms": 200.0,
+                "last": {"model": "qwen3:8b", "tps": 55.0, "duration_ms": 900.0},
+            },
+        }
+        panel = _build_usage_screen(usage_data, width=90, height=40)
+        console = Console(file=StringIO(), width=100, height=40)
+        console.print(panel)
+        out = console.file.getvalue()
+        assert "Local Model Performance" in out
+        assert "tok/s" in out
+
+    def test_screen_hides_section_when_no_data(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
+
+        panel = _build_usage_screen({"provider": "anthropic", "local_performance": {}}, width=90, height=40)
+        console = Console(file=StringIO(), width=100, height=40)
+        console.print(panel)
+        assert "Local Model Performance" not in console.file.getvalue()
+
+
 class TestUsageDataCloud:
     def test_anthropic_without_key_not_configured(self, monkeypatch, tmp_path):
         data = _collect(monkeypatch, tmp_path, "anthropic")

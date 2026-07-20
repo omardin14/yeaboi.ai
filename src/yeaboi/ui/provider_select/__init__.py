@@ -78,6 +78,30 @@ def _existing_model_for(existing_config: dict[str, str] | None, provider_val: st
     return cfg.get("LLM_MODEL", "")
 
 
+def _merge_model_presets(
+    discovered: list[str], curated: list[str], *, cap: int, is_ollama: bool
+) -> tuple[list[str], set[str]]:
+    """Merge live-discovered models with the curated recommendations.
+
+    Discovered models (what the key/server can actually run) come first, capped;
+    then any curated preset not already discovered is appended so the recommended
+    models stay visible even once you have one of your own. Returns
+    ``(ordered_presets, unpulled_ids)`` where ``unpulled_ids`` is the Ollama-only
+    set of appended ids the server doesn't have yet — they get a "· not pulled"
+    label and a download-on-select offer. Non-Ollama providers get an empty set
+    (their appended presets are pickable and validated by verify-on-select).
+    """
+    discovered_capped = discovered[:cap]
+    extras = [p for p in curated if p not in discovered_capped]
+    presets = discovered_capped + extras
+    if not is_ollama:
+        return presets, set()
+    # Ollama: appended curated ids aren't on the server. When discovery returned
+    # nothing at all, every curated preset is an offline seed → all unpulled.
+    unpulled = set(extras) if discovered_capped else set(curated)
+    return presets, unpulled
+
+
 def _detect_aws_region() -> str | None:
     """Auto-detect AWS region from environment, config, or instance metadata.
 
@@ -204,16 +228,20 @@ def select_provider(
             to the API-key input.
             """
             models_cfg = provider.get("models") or {}
-            presets = list(models_cfg.get("presets") or [])
+            curated = list(models_cfg.get("presets") or [])
+            presets = list(curated)
             default_model = models_cfg.get("default", "")
-            # Ollama only: True when the shown presets are offline seeds the
-            # server does NOT have — they get a "not pulled" label and a P-to-
-            # download offer instead of a dead-end verification failure.
-            seeds_unpulled = False
+            is_ollama = provider.get("provider_val") == "ollama"
+            # Ollama only: ids shown as offline seeds the server does NOT have —
+            # they get a "· not pulled" label and a P-to-download offer instead
+            # of a dead-end verification failure. Populated per-id after discovery.
+            unpulled: set[str] = set()
 
-            # Live discovery: ask the provider what this key can actually run, so
-            # the menu never offers a retired id. The hardcoded presets above are
-            # only an offline seed. Bedrock is excluded (auto-detects via OpenClaw).
+            # Live discovery: ask the provider what this key can actually run.
+            # The curated presets above are the recommendations; we MERGE the two
+            # (discovered first, then any recommended preset you don't have) so the
+            # menu is consistent whether you have zero, some, or many models.
+            # Bedrock is excluded (auto-detects via OpenClaw).
             if provider.get("provider_val") != "bedrock" and api_key_val:
                 # Run the (blocking, up-to-8s) HTTP discovery on a daemon thread while
                 # the Live loop keeps animating a "Discovering…" screen — otherwise the
@@ -237,10 +265,9 @@ def select_provider(
                 thread.join()
                 discovered = discovered_box[0] if discovered_box else []
                 logger.debug("provider_select: discovered %d models for %s", len(discovered), provider["provider_val"])
-                if discovered:
-                    presets = discovered[:_MAX_LIVE_MODELS]
-                elif provider.get("provider_val") == "ollama":
-                    seeds_unpulled = True
+                # Merge discovered + curated so the recommendations stay visible
+                # whether you have zero, some, or many models installed/available.
+                presets, unpulled = _merge_model_presets(discovered, curated, cap=_MAX_LIVE_MODELS, is_ollama=is_ollama)
 
             # A detected Bedrock model (from OpenClaw) or a previously-saved LLM_MODEL
             # is offered at the top of the list and pre-selected, preserving zero-config.
@@ -274,7 +301,7 @@ def select_provider(
             _add(detected, "(detected)")
             _add(existing_model, "(current)")
             for m in presets:
-                _add(m, extra="· not pulled" if seeds_unpulled else "")
+                _add(m, extra="· not pulled" if m in unpulled else "")
             model_ids.append("")  # Custom… sentinel
             labels.append("Custom…")
 

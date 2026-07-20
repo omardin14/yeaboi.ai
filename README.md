@@ -235,7 +235,7 @@ ollama pull qwen3:8b
 echo "LLM_PROVIDER=ollama" >> ~/.yeaboi/.env
 ```
 
-The setup wizard's **Ollama (Local)** card pre-fills `http://localhost:11434`, verifies the server is running, and lists every model you've pulled (live from `/api/tags`). You don't even need step 2's `ollama pull` — pick any preset and the wizard offers to **download it for you** (press `P` on the "Model not pulled" notice) with live progress, straight from the Ollama server API.
+The setup wizard's **Ollama (Local)** card pre-fills `http://localhost:11434`, verifies the server is running, and lists the models you've pulled (live from `/api/tags`) **plus the recommended presets you haven't**, each tagged "· not pulled". You don't even need step 2's `ollama pull` — pick any not-pulled preset and the wizard offers to **download it for you** (press `P`) with live progress, straight from the Ollama server API. (Cloud providers get the same merged view: your key's available models plus the recommended ones.)
 
 ### Choosing a model
 
@@ -259,6 +259,11 @@ Local models are weaker than cloud models at emitting valid JSON, and every yeab
 3. **Deterministic fallbacks** — as always, a failed generation degrades to a deterministic artifact instead of crashing.
 
 On top of that, chat history is automatically trimmed to fit the local context window (oldest turns first, never mid-exchange), and `<think>` reasoning blocks from thinking models like qwen3 are stripped before display.
+
+### Performance & housekeeping
+
+- **Track your model's speed** — because the model runs on your own hardware, the **Usage** page shows a *Local Model Performance* section: average and peak throughput (tokens/sec), average call and model-load times, and your last call's speed. Every call also logs a one-line perf trace to `~/.yeaboi/logs/tui/yeaboi.log`. Useful for comparing models or spotting when a model is too big for your machine.
+- **Stop the server on exit** — yeaboi doesn't start Ollama, but when you quit (Esc/Q, or Ctrl-C) with a local server running it offers to stop it: a full `brew services stop ollama` if Homebrew manages it, otherwise it unloads the model to free RAM (~5 GB) while leaving the server idling. Declining leaves everything running.
 
 Config knobs: `OLLAMA_BASE_URL` (default `http://localhost:11434`), `OLLAMA_NUM_CTX` (default 16384 — yeaboi requests a bigger context than Ollama's 2-4k default because the planning prompts are large; lower it on low-RAM machines).
 

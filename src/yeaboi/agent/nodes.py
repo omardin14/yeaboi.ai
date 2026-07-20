@@ -25,7 +25,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END
 
 from yeaboi.agent.ceremony_history import gather_ceremony_context
-from yeaboi.agent.llm import get_llm, invoke_json
+from yeaboi.agent.llm import get_llm, invoke_json, track_usage
 from yeaboi.agent.repo_signals import analyze_context, scan_repo_signals
 from yeaboi.agent.state import (
     DOD_ITEMS,
@@ -160,12 +160,20 @@ def _is_llm_connection_error(exc: Exception) -> bool:
 
 
 def _ollama_connection_hint() -> str:
-    """Actionable message for a down/unreachable local Ollama server."""
-    from yeaboi.config import get_ollama_base_url
+    """Actionable message for a down/unreachable local Ollama server.
 
+    Mirrors the setup-screen copy (_ollama_unreachable_message): distinguish
+    "not installed" from "installed but not running" so the hint matches reality.
+    """
+    from yeaboi.config import get_ollama_base_url
+    from yeaboi.ollama_control import is_ollama_installed
+
+    base = get_ollama_base_url()
+    if is_ollama_installed():
+        return f"Can't reach Ollama at {base}. Start it with: ollama serve — or check OLLAMA_BASE_URL in your .env."
     return (
-        f"Can't reach Ollama at {get_ollama_base_url()}. Is it running? "
-        "Start it with: ollama serve — or check OLLAMA_BASE_URL in your .env."
+        f"Can't reach Ollama at {base}. Ollama isn't installed — get it at https://ollama.com "
+        "(or: brew install ollama), then start it with: ollama serve."
     )
 
 
@@ -479,6 +487,7 @@ def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, l
                 _tools_unsupported = True
                 _bound_llm = None
                 response = get_llm().invoke(all_messages)
+                track_usage(response)  # prose chat path — count tokens + local timing
                 _strip_response_think_tags(response)
                 if isinstance(response.content, str):
                     response.content += (
@@ -490,6 +499,7 @@ def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, l
                 if state.get("chat_images"):
                     out_deg["chat_images"] = []
                 return out_deg
+        track_usage(response)  # covers both the tools-unsupported and bound-LLM invokes above
         _strip_response_think_tags(response)
         out: dict = {"messages": [response]}
         if state.get("chat_images"):
@@ -558,6 +568,7 @@ def call_model(state: ScrumState) -> dict[str, list[BaseMessage]]:
     all_messages = _attach_chat_images(state, _trim_history_for_local([system_message, *state["messages"]]))
 
     response = get_llm().invoke(all_messages)
+    track_usage(response)  # prose chat path — count tokens + local timing
     _strip_response_think_tags(response)
 
     # Return single-item list — the add_messages reducer on ScrumState["messages"]
