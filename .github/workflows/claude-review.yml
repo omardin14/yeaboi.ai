@@ -1,0 +1,64 @@
+# Async Claude code + security review on every PR.
+#
+# Deliberately NON-BLOCKING: this workflow is not a required check — ci.yml
+# remains the merge gate. The old per-PR review was removed for being slow;
+# this one can never block a merge, only add review comments when it lands.
+# Skips drafts and the auto-version bot's `chore: bump version` pushes.
+
+name: Claude Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: |
+      github.event.pull_request.draft == false &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+
+            Read the diff with `gh pr diff ${{ github.event.pull_request.number }}` and the PR
+            description with `gh pr view ${{ github.event.pull_request.number }}`. Then review for:
+
+            1. **Correctness** — real bugs only: logic errors, broken edge cases, state
+               serialization issues (frozen dataclass fields without defaults break --resume),
+               concurrency problems in the retro/standup servers.
+            2. **Repo conventions (CLAUDE.md)** — three-pillar observability (logging via
+               logging_setup, paths from paths.py, tests for every new function), TUI component
+               standards (shared components from ui/shared/_components.py, theme colours not
+               hardcoded RGB), parse → fallback → format pattern in generation code, prompts
+               separated in prompts/.
+            3. **Security** — injected/unescaped untrusted input (LAN retro cards, tracker
+               ticket text), secrets or tokens logged or committed, unsafe subprocess/network
+               use, missing auth on new server endpoints.
+
+            Post the result as a single PR review comment via
+            `gh pr comment ${{ github.event.pull_request.number }} --body "..."`:
+            a short verdict line, then only findings that matter (file:line, what, why).
+            If there are no significant findings, post one line saying the review passed.
+            Do not comment on style that ruff already enforces. Do not request changes on
+            nitpicks. This review is advisory — never attempt to approve, merge, or block.
+          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh run view:*),Read,Grep,Glob"'

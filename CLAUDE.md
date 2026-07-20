@@ -41,6 +41,29 @@ agg docs/demo.cast docs/demo.gif --theme github-dark       # convert to GIF
 rm docs/demo.cast                                           # clean up source
 ```
 
+## Parallel Development (worktrees)
+
+Each feature gets its own git worktree under `<main checkout>/.claude/worktrees/<name>` with its own branch, `.env`, uv venv, and pre-commit hooks. Never develop two features in one checkout.
+
+```bash
+make wt-new NAME=my-feature       # create worktree + open VS Code with claude auto-running
+make wt-headless NAME=my-feature  # create worktree WITHOUT VS Code (for background-agent work)
+make wt-list                      # list worktrees (branch, clean/dirty, path)
+make wt-rm NAME=my-feature        # remove worktree dir + branch
+```
+
+Slash commands (in `.claude/commands/`): `/wt` (worktree ops from inside a session), `/sync-main` (rebase on latest main + re-verify), `/ship` (independent review → full tests → commit → push → PR), `/babysit-prs` (survey open PRs, spawn fix agents for red CI).
+
+### Verification loop
+
+- **Every turn (automatic)**: a Stop hook runs `make lint` + `make test-fast` whenever a turn ends with dirty `.py` files, and a PostToolUse hook ruff-formats every edited `.py` file. Hook scripts live in `scripts/claude-hooks/`; wiring is in `.claude/settings.json`.
+- **At ship time (`/ship`)**: an independent fresh-context agent reviews the diff against the task (spec-fit + CLAUDE.md conventions), then the full `make test` + `make lint` gate runs before commit/push/PR.
+- **In CI**: `claude-review.yml` posts an async code + security review on every PR (non-blocking; `ci.yml` remains the merge gate).
+
+### Orchestration conventions
+
+When driving multiple features at once, work as an **orchestrator**: one main session, one background agent per feature, each in its own worktree (`make wt-headless`). The orchestrator kicks off agents, tracks them, reviews **final diffs** (not intermediate steps), and runs `/ship` per feature when green. Use `make test-fast` in the inner loop; the full `make test` runs at ship time.
+
 ## Code Style
 
 - Python 3.11+, ruff for linting/formatting (line-length 120)

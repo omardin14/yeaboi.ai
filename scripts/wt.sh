@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# scripts/wt.sh <name> [open|rm] — git-worktree lifecycle for parallel Claude sessions.
+# scripts/wt.sh <name> [open|headless|rm] — git-worktree lifecycle for parallel Claude sessions.
 #
-#   bash scripts/wt.sh my-feature        -> create .claude/worktrees/my-feature + provision
-#   bash scripts/wt.sh my-feature open   -> create (if needed) + open a new VS Code window
-#                                           (claude auto-starts in the integrated terminal)
-#   bash scripts/wt.sh my-feature rm     -> remove worktree dir + git branch
+#   bash scripts/wt.sh my-feature          -> create .claude/worktrees/my-feature + provision
+#   bash scripts/wt.sh my-feature open     -> create (if needed) + open a new VS Code window
+#                                             (claude auto-starts in the integrated terminal)
+#   bash scripts/wt.sh my-feature headless -> create + provision WITHOUT VS Code auto-launch;
+#                                             for worktrees driven by background agents from
+#                                             an orchestrating Claude session
+#   bash scripts/wt.sh my-feature rm       -> remove worktree dir + git branch
 #
 # Provisioning per worktree: copy the main checkout's .env, create a uv venv with
-# the package installed editable (same as `make install`), and write .vscode/
-# auto-launch files so opening the folder starts a claude session.
+# the package installed editable (same as `make install`), install pre-commit
+# hooks, and (except for headless) write .vscode/ auto-launch files so opening
+# the folder starts a claude session.
 #
-# Backs `make wt-new` / `make wt-open` / `make wt-rm`. Editor CLI comes from
-# $CODE (default: code) — e.g. `CODE=cursor make wt-open NAME=my-feature`.
+# Backs `make wt-new` / `make wt-open` / `make wt-headless` / `make wt-rm`.
+# Editor CLI comes from $CODE (default: code) — e.g. `CODE=cursor make wt-open NAME=my-feature`.
 
 set -euo pipefail
 
-NAME="${1:?usage: wt.sh <name> [open|rm]}"
+NAME="${1:?usage: wt.sh <name> [open|headless|rm]}"
 ACTION="${2:-create}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,10 +62,21 @@ if [ ! -d "$TARGET" ]; then
   echo "[wt] creating venv + installing deps (uv)…"
   (cd "$TARGET" && "$UV" venv >/dev/null && "$UV" pip install -q -e ".[dev]")
 
+  # --- pre-commit: ruff/gitleaks/unit-test hooks guaranteed in every worktree --
+  # (hooks land in the shared .git/hooks, so this is idempotent across worktrees)
+  if (cd "$TARGET" && "$UV" run pre-commit install >/dev/null 2>&1); then
+    echo "[wt] pre-commit hooks installed"
+  else
+    echo "[wt] note: pre-commit install failed — run \`make pre-commit\` in the worktree"
+  fi
+
   # --- .vscode/: auto-launch claude in the integrated terminal on folder open --
   # `runOn: folderOpen` + workspace-scoped `task.allowAutomaticTasks: on` skips
   # VS Code's "allow automatic tasks?" prompt. The Workspace Trust prompt is
   # unavoidable on first open of any folder; trust once and it sticks.
+  # Skipped for headless worktrees — those are driven by background agents,
+  # not a human-attended editor window.
+  if [ "$ACTION" != "headless" ]; then
   mkdir -p "$TARGET/.vscode"
   cat > "$TARGET/.vscode/settings.json" <<'EOF'
 {
@@ -90,9 +105,13 @@ EOF
   ]
 }
 EOF
+  fi
 fi
 
 echo "[wt] worktree ready: $TARGET"
+if [ "$ACTION" = "headless" ]; then
+  echo "[wt] headless — no VS Code auto-launch; drive it with a background agent from your orchestrating session"
+fi
 
 if [ "$ACTION" = "open" ]; then
   CODE="${CODE:-code}"
