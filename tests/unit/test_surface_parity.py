@@ -94,14 +94,14 @@ CAPABILITIES: dict[str, dict] = {
         "engines": {("yeaboi.standup.engine", "run_standup")},
         "mcp_tools": {"standup_run", "standup_history", "standup_config_get", "standup_config_set"},
         "tui_mode": "daily-standup",
-        "cli": {"--standup-run", "--standup-session", "--standup-output", "--standup-interactive"},
+        "cli": {"standup", "--standup-run", "--standup-session", "--standup-output", "--standup-interactive"},
         "skill": "standup",
     },
     "reporting": {
         "engines": {("yeaboi.reporting.engine", "run_delivery_report")},
         "mcp_tools": {"report_delivery"},
         "tui_mode": "reporting",
-        "cli": Exempt("no headless reporting path yet — tracked gap, lands with the CLI subcommands"),
+        "cli": {"report"},
         "skill": "delivery-report",
     },
     "performance": {
@@ -118,7 +118,7 @@ CAPABILITIES: dict[str, dict] = {
             "perf_note_add",
         },
         "tui_mode": "performance",
-        "cli": Exempt("no headless performance path yet — tracked gap, lands with the CLI subcommands"),
+        "cli": {"perf"},
         "skill": Exempt("no plugin skill yet — tracked gap"),
     },
     "retro-board": {
@@ -132,14 +132,14 @@ CAPABILITIES: dict[str, dict] = {
         "engines": Exempt("lives in tools/team_learning.py as @tool functions — covered by test_tools_registry"),
         "mcp_tools": {"team_profile_get", "team_compare_plan_to_actuals"},
         "tui_mode": Exempt("profiles are consumed inside the planning/analysis screens, no dedicated card"),
-        "cli": {"--learn", "--team-profile", "--retro"},
+        "cli": {"--team-profile", "--retro"},  # --learn moved to team-analysis (drives its engine now)
         "skill": Exempt("no plugin skill yet — tracked gap"),
     },
     "team-analysis": {
         "engines": {("yeaboi.analysis.engine", "run_team_analysis")},
         "mcp_tools": {"team_analyze"},
         "tui_mode": "team-analysis",
-        "cli": Exempt("no dedicated flag yet (--learn drives the engine) — lands with the CLI subcommands"),
+        "cli": {"analyze", "--learn"},
         "skill": Exempt("no plugin skill yet — tracked gap"),
     },
     "usage": {

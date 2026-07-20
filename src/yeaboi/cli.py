@@ -477,6 +477,53 @@ def build_parser() -> argparse.ArgumentParser:
         "Pass a session ID or omit for the most recent session.",
     )
 
+    # ── Subcommands — headless mode runners ───────────────────────────────
+    # Additive: every flat flag above keeps working (the subparsers action is
+    # optional, so bare `yeaboi` and `yeaboi --<flag>` parse unchanged).
+    # See CLAUDE.md "REQUIRED: Surface Parity" — each mode needs a CLI path;
+    # these run the same engines the TUI and the MCP server use.
+    subparsers = parser.add_subparsers(dest="command", metavar="{report,standup,perf,analyze}")
+
+    report_p = subparsers.add_parser("report", help="Generate a stakeholder delivery report (Reporting mode)")
+    report_p.add_argument("--period", choices=["last_sprint", "last_month", "quarter"], default="last_sprint")
+    report_p.add_argument("--session", default="", metavar="ID", help="Session to use (default: most recent)")
+    report_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
+    standup_p = subparsers.add_parser("standup", help="Run a Daily Standup (alias of --standup-run, more knobs)")
+    standup_p.add_argument("--session", default="", metavar="ID", help="Session to use (default: most recent)")
+    standup_p.add_argument("--deliver", action="store_true", help="Send to the configured channels (default: print)")
+    standup_p.add_argument(
+        "--channels", nargs="+", choices=["terminal", "desktop", "slack", "email"], help="Override delivery channels"
+    )
+    standup_p.add_argument("--days", type=int, default=0, help="Activity look-back window override")
+    standup_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
+    perf_p = subparsers.add_parser("perf", help="Performance mode: 1:1 prep/completion, reviews, notes")
+    perf_sub = perf_p.add_subparsers(dest="perf_command", metavar="{roster,prep,complete,review,note}", required=True)
+    perf_sub.add_parser("roster", help="List the engineer roster from recent tracker assignees")
+    prep_p = perf_sub.add_parser("prep", help="Prepare a 1:1 for an engineer")
+    prep_p.add_argument("engineer", help="Engineer name (see `yeaboi perf roster`)")
+    complete_p = perf_sub.add_parser("complete", help="Complete a held 1:1 from its transcript")
+    complete_p.add_argument("engineer", help="Engineer name")
+    complete_p.add_argument(
+        "--transcript", required=True, metavar="TEXT", help="Transcript text; @file.txt reads from file"
+    )
+    complete_p.add_argument("--deliver", action="store_true", help="Email the summary via the configured SMTP")
+    review_p = perf_sub.add_parser("review", help="Draft a periodic performance review")
+    review_p.add_argument("engineer", help="Engineer name")
+    review_p.add_argument("--months", type=int, default=6, help="Review period in months (default 6)")
+    note_p = perf_sub.add_parser("note", help="Record a note about an engineer")
+    note_p.add_argument("engineer", help="Engineer name")
+    note_p.add_argument("--text", required=True, help="The note text")
+
+    analyze_p = subparsers.add_parser("analyze", help="Analyse team board history into a calibration profile")
+    analyze_p.add_argument("--source", choices=["jira", "azdevops"], default="", help="Tracker (default: auto)")
+    analyze_p.add_argument("--project", default="", metavar="KEY", help="Project key (default: configured)")
+    analyze_p.add_argument("--sprints", type=int, default=8, help="Closed sprints to analyse (default 8)")
+    analyze_p.add_argument("--samples", action="store_true", help="Also generate sample tickets (extra LLM calls)")
+    analyze_p.add_argument("--no-insights", action="store_true", help="Skip the coaching-insights LLM call")
+    analyze_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
     return parser
 
 
@@ -872,6 +919,170 @@ def _install_skill(target_arg: str) -> None:
         print("Skipped. Run 'openclaw gateway restart' when ready.")
 
 
+def _json_dump(obj: object) -> str:
+    """JSON for CLI --format json output — flattens frozen-dataclass artifacts."""
+    import dataclasses
+    import json
+
+    def _default(o):
+        if dataclasses.is_dataclass(o) and not isinstance(o, type):
+            return dataclasses.asdict(o)
+        return str(o)
+
+    return json.dumps(obj, indent=2, default=_default)
+
+
+def _resolve_cli_session(session_id: str) -> str | None:
+    """Blank/latest → the most recent saved session id (None when none exist)."""
+    from yeaboi.paths import get_db_path
+    from yeaboi.sessions import SessionStore
+
+    if session_id and session_id != "latest":
+        return session_id
+    with SessionStore(get_db_path()) as store:
+        return store.get_latest_session_id()
+
+
+def _run_subcommand(args: argparse.Namespace) -> int:
+    """Dispatch `yeaboi <command>` headless runners. Returns a process exit code.
+
+    Thin adapters over the same engines the TUI and MCP server use
+    (CLAUDE.md "REQUIRED: Surface Parity").
+    """
+    from rich.console import Console
+
+    to_json = getattr(args, "format", "text") == "json"
+    # JSON mode keeps stdout machine-clean: human chatter goes to stderr.
+    console = Console(stderr=to_json)
+    handlers = {"report": _cmd_report, "standup": _cmd_standup, "perf": _cmd_perf, "analyze": _cmd_analyze}
+    try:
+        return handlers[args.command](args, console)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def _cmd_report(args: argparse.Namespace, console: "Console") -> int:
+    from yeaboi.reporting.engine import run_delivery_report
+    from yeaboi.reporting.render import format_report_rich
+
+    console.print(f"[bold cyan]Generating {args.period.replace('_', ' ')} delivery report...[/bold cyan]")
+    report = run_delivery_report(args.period, session_id=_resolve_cli_session(args.session) or "")
+    for warning in report.warnings:
+        print(f"⚠ {warning}", file=sys.stderr)
+    if args.format == "json":
+        print(_json_dump(report))
+    else:
+        console.print(format_report_rich(report))
+    return 0
+
+
+def _cmd_standup(args: argparse.Namespace, console: "Console") -> int:
+    from yeaboi.standup.engine import run_standup
+    from yeaboi.standup.render import format_standup_rich
+
+    session_id = _resolve_cli_session(args.session)
+    if not session_id:
+        print("Error: no session found to run a standup for.", file=sys.stderr)
+        return 2
+    report = run_standup(session_id, deliver=args.deliver, days=args.days or None, channels=args.channels)
+    for warning in report.warnings:
+        print(f"⚠ {warning}", file=sys.stderr)
+    if args.format == "json":
+        print(_json_dump(report))
+    else:
+        console.print(format_standup_rich(report))
+    return 0
+
+
+def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
+    if args.perf_command == "roster":
+        from yeaboi.performance.roster import fetch_roster
+
+        engineers = fetch_roster()
+        if not engineers:
+            console.print("[yellow]No engineers found — is a tracker (Jira/AzDO) configured?[/yellow]")
+            return 2
+        for eng in engineers:
+            console.print(f"  • {getattr(eng, 'name', eng)}")
+        return 0
+
+    if args.perf_command == "prep":
+        from yeaboi.performance.engine import run_one_on_one_prep
+        from yeaboi.performance.render import format_prep_rich
+
+        prep = run_one_on_one_prep(args.engineer)
+        for warning in prep.warnings:
+            print(f"⚠ {warning}", file=sys.stderr)
+        console.print(format_prep_rich(prep))
+        return 0
+
+    if args.perf_command == "complete":
+        transcript = args.transcript
+        if transcript.startswith("@"):
+            path = Path(transcript[1:])
+            if not path.exists():
+                print(f"Error: transcript file not found: {path}", file=sys.stderr)
+                return 1
+            transcript = path.read_text().strip()
+        from yeaboi.performance.engine import complete_one_on_one
+        from yeaboi.performance.render import format_completion_rich
+
+        record = complete_one_on_one(args.engineer, transcript, deliver=args.deliver)
+        for warning in record.warnings:
+            print(f"⚠ {warning}", file=sys.stderr)
+        console.print(format_completion_rich(record))
+        return 0
+
+    if args.perf_command == "review":
+        from yeaboi.performance.engine import run_six_month_review
+        from yeaboi.performance.render import format_review_rich
+
+        review = run_six_month_review(args.engineer, period_months=args.months)
+        for warning in review.warnings:
+            print(f"⚠ {warning}", file=sys.stderr)
+        console.print(format_review_rich(review))
+        return 0
+
+    # note
+    from yeaboi.paths import get_db_path
+    from yeaboi.performance.store import PerformanceStore
+
+    with PerformanceStore(get_db_path()) as store:
+        store.add_note(args.engineer, args.text)
+    console.print(f"[green]Note recorded for {args.engineer}[/green]")
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
+    from yeaboi.analysis import run_team_analysis
+
+    console.print("[bold cyan]Analysing team history...[/bold cyan]")
+    result = run_team_analysis(
+        source=args.source,
+        project_key=args.project,
+        sprint_count=args.sprints,
+        generate_samples=args.samples,
+        include_insights=not args.no_insights,
+    )
+    for warning in result["warnings"]:
+        print(f"⚠ {warning}", file=sys.stderr)
+    if args.format == "json":
+        print(_json_dump(result))
+        return 0
+    profile = result["profile"]
+    console.print(f"[green]Team profile saved for {profile.source}/{profile.project_key}[/green]")
+    console.print(
+        f"  Analysed [bold]{profile.sample_sprints}[/bold] sprints, [bold]{profile.sample_stories}[/bold] stories"
+    )
+    console.print(f"  Avg velocity: [bold]{profile.velocity_avg:.0f} ± {profile.velocity_stddev:.0f}[/bold] pts/sprint")
+    insights = result["insights"] or {}
+    for category in ("start", "stop", "keep", "try"):
+        for item in insights.get(category, [])[:2]:
+            console.print(f"  [bold]{category.upper()}[/bold]: {item.get('title', '')}")
+    return 0
+
+
 def _run_learn(console: "Console") -> None:
     """Run the full team analysis via the analysis engine and print a summary.
 
@@ -1019,6 +1230,14 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Error: description file not found: {desc_path}", file=sys.stderr)
             sys.exit(1)
         args.description = desc_path.read_text().strip()
+
+    # ── Subcommand dispatch (yeaboi report/standup/perf/analyze) ─────────────
+    # Headless mode runners over the shared engines — no TUI, no splash.
+    if getattr(args, "command", None):
+        from yeaboi.logging_setup import configure_logging
+
+        configure_logging()
+        sys.exit(_run_subcommand(args))
 
     # ── Daily Standup headless flow ──────────────────────────────────────────
     # What the OS scheduler (launchd/cron) invokes: run a standup and deliver it,
