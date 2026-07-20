@@ -636,7 +636,7 @@ Every TUI mode has a headless CLI path over the same engine:
 | `yeaboi perf note <engineer> --text "..."` | Record a note (feeds future preps/reviews) |
 | `yeaboi analyze [--source jira\|azdevops] [--sprints N] [--samples] [--format json]` | Analyse board history into a team calibration profile |
 
-`--format json` keeps stdout machine-clean (warnings and progress go to stderr) for piping into CI or other tools.
+`--format json` keeps stdout machine-clean (warnings and progress go to stderr) for piping into CI or other tools. Add `--strict` to any runner to exit 3 on a degraded run (warnings present, or an empty report) — by default degraded runs still exit 0 with warnings on stderr.
 
 ### Interactive modes
 

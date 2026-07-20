@@ -497,6 +497,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_p.add_argument("--label", default="", metavar="TEXT", help='Period label override (e.g. "Q3 2026")')
     report_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
     report_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
+    report_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings/empty report)")
     report_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     standup_p = subparsers.add_parser("standup", help="Run a Daily Standup (alias of --standup-run, more knobs)")
@@ -511,6 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["install", "remove", "status"],
         help="Manage the OS schedule (launchd/cron) that runs the standup daily, instead of running one now",
     )
+    standup_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     standup_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     perf_p = subparsers.add_parser("perf", help="Performance mode: 1:1 prep/completion, reviews, notes")
@@ -521,6 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     prep_p.add_argument("--session", default="", metavar="ID", help="Session for team context (default: most recent)")
     prep_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
     prep_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
+    prep_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     complete_p = perf_sub.add_parser("complete", help="Complete a held 1:1 from its transcript")
     complete_p.add_argument("engineer", help="Engineer name")
     complete_p.add_argument(
@@ -534,12 +537,14 @@ def build_parser() -> argparse.ArgumentParser:
     complete_p.add_argument(
         "--recipients", nargs="+", default=None, metavar="EMAIL", help="Email recipients override (with --deliver)"
     )
+    complete_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     review_p = perf_sub.add_parser("review", help="Draft a periodic performance review")
     review_p.add_argument("engineer", help="Engineer name")
     review_p.add_argument("--months", type=int, default=6, help="Review period in months (default 6)")
     review_p.add_argument("--session", default="", metavar="ID", help="Session for team context")
     review_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
     review_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
+    review_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     note_p = perf_sub.add_parser("note", help="Record a note about an engineer")
     note_p.add_argument("engineer", help="Engineer name")
     note_p.add_argument("--text", required=True, help="The note text")
@@ -550,6 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_p.add_argument("--sprints", type=int, default=8, help="Closed sprints to analyse (default 8)")
     analyze_p.add_argument("--samples", action="store_true", help="Also generate sample tickets (extra LLM calls)")
     analyze_p.add_argument("--no-insights", action="store_true", help="Skip the coaching-insights LLM call")
+    analyze_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     analyze_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     return parser
@@ -961,13 +967,21 @@ def _json_dump(obj: object) -> str:
 
 
 def _resolve_cli_session(session_id: str) -> str | None:
-    """Blank/latest → the most recent saved session id (None when none exist)."""
+    """Blank/latest → the most recent saved session id (None when none exist).
+
+    An explicit id must exist — a typo'd --session used to pass through
+    verbatim and silently produce empty-context output.
+    """
     from yeaboi.paths import get_db_path
     from yeaboi.sessions import SessionStore
 
-    if session_id and session_id != "latest":
-        return session_id
     with SessionStore(get_db_path()) as store:
+        if session_id and session_id != "latest":
+            known = [s["session_id"] for s in store.list_sessions()]
+            if session_id not in known:
+                listing = ", ".join(known) if known else "none saved yet"
+                raise ValueError(f"session {session_id!r} not found — available: {listing}")
+            return session_id
         return store.get_latest_session_id()
 
 
@@ -988,6 +1002,17 @@ def _run_subcommand(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+
+def _strict_exit(strict: bool, warnings, empty: bool = False) -> int:
+    """--strict maps a degraded run (warnings, or an empty result) to exit 3 —
+    so CI can tell a real report from a deterministic fallback. Default runs
+    keep exit 0 with warnings on stderr."""
+    if strict and (warnings or empty):
+        detail = f"{len(list(warnings))} warning(s)" + (", empty result" if empty else "")
+        print(f"strict: degraded run ({detail}) — exit 3", file=sys.stderr)
+        return 3
+    return 0
 
 
 def _cmd_report(args: argparse.Namespace, console: "Console") -> int:
@@ -1012,7 +1037,7 @@ def _cmd_report(args: argparse.Namespace, console: "Console") -> int:
         print(_json_dump(report))
     else:
         console.print(format_report_rich(report))
-    return 0
+    return _strict_exit(args.strict, report.warnings, empty=not report.delivered_items)
 
 
 def _cmd_standup(args: argparse.Namespace, console: "Console") -> int:
@@ -1032,7 +1057,7 @@ def _cmd_standup(args: argparse.Namespace, console: "Console") -> int:
         print(_json_dump(report))
     else:
         console.print(format_standup_rich(report))
-    return 0
+    return _strict_exit(args.strict, report.warnings)
 
 
 def _cmd_standup_schedule(args: argparse.Namespace, console: "Console", session_id: str) -> int:
@@ -1096,7 +1121,7 @@ def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
         for warning in prep.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         console.print(format_prep_rich(prep))
-        return 0
+        return _strict_exit(args.strict, prep.warnings)
 
     if args.perf_command == "complete":
         transcript = args.transcript
@@ -1120,7 +1145,7 @@ def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
         for warning in record.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         console.print(format_completion_rich(record))
-        return 0
+        return _strict_exit(args.strict, record.warnings)
 
     if args.perf_command == "review":
         from yeaboi.performance.engine import run_six_month_review
@@ -1136,7 +1161,7 @@ def _cmd_perf(args: argparse.Namespace, console: "Console") -> int:
         for warning in review.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         console.print(format_review_rich(review))
-        return 0
+        return _strict_exit(args.strict, review.warnings)
 
     # note
     from yeaboi.paths import get_db_path
@@ -1163,7 +1188,7 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
         print(f"⚠ {warning}", file=sys.stderr)
     if args.format == "json":
         print(_json_dump(result))
-        return 0
+        return _strict_exit(args.strict, result["warnings"])
     profile = result["profile"]
     console.print(f"[green]Team profile saved for {profile.source}/{profile.project_key}[/green]")
     console.print(
@@ -1174,7 +1199,7 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
     for category in ("start", "stop", "keep", "try"):
         for item in insights.get(category, [])[:2]:
             console.print(f"  [bold]{category.upper()}[/bold]: {item.get('title', '')}")
-    return 0
+    return _strict_exit(args.strict, result["warnings"])
 
 
 def _run_learn(console: "Console") -> None:

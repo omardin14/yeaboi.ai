@@ -19,7 +19,24 @@ def _roster(jira_project: str, azdo_project: str):
     return {"engineers": fetch_roster(jira_project=jira_project, azdo_project=azdo_project)}
 
 
+def _check_engineer(engineer: str, jira_project: str = "", azdo_project: str = "") -> None:
+    """Best-effort typo guard: error early (with the roster listed) instead of
+    returning an empty artifact for a name the tracker has never seen. Skipped
+    entirely when the roster can't be fetched — the engines stay best-effort."""
+    if not engineer.strip():
+        raise ValueError("engineer is required — a name from perf_roster.")
+    try:
+        from yeaboi.performance.roster import fetch_roster
+
+        names = [getattr(e, "name", str(e)) for e in fetch_roster(jira_project=jira_project, azdo_project=azdo_project)]
+    except Exception:
+        return
+    if names and engineer.strip().lower() not in {n.lower() for n in names}:
+        raise ValueError(f"Unknown engineer {engineer!r} — roster: {', '.join(sorted(names))} (see perf_roster).")
+
+
 def _one_on_one_prep(engineer: str, session_id: str, jira_project: str, azdo_project: str):
+    _check_engineer(engineer, jira_project, azdo_project)
     from yeaboi.performance.engine import run_one_on_one_prep
 
     return run_one_on_one_prep(
@@ -35,6 +52,7 @@ def _one_on_one_complete(
 ):
     if not transcript.strip():
         raise ValueError("transcript is required — the 1:1 notes or transcript text.")
+    _check_engineer(engineer)
     from yeaboi.performance.engine import complete_one_on_one
 
     return complete_one_on_one(
@@ -61,6 +79,7 @@ def _note_add(engineer: str, note_text: str) -> dict:
 
 
 def _six_month_review(engineer: str, period_months: int, session_id: str, jira_project: str, azdo_project: str):
+    _check_engineer(engineer, jira_project, azdo_project)
     from yeaboi.performance.engine import run_six_month_review
 
     return run_six_month_review(

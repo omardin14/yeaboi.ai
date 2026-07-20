@@ -93,16 +93,17 @@ async def run_engine(ctx, fn, /, *args, needs_llm: bool = True, **kwargs) -> dic
     from yeaboi.mcp.sampling import SamplingChatModel, resolve_llm_mode
 
     mode = resolve_llm_mode(ctx) if needs_llm else "n/a"
+    sampling_model = SamplingChatModel(session=ctx.session) if mode == "sampling" else None
 
     def _call():
         with _ENGINE_LOCK:
-            if mode == "sampling":
+            if sampling_model is not None:
                 from yeaboi.agent.llm import llm_override
 
                 # The override is set here, in the worker thread, so the
                 # SamplingChatModel's anyio.from_thread bridge back to the
                 # event loop is always available when the engine invokes it.
-                with llm_override(SamplingChatModel(session=ctx.session)):
+                with llm_override(sampling_model):
                     return fn(*args, **kwargs)
             return fn(*args, **kwargs)
 
@@ -116,6 +117,11 @@ async def run_engine(ctx, fn, /, *args, needs_llm: bool = True, **kwargs) -> dic
     warnings = _result_warnings(result)
     if mode == "fallback":
         warnings.append(LLM_HINT + " Content below is a deterministic fallback, not AI-generated.")
+    if sampling_model is not None and sampling_model.truncated_calls:
+        warnings.append(
+            f"{sampling_model.truncated_calls} sampling response(s) hit the token cap and were truncated — "
+            "parts of the content may be deterministic fallback. Raise YEABOI_MCP_MAX_TOKENS (default 8192)."
+        )
     return envelope(to_jsonable(result), llm_mode=mode, warnings=warnings)
 
 

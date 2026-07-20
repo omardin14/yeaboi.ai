@@ -13,7 +13,33 @@ from yeaboi.mcp.runtime import run_engine, run_readonly
 logger = logging.getLogger(__name__)
 
 
-def _team_analyze(source: str, project_key: str, sprint_count: int, generate_samples: bool, include_insights: bool):
+class _BridgedProgress(list):
+    """The analysis engine's `progress` seam is a shared list its workers append
+    status lines to (the TUI reads it every frame). Here each append also fires
+    an MCP progress notification. The appends come from the engine's own worker
+    threads (not anyio's), so the bridge uses run_coroutine_threadsafe against
+    the server loop captured at tool-call time — fire-and-forget."""
+
+    def __init__(self, loop, ctx):
+        super().__init__()
+        self._loop = loop
+        self._ctx = ctx
+
+    def append(self, item) -> None:
+        super().append(item)
+        try:
+            import asyncio
+
+            asyncio.run_coroutine_threadsafe(self._ctx.report_progress(float(len(self)), None, str(item)), self._loop)
+        except Exception:
+            logger.debug("analysis progress bridge failed (continuing)", exc_info=True)
+
+
+def _team_analyze(
+    source: str, project_key: str, sprint_count: int, generate_samples: bool, include_insights: bool, progress=None
+):
+    if source not in ("", "jira", "azdevops"):
+        raise ValueError(f"source must be 'jira' or 'azdevops' (blank auto-detects) — got {source!r}")
     from yeaboi.analysis import run_team_analysis
 
     return run_team_analysis(
@@ -22,6 +48,7 @@ def _team_analyze(source: str, project_key: str, sprint_count: int, generate_sam
         sprint_count=sprint_count,
         generate_samples=generate_samples,
         include_insights=include_insights,
+        progress=progress,
     )
 
 
@@ -69,8 +96,14 @@ def register(app) -> None:
         calls plus tracker API paging — takes minutes; warn the user before running.
         source: 'jira' or 'azdevops' (blank auto-detects); generate_samples additionally drafts
         sample tickets in the team's style (more LLM calls)."""
+        import asyncio
+
+        try:
+            progress = _BridgedProgress(asyncio.get_running_loop(), ctx)
+        except RuntimeError:  # non-asyncio backend — run without progress
+            progress = None
         return await run_engine(
-            ctx, _team_analyze, source, project_key, sprint_count, generate_samples, include_insights
+            ctx, _team_analyze, source, project_key, sprint_count, generate_samples, include_insights, progress
         )
 
     @app.tool()

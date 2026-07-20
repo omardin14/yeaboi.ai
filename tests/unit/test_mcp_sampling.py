@@ -20,14 +20,15 @@ from yeaboi.mcp.sampling import (  # noqa: E402
 class FakeSession:
     """Stub of mcp ServerSession: records create_message calls, answers capability checks."""
 
-    def __init__(self, text: str = "sampled reply", sampling: bool = True):
+    def __init__(self, text: str = "sampled reply", sampling: bool = True, stop_reason: str | None = None):
         self.text = text
         self.sampling = sampling
+        self.stop_reason = stop_reason
         self.calls: list[dict] = []
 
     async def create_message(self, messages, *, max_tokens, system_prompt=None, **kwargs):
         self.calls.append({"messages": messages, "max_tokens": max_tokens, "system_prompt": system_prompt})
-        return SimpleNamespace(content=SimpleNamespace(text=self.text), model="host-model")
+        return SimpleNamespace(content=SimpleNamespace(text=self.text), model="host-model", stopReason=self.stop_reason)
 
     def check_client_capability(self, _caps) -> bool:
         return self.sampling
@@ -186,3 +187,91 @@ class TestRunEngineSamplingInjection:
         ctx = make_ctx(sampling=True)
         payload = anyio.run(lambda: run_engine(ctx, lambda: {"summary": "x", "warnings": ["Jira 401"]}))
         assert payload["warnings"] == ["Jira 401"]
+
+
+class TestSamplingTruncation:
+    def _engine(self):
+        def engine():
+            from langchain_core.messages import HumanMessage
+
+            from yeaboi.agent.llm import get_llm
+
+            get_llm().invoke([HumanMessage(content="go")])
+            return {"summary": "partial", "warnings": []}
+
+        return engine
+
+    def test_truncated_response_adds_envelope_warning(self, monkeypatch):
+        monkeypatch.delenv("YEABOI_MCP_LLM", raising=False)
+        ctx = SimpleNamespace(session=FakeSession(text="{cut", stop_reason="maxTokens"))
+        payload = anyio.run(lambda: run_engine(ctx, self._engine()))
+        assert payload["ok"] is True
+        assert any("truncated" in w and "YEABOI_MCP_MAX_TOKENS" in w for w in payload["warnings"])
+
+    def test_normal_stop_reason_adds_no_warning(self, monkeypatch):
+        monkeypatch.delenv("YEABOI_MCP_LLM", raising=False)
+        ctx = SimpleNamespace(session=FakeSession(text="done", stop_reason="endTurn"))
+        payload = anyio.run(lambda: run_engine(ctx, self._engine()))
+        assert payload["warnings"] == []
+
+
+class TestEngineLock:
+    def test_engine_calls_serialize_and_readonly_passes(self):
+        """One slow engine call blocks the next engine call (process-wide lock),
+        but run_readonly tools stay responsive throughout."""
+        import functools
+        import threading
+
+        from yeaboi.mcp.runtime import run_readonly
+
+        started = threading.Event()
+        release = threading.Event()
+        order: list[str] = []
+
+        def slow_engine():
+            started.set()
+            release.wait(timeout=5)
+            order.append("slow-done")
+            return {}
+
+        def fast_engine():
+            order.append("fast-done")
+            return {}
+
+        async def main():
+            ctx = make_ctx()
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(functools.partial(run_engine, ctx, slow_engine, needs_llm=False))
+                await anyio.to_thread.run_sync(started.wait)  # slow engine holds the lock
+                readonly = await run_readonly(lambda: "read ok")
+                assert readonly["data"] == "read ok"  # read-only path ignores the engine lock
+                tg.start_soon(functools.partial(run_engine, ctx, fast_engine, needs_llm=False))
+                await anyio.sleep(0.2)
+                assert order == []  # second engine call is queued behind the lock
+                release.set()
+
+        anyio.run(main)
+        assert order == ["slow-done", "fast-done"]
+
+
+class TestBridgedProgress:
+    def test_append_fires_report_progress_from_foreign_thread(self):
+        import asyncio
+
+        from yeaboi.mcp.tools_team import _BridgedProgress
+
+        calls: list[tuple] = []
+
+        class Ctx:
+            async def report_progress(self, progress, total=None, message=None):
+                calls.append((progress, total, message))
+
+        async def main():
+            progress = _BridgedProgress(asyncio.get_running_loop(), Ctx())
+            # The analysis workers append from their own (non-anyio) threads.
+            await asyncio.to_thread(progress.append, "Fetching sprint history")
+            await asyncio.sleep(0.05)  # let the scheduled notification run
+            assert list(progress) == ["Fetching sprint history"]
+
+        asyncio.run(main())
+        assert calls == [(1.0, None, "Fetching sprint history")]

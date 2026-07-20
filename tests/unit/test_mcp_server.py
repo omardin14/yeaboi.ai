@@ -409,6 +409,61 @@ class TestEngineTools:
         assert payload["data"]["accuracy_pct"] == 82
 
 
+class TestInputValidation:
+    """Friendly fail-fast errors instead of deep engine failures (audit hardening)."""
+
+    def test_report_delivery_rejects_bad_window_date(self, tmp_db, provider_mode):
+        payload = call_tool("report_delivery", {"period": "quarter", "window_start": "July 1st"})
+        assert payload["ok"] is False
+        assert "YYYY-MM-DD" in payload["error"]["message"]
+
+    def test_report_delivery_rejects_inverted_window(self, tmp_db, provider_mode):
+        payload = call_tool(
+            "report_delivery", {"period": "quarter", "window_start": "2026-06-30", "window_end": "2026-04-01"}
+        )
+        assert payload["ok"] is False
+        assert "before window_start" in payload["error"]["message"]
+
+    def test_team_analyze_rejects_bad_source(self, tmp_db, provider_mode):
+        payload = call_tool("team_analyze", {"source": "linear"})
+        assert payload["ok"] is False
+        assert "jira" in payload["error"]["message"]
+
+    def test_perf_prep_rejects_unknown_engineer(self, tmp_db, provider_mode, monkeypatch):
+        from types import SimpleNamespace
+
+        monkeypatch.setattr("yeaboi.performance.roster.fetch_roster", lambda **kw: [SimpleNamespace(name="Sam Chen")])
+        payload = call_tool("perf_one_on_one_prep", {"engineer": "Zed"})
+        assert payload["ok"] is False
+        assert "Sam Chen" in payload["error"]["message"]
+        assert "perf_roster" in payload["error"]["message"]
+
+    def test_perf_prep_roster_unavailable_proceeds(self, tmp_db, provider_mode, monkeypatch):
+        from yeaboi.agent.state import OneOnOnePrep
+
+        def broken_roster(**kw):
+            raise RuntimeError("tracker down")
+
+        monkeypatch.setattr("yeaboi.performance.roster.fetch_roster", broken_roster)
+        monkeypatch.setattr(
+            "yeaboi.performance.engine.run_one_on_one_prep", lambda engineer, **kw: OneOnOnePrep(engineer=engineer)
+        )
+        payload = call_tool("perf_one_on_one_prep", {"engineer": "Zed"})
+        assert payload["ok"] is True  # best-effort: an unreachable tracker must not block the workflow
+
+    def test_perf_prep_matches_engineer_case_insensitively(self, tmp_db, provider_mode, monkeypatch):
+        from types import SimpleNamespace
+
+        from yeaboi.agent.state import OneOnOnePrep
+
+        monkeypatch.setattr("yeaboi.performance.roster.fetch_roster", lambda **kw: [SimpleNamespace(name="Sam Chen")])
+        monkeypatch.setattr(
+            "yeaboi.performance.engine.run_one_on_one_prep", lambda engineer, **kw: OneOnOnePrep(engineer=engineer)
+        )
+        payload = call_tool("perf_one_on_one_prep", {"engineer": "sam chen"})
+        assert payload["ok"] is True
+
+
 class TestPlanPublish:
     def test_publish_success(self, seeded_session, monkeypatch):
         from yeaboi.export_targets import PublishResult

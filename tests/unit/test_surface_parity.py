@@ -191,7 +191,7 @@ HIDDEN_PARAMS: dict[str, dict[str, str]] = {
         "max_steps": "internal runaway-loop guard, not a user knob",
     },
     "team_analyze": {
-        "progress": "a live shared list the TUI frame loop reads — MCP has no incremental channel for it",
+        "progress": "injected adapter — the tool bridges it to ctx.report_progress notifications",
         "team_name": "AzDO team label; MCP auto-resolves it from the configured AZURE_DEVOPS_TEAM",
     },
 }
@@ -237,12 +237,12 @@ CLI_RENAMES: dict[str, dict[str, str]] = {
 
 # CLI dests with no engine counterpart — output/dispatch concerns.
 CLI_ONLY_DESTS: dict[str, set[str]] = {
-    "report": {"format"},
-    "standup": {"format", "schedule"},  # --schedule drives standup/scheduler.py, not run_standup
-    "perf prep": set(),
-    "perf complete": set(),
-    "perf review": set(),
-    "analyze": {"format"},
+    "report": {"format", "strict"},
+    "standup": {"format", "strict", "schedule"},  # --schedule drives standup/scheduler.py, not run_standup
+    "perf prep": {"strict"},
+    "perf complete": {"strict"},
+    "perf review": {"strict"},
+    "analyze": {"format", "strict"},
 }
 
 # Engine params deliberately without a CLI flag. Reasoned; staleness-checked.

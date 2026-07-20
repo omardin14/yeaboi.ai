@@ -374,10 +374,87 @@ class TestDispatch:
             cli.main(["report"])
         assert exc.value.code == 0
 
-    def test_resolve_cli_session_prefers_explicit(self):
+    def test_resolve_cli_session_validates_explicit(self, monkeypatch, tmp_path):
         from yeaboi.cli import _resolve_cli_session
+        from yeaboi.sessions import SessionStore
+
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+        with SessionStore(db) as store:
+            store.create_session("new-1234-2026-01-01")
 
         assert _resolve_cli_session("new-1234-2026-01-01") == "new-1234-2026-01-01"
+        with pytest.raises(ValueError, match="available: new-1234-2026-01-01"):
+            _resolve_cli_session("new-typo-2026-01-01")
+
+    def test_resolve_cli_session_empty_db(self, monkeypatch, tmp_path):
+        from yeaboi.cli import _resolve_cli_session
+
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
+        assert _resolve_cli_session("") is None
+        with pytest.raises(ValueError, match="none saved yet"):
+            _resolve_cli_session("new-nope-2026-01-01")
+
+
+class TestStrictExit:
+    def test_report_warnings_exit_3(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "yeaboi.reporting.engine.run_delivery_report",
+            lambda period, **kw: DeliveryReport(warnings=("no tracker configured",)),
+        )
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        args = build_parser().parse_args(["report", "--strict"])
+        assert _cmd_report(args, _console()) == 3
+        assert "exit 3" in capsys.readouterr().err
+
+    def test_report_empty_result_exit_3(self, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.reporting.engine.run_delivery_report", lambda period, **kw: DeliveryReport(delivered_items=())
+        )
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        args = build_parser().parse_args(["report", "--strict"])
+        assert _cmd_report(args, _console()) == 3
+
+    def test_default_keeps_exit_0_on_warnings(self, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.reporting.engine.run_delivery_report",
+            lambda period, **kw: DeliveryReport(warnings=("no tracker configured",)),
+        )
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        args = build_parser().parse_args(["report"])
+        assert _cmd_report(args, _console()) == 0
+
+    def test_standup_strict(self, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.standup.engine.run_standup",
+            lambda session_id, **kw: StandupReport(team_summary="x", warnings=("Jira 401",)),
+        )
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        args = build_parser().parse_args(["standup", "--strict"])
+        assert _cmd_standup(args, _console()) == 3
+
+    def test_analyze_strict(self, monkeypatch):
+        from yeaboi.team_profile import TeamProfile
+
+        monkeypatch.setattr(
+            "yeaboi.analysis.run_team_analysis",
+            lambda **kw: {
+                "profile": TeamProfile(team_id="jira:P", source="jira", project_key="P"),
+                "insights": {},
+                "warnings": ["insights failed"],
+            },
+        )
+        args = build_parser().parse_args(["analyze", "--strict", "--format", "json"])
+        assert _cmd_analyze(args, _console()) == 3
+
+    def test_perf_review_strict(self, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.performance.engine.run_six_month_review",
+            lambda engineer, **kw: SixMonthReview(engineer=engineer, warnings=("LLM fallback",)),
+        )
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        args = build_parser().parse_args(["perf", "review", "Sam", "--strict"])
+        assert _cmd_perf(args, _console()) == 3
 
 
 def test_namespace_type_sanity():

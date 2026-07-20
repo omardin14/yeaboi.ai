@@ -97,6 +97,7 @@ class SamplingChatModel(BaseChatModel):
 
     session: Any = None  # mcp ServerSession — Any keeps the mcp import lazy
     max_tokens: int = 0  # 0 → resolve from env at first use
+    truncated_calls: int = 0  # responses that hit the max_tokens cap (read by run_engine)
 
     @property
     def _llm_type(self) -> str:
@@ -112,6 +113,15 @@ class SamplingChatModel(BaseChatModel):
             max_tokens=self._resolved_max_tokens(),
             system_prompt=system_prompt,
         )
+        stop_reason = str(getattr(result, "stopReason", "") or "")
+        if stop_reason.replace("_", "").lower() == "maxtokens":
+            # A truncated response usually means broken JSON downstream — the
+            # engine's parse-fallback then fires while llm_mode still says
+            # "sampling". Count it so run_engine can surface a warning.
+            self.truncated_calls += 1
+            logger.warning(
+                "Sampling response truncated at %d tokens (stopReason=%s)", self._resolved_max_tokens(), stop_reason
+            )
         content = getattr(result, "content", None)
         text = getattr(content, "text", "") or ""
         ai_message = AIMessage(content=text, response_metadata={"model": getattr(result, "model", "")})
