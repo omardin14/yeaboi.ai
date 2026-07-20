@@ -9,9 +9,17 @@
 #
 # Because workflow_run loses the PR context, the PR is resolved from the CI
 # run's head SHA, and the old trigger filters are reimplemented there: skip
-# drafts, Dependabot PRs (dependabot-auto.yml owns those), and the
-# auto-version bot's `chore: bump version` pushes (re-reviewing the same diff
-# plus a version line wastes tokens — the original review already posted).
+# drafts and Dependabot PRs (dependabot-auto.yml owns those).
+#
+# We deliberately do NOT skip the auto-version bot's `chore: bump version`
+# commit. auto-version pushes that commit to the PR branch, which fires a fresh
+# CI run; ci.yml's own `cancel-in-progress` concurrency then cancels the
+# in-flight CI run on the pre-bump commit. A cancelled run isn't `success`, so
+# its workflow_run never fires — meaning the bump commit is usually the ONLY CI
+# run that reaches `success` on a feature PR. Skipping it dropped the review
+# entirely. Reviewing it is correct anyway: `gh pr diff` shows the whole PR
+# (feature changes + the one version line), and the per-branch
+# `cancel-in-progress` below guarantees exactly one review, on the final head.
 
 name: Claude Review
 
@@ -28,8 +36,7 @@ jobs:
   review:
     if: |
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      !startsWith(github.event.workflow_run.head_commit.message, 'chore: bump version')
+      github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
