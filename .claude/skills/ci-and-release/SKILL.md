@@ -34,6 +34,10 @@ Workflows in `.github/workflows/`:
 | `smoke.yml` | Weekly cron | Live API smoke tests |
 | `security-scan.yml` | Weekly cron + manual | SAST + dependency CVE audit on `main`; findings get a Claude fix PR (PRs get the same scan via ci.yml's `make security` job) |
 | `claude.yml` | `@claude` mention, or `claude-implement` label on an issue | On-demand Claude Code assistance; the label triggers an implementation run that opens a PR |
+| `flaky-test-hunter.yml` | Weekly cron + manual | Deterministic detector reruns the suite 5× + scans CI history; if flakes found, Claude (Haiku) files/updates `[Flaky] …` issues (label `flaky-test`). Issues, not fix PRs — a human escalates via `claude-implement` |
+| `ci-sentinel.yml` | CI fails on `main` (`workflow_run`) | Claude diagnoses the red main build and opens a `ci-sentinel/…` fix PR (label `ci-sentinel`) or a `ci-red-main` issue; never pushes main. The `head_branch == 'main'` filter + open-PR dedupe prevent self-retrigger |
+| `backlog-groomer.yml` | Weekly cron + manual | Claude (Sonnet) normalizes `type:*`/`area:*` labels, cross-links duplicates, nudges stale issues, and maintains one `Backlog grooming report` issue with `claude-implement` candidates. Never applies `claude-implement` itself |
+| `feedback-remediation.yml` | Nightly cron | Agent-SDK triage of new issues (`automation/feedback_remediation/`): Haiku classify → labels up to 3 actionable bugs `claude-implement` (fix PRs flow through normal CI + review + human merge), tags `feature-candidate`s, weekly digest. Needs an `ANTHROPIC_API_KEY` secret (the SDK does not use the App's OAuth token) |
 
 Merge gating: the `main-branch` ruleset requires the five ci.yml checks (Unit tests, Integration & contract tests, Lint, Format check, Security scan) to pass before **any** PR can merge; auto-merge (enabled repo-wide) fires only when they're green. Golden evaluators stay non-blocking by design.
 
