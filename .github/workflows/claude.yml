@@ -6,7 +6,7 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened, assigned, labeled]
   pull_request_review:
     types: [submitted]
 
@@ -16,7 +16,7 @@ jobs:
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (github.event_name == 'issues' && github.event.action != 'labeled' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -47,3 +47,44 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
           # claude_args: '--allowed-tools Bash(gh pr:*)'
+
+  # Issue-to-PR: adding the `claude-implement` label to an issue kicks off an
+  # implementation run that opens a PR. The PR then flows through ci.yml,
+  # claude-review.yml, and auto-version.yml like any human-authored branch.
+  implement:
+    if: |
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'claude-implement'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Implement issue
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Implement GitHub issue #${{ github.event.issue.number }} in ${{ github.repository }}.
+
+            1. Read the issue with `gh issue view ${{ github.event.issue.number }}` (including comments).
+            2. Create a branch named `feature/issue-${{ github.event.issue.number }}-<short-slug>` off main.
+            3. Implement the change following CLAUDE.md conventions (observability pillars,
+               TUI component standards, frozen-dataclass defaults, tests for every new function).
+            4. Verify: `make test` and `make lint` must both pass before you commit.
+            5. Commit (lowercase imperative message + the Co-Authored-By trailer from CLAUDE.md),
+               push the branch, and open a PR against main whose body summarizes the change,
+               lists what was verified, and closes the issue (`Closes #${{ github.event.issue.number }}`).
+            6. Comment on the issue with a link to the PR.
+
+            If the issue is too ambiguous to implement safely, do NOT guess: comment on the
+            issue with the specific questions that need answering, and stop.

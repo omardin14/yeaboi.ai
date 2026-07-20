@@ -4,7 +4,7 @@ UV := $(or $(shell command -v uv 2>/dev/null),$(HOME)/.local/bin/uv)
 # Override for forks of VS Code (e.g. `CODE=cursor make wt-open NAME=my-feature`).
 CODE ?= code
 
-.PHONY: install dev test test-fast test-v test-all lint format security run run-dry clean env pre-commit graph eval contract record smoke-test snapshot-update budget-report bump-patch bump-minor bump-major build publish help wt-new wt-open wt-list wt-rm wt-rm-all
+.PHONY: install dev test test-fast test-v test-all lint format security run run-dry clean env pre-commit graph eval contract record smoke-test snapshot-update budget-report bump-patch bump-minor bump-major build publish help wt-new wt-open wt-headless wt-list wt-rm wt-rm-all
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -104,6 +104,10 @@ wt-new: ## Create worktree .claude/worktrees/NAME (branch + .env + venv) + open 
 wt-open: ## Open worktree in a NEW VS Code window with claude auto-running (creates it first if needed)
 	$(need-name)
 	CODE="$(CODE)" bash scripts/wt.sh "$(NAME)" open
+
+wt-headless: ## Create worktree WITHOUT VS Code auto-launch (driven by background agents instead)
+	$(need-name)
+	bash scripts/wt.sh "$(NAME)" headless
 
 wt-list: ## List worktrees (branch, clean/dirty, path)
 	@bash scripts/wt-list.sh
