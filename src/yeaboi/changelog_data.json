@@ -2,6 +2,18 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.20.0",
+      "date": "2026-07-20",
+      "summary": "You can now run yeaboi completely for free with no API key by using a local Ollama model instead of a cloud AI provider — planning, standups, retros, performance reviews, reporting, and chat all work fully offline with nothing leaving your machine. The setup wizard walks you through picking a downloaded model (or downloading one right from the app, with live progress) and explains the size/speed/RAM trade-offs of each. Extra work under the hood keeps local models just as reliable as cloud ones, with clear on-screen guidance if the local server isn't running or a model needs to be downloaded first.",
+      "highlights": [
+        {"text": "New free local mode: run yeaboi entirely offline with Ollama, no API key required", "areas": ["settings", "general"]},
+        {"text": "Setup wizard adds an Ollama option with live model discovery and per-model size/speed/RAM guidance", "areas": ["settings"]},
+        {"text": "Download and verify local models directly from the app, with live progress and resumable downloads", "areas": ["settings"]},
+        {"text": "Clearer, more reliable output from local models across planning and all ceremony modes", "areas": ["planning", "standup", "retro", "performance", "reporting"]},
+        {"text": "Usage page shows $0 cost for local runs while still tracking your past cloud spend", "areas": ["usage"]}
+      ]
+    },
+    {
       "version": "2.19.1",
       "date": "2026-07-20",
       "summary": "Fixed a bug where keys you pressed while the terminal UI was busy rendering a frame could be silently dropped instead of registering — now every keypress is reliably picked up, even ones sent while the app is mid-render.",
