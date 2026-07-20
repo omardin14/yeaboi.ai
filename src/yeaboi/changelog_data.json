@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.21.0",
+      "date": "2026-07-20",
+      "summary": "Planning now has a fourth way to start a project: point it at your quarterly roadmap — a Confluence or Notion page, or a local document — and it reads through it to pull out the concrete candidate projects, ranks them by suggested start order, and sizes each as small or large. Pick one and its description is pre-filled into the normal planning flow, so you skip re-typing what's already written down. Saved roadmap analyses show up right alongside your other projects, tagged so you can tell them apart, and can be exported the same way as everything else.",
+      "highlights": [
+        {"text": "New Roadmap intake: analyze a quarterly roadmap document into ranked, sized candidate projects", "areas": ["planning"]},
+        {"text": "Pick a candidate project to pre-fill its description into the normal planning intake", "areas": ["planning"]},
+        {"text": "Saved roadmap analyses appear alongside your projects, tagged and exportable to Files, Notion, or Confluence", "areas": ["planning"]},
+        {"text": "Improved reliability for newer AI models used in planning and every ceremony mode", "areas": ["planning", "standup", "retro", "performance", "reporting"]}
+      ]
+    },
+    {
       "version": "2.20.0",
       "date": "2026-07-20",
       "summary": "You can now run yeaboi completely for free with no API key by using a local Ollama model instead of a cloud AI provider — planning, standups, retros, performance reviews, reporting, and chat all work fully offline with nothing leaving your machine. The setup wizard walks you through picking a downloaded model (or downloading one right from the app, with live progress) and explains the size/speed/RAM trade-offs of each. Extra work under the hood keeps local models just as reliable as cloud ones, with clear on-screen guidance if the local server isn't running or a model needs to be downloaded first.",
