@@ -21,14 +21,22 @@ from yeaboi.mcp.runtime import LLM_HINT, envelope, error_envelope, to_jsonable  
 from yeaboi.mcp.server import create_app  # noqa: E402
 
 EXPECTED_TOOLS = {
+    "plan_generate",
     "intake_questions",
     "plan_get",
     "plan_export",
     "sessions_list",
     "session_get",
+    "standup_run",
     "standup_history",
+    "report_delivery",
+    "perf_roster",
+    "perf_one_on_one_prep",
+    "perf_one_on_one_complete",
+    "perf_six_month_review",
     "retro_history",
     "team_profile_get",
+    "team_compare_plan_to_actuals",
 }
 
 
@@ -192,6 +200,136 @@ class TestHistoryTools:
         payload = call_tool("team_profile_get")
         assert payload["ok"] is True
         assert payload["data"]["profiles"] == []
+
+
+@pytest.fixture
+def provider_mode(monkeypatch):
+    """Pin the LLM mode to 'provider' so engine-tool tests are deterministic."""
+    monkeypatch.setenv("YEABOI_MCP_LLM", "provider")
+    monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, "ok"))
+
+
+class TestEngineTools:
+    """The LLM-backed tools with their engines monkeypatched (no real LLM/tracker calls)."""
+
+    def test_plan_generate(self, seeded_session, provider_mode, monkeypatch):
+        from yeaboi.sessions import SessionStore
+
+        def fake_pipeline(questionnaire, *, on_progress=None, **kwargs):
+            assert questionnaire.answers[1] == "A todo app"
+            assert questionnaire.answers[6] == "4"
+            assert questionnaire.answers[11] == "Python"  # explicit answer won
+            if on_progress:
+                on_progress("project_analyzer", 0)
+            from yeaboi.paths import get_db_path
+
+            with SessionStore(get_db_path()) as store:
+                state = store.load_state("new-abcd1234-2026-07-20")
+            state["_session_id"] = "new-abcd1234-2026-07-20"
+            return state
+
+        monkeypatch.setattr("yeaboi.agent.headless.run_planning_pipeline", fake_pipeline)
+        payload = call_tool(
+            "plan_generate",
+            {"description": "A todo app", "team_size": 4, "answers": {"11": "Python"}},
+        )
+        assert payload["ok"] is True
+        assert payload["llm_mode"] == "provider"
+        assert payload["data"]["session_id"] == "new-abcd1234-2026-07-20"
+        assert payload["data"]["stories"]
+
+    def test_plan_generate_requires_description(self, tmp_db, provider_mode):
+        payload = call_tool("plan_generate", {"description": "   "})
+        assert payload["ok"] is False
+        assert "description is required" in payload["error"]["message"]
+
+    def test_plan_generate_rejects_bad_answer_keys(self, tmp_db, provider_mode):
+        payload = call_tool("plan_generate", {"description": "An app", "answers": {"55": "x"}})
+        assert payload["ok"] is False
+        assert "question numbers 1-30" in payload["error"]["message"]
+
+    def test_standup_run_defaults_no_delivery(self, seeded_session, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_run_standup(session_id, *, deliver, days=None, **kwargs):
+            captured.update(session_id=session_id, deliver=deliver, days=days)
+            return {"team_summary": "all good", "warnings": ["Jira skipped"]}
+
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", fake_run_standup)
+        payload = call_tool("standup_run")
+        assert payload["ok"] is True
+        assert captured == {"session_id": seeded_session, "deliver": False, "days": None}
+        assert payload["warnings"] == ["Jira skipped"]
+
+    def test_report_delivery_validates_period(self, tmp_db, provider_mode):
+        payload = call_tool("report_delivery", {"period": "fortnight"})
+        assert payload["ok"] is False
+        assert "period must be one of" in payload["error"]["message"]
+
+    def test_report_delivery(self, tmp_db, provider_mode, monkeypatch):
+        def fake_report(period, **kwargs):
+            assert period == "last_sprint"
+            return {"executive_summary": "shipped", "warnings": []}
+
+        monkeypatch.setattr("yeaboi.reporting.engine.run_delivery_report", fake_report)
+        payload = call_tool("report_delivery", {"period": "last_sprint"})
+        assert payload["ok"] is True
+        assert payload["data"]["executive_summary"] == "shipped"
+
+    def test_perf_roster(self, tmp_db, monkeypatch):
+        monkeypatch.setattr("yeaboi.performance.roster.fetch_roster", lambda **kw: [{"name": "Sam"}])
+        payload = call_tool("perf_roster")
+        assert payload["ok"] is True
+        assert payload["data"]["engineers"] == [{"name": "Sam"}]
+
+    def test_perf_one_on_one_prep(self, tmp_db, provider_mode, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.performance.engine.run_one_on_one_prep",
+            lambda engineer, **kw: {"engineer": engineer, "talking_points": ["velocity"], "warnings": []},
+        )
+        payload = call_tool("perf_one_on_one_prep", {"engineer": "Sam"})
+        assert payload["ok"] is True
+        assert payload["data"]["engineer"] == "Sam"
+
+    def test_perf_one_on_one_complete_requires_transcript(self, tmp_db, provider_mode):
+        payload = call_tool("perf_one_on_one_complete", {"engineer": "Sam", "transcript": " "})
+        assert payload["ok"] is False
+        assert "transcript is required" in payload["error"]["message"]
+
+    def test_perf_one_on_one_complete_defaults_no_delivery(self, tmp_db, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_complete(engineer, transcript, *, deliver, recipients=None, **kwargs):
+            captured.update(engineer=engineer, deliver=deliver)
+            return {"summary": "done", "warnings": []}
+
+        monkeypatch.setattr("yeaboi.performance.engine.complete_one_on_one", fake_complete)
+        payload = call_tool("perf_one_on_one_complete", {"engineer": "Sam", "transcript": "we talked"})
+        assert payload["ok"] is True
+        assert captured == {"engineer": "Sam", "deliver": False}
+
+    def test_perf_six_month_review(self, tmp_db, provider_mode, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.performance.engine.run_six_month_review",
+            lambda engineer, *, period_months, **kw: {"engineer": engineer, "months": period_months, "warnings": []},
+        )
+        payload = call_tool("perf_six_month_review", {"engineer": "Sam", "period_months": 12})
+        assert payload["ok"] is True
+        assert payload["data"]["months"] == 12
+
+    def test_team_compare_plan_to_actuals(self, tmp_db, monkeypatch):
+        from types import SimpleNamespace
+
+        from yeaboi.tools import team_learning
+
+        monkeypatch.setattr(
+            team_learning,
+            "compare_plan_to_actuals",
+            SimpleNamespace(invoke=lambda args: '{"accuracy_pct": 82}'),
+        )
+        payload = call_tool("team_compare_plan_to_actuals")
+        assert payload["ok"] is True
+        assert payload["data"]["accuracy_pct"] == 82
 
 
 class TestServerEntry:

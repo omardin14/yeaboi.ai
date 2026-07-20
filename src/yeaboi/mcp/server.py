@@ -51,7 +51,9 @@ def create_app():
     from mcp.server.fastmcp import FastMCP
 
     from yeaboi.mcp import (
+        tools_performance,
         tools_planning,
+        tools_reporting,
         tools_retro,
         tools_sessions,
         tools_standup,
@@ -59,7 +61,16 @@ def create_app():
     )
 
     app = FastMCP("yeaboi", instructions=_INSTRUCTIONS)
-    for module in (tools_planning, tools_sessions, tools_standup, tools_retro, tools_team):
+    modules = (
+        tools_planning,
+        tools_sessions,
+        tools_standup,
+        tools_reporting,
+        tools_performance,
+        tools_retro,
+        tools_team,
+    )
+    for module in modules:
         module.register(app)
     return app
 
