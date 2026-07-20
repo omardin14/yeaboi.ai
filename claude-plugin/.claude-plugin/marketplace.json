@@ -1,0 +1,13 @@
+{
+  "name": "yeaboi",
+  "owner": {
+    "name": "Omar Din"
+  },
+  "plugins": [
+    {
+      "name": "yeaboi",
+      "source": "./yeaboi",
+      "description": "AI Scrum Master — sprint planning, daily standups, delivery reports, and 1:1 prep as MCP tools + guided skills."
+    }
+  ]
+}
