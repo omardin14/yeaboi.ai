@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.19.0",
+      "date": "2026-07-20",
+      "summary": "You can now send bug reports and feature requests straight from the app instead of leaving to file a GitHub issue. Press f from the mode select screen to open a quick feedback form, pick a type and area, write a title and description (with voice dictation and screenshot paste support), and optionally let AI polish your wording before you submit. Your feedback is filed as a GitHub issue automatically, or opens a pre-filled page in your browser if that's not set up.",
+      "highlights": [
+        {"text": "New Feedback page (press f) for filing bug reports and feature requests without leaving the app", "areas": ["general"]},
+        {"text": "Feedback form supports voice dictation and screenshot paste, same as other text fields", "areas": ["general"]},
+        {"text": "Optional AI Polish rewrites your draft with repro steps or user-story framing before you submit", "areas": ["general"]},
+        {"text": "Submissions file a GitHub issue automatically, or open a pre-filled issue page in your browser", "areas": ["general"]}
+      ]
+    },
+    {
       "version": "2.18.0",
       "date": "2026-07-19",
       "summary": "Analysis mode now gives you actionable coaching on how to improve your team before it moves on to suggesting sample tickets. After you see your results, a new Team Insights page shows four categories - things to start doing, stop doing, keep doing, and things worth trying - covering team setup, ways of working, estimation, process, and work mix. Every suggestion comes with practical advice and points to the specific stat from your analysis that triggered it, and you can export the page just like any other report.",
