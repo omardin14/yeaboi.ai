@@ -54,7 +54,12 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
     fd = (stdin or sys.stdin).fileno()
     old_settings = termios.tcgetattr(fd)
     try:
-        tty.setcbreak(fd)
+        # TCSANOW, not setcbreak's default TCSAFLUSH: TCSAFLUSH discards any
+        # input queued between read_key calls, silently dropping keypresses
+        # that arrive while a frame is rendering (worst under slow terminals,
+        # where rendering dominates the frame budget). Session-start flushing
+        # is enter_raw_mode's job; per-call reads must preserve type-ahead.
+        tty.setcbreak(fd, termios.TCSANOW)
         # Disable two terminal features so their control chars reach the app
         # instead of being consumed by the line discipline (restored below):
         #   - IXON  — XON/XOFF flow control, so Ctrl+S (\x13) doesn't freeze us.

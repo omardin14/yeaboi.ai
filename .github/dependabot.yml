@@ -11,6 +11,10 @@ updates:
     labels:
       - "dependencies"
       - "security"
+      # auto-version.yml honours semver:* labels — a pip bump gets a patch
+      # version bump on the PR branch, so merging publishes a release that
+      # actually ships the (potentially security-relevant) dependency update.
+      - "semver:patch"
     commit-message:
       prefix: "chore(deps)"
     groups:
@@ -18,6 +22,11 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      # CVE-driven security updates arrive as one grouped PR too.
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -28,3 +37,8 @@ updates:
       - "ci"
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      # All action bumps in one weekly PR instead of one PR per action.
+      actions-all:
+        patterns:
+          - "*"

@@ -2,6 +2,14 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.19.1",
+      "date": "2026-07-20",
+      "summary": "Fixed a bug where keys you pressed while the terminal UI was busy rendering a frame could be silently dropped instead of registering — now every keypress is reliably picked up, even ones sent while the app is mid-render.",
+      "highlights": [
+        {"text": "Fixed dropped keypresses in the terminal UI when input arrived while a frame was rendering", "areas": ["general"]}
+      ]
+    },
+    {
       "version": "2.19.0",
       "date": "2026-07-20",
       "summary": "You can now send bug reports and feature requests straight from the app instead of leaving to file a GitHub issue. Press f from the mode select screen to open a quick feedback form, pick a type and area, write a title and description (with voice dictation and screenshot paste support), and optionally let AI polish your wording before you submit. Your feedback is filed as a GitHub issue automatically, or opens a pre-filled page in your browser if that's not set up.",

@@ -58,7 +58,7 @@ Slash commands (in `.claude/commands/`): `/wt` (worktree ops from inside a sessi
 
 - **Every turn (automatic)**: a Stop hook runs `make lint` + `make test-fast` whenever a turn ends with dirty `.py` files, and a PostToolUse hook ruff-formats every edited `.py` file. Hook scripts live in `scripts/claude-hooks/`; wiring is in `.claude/settings.json`.
 - **At ship time (`/ship`)**: an independent fresh-context agent reviews the diff against the task (spec-fit + CLAUDE.md conventions), then the full `make test` + `make lint` gate runs before commit/push/PR.
-- **In CI**: `claude-review.yml` posts an async code + security review on every PR (non-blocking; `ci.yml` remains the merge gate).
+- **In CI**: `claude-review.yml` posts an async code + security review once the full CI suite has passed on a PR (non-blocking; `ci.yml` remains the merge gate).
 
 ### Orchestration conventions
 
@@ -431,6 +431,7 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 - Use `monkeypatch` to avoid filesystem writes, network calls, and delays in tests
 - Test both happy path and edge cases (empty input, boundary values, immutability)
 - Node tests live in `tests/unit/nodes/` — split into ~9 files by node (analyzer, route, tasks, etc.)
+- `tests/integration/test_tui_smoke.py` boots the real TUI (`yeaboi --dry-run`) in a pseudo-terminal and quits it — the only test exercising the live raw-mode/alt-screen path. It guards dependency bumps (e.g. `rich`) that unit tests with StringIO consoles can't catch
 - Shared node test helpers in `tests/_node_helpers.py`: `make_completed_questionnaire()`, `make_dummy_analysis()`, `make_sample_features()`, `make_sample_stories()`, `make_sample_sprints()`
 - **Never modify `tests/integration/test_repl.py`** — it monkeypatches 10+ names in `yeaboi.repl` and is the only test file with this level of coupling. Future tests should avoid this pattern.
 - Pytest markers: `slow` (graph compilation), `eval` (golden evaluators), `vcr` (contract tests), `smoke` (live API)
@@ -513,9 +514,15 @@ Workflows in `.github/workflows/`:
 | `ci.yml` | Every push | Lint + test |
 | `auto-version.yml` | PR | Claude classifies the diff and commits a `chore: bump version…` to the PR branch (skips docs/chore-only PRs; `semver:*` / `release:skip` labels override) |
 | `publish.yml` | Push to `main` | if `pyproject.toml` version has no tag yet: test → build → PyPI publish (OIDC) → tag + GitHub Release (else no-op) |
+| `claude-review.yml` | CI workflow succeeds on a PR (`workflow_run`) | Async Claude code + security review comment; only fires when all CI checks passed (no tokens burned on red PRs); advisory only, never blocks merge (skips drafts, bots, and Dependabot PRs) |
+| `dependabot-auto.yml` | Dependabot PR | Claude verifies each bump (release notes vs our actual usage), posts a `SAFE-TO-MERGE` / `NEEDS-HUMAN` verdict comment, and enables auto-merge for safe ones. Pip **majors** and minor+ bumps of TUI/agent-critical packages (`rich`, `sqlite-vec`, `langgraph`, `langchain*`, `anthropic`) always get the `needs-human` label instead. Auto-merge waits on the required checks, so nothing red can land |
 | `smoke.yml` | Weekly cron | Live API smoke tests |
-| `security-scan.yml` | Weekly cron + manual | SAST + dependency CVE audit (PRs get the same scan via ci.yml's `make security` job) |
-| `claude.yml` | `@claude` mention in an issue/PR comment | On-demand Claude Code assistance (the auto-run per-PR review workflow was removed — it was too slow) |
+| `security-scan.yml` | Weekly cron + manual | SAST + dependency CVE audit on `main`; findings get a Claude fix PR (PRs get the same scan via ci.yml's `make security` job) |
+| `claude.yml` | `@claude` mention, or `claude-implement` label on an issue | On-demand Claude Code assistance; the label triggers an implementation run that opens a PR |
+
+Merge gating: the `main-branch` ruleset requires the five ci.yml checks (Unit tests, Integration & contract tests, Lint, Format check, Security scan) to pass before **any** PR can merge; auto-merge (enabled repo-wide) fires only when they're green. Golden evaluators stay non-blocking by design.
+
+Dependabot notes: updates arrive **grouped** (one weekly PR per ecosystem; security updates grouped too — see `.github/dependabot.yml`). Dependabot-triggered workflow runs read the separate **Dependabot secrets store**, so `CLAUDE_CODE_OAUTH_TOKEN` must be mirrored there (`gh secret set CLAUDE_CODE_OAUTH_TOKEN --app dependabot`) for `dependabot-auto.yml` and the on-PR-branch version bump to work. Pip Dependabot PRs carry the `semver:patch` label so merging one publishes a patch release — a merged dependency/CVE fix reaches PyPI users instead of sitting unreleased. Two mechanics to know: (1) Dependabot only *applies* labels that already exist in the repo — `dependencies`/`security`/`ci`/`semver:patch` are created; if a label is ever deleted, Dependabot silently skips it. (2) A merge performed by the default `GITHUB_TOKEN` does not trigger `publish.yml` (same recursion suppression as the version bump), so `dependabot-auto.yml` prefers an optional `AUTO_MERGE_TOKEN` PAT (contents+PR write, mirrored to both secret stores); without it auto-merged releases simply defer to the next human push to `main`.
 
 There is no Homebrew tap auto-update: the `omardin14/homebrew-tap` formula is disabled (see Version Management) and `publish.yml` no longer dispatches to it.
 
