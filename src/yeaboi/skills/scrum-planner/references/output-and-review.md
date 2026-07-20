@@ -17,7 +17,7 @@ Reference for the scrum-planner skill — read this when yeaboi output is ready 
 > ✏️ *Edit* — tell me what to change
 > 🔄 *Regenerate* — re-run with more context
 
-If user edits: apply changes, show updated list, ask again. If substantial edit, re-run CLI.
+If user edits: apply changes, show updated list, ask again. If substantial edit, call `plan_generate` again with the amended `answers`/`project_context`.
 
 ### Phase 2: User Stories
 
@@ -70,9 +70,14 @@ After the canvas is created, post this summary in thread:
 
 ### Jira Push
 
-Check if configured: `grep -q "JIRA_BASE_URL" ~/.scrum-agent/.env 2>/dev/null`
-- Configured → `yeaboi --resume latest --export-only`
+Check if configured: `grep -q "JIRA_BASE_URL" ~/.yeaboi/.env 2>/dev/null`
+- Configured → `uvx yeaboi --resume latest --export-only`
 - Not configured → tell user to run `yeaboi --setup`
+
+### Notion / Confluence
+
+If the user wants the plan in their docs instead, call the `plan_publish` MCP tool
+(`destination: "notion"` or `"confluence"`) — confirm before publishing.
 
 ## Final Plan Output
 
@@ -105,8 +110,8 @@ Post summary in thread after canvas is created: `📋 *Sprint plan ready* — se
 
 Diagnostics commands:
 ```bash
-yeaboi --version 2>/dev/null || echo "unknown"
-grep -E '^(LLM_PROVIDER|LLM_MODEL)=' ~/.scrum-agent/.env 2>/dev/null || echo "defaults"
+uvx yeaboi --version 2>/dev/null || echo "unknown"
+grep -E '^(LLM_PROVIDER|LLM_MODEL)=' ~/.yeaboi/.env 2>/dev/null || echo "defaults"
 ```
 
 **Never include API keys or tokens.**
@@ -119,7 +124,7 @@ Format as Markdown, upload as `.md` file attachment.
 
 ## Error Handling
 
-- **Non-zero exit:** "Check `~/.scrum-agent/.env` has valid credentials and run `yeaboi --setup`"
+- **`ok: false` envelope:** relay `error.message` and the `hint` (usually credentials → `yeaboi --setup`)
+- **`llm_mode: "fallback"`:** the plan is a deterministic skeleton — no LLM was reachable; suggest `yeaboi --setup`
 - **Timeout (>5 min):** "Try simplifying the description or reducing sprint count"
-- **Empty output:** "Add more detail — tech stack, team size, or goals"
-- **Not found:** "Install with `pip install 'yeaboi[bedrock]'` then run `yeaboi --setup`"
+- **yeaboi tools missing:** register the MCP server (`uvx --from 'yeaboi[mcp]' yeaboi-mcp`) in OpenClaw's MCP configuration

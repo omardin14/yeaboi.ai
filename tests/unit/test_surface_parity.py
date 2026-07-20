@@ -119,7 +119,7 @@ CAPABILITIES: dict[str, dict] = {
         },
         "tui_mode": "performance",
         "cli": {"perf"},
-        "skill": Exempt("no plugin skill yet — tracked gap"),
+        "skill": "performance",
     },
     "retro-board": {
         "engines": {("yeaboi.retro.engine", "generate_action_items")},
@@ -140,7 +140,7 @@ CAPABILITIES: dict[str, dict] = {
         "mcp_tools": {"team_analyze"},
         "tui_mode": "team-analysis",
         "cli": {"analyze", "--learn"},
-        "skill": Exempt("no plugin skill yet — tracked gap"),
+        "skill": "team-analysis",
     },
     "usage": {
         "engines": Exempt("TUI utility page — reads the local token_usage table"),

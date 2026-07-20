@@ -5,13 +5,16 @@ Sprint planning, daily standups, stakeholder delivery reports, and engineer
 
 ## What you get
 
-- **MCP server** (started automatically via `uvx`): 16 tools — `plan_generate`,
-  `plan_get`/`plan_export`, `intake_questions`, `sessions_list`/`session_get`,
-  `standup_run`/`standup_history`, `report_delivery`, `perf_roster`,
-  `perf_one_on_one_prep`/`perf_one_on_one_complete`/`perf_six_month_review`,
-  `retro_history`, `team_profile_get`, `team_compare_plan_to_actuals`.
+- **MCP server** (started automatically via `uvx`): 21 tools — `plan_generate`,
+  `plan_get`/`plan_export`/`plan_publish`, `intake_questions`,
+  `sessions_list`/`session_get`, `standup_run`/`standup_history`/
+  `standup_config_get`/`standup_config_set`, `report_delivery`, `perf_roster`,
+  `perf_one_on_one_prep`/`perf_one_on_one_complete`/`perf_six_month_review`/
+  `perf_note_add`, `retro_history`, `team_analyze`, `team_profile_get`,
+  `team_compare_plan_to_actuals`.
 - **Skills**: `/yeaboi:plan-sprint` (guided conversational intake → full sprint
-  plan), `/yeaboi:standup`, `/yeaboi:delivery-report`.
+  plan), `/yeaboi:standup`, `/yeaboi:delivery-report`, `/yeaboi:performance`,
+  `/yeaboi:team-analysis`.
 
 ## Requirements
 
