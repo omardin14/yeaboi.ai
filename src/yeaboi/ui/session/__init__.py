@@ -97,6 +97,7 @@ def run_session(
     dry_run: bool = False,
     _read_key_fn=None,
     analysis_profile_id: str = "",
+    initial_description: str = "",
 ) -> None:
     """Drive the full TUI session inside an existing Live context.
 
@@ -115,13 +116,17 @@ def run_session(
         bell: Ring terminal bell after pipeline steps.
         theme: Colour theme ("dark" or "light").
         _read_key_fn: Override for testing (default: read_key from _input.py).
+        initial_description: Pre-fill for the Phase A description editor (e.g.
+            a project description extracted from the quarterly roadmap). The
+            user can still edit before submitting.
     """
     logger.info(
-        "run_session started: mode=%s resume=%s export_only=%s dry_run=%s",
+        "run_session started: mode=%s resume=%s export_only=%s dry_run=%s preseeded=%s",
         intake_mode,
         bool(resume_graph_state),
         export_only,
         dry_run,
+        bool(initial_description),
     )
     rk = _read_key_fn or read_key
     _supports_timeout = "timeout" in inspect.signature(rk).parameters
@@ -155,6 +160,7 @@ def run_session(
             bell=bell,
             dry_run=dry_run,
             analysis_profile_id=analysis_profile_id,
+            initial_description=initial_description,
         )
     finally:
         logger.info("Session ended: project_id=%s", project_id)
@@ -175,6 +181,7 @@ def _run_session_body(
     bell,
     dry_run,
     analysis_profile_id="",
+    initial_description="",
 ):
     """Session body — extracted so run_session can use try/finally for log cleanup."""
     # Compile graph once for the session (skipped in dry-run — no LLM calls)
@@ -225,7 +232,9 @@ def _run_session_body(
     # Skipped when resuming a project that already has messages.
     # In dry-run mode, the input is pre-filled with an example description.
     if questionnaire is None and resume_graph_state is None:
-        desc_result = _phase_description_input(live, console, _key, dry_run=dry_run, scope_id=project_id)
+        desc_result = _phase_description_input(
+            live, console, _key, dry_run=dry_run, scope_id=project_id, initial_text=initial_description
+        )
         if desc_result is None:
             return  # Esc pressed — go back to mode select
 

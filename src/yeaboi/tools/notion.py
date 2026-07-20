@@ -486,3 +486,65 @@ def notion_recent_pages(root_id: str = "", days: int = 1, since=None) -> list[di
     except Exception as e:
         logger.warning("notion_recent_pages unexpected error: %s", e)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Full-page reader for Roadmap intake
+# ---------------------------------------------------------------------------
+# Plain function (not @tool) the roadmap ingester calls directly. The @tool
+# notion_read_page truncates at 8 000 chars and reads only top-level blocks;
+# a quarterly roadmap needs a larger budget and often lives inside toggles or
+# sections, so this helper takes an explicit max_chars and recurses one level
+# into blocks that have children.
+
+
+def notion_read_page_text(page_id: str, max_chars: int = 30_000) -> dict:
+    """Read a full Notion page (one level deep) as plain text for roadmap ingestion.
+
+    Returns {"title", "text", "truncated", "error"} — never raises; any failure
+    lands in "error" with empty text so the caller can surface it as a warning.
+    """
+    logger.info("notion_read_page_text: page_id=%r max_chars=%d", page_id, max_chars)
+    client = _make_notion_client()
+    if client is None:
+        return {"title": "", "text": "", "truncated": False, "error": _MISSING_CONFIG_MSG}
+    if not page_id.strip():
+        return {"title": "", "text": "", "truncated": False, "error": "Provide a Notion page ID."}
+
+    try:
+        page = client.pages.retrieve(page_id)
+        title = _page_title(page)
+
+        children = client.blocks.children.list(page_id, page_size=100)
+        blocks = children.get("results", []) if isinstance(children, dict) else []
+
+        # Roadmaps commonly nest their real content under toggle/section blocks.
+        # Recurse exactly one level into blocks with children (bounded by
+        # max_chars) — deep trees are cut off rather than walked exhaustively.
+        parts: list[str] = [_blocks_to_text(blocks)]
+        for block in blocks:
+            if not isinstance(block, dict) or not block.get("has_children"):
+                continue
+            if sum(len(p) for p in parts) >= max_chars:
+                break
+            try:
+                sub = client.blocks.children.list(block.get("id", ""), page_size=100)
+                sub_blocks = sub.get("results", []) if isinstance(sub, dict) else []
+                sub_text = _blocks_to_text(sub_blocks)
+                if sub_text:
+                    parts.append(sub_text)
+            except Exception as e:  # one bad child block never sinks the read
+                logger.debug("notion_read_page_text: child fetch failed for %r: %s", block.get("id"), e)
+
+        text = "\n".join(p for p in parts if p).strip()
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars]
+        logger.info("notion_read_page_text: fetched %r (%d chars, truncated=%s)", title, len(text), truncated)
+        return {"title": title, "text": text, "truncated": truncated, "error": ""}
+    except APIResponseError as e:
+        logger.error("notion_read_page_text API error: %s", e)
+        return {"title": "", "text": "", "truncated": False, "error": _notion_error_msg(e)}
+    except Exception as e:
+        logger.error("notion_read_page_text unexpected error: %s", e)
+        return {"title": "", "text": "", "truncated": False, "error": f"Notion read failed: {e}"}

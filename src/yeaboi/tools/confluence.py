@@ -581,3 +581,58 @@ def confluence_recent_pages(space_key: str = "", days: int = 1, since=None) -> l
     except Exception as e:
         logger.warning("confluence_recent_pages unexpected error: %s", e)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Full-page reader for Roadmap intake
+# ---------------------------------------------------------------------------
+# Plain function (not @tool) the roadmap ingester calls directly. The @tool
+# confluence_read_page truncates at 8 000 chars to protect the ReAct loop's
+# context; a quarterly roadmap needs a larger budget, so this helper takes an
+# explicit max_chars and returns structured data instead of display text.
+
+
+def confluence_read_page_text(page_id: str = "", page_title: str = "", max_chars: int = 30_000) -> dict:
+    """Read a full Confluence page as plain text for roadmap ingestion.
+
+    Provide either page_id or page_title (title lookup needs CONFLUENCE_SPACE_KEY).
+    Returns {"title", "text", "truncated", "error"} — never raises; any failure
+    lands in "error" with empty text so the caller can surface it as a warning.
+    """
+    logger.info("confluence_read_page_text: page_id=%r title=%r max_chars=%d", page_id, page_title, max_chars)
+    conf = _make_confluence_client()
+    if conf is None:
+        return {"title": "", "text": "", "truncated": False, "error": _MISSING_CONFIG_MSG}
+    if not page_id and not page_title:
+        return {"title": "", "text": "", "truncated": False, "error": "Provide a Confluence page ID or title."}
+
+    try:
+        if page_id:
+            page = conf.get_page_by_id(page_id, expand="body.storage")
+        else:
+            key = get_confluence_space_key() or ""
+            if not key:
+                return {
+                    "title": "",
+                    "text": "",
+                    "truncated": False,
+                    "error": "Looking up a page by title needs CONFLUENCE_SPACE_KEY set in .env.",
+                }
+            page = conf.get_page_by_title(space=key, title=page_title, expand="body.storage")
+        if not page:
+            ref = page_id or f"'{page_title}'"
+            return {"title": "", "text": "", "truncated": False, "error": f"Confluence page {ref} not found."}
+
+        title = page.get("title", "Untitled")
+        text = _strip_html_tags(page.get("body", {}).get("storage", {}).get("value", ""))
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars]
+        logger.info("confluence_read_page_text: fetched %r (%d chars, truncated=%s)", title, len(text), truncated)
+        return {"title": title, "text": text, "truncated": truncated, "error": ""}
+    except HTTPError as e:
+        logger.error("confluence_read_page_text HTTP error: %s", e)
+        return {"title": "", "text": "", "truncated": False, "error": _confluence_error_msg(e)}
+    except Exception as e:
+        logger.error("confluence_read_page_text unexpected error: %s", e)
+        return {"title": "", "text": "", "truncated": False, "error": f"Confluence read failed: {e}"}

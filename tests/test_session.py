@@ -361,6 +361,40 @@ class TestPhaseDescriptionInput:
         assert desc == "x"
         assert images == []
 
+    def test_initial_text_prefills_editor(self):
+        """A roadmap-seeded description pre-fills the editor and submits as-is."""
+        live = MagicMock()
+        console = _make_console()
+        keys = iter(["enter", "enter"])
+        seeded = "Add SSO across products.\nCovers SAML and OIDC."
+        result = _phase_description_input(live, console, lambda: next(keys), initial_text=seeded)
+        assert result is not None
+        desc, lines, row, col, _ = result
+        assert desc == seeded
+        assert lines == ["Add SSO across products.", "Covers SAML and OIDC."]
+        assert row == 1 and col == len("Covers SAML and OIDC.")
+
+    def test_initial_text_wins_over_dry_run_example(self):
+        """initial_text beats the dry-run example prefill."""
+        live = MagicMock()
+        console = _make_console()
+        keys = iter(["enter", "enter"])
+        result = _phase_description_input(
+            live, console, lambda: next(keys), dry_run=True, initial_text="Seeded project."
+        )
+        desc, _, _, _, _ = result
+        assert desc == "Seeded project."
+        assert "restaurant reservations" not in desc
+
+    def test_initial_text_still_editable(self):
+        """The seeded text is a prefill, not a lock — clear + retype works."""
+        live = MagicMock()
+        console = _make_console()
+        keys = iter(["clear", "H", "i", "enter", "enter"])
+        result = _phase_description_input(live, console, lambda: next(keys), initial_text="Seeded.")
+        desc, _, _, _, _ = result
+        assert desc == "Hi"
+
 
 # ---------------------------------------------------------------------------
 # Question Input Loop

@@ -64,10 +64,10 @@ class TestStore:
 
 
 class TestSchemaMigration:
-    def test_current_version_is_9(self):
+    def test_current_version_covers_reporting(self):
         from yeaboi.sessions import CURRENT_SCHEMA_VERSION
 
-        assert CURRENT_SCHEMA_VERSION == 9
+        assert CURRENT_SCHEMA_VERSION >= 9
 
     def test_session_store_creates_reporting_table(self, db_path):
         import sqlite3

@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See README: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 9  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting  # noqa: E501
+CURRENT_SCHEMA_VERSION = 11  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -530,6 +530,51 @@ class SessionStore:
 
             self._conn.executescript(_REPORTING_SCHEMA)
             logger.info("Migration v9: created reporting tables")
+
+        if from_version < 10:
+            # v10: Roadmap intake — saved roadmap source (singleton) + analysis
+            # history. Schema lives in roadmap/store.py (executescript handles
+            # both CREATEs).
+            from yeaboi.roadmap.store import _ROADMAP_SCHEMA
+
+            self._conn.executescript(_ROADMAP_SCHEMA)
+            logger.info("Migration v10: created roadmap tables")
+
+        if from_version < 11:
+            # v11: Roadmaps become a LIST (open/create/delete like planning
+            # projects) — new multi-row `roadmaps` table, seeded with one row
+            # from the v10 singleton (roadmap_config + newest roadmap_history
+            # analysis) so an already-analyzed roadmap survives the upgrade.
+            from yeaboi.roadmap.store import _ROADMAP_SCHEMA
+
+            self._conn.executescript(_ROADMAP_SCHEMA)  # idempotent; adds `roadmaps`
+            # Seed only when empty — RoadmapStore may have pre-created the table.
+            if self._conn.execute("SELECT COUNT(*) FROM roadmaps").fetchone()[0] == 0:
+                cfg = self._conn.execute(
+                    "SELECT source_type, source_locator, source_label, updated_at FROM roadmap_config WHERE id = 1"
+                ).fetchone()
+                hist = self._conn.execute(
+                    "SELECT source_type, source_locator, project_count, analysis_json, run_at "
+                    "FROM roadmap_history ORDER BY run_at DESC LIMIT 1"
+                ).fetchone()
+                # Source fields come from the config; fall back to the newest
+                # history row when the config was never saved. The analysis
+                # payload always comes from history (config never held one).
+                src = (cfg[0], cfg[1], cfg[2], cfg[3]) if cfg and cfg[0] else None
+                if src is None and hist and hist[0]:
+                    src = (hist[0], hist[1], hist[1], hist[4])  # locator doubles as label
+                if src is not None:
+                    analysis_json = hist[3] if hist else ""
+                    project_count = hist[2] if hist else 0
+                    self._conn.execute(
+                        """INSERT INTO roadmaps
+                           (label, source_type, source_locator, source_label, analysis_json, project_count,
+                            created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (src[2] or src[1], src[0], src[1], src[2], analysis_json, project_count, src[3], src[3]),
+                    )
+                    logger.info("Migration v11: seeded roadmaps row from v10 singleton (type=%s)", src[0])
+            logger.info("Migration v11: created roadmaps table")
 
     # ── Token usage persistence ──────────────────────────────────────────
 

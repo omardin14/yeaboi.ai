@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def _phase_description_input(
-    live: Live, console: Console, _key, *, dry_run: bool = False, scope_id: str = ""
+    live: Live, console: Console, _key, *, dry_run: bool = False, scope_id: str = "", initial_text: str = ""
 ) -> tuple[str, list[str], int, int, list[str]] | None:
     """Multi-line text input for the project description.
 
@@ -47,11 +47,18 @@ def _phase_description_input(
     survive in the text (see ui/shared/_attachments.py) — the caller routes them
     to the analyzer via graph_state["pasted_images"].
 
-    When dry_run=True, pre-fills an example description so the developer
-    can just hit Enter twice to move on quickly.
+    When initial_text is given (e.g. a project description extracted from the
+    quarterly roadmap), the editor is pre-filled with it — the user can still
+    edit before submitting. It wins over the dry-run example. Otherwise, when
+    dry_run=True, pre-fills an example description so the developer can just
+    hit Enter twice to move on quickly.
     """
-    logger.debug("_phase_description_input: dry_run=%s", dry_run)
-    if dry_run:
+    logger.debug("_phase_description_input: dry_run=%s preseeded=%s", dry_run, bool(initial_text))
+    if initial_text:
+        input_lines = initial_text.split("\n")
+        cursor_row = len(input_lines) - 1
+        cursor_col = len(input_lines[-1])
+    elif dry_run:
         _example = (
             "We're building a mobile app for restaurant reservations. "
             "The team is 4 developers, we use React Native and Node.js, "

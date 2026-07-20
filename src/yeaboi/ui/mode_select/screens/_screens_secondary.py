@@ -2681,6 +2681,280 @@ def _build_reporting_screen(
     )
 
 
+def _build_roadmap_screen(
+    roadmap_data: dict,
+    *,
+    scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
+) -> Panel:
+    """Build the Roadmap intake screen using shared TUI components.
+
+    Two views, both rendered here (the run page owns which is active):
+    - "source": choose where the quarterly roadmap lives (Confluence / Notion /
+      local file) with ▲/▼, then Select to enter the page URL / file path.
+    - "results": the analysis — summary, a *selectable* recommended-project list
+      (▸ cursor, [Small]/[Large] badges, rationale), and a ⚠ Notices block —
+      with Plan This / Re-analyze / Change Source / Back buttons.
+
+    Saved roadmaps are listed as amber-tagged cards inside the Planning
+    "Your projects" list (see _build_project_list_screen), not here.
+
+    roadmap_data keys: view ("source"|"results"), sources (list[(key, label,
+    hint)]), selected_idx (int), analysis (RoadmapAnalysis | None),
+    project_cursor (int), actions (list[str]), message (str), busy (bool),
+    source_label (str), analyzed_at (str).
+
+    A Planning sub-page — uses PLANNING_THEME + planning_title (not a new mode
+    theme), with shared buttons, scrollbar, and viewport.
+
+    # See README: "Roadmap Intake" — TUI page
+    """
+    from yeaboi.ui.shared._components import PLANNING_THEME, build_reveal_subtitle
+
+    theme = PLANNING_THEME
+    title = planning_title(shimmer_tick, width=width)
+    view = roadmap_data.get("view", "source")
+    message = roadmap_data.get("message", "")
+    actions = roadmap_data.get("actions") or ["Select", "Back"]
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions, action_sel)
+
+    busy = bool(roadmap_data.get("busy"))
+    if busy:
+        sub_text = "Analyzing your roadmap…"
+    elif view == "results":
+        source_label = roadmap_data.get("source_label", "")
+        analyzed_at = roadmap_data.get("analyzed_at", "")
+        sub_text = " · ".join(x for x in (source_label, f"analyzed {analyzed_at}" if analyzed_at else "") if x)
+        sub_text = sub_text or "Roadmap analysis"
+    else:
+        sub_text = "Where does your quarterly roadmap live?"
+    sub = build_reveal_subtitle(sub_text, sub_reveal, pad=PAD)
+
+    # ── Busy overlay — while the analysis worker runs, show only the spinner so
+    # the source options / buttons underneath don't confuse the user. ─────────────
+    if busy:
+        spinner = Text(PAD + message, style=theme.accent_bright, justify="left") if message else Text("")
+        return Panel(
+            Group(Text(""), title, Text(""), sub, Text(""), Text(""), spinner),
+            border_style="white",
+            box=rich.box.ROUNDED,
+            expand=True,
+            height=height,
+            padding=(1, 2),
+        )
+
+    # ── Source view — pick where the roadmap lives ───────────────────────────────
+    if view == "source":
+        sources = roadmap_data.get("sources", []) or []
+        selected_idx = max(0, min(roadmap_data.get("selected_idx", 0), len(sources) - 1)) if sources else 0
+
+        body: list = []
+        if message:
+            body.append(Text(PAD + message, style=theme.accent_bright, justify="left"))
+            body.append(Text(""))
+        body.append(Text(PAD + "Choose a roadmap source:", style=f"bold {theme.accent}", justify="left"))
+        body.append(Text(""))
+        for idx, (_key, label, hint) in enumerate(sources):
+            is_sel = idx == selected_idx
+            marker = "▸ " if is_sel else "  "
+            row = Text(justify="left")
+            row.append(PAD + marker, style=theme.accent_bright if is_sel else theme.dim)
+            row.append(label, style=theme.value if is_sel else theme.desc)
+            body.append(row)
+            if hint:
+                body.append(Text(PAD + "    " + hint, style=theme.muted, justify="left"))
+            body.append(Text(""))
+
+        content = Group(
+            Text(""),
+            title,
+            Text(""),
+            sub,
+            Text(""),
+            *body,
+            Text(""),
+            btn_top,
+            btn_mid,
+            btn_bot,
+        )
+        return Panel(
+            content,
+            border_style="white",
+            box=rich.box.ROUNDED,
+            expand=True,
+            height=height,
+            padding=(1, 2),
+        )
+
+    # ── Results view — summary + bordered project cards (selected expands) ────
+    # Mirrors the list branch above: _Padding-wrapped rounded cards with peek
+    # stubs and no scrollbar. Unlike the fixed-height project list, the selected
+    # card grows to reveal the full description + rationale, so a variable-height
+    # window (_window_project_cards) replaces _compute_viewport.
+    import textwrap
+
+    from rich.padding import Padding as _Padding
+
+    from yeaboi.ui.mode_select.screens._project_cards import (
+        _PEEK_H,
+        _ROADMAP_UNSEL_H,
+        _build_empty_state_card,
+        _build_peek_above,
+        _build_peek_below,
+        _build_roadmap_notices_card,
+        _build_roadmap_project_card,
+        _window_project_cards,
+    )
+
+    analysis = roadmap_data.get("analysis")
+    cursor = roadmap_data.get("project_cursor", 0)
+    projects = tuple(getattr(analysis, "projects", ()) or ())
+    cursor = max(0, min(cursor, len(projects) - 1)) if projects else 0
+    summary = getattr(analysis, "summary", "") if analysis is not None else ""
+    warnings = tuple(getattr(analysis, "warnings", ()) or ()) if analysis is not None else ()
+
+    box_w = min(72, max(32, width - len(PAD) - 4))
+    inner_w = max(16, box_w - 6)  # border(2) + padding(4)
+    card_pad = (0, 0, 0, len(PAD))
+
+    body: list = []
+    if message:
+        body.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body.append(Text(""))
+    if summary:
+        body.append(Text(PAD + "  " + summary, style=theme.desc, justify="left"))
+        body.append(Text(""))
+
+    if not projects:
+        body.append(
+            _Padding(
+                _build_empty_state_card(
+                    selected=False,
+                    title="No projects extracted",
+                    subtitle="from the roadmap — Re-analyze or Change Source",
+                    box_w=box_w,
+                ),
+                card_pad,
+            )
+        )
+        # The zero-project fallback is exactly where the warnings carry the
+        # failure reason (LLM/auth/ingest errors) — always show them here.
+        if warnings:
+            base = calc_viewport(height, header_h=10, action_h=4) - len(body)
+            if base >= 2 + 2 + len(warnings):  # blank + borders + title + bullets
+                body.append(Text(""))
+                body.append(_Padding(_build_roadmap_notices_card(warnings, box_w=box_w), card_pad))
+            else:
+                plural = "s" if len(warnings) != 1 else ""
+                body.append(
+                    Text(
+                        PAD + f"⚠ {len(warnings)} Notice{plural} — enlarge the window to view",
+                        style=theme.muted,
+                        justify="left",
+                    )
+                )
+    else:
+        # Key hint (like the list view's) then the card viewport.
+        body.append(Text(PAD + "↑/↓ choose a project · Plan This to plan it", style=theme.muted, justify="left"))
+        body.append(Text(""))
+
+        # Budget: the shared viewport line count, minus the fixed lines already
+        # placed above the cards, minus room reserved for the notices block (so
+        # the cards never push the bottom buttons off-panel). Peek-stub space is
+        # accounted for inside _window_project_cards, not reserved here.
+        base = calc_viewport(height, header_h=10, action_h=4) - len(body)
+        notices_full = (1 + 2 + len(warnings)) if warnings else 0  # blank + border + title + bullets
+        notices_mode = "card" if warnings else "none"
+        available_h = base - notices_full
+        if warnings and available_h < _ROADMAP_UNSEL_H:
+            notices_mode = "hint"  # not enough room for the card — one-line hint instead
+            available_h = base - 1
+        available_h = max(_ROADMAP_UNSEL_H, available_h)
+
+        # Wrap the selected project's full description + rationale, capped so its
+        # (taller) card — plus room for peek stubs when there are other cards —
+        # still fits the viewport.
+        sel = projects[cursor]
+        wrapped: list[str] = []
+        for para in (getattr(sel, "description", "") or "").strip().splitlines() or [""]:
+            wrapped.extend(textwrap.wrap(para, inner_w) or [""])
+        rationale = (getattr(sel, "rationale", "") or "").strip()
+        if rationale:
+            wrapped.append("")
+            wrapped.extend(textwrap.wrap("Why now: " + rationale, inner_w))
+        peek_reserve = 2 * _PEEK_H if len(projects) > 1 else 0
+        max_body = max(0, available_h - _ROADMAP_UNSEL_H - 1 - peek_reserve)
+        if len(wrapped) > max_body:
+            wrapped = wrapped[:max_body]
+            if wrapped:
+                wrapped[-1] = (wrapped[-1][: max(0, inner_w - 1)]).rstrip() + "…"
+        body_lines = tuple(x for x in wrapped if x is not None)
+
+        heights = [
+            (_ROADMAP_UNSEL_H + 1 + len(body_lines)) if (idx == cursor and body_lines) else _ROADMAP_UNSEL_H
+            for idx in range(len(projects))
+        ]
+        start, end, peek_above, peek_below = _window_project_cards(heights, cursor, available_h)
+
+        def _pname(i: int) -> str:
+            return getattr(projects[i], "name", "") or "(unnamed)"
+
+        if peek_above:
+            body.append(_Padding(_build_peek_above(title=_pname(start - 1), box_w=box_w), card_pad))
+        for idx in range(start, end):
+            index = getattr(projects[idx], "priority", 0) or (idx + 1)
+            card = _build_roadmap_project_card(
+                projects[idx],
+                index=index,
+                selected=(idx == cursor),
+                box_w=box_w,
+                body_lines=body_lines if idx == cursor else (),
+            )
+            body.append(_Padding(card, card_pad))
+            if idx < end - 1:
+                body.append(Text(""))
+        if peek_below:
+            body.append(_Padding(_build_peek_below(title=_pname(end), box_w=box_w), card_pad))
+
+        # Notices below the cards (a distinct amber card, or a one-line hint).
+        if notices_mode == "card":
+            body.append(Text(""))
+            body.append(_Padding(_build_roadmap_notices_card(warnings, box_w=box_w), card_pad))
+        elif notices_mode == "hint":
+            plural = "s" if len(warnings) != 1 else ""
+            body.append(Text(PAD + f"⚠ {len(warnings)} Notice{plural} — enlarge the window to view", style=theme.warn))
+
+    # No scrollbar geometry to publish — the card viewport uses peek stubs, like
+    # the list view (publish an empty geometry so stale scroll state clears).
+    publish_geometry(scroll_meta, 0, 0)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        *body,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _build_retro_screen(
     retro_data: dict,
     *,

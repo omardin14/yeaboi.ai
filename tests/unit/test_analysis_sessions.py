@@ -39,8 +39,9 @@ class TestSchemaVersion:
     def test_current_version(self):
         # v6 added the Daily Standup tables; v7 added the Retro tables (retro_history);
         # v8 added the Performance tables (1:1s, reviews, notes); v9 added the
-        # Reporting table (reporting_history).
-        assert CURRENT_SCHEMA_VERSION == 9
+        # Reporting table (reporting_history); v10 added the Roadmap tables
+        # (roadmap_config, roadmap_history); v11 added the multi-row roadmaps list.
+        assert CURRENT_SCHEMA_VERSION == 11
 
     def test_new_db_has_session_mode_column(self, store: SessionStore):
         """A freshly created DB should have the session_mode column."""

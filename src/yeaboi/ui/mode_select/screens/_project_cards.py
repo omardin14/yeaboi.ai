@@ -36,6 +36,9 @@ class ProjectSummary:
     sprint_count: int = 0
     jira_summary: str = ""  # e.g. "3/4 epics synced"
     progress: str = ""  # e.g. "3/7 stages complete"
+    kind: str = "project"  # "project" | "roadmap" — roadmap rows open the roadmap results view
+    roadmap_id: int = 0  # RoadmapStore row id when kind == "roadmap"
+    updated_at: str = ""  # ISO UTC timestamp — merged-list sort key
 
 
 @dataclass
@@ -159,6 +162,11 @@ def _build_project_card(
         title_text.append(project.name, style=f"bold {lerp_color(opacity, BLACK_RGB, (255, 255, 255))}")
     else:
         title_text.append(project.name, style=lerp_color(opacity, BLACK_RGB, (140, 140, 140)))
+    if getattr(project, "kind", "project") == "roadmap":
+        # Amber tag marking a saved roadmap row in the merged "Your projects"
+        # list — same amber as the results view's [Large] size badge.
+        title_text.append("  ")
+        title_text.append("[roadmap]", style=lerp_color(opacity, BLACK_RGB, (220, 180, 60)))
 
     if selected:
         meta_style = lerp_color(opacity, BLACK_RGB, (140, 140, 160))
@@ -305,13 +313,14 @@ def _build_new_project_card(
     selected: bool,
     box_w: int = 64,
     opacity: float = 1.0,
+    label_text: str = "+ New Project",
 ) -> Panel:
-    """Build the '+ New Project' button card."""
+    """Build the '+ New Project' button card (label_text re-brands it, e.g. '+ New Roadmap')."""
     label = Text(justify="left")
     if selected:
-        label.append("+ New Project", style=f"bold {lerp_color(opacity, BLACK_RGB, (255, 255, 255))}")
+        label.append(label_text, style=f"bold {lerp_color(opacity, BLACK_RGB, (255, 255, 255))}")
     else:
-        label.append("+ New Project", style=lerp_color(opacity, BLACK_RGB, (100, 100, 100)))
+        label.append(label_text, style=lerp_color(opacity, BLACK_RGB, (100, 100, 100)))
 
     if selected:
         border = lerp_color(opacity, BLACK_RGB, (70, 100, 180))
@@ -445,8 +454,10 @@ def _build_empty_state_card(
     selected: bool,
     box_w: int = 64,
     opacity: float = 1.0,
+    title: str = "No projects yet",
+    subtitle: str = "Press Enter to create your first project",
 ) -> Panel:
-    """Build the empty-state prompt when no projects exist."""
+    """Build the empty-state prompt when no items exist (title/subtitle re-brand it)."""
     if selected:
         title_style = f"bold {lerp_color(opacity, BLACK_RGB, (255, 255, 255))}"
     else:
@@ -454,8 +465,8 @@ def _build_empty_state_card(
     sub_style = lerp_color(opacity, BLACK_RGB, (100, 100, 100))
 
     content = Group(
-        Text("No projects yet", style=title_style, justify="left"),
-        Text("Press Enter to create your first project", style=sub_style, justify="left"),
+        Text(title, style=title_style, justify="left"),
+        Text(subtitle, style=sub_style, justify="left"),
     )
 
     if selected:
@@ -586,3 +597,130 @@ def _build_peek_below(*, box_w: int = 64, opacity: float = 1.0, title: str = "")
     border_line.append("  \u2570" + "\u2500" * inner_w + "\u256f", style=style)
 
     return Group(title_line, border_line)
+
+
+# ---------------------------------------------------------------------------
+# Roadmap results-view cards
+# ---------------------------------------------------------------------------
+#
+# The Roadmap "results" view (ranked candidate projects) uses the same bordered
+# card language as the project list, but the *selected* card expands to reveal
+# the project's full description + rationale inline \u2014 unselected cards stay
+# compact (title + meta). Because heights vary, the fixed-height _compute_viewport
+# above can't be reused; _window_project_cards handles the variable-height window.
+
+_ROADMAP_UNSEL_H = 4  # compact card: border + title + meta + border
+
+
+def _build_roadmap_project_card(
+    project,
+    *,
+    index: int,
+    selected: bool,
+    box_w: int = 64,
+    body_lines: tuple[str, ...] = (),
+    opacity: float = 1.0,
+) -> Panel:
+    """Build one recommended-project card for the roadmap results view.
+
+    Mirrors _build_project_card's styling (rounded Panel, dim\u2192blue border on
+    selection, inline colour-coded token) but the selected card grows to show
+    ``body_lines`` \u2014 the caller-wrapped full description + rationale. Unselected
+    cards render just the title + meta (height _ROADMAP_UNSEL_H).
+
+    index: 1-based display position. body_lines: pre-wrapped body text, only
+    rendered when ``selected`` (the caller caps the count so the card fits the
+    viewport).
+    """
+    from yeaboi.roadmap.render import size_badge
+
+    # Title: "\u25b8 N. Name  [Small]/[Large]" \u2014 badge coloured inline (amber large /
+    # green small), the same inline-token convention as _build_project_card.
+    title_text = Text(justify="left")
+    if selected:
+        title_text.append("\u25b8 ", style=lerp_color(opacity, BLACK_RGB, (140, 170, 255)))
+        title_text.append(f"{index}. {project.name}", style=f"bold {lerp_color(opacity, BLACK_RGB, (255, 255, 255))}")
+    else:
+        title_text.append(f"{index}. {project.name}", style=lerp_color(opacity, BLACK_RGB, (140, 140, 140)))
+    title_text.append("  ")
+    badge_rgb = (220, 180, 60) if getattr(project, "size", "") == "large" else (80, 220, 120)
+    title_text.append(size_badge(project), style=lerp_color(opacity, BLACK_RGB, badge_rgb))
+
+    meta_style = lerp_color(opacity, BLACK_RGB, (140, 140, 160) if selected else (100, 100, 100))
+    meta = " \u00b7 ".join(x for x in (getattr(project, "quarter", ""), ", ".join(getattr(project, "themes", ()))) if x)
+    meta_text = Text(meta, style=meta_style, justify="left")
+
+    parts: list = [title_text, meta_text]
+    height = _ROADMAP_UNSEL_H
+    if selected and body_lines:
+        body_style = lerp_color(opacity, BLACK_RGB, (170, 170, 175))
+        parts.append(Text(""))
+        for line in body_lines:
+            parts.append(Text(line, style=body_style, justify="left"))
+        # border(2) + title + meta + blank + body lines
+        height = _ROADMAP_UNSEL_H + 1 + len(body_lines)
+
+    border = lerp_color(opacity, BLACK_RGB, (70, 100, 180) if selected else (35, 35, 45))
+    return Panel(
+        Group(*parts),
+        border_style=border,
+        box=rich.box.ROUNDED,
+        padding=(0, 2),
+        width=box_w,
+        height=height,
+    )
+
+
+def _build_roadmap_notices_card(warnings: tuple[str, ...], *, box_w: int = 64, opacity: float = 1.0) -> Panel:
+    """Build the \u26a0 Notices card for the roadmap results view (amber-bordered)."""
+    amber = lerp_color(opacity, BLACK_RGB, (220, 180, 60))
+    muted = lerp_color(opacity, BLACK_RGB, (150, 150, 155))
+    lines: list = [Text("\u26a0 Notices", style=f"bold {amber}", justify="left")]
+    for w in warnings:
+        lines.append(Text(f"\u2022 {w}", style=muted, justify="left"))
+    return Panel(
+        Group(*lines),
+        border_style=lerp_color(opacity, BLACK_RGB, (120, 90, 40)),
+        box=rich.box.ROUNDED,
+        padding=(0, 2),
+        width=box_w,
+    )
+
+
+def _window_project_cards(heights: list[int], selected: int, budget: int) -> tuple[int, int, bool, bool]:
+    """Variable-height card window keeping the selected card fully visible.
+
+    Cards have differing heights (the selected one is taller), so the fixed-height
+    _compute_viewport can't be used. If every card + spacing fits ``budget`` it
+    shows all (no peeks). Otherwise it starts from the selected card and greedily
+    extends downward then upward, reserving _PEEK_H for each side that still has a
+    hidden card \u2014 so the window + its peek stubs never exceed ``budget`` (which is
+    why the caller caps the selected card's height to leave room for the stubs).
+
+    Returns (start, end, peek_above, peek_below) \u2014 end exclusive.
+    """
+    n = len(heights)
+    spacing = _CARD_SPACING
+
+    def _span(a: int, b: int) -> int:
+        if b <= a:
+            return 0
+        return sum(heights[a:b]) + (b - a - 1) * spacing
+
+    if _span(0, n) <= budget:
+        return 0, n, False, False
+
+    def _used(a: int, b: int) -> int:
+        return _span(a, b) + (_PEEK_H if a > 0 else 0) + (_PEEK_H if b < n else 0)
+
+    start, end = selected, selected + 1
+    grew = True
+    while grew:
+        grew = False
+        if end < n and _used(start, end + 1) <= budget:
+            end += 1
+            grew = True
+        if start > 0 and _used(start - 1, end) <= budget:
+            start -= 1
+            grew = True
+    return start, end, start > 0, end < n
