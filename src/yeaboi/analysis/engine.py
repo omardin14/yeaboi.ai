@@ -1,0 +1,193 @@
+"""Team-analysis engine — the headless pipeline behind the TUI Analysis mode.
+
+# See README: "Architecture" — engines are UI-free pipelines; the TUI, CLI and
+# MCP server are thin adapters over them (CLAUDE.md "REQUIRED: Surface Parity").
+
+Design choice — standalone pipeline, not a LangGraph node (same rationale as
+``standup/engine.py``): the analysis is a deterministic gather step
+(``_fetch_*_history``) followed by the 4-worker parallel analysis in
+``tools/team_learning.py`` (which already handles its own LLM calls with
+regex fallbacks), so a compiled graph would add checkpointing overhead for
+nothing.
+
+Error contract:
+- Missing tracker / no closed sprints / fetch failures **raise** — with no
+  board there is nothing to analyse, and every caller (TUI worker, CLI, MCP
+  ``run_engine``) has its own error surface for that.
+- LLM failures never raise: the parsers inside ``_run_parallel_analysis`` fall
+  back to regex extraction, and the optional insights/samples steps degrade to
+  a ``warnings`` entry.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_source(source: str) -> str:
+    from yeaboi.tools.team_learning import _detect_source
+
+    resolved = source or _detect_source()
+    if resolved not in ("jira", "azdevops"):
+        raise ValueError(
+            "No tracker configured for analysis — set JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN "
+            "or AZURE_DEVOPS_ORG_URL/AZURE_DEVOPS_TOKEN (source: 'jira' or 'azdevops')."
+        )
+    return resolved
+
+
+def _resolve_project(source: str, project_key: str, team_name: str) -> tuple[str, str]:
+    if project_key:
+        return project_key, team_name
+    try:
+        if source == "jira":
+            from yeaboi.config import get_jira_project_key
+
+            return get_jira_project_key() or "", team_name
+        from yeaboi.config import get_azure_devops_project, get_azure_devops_team
+
+        return get_azure_devops_project() or "", team_name or (get_azure_devops_team() or "")
+    except Exception:
+        return project_key, team_name
+
+
+def _generate_samples(profile, examples: dict, warnings: list[str]) -> dict | None:
+    """Auto-accepted sample tickets in the team's style (the TUI preview flow,
+    minus the interactive accept/edit loop)."""
+    try:
+        from yeaboi.agent.nodes import _format_team_calibration
+        from yeaboi.tools.team_learning import (
+            generate_sample_epic,
+            generate_sample_sprint,
+            generate_sample_stories,
+            generate_sample_tasks,
+        )
+
+        calibration = _format_team_calibration(profile, examples=examples)
+        epic = generate_sample_epic(calibration, examples)
+        stories = generate_sample_stories(calibration, epic, examples)
+        tasks = generate_sample_tasks(calibration, stories, examples)
+        sprint = generate_sample_sprint(calibration, stories, tasks, examples)
+        return {"epic": epic, "stories": stories, "tasks": tasks, "sprint": sprint}
+    except Exception as exc:  # LLM/parse trouble → warning, never a crash
+        logger.warning("Sample-ticket generation failed: %s", exc)
+        warnings.append(f"Sample-ticket generation failed: {exc}")
+        return None
+
+
+def run_team_analysis(
+    source: str = "",
+    project_key: str = "",
+    team_name: str = "",
+    sprint_count: int = 8,
+    generate_samples: bool = False,
+    include_insights: bool = True,
+    *,
+    progress: list | None = None,
+    db_path=None,
+) -> dict:
+    """Analyse the team's board history into a TeamProfile and persist it.
+
+    Pipeline: resolve source/project (auto-detected from config when blank) →
+    fetch ``sprint_count`` closed sprints → ``_run_parallel_analysis`` (velocity,
+    calibration, writing style, DoD — 4 workers, LLM-enriched with deterministic
+    fallbacks) → save via ``TeamProfileStore`` → write the analysis log →
+    optional coaching insights and sample tickets.
+
+    Args:
+        source: 'jira' or 'azdevops'; blank auto-detects from configured creds.
+        project_key: tracker project; blank falls back to the configured one.
+        team_name: AzDO team name attached to the profile (blank = configured).
+        sprint_count: closed sprints to analyse (TUI uses 8).
+        generate_samples: also generate auto-accepted sample tickets
+            (epic/stories/tasks/sprint) in the team's style — extra LLM calls.
+        include_insights: also generate the start/stop/keep/try coaching
+            insights (one extra LLM call).
+        progress: optional shared list the analysis workers append status
+            strings to (the TUI reads it from its frame loop).
+        db_path: sessions DB override (tests). Defaults to paths.get_db_path().
+
+    Returns a dict with: source, project_key, sprint_names, duration_secs,
+    profile (TeamProfile), examples (dict), headline_stats, insights, samples,
+    log_path, warnings. Raises ValueError when no tracker is configured or the
+    board has no closed sprints; tracker API errors propagate.
+    """
+    from yeaboi.paths import get_db_path
+    from yeaboi.team_profile import TeamProfileStore
+    from yeaboi.tools.team_learning import (
+        _fetch_azdevops_history,
+        _fetch_jira_history,
+        _run_parallel_analysis,
+        compute_headline_stats,
+    )
+
+    started = time.monotonic()
+    warnings: list[str] = []
+    resolved_source = _resolve_source(source)
+    resolved_project, resolved_team = _resolve_project(resolved_source, project_key, team_name)
+    logger.info(
+        "Team analysis starting: source=%s project=%s sprints=%d", resolved_source, resolved_project, sprint_count
+    )
+
+    if resolved_source == "jira":
+        sprint_data = _fetch_jira_history(resolved_project, sprint_count)
+    else:
+        sprint_data = _fetch_azdevops_history(resolved_project, sprint_count)
+    if not sprint_data:
+        raise ValueError("No closed sprints found on the board — nothing to analyse.")
+    sprint_names = [sd.get("sprint_name", "") for sd in sprint_data]
+
+    profile, examples = _run_parallel_analysis(
+        resolved_source, resolved_project or "unknown", sprint_data, progress if progress is not None else []
+    )
+    if resolved_team and not profile.team_name:
+        from dataclasses import replace
+
+        profile = replace(profile, team_name=resolved_team)
+
+    with TeamProfileStore(db_path or get_db_path()) as store:
+        store.save(profile, examples=examples)
+
+    duration = time.monotonic() - started
+    log_path = ""
+    try:
+        from yeaboi.team_profile_exporter import write_analysis_log
+
+        log_path = str(
+            write_analysis_log(profile, examples=examples, sprint_names=sprint_names, duration_secs=duration)
+        )
+    except Exception as exc:  # best-effort artifact, same as the TUI
+        logger.warning("Analysis log write failed: %s", exc)
+        warnings.append(f"Analysis log not written: {exc}")
+
+    insights = None
+    if include_insights:
+        from yeaboi.tools.team_learning import _generate_team_insights
+
+        insights = _generate_team_insights(profile, examples)  # never raises — deterministic fallback inside
+
+    samples = _generate_samples(profile, examples or {}, warnings) if generate_samples else None
+
+    logger.info(
+        "Team analysis completed in %.1fs: %d sprints, %d stories, vel=%.1f",
+        duration,
+        profile.sample_sprints,
+        profile.sample_stories,
+        profile.velocity_avg,
+    )
+    return {
+        "source": resolved_source,
+        "project_key": resolved_project,
+        "sprint_names": sprint_names,
+        "duration_secs": round(duration, 1),
+        "profile": profile,
+        "examples": examples,
+        "headline_stats": compute_headline_stats(profile, examples),
+        "insights": insights,
+        "samples": samples,
+        "log_path": log_path,
+        "warnings": warnings,
+    }

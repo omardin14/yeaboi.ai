@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "yeaboi": {
+      "command": "uvx",
+      "args": ["--from", "yeaboi[mcp]", "yeaboi-mcp"]
+    }
+  }
+}

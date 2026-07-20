@@ -123,6 +123,19 @@ Every new feature MUST include all three pillars before it can be considered com
 - **Secret/sensitive data** rendering must be tested for proper masking
 - Tests live in `tests/unit/` — one file per source module or grouped by feature
 
+## REQUIRED: Surface Parity
+
+yeaboi ships on **six surfaces**: the TUI, CLI flags/subcommands, the Python engines, the MCP server, the Claude Code plugin skills, and the OpenClaw skill. Features MUST NOT land TUI-only. This is machine-enforced by `tests/unit/test_surface_parity.py` — a declarative capability registry plus discovery checks over engines, MCP tools, `_MODE_CARDS`, `build_parser()`, and plugin skills.
+
+The contract:
+
+1. **New mode / feature → engine first.** Implement the pipeline as a headless engine (`src/yeaboi/<mode>/engine.py`, parse → fallback → format, frozen-dataclass artifacts). The TUI, CLI, and MCP are thin adapters over it.
+2. **Propagate to every surface** (or record a reasoned exemption): an MCP tool in `src/yeaboi/mcp/tools_*.py`, a CLI flag/subcommand in `cli.py`, a TUI card + handler, and — for user-facing workflows — a plugin skill in `claude-plugin/yeaboi/skills/`.
+3. **Register it.** Add/extend the capability row in `CAPABILITIES` (and `PARAM_PAIRS` for engine-backed MCP tools) in `tests/unit/test_surface_parity.py`. Until you do, `make test` fails with a message naming the exact edit.
+4. **New engine params must reach the MCP tool.** The param-parity check compares the engine signature against the tool schema; expose the new param or add it to `HIDDEN_PARAMS` with a reason. `db_path`/`today`/`on_progress`/`dry_run` are injection seams, always hidden.
+5. **Deliberate absences use `Exempt("reason")`** — e.g. the retro live board is TUI-only by design. Exemptions are visible, reviewed gaps, not silent ones.
+6. **Removals count too.** Every check is two-way set equality: deleting a tool/card/skill without updating the registry also fails.
+
 ## REQUIRED: TUI Component Standards
 
 All TUI screens MUST use the shared component system in `src/yeaboi/ui/shared/_components.py`. Do NOT duplicate rendering logic.
@@ -248,6 +261,14 @@ src/yeaboi/
     render.py           — RoadmapAnalysis → plaintext lines for the TUI results view
     export.py           — RoadmapAnalysis → Markdown + self-contained HTML (paths.get_roadmap_export_dir; reuses html_exporter._CSS; escapes untrusted project text)
     store.py            — RoadmapStore (multi-row roadmaps list + roadmap_history run log, schema v10/v11)
+  analysis/             — Team-analysis engine (headless pipeline behind the TUI Analysis mode)
+    engine.py           — run_team_analysis(): fetch history → _run_parallel_analysis → save profile → log → insights/samples
+  mcp/                  — MCP stdio server (yeaboi-mcp entry point, optional [mcp] extra)
+    server.py           — create_app() + main(): FastMCP app, guarded mcp import, logs to logs/mcp/
+    runtime.py          — {ok, llm_mode, warnings, data} envelope + run_engine()/run_readonly() dispatch
+    sampling.py         — SamplingChatModel (LangChain model over MCP sampling) + sampling→provider→fallback chain
+    tools_*.py          — one module per domain (planning, sessions, standup, reporting, performance, retro, team)
+  agent/headless.py     — run_planning_pipeline(): auto-driven graph loop (no UI), used by plan_generate
   tools/
     __init__.py         — get_tools() factory (lazy imports all tool modules)
     github.py           — GitHub repo/file/issues/readme (4 tools) + recent-activity helpers
@@ -324,6 +345,8 @@ Key flags to know about when modifying the CLI:
 | `--standup-interactive` | With `--standup-run`: timed prompt for the user's update + confirm before generating (TTY-aware; headless fallback) |
 | `--standup-session ID` | Session to run the standup for (default: most recent) |
 | `--standup-output {terminal,desktop,slack,email,all}` | Override the session's saved delivery channels |
+
+**Subcommands** (additive `add_subparsers(dest="command")` — every flat flag keeps working): `yeaboi report`, `yeaboi standup`, `yeaboi perf {roster,prep,complete,review,note}`, `yeaboi analyze`. Thin `_cmd_*` handlers in `cli.py` over the shared engines; `--format json` keeps stdout machine-clean. Dispatched in `main()` before the flag-guard sequence. Tests in `tests/unit/test_cli_subcommands.py` (the flat-flag assertions in `tests/integration/test_cli.py` must stay untouched).
 
 Validation rules in `main()`:
 - `--non-interactive` requires `--description`
@@ -542,14 +565,13 @@ There is no Homebrew tap auto-update: the `omardin14/homebrew-tap` formula is di
 
 ## OpenClaw Skill
 
-The `skills/scrum-planner/` directory contains an OpenClaw skill that replicates the smart intake TUI experience conversationally. OpenClaw acts as the front-end (asks questions, handles follow-ups), then invokes `yeaboi --non-interactive` as the back-end.
+The `src/yeaboi/skills/scrum-planner/` directory contains an OpenClaw skill that replicates the smart intake TUI experience conversationally. OpenClaw acts as the front-end (asks questions, handles follow-ups), then calls the **yeaboi MCP server's tools** as the back-end (the old SCRUM.md temp-file + `--non-interactive` shell-out + JSON-polling pattern was removed).
 
 **How it works:**
 1. OpenClaw asks ~7 essential questions (matching `SMART_ESSENTIALS` from `prompts/intake.py`)
-2. Answers map to: Q1/Q6/Q8 → CLI args, everything else → temp `SCRUM.md` in CWD
-3. Invokes: `yeaboi --non-interactive --description "Q1" --team-size Q6 --sprint-length Q8 --output json`
-4. `_load_user_context()` in `nodes.py` reads the SCRUM.md from CWD, `_keyword_extract_fallback()` does keyword scanning
-5. JSON output is parsed and presented to the user
+2. Answers map to `plan_generate` params: Q1 → `description`, Q6/Q8 → `team_size`/`sprint_length_weeks`, the rest → `answers` {number: answer}, extras → `project_context`
+3. Requires the `yeaboi-mcp` server registered in OpenClaw's MCP config (`uvx --from 'yeaboi[mcp]' yeaboi-mcp`)
+4. The returned envelope is presented phase-by-phase; `plan_export`/`plan_publish` handle output
 
 **Key files:**
 - `skills/scrum-planner/SKILL.md` — agent instructions (persona, conversation flow, SCRUM.md generation, CLI invocation, output formatting)
@@ -655,6 +677,18 @@ The `src/yeaboi/roadmap/` package makes Planning **proactive**: instead of descr
 **TUI — saved roadmaps live in the Planning project list.** There is **no separate roadmap list**: `_load_planning_rows()` in `ui/mode_select/__init__.py` merges planning projects (`persistence.load_projects`) with saved roadmaps (`RoadmapStore.list_roadmaps`) into one `ProjectSummary` list sorted by `updated_at` desc — roadmap rows carry `kind="roadmap"` + `roadmap_id` and render in "Your projects" as amber-`[roadmap]`-tagged cards (`_build_project_card`) whose meta line shows `source · N candidate projects · analyzed <date>` (or `not analyzed yet`); labels are humanized via `store.friendly_label`. The list's standard **Delete** button (confirm popup) branches on `kind` → `delete_roadmap`; the standard **Export** button on a roadmap row runs `_export_roadmap_via_picker` — the shared destination picker (`_export_via_picker`, mode="planning", no Jira/AzDO): **Files** → Markdown + HTML via `roadmap/export.py`, **Notion/Confluence** → `publish_markdown(title="Roadmap — <label>", markdown=build_roadmap_markdown(...))`. Enter on a roadmap card opens `_run_roadmap_page(open_roadmap_id=…)` straight into results (analyzing first if the row was never analyzed).
 
 The page itself (`_build_roadmap_screen` in `_screens_secondary.py` + `_run_roadmap_page`, a Planning sub-page — `PLANNING_THEME` + `planning_title`) now has **two views**: a **source** picker (Confluence / Notion / Local file, with not-configured hints; locator entry reuses `_standup_read_line` re-branded with `PLANNING_THEME`) — this is home when creating a new roadmap from the Phase-4 **Roadmap** intake card; and a **results** view (summary line + ↑/↓-selectable project **cards** with `[Small]`/`[Large]` badges and `quarter · themes` meta; the **selected** card expands to reveal the project's full wrapped description + `Why now:` rationale while the others stay compact — `_build_roadmap_project_card` in `_project_cards.py`, `_window_project_cards` variable-height windowing + `_build_peek_above/below` stubs, no scrollbar; ⚠ Notices render as a distinct `_build_roadmap_notices_card`, degrading to a one-line hint on short terminals) with **Plan This / Re-analyze / Change Source / Back**. Return contract: `(intake_mode, description)` on Plan This, `"done"` on Back once a roadmap row exists (caller returns to the merged project list), `None` when backed out of the source view before saving (caller stays on the intake cards). The analysis runs on a worker thread while the frame loop animates a spinner + stage + elapsed time (`run_roadmap_analysis(on_progress=…)`); a `busy` flag renders a **spinner-only** screen (`_build_roadmap_screen` busy branch) so the source options underneath stay hidden during analysis. The analysis-profile picker is shared via the extracted `_pick_analysis_profile()`. `--dry-run` returns a canned 3-project analysis (no network/LLM). Logs go to `~/.yeaboi/logs/roadmap/`.
+
+## MCP Server
+
+The `src/yeaboi/mcp/` package exposes yeaboi to AI coding agents (Claude Code, Cursor, Codex CLI, VS Code…) as a **stdio MCP server** — entry point `yeaboi-mcp`, optional extra `mcp = ["mcp>=1.9,<2"]` (the `<2` pin is load-bearing; SDK v2 is a breaking pre-release). See README section "MCP Server" for the user-facing docs.
+
+**Design:**
+- **25 tools across 7 `tools_*.py` modules**, registered by `server.create_app()`. Tool bodies lazy-import engines (repo convention); `mcp` itself is imported only inside `create_app()`/`main()` so `import yeaboi.mcp.server` always succeeds without the extra. Exception: `tools_*.py` import `Context` at module level — FastMCP evaluates PEP 563 stringified hints against module globals.
+- **Envelope** (`runtime.py`): every tool returns `{ok, llm_mode, warnings, data}`; exceptions become structured `{ok: false, error, hint}` payloads (auth-looking messages get an actionable hint). A tool call never crashes the server. `run_engine()` is the single dispatch point: worker thread (`anyio.to_thread`) + process-wide `threading.Lock` (engines aren't concurrency-safe).
+- **LLM chain** (`sampling.py`): `resolve_llm_mode()` picks `sampling` (client advertises the capability) → `provider` (`is_llm_configured()`) → `fallback` (deterministic artifacts + warning). Sampling injects `SamplingChatModel` via `llm_override()` in `agent/llm.py` (a ContextVar that short-circuits `get_llm()`; propagates into anyio worker threads). The model's sync `_generate` bridges to the loop with `anyio.from_thread.run(...)` — only ever call it from a `run_engine` worker thread. `YEABOI_MCP_LLM=provider` forces mode 2; `YEABOI_MCP_MAX_TOKENS` caps sampling responses (default 8192).
+- **Planning** runs through `agent/headless.py:run_planning_pipeline()` — a UI-free replica of run_repl's export-only auto-drive (confirm → continue → accept, capacity auto-accepted, `_predict_next_node` == "agent" → done). `repl/_ui.py` re-exports `_predict_next_node` from there.
+- **stdio rule**: stdout carries JSON-RPC — nothing may `print()` to it (there's a capsys test). Logs: `~/.yeaboi/logs/mcp/mcp.log` via `attach_mode_handler("mcp")`.
+- **Claude Code plugin** at `claude-plugin/` (repo doubles as a marketplace): `yeaboi/.claude-plugin/plugin.json` (no `version` field — commit-SHA versioning), `.mcp.json` at the plugin root (NOT inside `.claude-plugin/`), and five skills (`plan-sprint`, `standup`, `delivery-report`, `performance`, `team-analysis`). Validate with `claude plugin validate claude-plugin/yeaboi`. Tests: `tests/unit/test_mcp_server.py`, `test_mcp_sampling.py`, `test_headless_pipeline.py`, `test_claude_plugin.py`; surface coverage is enforced by `tests/unit/test_surface_parity.py` (see "REQUIRED: Surface Parity").
 
 ## Deployment (AWS Lightsail)
 
