@@ -142,6 +142,19 @@ CAPABILITIES: dict[str, dict] = {
         "cli": {"analyze", "--learn"},
         "skill": "team-analysis",
     },
+    "roadmap": {
+        # Landed on main (TUI-only) before both this parity framework and the
+        # MCP surface existed; the non-TUI surfaces are visible tracked gaps,
+        # not silent ones — a follow-up should add a roadmap_analyze tool + CLI.
+        "engines": {
+            ("yeaboi.roadmap.engine", "run_roadmap_analysis"),
+            ("yeaboi.roadmap.engine", "intake_mode_for"),
+        },
+        "mcp_tools": Exempt("no roadmap_analyze tool yet — tracked follow-up gap (newer than the MCP surface)"),
+        "tui_mode": Exempt("a Planning intake card in _INTAKE_CARDS (Small/Large/Offline/Roadmap), not a mode card"),
+        "cli": Exempt("interactive source picker + intake handoff; a headless roadmap path is a tracked gap"),
+        "skill": Exempt("no plugin skill yet — tracked follow-up gap"),
+    },
     "usage": {
         "engines": Exempt("TUI utility page — reads the local token_usage table"),
         "mcp_tools": {"usage_get"},
