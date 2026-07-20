@@ -90,6 +90,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 - [Deploy on AWS Lightsail](#-deploy-on-aws-lightsail-openclaw)
 - [CLI Reference](#%EF%B8%8F-cli-reference)
 - [Intake Modes](#-intake-modes)
+- [Roadmap Intake](#%EF%B8%8F-roadmap-intake)
 - [Pipeline](#-pipeline)
 - [Team Analysis Mode](#-team-analysis-mode)
 - [Analysis-Calibrated Planning](#-analysis-calibrated-planning)
@@ -824,6 +825,30 @@ uv sync --extra pdf
 Files are automatically ingested and fed into the project analyzer for grounded output.
 
 </details>
+
+---
+
+## 🗺️ Roadmap Intake
+
+The **Roadmap** card (the 4th Planning intake card, alongside Small / Large / Offline) makes planning proactive: instead of describing a project yourself, point the agent at wherever your **quarterly roadmap** lives and let it recommend what to plan next.
+
+**Supported sources:**
+
+| Source | What to enter | Requirements |
+|--------|---------------|--------------|
+| Confluence page | Page URL, ID, or title | `CONFLUENCE_*` (or `JIRA_*`) creds; title lookup needs `CONFLUENCE_SPACE_KEY` |
+| Notion page | Page URL or ID | `NOTION_TOKEN` |
+| Local file | Path to `.md` `.txt` `.rst` `.pdf` `.docx` `.pptx` | PDF: `uv sync --extra pdf` · Word/PowerPoint: `uv sync --extra docs` |
+
+**How it works:**
+
+1. The **Roadmap** intake card goes straight to the source picker: choose where the roadmap lives and enter the page URL / file path.
+2. The agent ingests the document (PowerPoint decks include speaker notes; roadmap text is capped at ~24k characters with a notice) and runs **one LLM call** that extracts the concrete candidate projects, ranks them by recommended start order, and classifies each as **[Small]** (1-2 tickets, one quick sprint) or **[Large]** (multi-sprint epic) — with a rationale for both the size and the ordering.
+3. Choose a project and hit **Plan This**: a planning session starts in the suggested Small/Large mode with the description **pre-filled from the roadmap** — edit it or just press Enter to continue into the normal intake.
+
+Saved roadmaps then appear **inside the Planning "Your projects" list** as amber-`[roadmap]`-tagged cards (a started project is a started project — there is no separate roadmap list): **Enter** re-opens the analysis (Re-analyze refreshes it in place), **Delete** removes it with confirmation, and **Export** uses the same destination picker as everything else — **local files** (Markdown + HTML), **Notion**, or **Confluence**.
+
+The roadmap document is treated as untrusted data (instructions inside it are never followed), and every failure — missing credentials, unreadable file, LLM/auth error — becomes a ⚠ notice on the results screen rather than a crash. Saved roadmaps live in the session database (schema v11) in the `roadmaps` table, with every analysis run logged to `roadmap_history`.
 
 ---
 

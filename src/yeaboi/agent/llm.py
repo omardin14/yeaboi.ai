@@ -151,6 +151,23 @@ DEFAULT_MODEL = _PROVIDER_DEFAULTS["anthropic"]
 _OLLAMA_NUM_PREDICT = 8192
 
 
+def _supports_temperature(model: str) -> bool:
+    """Whether a Claude model still accepts the ``temperature`` sampling param.
+
+    Newer Claude models (Opus 4.6+ and the Claude 5 family) reject sampling
+    parameters *by presence*: sending ``temperature`` at all — even a default
+    value — fails with HTTP 400 "temperature is deprecated for this model".
+    For those models the parameter must be omitted entirely so the API uses
+    the model's own default sampling. Matched by substring so plain Anthropic
+    ids ("claude-opus-4-8") and Bedrock ids ("us.anthropic.claude-opus-4-8-v1:0")
+    both work. Older models (Sonnet 4.x, Haiku 4.5, Claude 3.x) keep the
+    explicit value.
+    """
+    import re
+
+    return not re.search(r"opus-4-[6-9]|(fable|sonnet|haiku|opus)-5(?!\d)", model)
+
+
 def get_llm(model: str | None = None, temperature: float = 0.0, json_mode: bool = False) -> BaseChatModel:
     """Create an LLM instance for the configured provider.
 
@@ -193,6 +210,12 @@ def get_llm(model: str | None = None, temperature: float = 0.0, json_mode: bool 
     resolved_model = model or get_llm_model() or _PROVIDER_DEFAULTS.get(provider, "")
     logger.debug("get_llm: provider=%s, model=%s, temperature=%s", provider, resolved_model, temperature)
 
+    # Newer Claude models reject `temperature` by presence (400 "temperature is
+    # deprecated for this model") — omit the kwarg entirely for those.
+    _sampling = {"temperature": temperature} if _supports_temperature(resolved_model) else {}
+    if not _sampling:
+        logger.debug("get_llm: omitting temperature — %s deprecates sampling params", resolved_model)
+
     if provider == "anthropic":
         # langchain-anthropic is a required dependency — always available.
         from langchain_anthropic import ChatAnthropic
@@ -202,7 +225,7 @@ def get_llm(model: str | None = None, temperature: float = 0.0, json_mode: bool 
         llm = ChatAnthropic(
             model=resolved_model,
             api_key=get_anthropic_api_key(),
-            temperature=temperature,
+            **_sampling,
         )
         logger.info("LLM ready: provider=anthropic, model=%s", resolved_model)
         return llm
@@ -272,7 +295,7 @@ def get_llm(model: str | None = None, temperature: float = 0.0, json_mode: bool 
             model=resolved_model,
             region_name=region,
             client=bedrock_client,
-            temperature=temperature,
+            **_sampling,
         )
 
     if provider == "ollama":

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yeaboi"
-version = "2.20.0"
+version = "2.21.0"
 description = "yeaboi.ai — a team lead's best friend. A terminal AI agent that decomposes projects into epics, user stories, tasks, and sprint plans."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -55,6 +55,10 @@ dependencies = [
 openai = ["langchain-openai"]
 google = ["langchain-google-genai"]
 pdf = ["pymupdf"]
+# Word/PowerPoint roadmap ingestion — lazy-imported in roadmap/ingest.py so the
+# Roadmap intake card can read .docx/.pptx quarterly roadmaps. Optional because
+# most users point at Confluence/Notion/markdown instead.
+docs = ["python-docx", "python-pptx"]
 bedrock = ["langchain-aws", "boto3"]
 # Local LLM via an Ollama server — free, private, no API key. See README:
 # "Local Mode (Ollama)".

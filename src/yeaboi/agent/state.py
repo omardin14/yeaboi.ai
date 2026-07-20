@@ -530,6 +530,49 @@ class DeliveryReport:
     generated_at: str = ""
 
 
+@dataclass(frozen=True)
+class RoadmapProject:
+    """One candidate project extracted from the team's quarterly roadmap.
+
+    Produced by roadmap/engine.py:run_roadmap_analysis() — the LLM reads the
+    ingested roadmap document and proposes concrete projects worth planning.
+    ``description`` must be rich enough to pre-seed a planning session's
+    Phase A description input on its own (it is pasted there verbatim when the
+    user picks "Plan This"). ``size`` maps onto the intake cards:
+    "small" → small_project intake, "large" → smart (Large) intake.
+
+    All fields defaulted for backward-compat with serialized history rows.
+    """
+
+    name: str = ""
+    description: str = ""  # self-contained — pre-seeds planning Phase A
+    size: str = "small"  # "small" | "large" → intake_mode small_project | smart
+    rationale: str = ""  # why this size + why start it now
+    priority: int = 0  # 1-based recommended start order (0 = unranked)
+    themes: tuple[str, ...] = ()  # roadmap themes/initiatives it belongs to
+    quarter: str = ""  # e.g. "Q3 2026" when detectable
+
+
+@dataclass(frozen=True)
+class RoadmapAnalysis:
+    """A full roadmap ingestion + analysis run (source descriptor + projects).
+
+    Produced by roadmap/engine.py following the parse → fallback convention:
+    an LLM failure yields a deterministic zero-project analysis carrying the
+    warnings, never a crash. Persisted to roadmap_history (roadmap/store.py)
+    so return visits to the Roadmap intake card show the last analysis
+    immediately with a Re-analyze option.
+    """
+
+    source_type: str = ""  # "confluence" | "notion" | "local"
+    source_locator: str = ""  # page id / file path
+    source_label: str = ""  # page title / file name (display)
+    summary: str = ""  # 1-2 sentence roadmap overview (LLM)
+    projects: tuple[RoadmapProject, ...] = ()
+    warnings: tuple[str, ...] = ()
+    generated_at: str = ""  # ISO timestamp
+
+
 # See README: "Scrum Standards" — prompt quality rating
 @dataclass(frozen=True)
 class PromptQualityRating:

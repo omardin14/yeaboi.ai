@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from yeaboi.agent.llm import (
     _PROVIDER_DEFAULTS,
     DEFAULT_MODEL,
+    _supports_temperature,
     build_multimodal_content,
     estimate_tokens,
     get_llm,
@@ -90,6 +91,49 @@ class TestGetLlmAnthropic:
         llm = get_llm()
         # ChatAnthropic stores the key as a SecretStr
         assert llm.anthropic_api_key.get_secret_value() == "sk-ant-test-key"
+
+
+class TestTemperatureDeprecation:
+    """Newer Claude models reject `temperature` by presence — it must be omitted.
+
+    Sending the parameter at all (even a default) to Opus 4.6+ or the Claude 5
+    family fails with HTTP 400 "temperature is deprecated for this model".
+    """
+
+    def test_older_models_support_temperature(self):
+        for model in (
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-20250514",
+            "claude-haiku-4-5-20251001",
+            "claude-3-5-sonnet-20241022",
+            "claude-opus-4-5",
+            "us.anthropic.claude-sonnet-4-6-v1:0",
+        ):
+            assert _supports_temperature(model), model
+
+    def test_newer_models_reject_temperature(self):
+        for model in (
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-fable-5",
+            "claude-sonnet-5",
+            "us.anthropic.claude-opus-4-8-v1:0",
+        ):
+            assert not _supports_temperature(model), model
+
+    def test_get_llm_omits_temperature_for_new_model(self, monkeypatch):
+        """Opus 4.8 → the kwarg is never passed, so ChatAnthropic keeps its unset default."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+        llm = get_llm(model="claude-opus-4-8", temperature=0.3)
+        assert llm.temperature is None  # omitted → not sent in the request body
+
+    def test_get_llm_keeps_temperature_for_old_model(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+        llm = get_llm(model="claude-sonnet-4-6", temperature=0.3)
+        assert llm.temperature == 0.3
 
 
 class TestGetLlmModelOverride:

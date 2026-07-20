@@ -261,6 +261,48 @@ class TestBuildProjectCard:
         assert "Export" not in rendered
 
 
+class TestRoadmapProjectRows:
+    """Saved roadmaps render as tagged ProjectSummary rows in the merged list."""
+
+    def _roadmap_row(self, analyzed: bool = True):
+        meta = "local · 4 candidate projects · analyzed 2026-07-18" if analyzed else "local · not analyzed yet"
+        return ProjectSummary(name="Q3 2026 Roadmap", kind="roadmap", roadmap_id=7, created=meta)
+
+    def test_roadmap_card_shows_tag_and_meta(self):
+        card = _build_project_card(self._roadmap_row(), selected=True)
+        rendered = _render(card)
+        assert "Q3 2026 Roadmap" in rendered
+        assert "[roadmap]" in rendered
+        assert "4 candidate projects" in rendered
+        assert "analyzed 2026-07-18" in rendered
+
+    def test_not_analyzed_meta(self):
+        rendered = _render(_build_project_card(self._roadmap_row(analyzed=False), selected=False))
+        assert "not analyzed yet" in rendered
+
+    def test_project_card_has_no_roadmap_tag(self):
+        rendered = _render(_build_project_card(ProjectSummary(name="Real Project"), selected=True))
+        assert "[roadmap]" not in rendered
+
+    def test_merged_list_renders_both_kinds(self):
+        rows = [ProjectSummary(name="Billing revamp", id="1", status="In Progress"), self._roadmap_row()]
+        screen = _build_project_list_screen(rows, 1, action_btns_visible=2.0)
+        rendered = _render(screen, width=120)
+        assert "Billing revamp" in rendered
+        assert "Q3 2026 Roadmap" in rendered
+        assert "[roadmap]" in rendered
+        # The selected roadmap row shows the standard Delete/Export buttons.
+        assert "Delete" in rendered
+        assert "Export" in rendered
+
+    def test_delete_popup_shows_roadmap_name(self):
+        rows = [self._roadmap_row()]
+        screen = _build_project_list_screen(rows, 0, delete_popup_name="Q3 2026 Roadmap", delete_popup_t=1.0)
+        rendered = _render(screen)
+        assert "Q3 2026 Roadmap" in rendered
+        assert "Enter to confirm" in rendered
+
+
 class TestDeletePopup:
     """Test the delete popup overlay in the project list screen."""
 

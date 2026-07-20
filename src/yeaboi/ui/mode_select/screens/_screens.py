@@ -103,6 +103,16 @@ _INTAKE_CARDS: list[dict[str, Any]] = [
         "color": "rgb(70,100,180)",
     },
     {
+        # Proactive intake: instead of describing a project by hand, point the
+        # agent at the quarterly roadmap — it extracts candidate projects and
+        # recommends Small or Large planning for each (roadmap/ package).
+        "key": "roadmap",
+        "title": "Roadmap",
+        "description": "Point at your quarterly roadmap — AI extracts projects, ranks them, and picks Small or Large.",
+        "available": True,
+        "color": "rgb(70,100,180)",
+    },
+    {
         "key": "offline",
         "title": "Offline",
         "description": "Export a blank template to fill in at your own pace, or import a completed one.",

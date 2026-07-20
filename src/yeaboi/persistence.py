@@ -428,6 +428,7 @@ def load_projects() -> list[ProjectSummary]:
                 sprint_count=artifacts.get("sprints", 0),
                 jira_summary=_compute_jira_summary(jira_sync),
                 progress=_compute_progress(pipeline),
+                updated_at=proj.get("updated_at", ""),
             )
         )
 

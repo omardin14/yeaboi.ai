@@ -987,3 +987,79 @@ class TestDeliveryReport:
         assert restored.themes == ()
         assert restored.delivered_items == ()
         assert restored.metrics == ()
+
+
+class TestRoadmapArtifacts:
+    """The Roadmap intake card's frozen dataclasses (RoadmapProject / RoadmapAnalysis)."""
+
+    def test_defaults_construct_empty(self):
+        from yeaboi.agent.state import RoadmapAnalysis, RoadmapProject
+
+        p = RoadmapProject()
+        assert p.name == ""
+        assert p.size == "small"
+        assert p.priority == 0
+        assert p.themes == ()
+        a = RoadmapAnalysis()
+        assert a.source_type == ""
+        assert a.projects == ()
+        assert a.warnings == ()
+
+    def test_frozen(self):
+        from yeaboi.agent.state import RoadmapAnalysis, RoadmapProject
+
+        p = RoadmapProject(name="Checkout revamp")
+        with pytest.raises(FrozenInstanceError):
+            p.name = "Other"  # type: ignore[misc]
+        a = RoadmapAnalysis(source_type="local")
+        with pytest.raises(FrozenInstanceError):
+            a.source_type = "notion"  # type: ignore[misc]
+
+    def test_asdict_round_trip(self):
+        from dataclasses import asdict
+
+        from yeaboi.agent.state import RoadmapAnalysis, RoadmapProject
+
+        a = RoadmapAnalysis(
+            source_type="confluence",
+            source_locator="12345",
+            source_label="Q3 Roadmap",
+            summary="Three initiatives this quarter.",
+            projects=(
+                RoadmapProject(
+                    name="SSO",
+                    description="Add single sign-on.",
+                    size="large",
+                    rationale="Multi-sprint epic.",
+                    priority=1,
+                    themes=("Security",),
+                    quarter="Q3 2026",
+                ),
+            ),
+            warnings=("truncated",),
+            generated_at="2026-07-18T10:00:00",
+        )
+        d = json.loads(json.dumps(asdict(a)))
+        assert d["projects"][0]["name"] == "SSO"
+        assert d["projects"][0]["themes"] == ["Security"]
+        assert d["warnings"] == ["truncated"]
+
+    def test_round_trip_via_store_helpers(self):
+        """RoadmapAnalysis survives serialize -> JSON -> reconstruct with types intact."""
+        from yeaboi.agent.state import RoadmapAnalysis, RoadmapProject
+        from yeaboi.roadmap.store import _analysis_to_json, _dict_to_analysis
+
+        original = RoadmapAnalysis(
+            source_type="local",
+            source_locator="/tmp/roadmap.md",
+            source_label="roadmap.md",
+            summary="One initiative.",
+            projects=(RoadmapProject(name="SSO", size="large", priority=1, themes=("Security",)),),
+            warnings=("w1",),
+            generated_at="2026-07-18",
+        )
+        restored = _dict_to_analysis(json.loads(_analysis_to_json(original)))
+        assert restored == original
+        assert isinstance(restored.projects, tuple)
+        assert isinstance(restored.projects[0], RoadmapProject)
+        assert isinstance(restored.projects[0].themes, tuple)

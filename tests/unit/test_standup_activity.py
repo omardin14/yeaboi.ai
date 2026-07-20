@@ -18,6 +18,19 @@ from yeaboi.tools.jira import jira_recent_activity
 from yeaboi.tools.local_git import git_subprocess_env, local_git_recent_commits
 
 
+@pytest.fixture(autouse=True)
+def _clean_git_env(monkeypatch):
+    """Scrub git env vars that hook runners (pre-commit) export to children.
+
+    GIT_DIR / GIT_INDEX_FILE pointing at the parent repo would redirect this
+    module's temp-repo `git` subprocesses (commits fail; a non-repo dir
+    resolves to the parent repo), so the tests behave differently under
+    `make test` vs a commit hook. Delete them for a hermetic environment.
+    """
+    for var in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX"):
+        monkeypatch.delenv(var, raising=False)
+
+
 class TestJiraRecentActivity:
     def test_missing_config_returns_empty(self, monkeypatch):
         monkeypatch.setattr("yeaboi.tools.jira._make_jira_client", lambda: None)

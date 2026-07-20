@@ -95,6 +95,7 @@ STANDUP_EXPORTS_DIR = EXPORTS_DIR / "standup"
 RETRO_EXPORTS_DIR = EXPORTS_DIR / "retro"
 PERFORMANCE_EXPORTS_DIR = EXPORTS_DIR / "performance"
 REPORTING_EXPORTS_DIR = EXPORTS_DIR / "reporting"
+ROADMAP_EXPORTS_DIR = EXPORTS_DIR / "roadmap"
 
 # ---------------------------------------------------------------------------
 # Logs
@@ -106,6 +107,7 @@ STANDUP_LOGS_DIR = LOGS_DIR / "standup"
 RETRO_LOGS_DIR = LOGS_DIR / "retro"
 PERFORMANCE_LOGS_DIR = LOGS_DIR / "performance"
 REPORTING_LOGS_DIR = LOGS_DIR / "reporting"
+ROADMAP_LOGS_DIR = LOGS_DIR / "roadmap"
 ANALYSIS_LOGS_DIR = LOGS_DIR / "analysis"
 PLANNING_LOGS_DIR = LOGS_DIR / "planning"
 
@@ -225,6 +227,13 @@ def get_reporting_export_dir(project_key: str) -> Path:
     return d
 
 
+def get_roadmap_export_dir(roadmap_key: str) -> Path:
+    """Return the Roadmap export directory for a roadmap, creating it if needed."""
+    d = ROADMAP_EXPORTS_DIR / (roadmap_key.lower() or "roadmap")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def move_data_tree(new_root: Path) -> tuple[bool, str]:
     """Best-effort move of the current data tree into *new_root*.
 
@@ -313,6 +322,12 @@ def get_reporting_log_dir() -> Path:
     """Return the Reporting logs directory, creating it if needed."""
     REPORTING_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return REPORTING_LOGS_DIR
+
+
+def get_roadmap_log_dir() -> Path:
+    """Return the Roadmap-intake logs directory, creating it if needed."""
+    ROADMAP_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return ROADMAP_LOGS_DIR
 
 
 def get_bin_dir() -> Path:

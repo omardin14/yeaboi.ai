@@ -1591,6 +1591,65 @@ def _team_profile_export_flow(
             break
 
 
+def _export_roadmap_via_picker(
+    console,
+    live,
+    read_key,
+    frame_time,
+    supports_timeout,
+    *,
+    roadmap_id: int,
+) -> str | None:
+    """Export a saved roadmap via the shared destination picker.
+
+    Files keeps the on-disk Markdown+HTML export (roadmap/export.py);
+    Notion/Confluence publish the Markdown via publish_markdown. Returns the
+    status message for the success screen, or None when the picker was
+    cancelled. No Jira/AzDO extras — a roadmap is a document, not tickets.
+    """
+    from yeaboi.roadmap.store import RoadmapStore
+
+    try:
+        with RoadmapStore(_ana_dbp) as store:
+            row = store.get_roadmap(roadmap_id)
+    except Exception:
+        logger.warning("roadmap: failed to load for export id=%s", roadmap_id, exc_info=True)
+        row = None
+    if row is None:
+        return "Roadmap not found."
+    analysis = row["analysis"]
+    label = row.get("label") or row.get("source_label") or "(unnamed roadmap)"
+    if analysis is None:
+        return "Analyze this roadmap before exporting."
+
+    def _files() -> str:
+        try:
+            from yeaboi.roadmap.export import export_roadmap
+
+            out = export_roadmap(analysis, name=label)
+            logger.info("roadmap: exported id=%s to files", roadmap_id)
+            return f"HTML  {out['html']}\nMD    {out['markdown']}"
+        except Exception:
+            logger.error("roadmap: export failed for id=%s", roadmap_id, exc_info=True)
+            return "Export failed — see the log."
+
+    def _doc() -> tuple[str, str]:
+        from yeaboi.roadmap.export import build_roadmap_markdown
+
+        return (f"Roadmap — {label}", build_roadmap_markdown(analysis))
+
+    return _export_via_picker(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        mode="planning",
+        files_export=_files,
+        get_document=_doc,
+    )
+
+
 def _project_tracker_sync(
     console,
     live,
@@ -3573,6 +3632,414 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
     logger.info("reporting: page closed (session=%s)", session_id)
 
 
+def _pick_analysis_profile(
+    console: Console, live, read_key, frame_time: float, supports_timeout: bool, *, board_configured: bool
+) -> str:
+    """Show the analysis-profile picker and return the chosen team_id ("" = skip).
+
+    Extracted from the Phase-4 intake branch so the Roadmap card can reuse it —
+    pure extraction, no behavior change: returns "" when no board is configured,
+    the DB is missing, there are no profiles, or the user skips/cancels. Never
+    raises (a picker failure just means no profile).
+    """
+    if not board_configured:
+        return ""
+    selected_profile_id = ""
+    try:
+        from yeaboi.team_profile import TeamProfileStore
+
+        if not _ana_dbp.exists():
+            return ""
+        with TeamProfileStore(_ana_dbp) as _pp_store:
+            _pp_profiles = _pp_store.list_profiles()
+        if not _pp_profiles:
+            return ""
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_profile_picker_screen
+
+        _pp_sel = 0
+        _pp_n = len(_pp_profiles) + 1  # profiles + Skip
+        w, h = console.size
+        live.update(_build_profile_picker_screen(_pp_profiles, _pp_sel, width=w, height=h))
+        while True:
+            pk = read_key(timeout=frame_time) if supports_timeout else read_key()
+            if pk in ("up", "scroll_up"):
+                _pp_sel = (_pp_sel - 1) % _pp_n
+            elif pk in ("down", "scroll_down"):
+                _pp_sel = (_pp_sel + 1) % _pp_n
+            elif pk == "enter":
+                if _pp_sel < len(_pp_profiles):
+                    selected_profile_id = _pp_profiles[_pp_sel].team_id
+                    logger.info("Profile selected: %s", selected_profile_id)
+                else:
+                    logger.info("Profile picker: Skip selected")
+                break
+            elif pk in ("esc", "q"):
+                break
+            w, h = console.size
+            live.update(_build_profile_picker_screen(_pp_profiles, _pp_sel, width=w, height=h))
+    except Exception:
+        logger.debug("Profile picker failed", exc_info=True)
+    return selected_profile_id
+
+
+def _load_planning_rows() -> list[ProjectSummary]:
+    """Merged "Your projects" rows: planning projects + saved roadmaps, newest first.
+
+    Saved roadmaps ride the project-list pipeline as ProjectSummary rows with
+    kind="roadmap" (amber-tagged card, meta in `created`) — the merge is purely
+    presentational; RoadmapStore stays the backing store. Roadmap-load failure
+    degrades to projects-only.
+    """
+    from yeaboi.persistence import load_projects
+
+    rows = load_projects()
+    try:
+        from yeaboi.roadmap.store import RoadmapStore
+
+        with RoadmapStore(_ana_dbp) as store:
+            roadmaps = store.list_roadmaps()
+    except Exception:
+        logger.warning("could not load saved roadmaps for the project list", exc_info=True)
+        roadmaps = []
+    for rm in roadmaps:
+        n = int(rm.get("project_count") or 0)
+        if rm.get("analyzed"):
+            detail = f"{n} candidate project{'s' if n != 1 else ''} · analyzed {(rm.get('updated_at') or '')[:10]}"
+        else:
+            detail = "not analyzed yet"
+        rows.append(
+            ProjectSummary(
+                name=rm.get("label") or rm.get("source_label") or "(unnamed roadmap)",
+                kind="roadmap",
+                roadmap_id=rm["id"],
+                created=" · ".join(x for x in (rm.get("source_type", ""), detail) if x),
+                updated_at=rm.get("updated_at") or rm.get("created_at") or "",
+            )
+        )
+    rows.sort(key=lambda r: r.updated_at or "", reverse=True)
+    return rows
+
+
+def _run_roadmap_page(
+    console: Console,
+    live,
+    read_key,
+    frame_time: float,
+    supports_timeout: bool,
+    *,
+    dry_run: bool = False,
+    open_roadmap_id: int | None = None,
+) -> tuple[str, str] | str | None:
+    """Event loop for the Roadmap intake page (a Planning sub-page).
+
+    Two views. "source" (home when creating a new roadmap): Up/Down choose where
+    the roadmap lives (Confluence / Notion / local file), Select opens a
+    line-input for the page URL / file path, then the analysis runs. While an
+    analysis runs, a `busy` flag renders a spinner-only screen (the source
+    options stay hidden). "results" shows the recommended projects: Up/Down move
+    the project cursor, Plan This hands the selection back to the caller,
+    Re-analyze re-runs on the saved source (updating the same roadmap row),
+    Change Source returns to "source".
+
+    Saved roadmaps live as amber-tagged cards inside the Planning "Your projects"
+    list (see _load_planning_rows); pass open_roadmap_id to open one of them
+    directly — the page loads the row and enters "results" (analyzing first if
+    the row was never analyzed). Saved roadmaps live in the RoadmapStore
+    `roadmaps` table (opened in short-lived blocks only).
+
+    Returns:
+      ("small_project"|"smart", description) — the user picked a project to plan.
+      "done" — Back/Esc after a roadmap row exists; the caller should return to
+               the project list (where the roadmap card now lives).
+      None   — backed out of the source view before anything was saved (or the
+               open_roadmap_id row is gone); the caller stays where it was.
+
+    # See README: "Roadmap Intake" — TUI page
+    """
+    from yeaboi.roadmap.engine import intake_mode_for, run_roadmap_analysis
+    from yeaboi.roadmap.ingest import RoadmapSource, parse_confluence_locator, parse_notion_locator
+    from yeaboi.roadmap.store import RoadmapStore
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_roadmap_screen
+
+    logger.info("roadmap page opened (dry_run=%s)", dry_run)
+
+    def _sources() -> list[tuple[str, str, str]]:
+        """Source options with configured-status hints (still selectable when unset)."""
+        from yeaboi.config import get_confluence_base_url, get_notion_token
+
+        conf_hint = "Read a page by URL, ID, or title"
+        if not get_confluence_base_url():
+            conf_hint = "Not configured — set CONFLUENCE_* (or JIRA_*) in .env"
+        notion_hint = "Read a page by URL or ID"
+        if not get_notion_token():
+            notion_hint = "Not configured — set NOTION_TOKEN in .env"
+        return [
+            ("confluence", "Confluence page", conf_hint),
+            ("notion", "Notion page", notion_hint),
+            ("local", "Local file (.md .txt .rst .pdf .docx .pptx)", "Read a roadmap document from disk"),
+        ]
+
+    state = {
+        "view": "source",
+        "current_roadmap_id": None,  # row being viewed/re-analyzed; None = creating new
+        "selected": 0,  # source index
+        "cursor": 0,  # project cursor (results view)
+        "scroll_meta": {},
+        "sel": 0,  # action button index (source/results views)
+        "message": "",
+        "analysis": None,
+        "source": None,  # RoadmapSource once configured
+        "busy": False,  # True while the analysis worker runs (spinner-only screen)
+    }
+    source_actions = ["Select", "Back"]
+    results_actions = ["Plan This", "Re-analyze", "Change Source", "Back"]
+
+    def _actions() -> list[str]:
+        return results_actions if state["view"] == "results" else source_actions
+
+    def _data() -> dict:
+        analysis = state["analysis"]
+        return {
+            "view": state["view"],
+            "sources": _sources(),
+            "selected_idx": state["selected"],
+            "analysis": analysis,
+            "project_cursor": state["cursor"],
+            "actions": _actions(),
+            "message": state["message"],
+            "busy": state["busy"],
+            "source_label": getattr(analysis, "source_label", ""),
+            "analyzed_at": (getattr(analysis, "generated_at", "") or "")[:10],
+        }
+
+    anim_start = time.monotonic()
+
+    def _render() -> None:
+        w, h = console.size
+        tick = time.monotonic() - anim_start
+        live.update(
+            _build_roadmap_screen(
+                _data(),
+                scroll_meta=state["scroll_meta"],
+                width=w,
+                height=max(10, h - 1),
+                action_sel=state["sel"],
+                shimmer_tick=tick,
+                sub_reveal=tick * _HEADER_SUB_SPEED,
+            )
+        )
+
+    def _analyze(source) -> None:
+        """Run the analysis on a worker thread while the frame loop animates progress.
+
+        The ingest + LLM call can take ~30s; running it inline would freeze the
+        Live display on one frame and make the TUI look hung (same reasoning as
+        the standup-generate and retro-tunnel workers). The worker only writes
+        into result_box/progress; all state/render updates stay on this thread.
+        """
+        import threading
+
+        progress: list[str] = ["Starting…"]
+        result_box: list = [None]
+
+        def _worker() -> None:
+            try:
+                result_box[0] = run_roadmap_analysis(
+                    source, db_path=_ana_dbp, dry_run=dry_run, on_progress=progress.append
+                )
+            except Exception as e:  # never let an action crash the TUI
+                result_box[0] = e
+
+        thread = threading.Thread(target=_worker, name="roadmap-analyze", daemon=True)
+        thread.start()
+        _spinners = "◐◓◑◒"
+        started = time.monotonic()
+        state["busy"] = True  # spinner-only screen — hide the source options underneath
+        while thread.is_alive():
+            elapsed = time.monotonic() - started
+            spin = _spinners[int(elapsed * 8) % len(_spinners)]
+            state["message"] = f"{spin} {progress[-1]}  ({int(elapsed)}s — usually ~30s)"
+            _render()
+            time.sleep(1 / 30)
+        thread.join()
+        state["busy"] = False
+
+        outcome = result_box[0]
+        if isinstance(outcome, Exception) or outcome is None:
+            logger.error("roadmap analyze failed: %s", outcome, exc_info=isinstance(outcome, Exception))
+            state["message"] = f"Analyze failed: {outcome}" if outcome else "Analyze failed."
+            return
+        analysis = outcome
+        try:
+            with RoadmapStore(_ana_dbp) as store:
+                # New roadmap (id None) inserts a row; Re-analyze/Change Source
+                # update the row being viewed in place.
+                state["current_roadmap_id"] = store.save_roadmap(
+                    source, analysis, roadmap_id=state["current_roadmap_id"]
+                )
+        except Exception:  # remembering the roadmap is best-effort — still show results
+            logger.error("roadmap analyze: failed to save roadmap", exc_info=True)
+        state["analysis"] = analysis
+        state["source"] = source
+        state["view"] = "results"
+        state["cursor"], state["sel"] = 0, 0
+        n = len(analysis.projects)
+        plural = "s" if n != 1 else ""
+        state["message"] = f"{n} project{plural} recommended." if n else ""
+        logger.info("roadmap analyze: %d project(s)", n)
+
+    def _enter_locator() -> None:
+        """Ask for the selected source's locator, then analyze."""
+        key = _sources()[state["selected"]][0]
+        prompts = {
+            "confluence": "Confluence page URL, ID, or title",
+            "notion": "Notion page URL or ID",
+            "local": "Roadmap file path (.md .txt .rst .pdf .docx .pptx)",
+        }
+        from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+
+        raw = _standup_read_line(
+            console,
+            live,
+            read_key,
+            frame_time,
+            supports_timeout,
+            prompt=prompts[key],
+            step="Roadmap source",
+            theme=PLANNING_THEME,
+            title=planning_title(),
+        )
+        if raw is None or not raw.strip():
+            state["message"] = ""
+            return  # Esc / empty — stay on the source view
+        raw = raw.strip()
+        logger.info("roadmap source entered: type=%s", key)
+        if key == "local":
+            path = Path(raw).expanduser()
+            if not path.exists() or not path.is_file():
+                state["message"] = f"File not found: {path}"
+                return
+            source = RoadmapSource(source_type="local", locator=str(path), label=path.name)
+        elif key == "confluence":
+            source = RoadmapSource(source_type="confluence", locator=parse_confluence_locator(raw), label=raw)
+        else:
+            source = RoadmapSource(source_type="notion", locator=parse_notion_locator(raw), label=raw)
+        _analyze(source)
+
+    def _plan_selected() -> tuple[str, str] | None:
+        analysis = state["analysis"]
+        projects = tuple(getattr(analysis, "projects", ()) or ())
+        if not projects:
+            state["message"] = "No projects to plan — Re-analyze or Change Source."
+            return None
+        project = projects[max(0, min(state["cursor"], len(projects) - 1))]
+        description = project.description or project.name
+        logger.info("roadmap: Plan This → %r (size=%s)", project.name, project.size)
+        return (intake_mode_for(project), description)
+
+    _stay = object()  # sentinel: _source_back handled the key, keep the page running
+
+    def _source_back() -> object:
+        """Back/Esc from the source view.
+
+        Returns "done"/None to bubble out of the page, or _stay when the page
+        should keep running (returned to the results view).
+        """
+        if state["analysis"] is not None:
+            # The return leg of "Change Source" — the roadmap still has results.
+            state["view"] = "results"
+            state["sel"], state["message"] = 0, ""
+            return _stay
+        if state["current_roadmap_id"] is not None:
+            # A saved (but unanalyzed / failed-analysis) roadmap — its card
+            # lives in the project list, so hand control back there.
+            logger.info("roadmap page closed (saved roadmap, no results)")
+            return "done"
+        logger.info("roadmap page closed before saving")
+        return None
+
+    # ── Entry: open a saved roadmap directly, or start at the source picker ──
+    if open_roadmap_id is not None:
+        try:
+            with RoadmapStore(_ana_dbp) as store:
+                row = store.get_roadmap(open_roadmap_id)
+        except Exception:
+            logger.warning("roadmap: failed to open id=%s", open_roadmap_id, exc_info=True)
+            row = None
+        if row is None:
+            return None
+        logger.info("roadmap: opened id=%s (analyzed=%s)", row["id"], row["analysis"] is not None)
+        state["current_roadmap_id"] = row["id"]
+        state["source"] = row["source"]
+        if row["analysis"] is None:
+            # Saved but never analyzed (e.g. seeded from a config-only v10 DB).
+            # Analysis failure lands on the source view with the error message.
+            _analyze(row["source"])
+        else:
+            state["analysis"] = row["analysis"]
+            state["view"] = "results"
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if state["view"] == "source":
+            n_sources = len(_sources())
+            if k in ("up", "scroll_up"):
+                state["selected"] = (state["selected"] - 1) % n_sources
+            elif k in ("down", "scroll_down"):
+                state["selected"] = (state["selected"] + 1) % n_sources
+            elif k == "left":
+                state["sel"] = max(0, state["sel"] - 1)
+            elif k == "right":
+                state["sel"] = min(len(source_actions) - 1, state["sel"] + 1)
+            elif k in ("enter", " "):
+                label = source_actions[state["sel"]]
+                if label == "Back":
+                    result = _source_back()
+                    if result is not _stay:
+                        return result
+                else:  # Select
+                    _enter_locator()
+            elif k in ("esc", "q"):
+                result = _source_back()
+                if result is not _stay:
+                    return result
+        else:  # results view
+            projects = tuple(getattr(state["analysis"], "projects", ()) or ())
+            if k in ("up", "scroll_up"):
+                if projects:
+                    state["cursor"] = (state["cursor"] - 1) % len(projects)
+            elif k in ("down", "scroll_down"):
+                if projects:
+                    state["cursor"] = (state["cursor"] + 1) % len(projects)
+            elif k == "left":
+                state["sel"] = max(0, state["sel"] - 1)
+            elif k == "right":
+                state["sel"] = min(len(results_actions) - 1, state["sel"] + 1)
+            elif k in ("enter", " "):
+                label = results_actions[state["sel"]]
+                if label == "Back":
+                    logger.info("roadmap page closed from results view")
+                    return "done"
+                elif label == "Plan This":
+                    result = _plan_selected()
+                    if result is not None:
+                        return result
+                elif label == "Re-analyze":
+                    if state["source"] is not None:
+                        _analyze(state["source"])
+                    else:
+                        state["view"] = "source"
+                        state["sel"], state["message"] = 0, ""
+                elif label == "Change Source":
+                    state["view"] = "source"
+                    state["sel"], state["message"] = 0, ""
+            elif k in ("esc", "q"):
+                logger.info("roadmap page closed from results view")
+                return "done"
+        _render()
+
+
 def _resolve_retro_session() -> tuple[str, str, str, str]:
     """Resolve the retro's target session → (session_id, session_name, project_name, sprint_name).
 
@@ -4888,9 +5355,8 @@ def select_mode(
 
             # 2d: Smooth fade-in — all cards appear together, opacity 0→1
             # See README: "Memory & State" — load persisted project history
-            from yeaboi.persistence import load_projects as _load_projects
-
-            projects = _load_projects()
+            # (planning projects + saved roadmaps in one merged list)
+            projects = _load_planning_rows()
             proj_selected = 0
             if projects:
                 proj_n = len(projects) + 1
@@ -5313,6 +5779,37 @@ def select_mode(
                             delete_popup_name = projects[proj_selected].name
 
                         # ── Focus 2: Export → shared destination picker ───
+                        elif focus == 2 and _is_project_row() and projects[proj_selected].kind == "roadmap":
+                            # Roadmap rows: Files / Notion / Confluence only —
+                            # a roadmap is a document, not tickets to sync.
+                            path = _export_roadmap_via_picker(
+                                console,
+                                live,
+                                read_key,
+                                _FRAME_TIME,
+                                _supports_timeout,
+                                roadmap_id=projects[proj_selected].roadmap_id,
+                            )
+                            if path:
+                                w, h = console.size
+                                live.update(
+                                    _build_project_export_success_screen(
+                                        str(path),
+                                        width=w,
+                                        height=h,
+                                    )
+                                )
+                                # Show for at least 1.5s, then wait for a real keypress
+                                _export_t0 = time.monotonic()
+                                while True:
+                                    k = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
+                                    elapsed = time.monotonic() - _export_t0
+                                    if elapsed < 1.5:
+                                        continue  # enforce minimum display time
+                                    if k and k not in ("scroll_up", "scroll_down", ""):
+                                        break
+                            exp_fade_target = 1.0  # restore Export highlight
+
                         elif focus == 2 and _is_project_row():
                             _extra = (["Jira"] if _jira_ok else []) + (["Azure DevOps"] if _azdevops_ok else [])
                             _dest = _pick_dest(
@@ -5426,6 +5923,49 @@ def select_mode(
                                 )
                                 time.sleep(_FRAME_TIME)
 
+                            project = projects[proj_selected]
+                            if project.kind == "roadmap":
+                                # A saved roadmap card — open the roadmap page
+                                # straight into its results (analyzing first if
+                                # the row was never analyzed).
+                                _rm = _run_roadmap_page(
+                                    console,
+                                    live,
+                                    read_key,
+                                    _FRAME_TIME,
+                                    _supports_timeout,
+                                    dry_run=dry_run,
+                                    open_roadmap_id=project.roadmap_id,
+                                )
+                                if isinstance(_rm, tuple):
+                                    # "Plan This" — start a session pre-seeded
+                                    # with the chosen candidate project.
+                                    _selected_profile_id = _pick_analysis_profile(
+                                        console,
+                                        live,
+                                        read_key,
+                                        _FRAME_TIME,
+                                        _supports_timeout,
+                                        board_configured=_board_configured,
+                                    )
+                                    from yeaboi.ui.session import run_session
+
+                                    run_session(
+                                        live,
+                                        console,
+                                        intake_mode=_rm[0],
+                                        dry_run=dry_run,
+                                        _read_key_fn=_read_key_fn,
+                                        analysis_profile_id=_selected_profile_id,
+                                        initial_description=_rm[1],
+                                    )
+                                # None / "done" → back to the project list.
+                                projects = _load_planning_rows()
+                                proj_n = (len(projects) + 1) if projects else 2
+                                proj_selected = min(proj_selected, proj_n - 1)
+                                pulse = 0.0
+                                continue
+
                             # Resume an existing project — load its saved graph state
                             # so the session can skip already-completed phases.
                             # See README: "Memory & State" — session persistence.
@@ -5434,7 +5974,6 @@ def select_mode(
                             from yeaboi.persistence import load_graph_state
                             from yeaboi.ui.session import run_session
 
-                            project = projects[proj_selected]
                             saved_state = load_graph_state(project.id)
 
                             # Fallback: if no state file exists (project created before
@@ -5455,8 +5994,8 @@ def select_mode(
                                 _read_key_fn=_read_key_fn,
                             )
                             # Session ended (Esc or completed) — return to project list
-                            projects = _load_projects()
-                            proj_n = len(projects) + 1
+                            projects = _load_planning_rows()
+                            proj_n = (len(projects) + 1) if projects else 2
                             proj_selected = min(proj_selected, proj_n - 1)
                             pulse = 0.0
                             continue
@@ -5650,11 +6189,21 @@ def select_mode(
                     # If a delete was confirmed (_delete_pending), perform it now.
                     if delete_popup_open and delete_popup_target == 0.0 and delete_popup_t <= 0:
                         if _delete_pending:
-                            from yeaboi.persistence import delete_project
-
                             project = projects[proj_selected]
-                            delete_project(project.id)
-                            projects = _load_projects()
+                            if project.kind == "roadmap":
+                                try:
+                                    from yeaboi.roadmap.store import RoadmapStore
+
+                                    with RoadmapStore(_ana_dbp) as _rm_store:
+                                        _rm_store.delete_roadmap(project.roadmap_id)
+                                    logger.info("roadmap: deleted id=%s", project.roadmap_id)
+                                except Exception:
+                                    logger.error("roadmap: delete failed for id=%s", project.roadmap_id, exc_info=True)
+                            else:
+                                from yeaboi.persistence import delete_project
+
+                                delete_project(project.id)
+                            projects = _load_planning_rows()
                             if projects:
                                 proj_n = len(projects) + 1
                                 proj_selected = min(proj_selected, proj_n - 1)
@@ -5956,63 +6505,63 @@ def select_mode(
                         intake_start = time.monotonic()
                     elif key == "enter":
                         chosen_intake = _INTAKE_CARDS[intake_selected]["key"]
+                        if chosen_intake == "roadmap":
+                            # ── Roadmap card: goes straight to the source picker;
+                            # analyze the quarterly roadmap and pick a recommended
+                            # project. The page returns the suggested intake mode +
+                            # a pre-seeded description, "done" when a roadmap was
+                            # saved (its card now lives in the project list), or
+                            # None when the user backed out before saving.
+                            _rm = _run_roadmap_page(
+                                console, live, read_key, _FRAME_TIME, _supports_timeout, dry_run=dry_run
+                            )
+                            if _rm is None:
+                                # Esc / Back before saving — stay on the intake cards
+                                intake_start = time.monotonic()
+                                continue
+                            if _rm == "done":
+                                # Roadmap saved — show it in the merged project list
+                                projects = _load_planning_rows()
+                                proj_n = (len(projects) + 1) if projects else 2
+                                proj_selected = min(proj_selected, proj_n - 1)
+                                _restart_project_list = True
+                                break  # break Phase 4 loop → restart Phase 3
+                            _rm_mode, _rm_desc = _rm
+                            _selected_profile_id = _pick_analysis_profile(
+                                console,
+                                live,
+                                read_key,
+                                _FRAME_TIME,
+                                _supports_timeout,
+                                board_configured=_board_configured,
+                            )
+                            from yeaboi.ui.session import run_session
+
+                            run_session(
+                                live,
+                                console,
+                                intake_mode=_rm_mode,
+                                dry_run=dry_run,
+                                _read_key_fn=_read_key_fn,
+                                analysis_profile_id=_selected_profile_id,
+                                initial_description=_rm_desc,
+                            )
+                            # Session ended (Esc or completed) — return to project list
+                            projects = _load_planning_rows()
+                            proj_n = (len(projects) + 1) if projects else 2
+                            proj_selected = min(proj_selected, proj_n - 1)
+                            _restart_project_list = True
+                            break  # break Phase 4 loop → restart Phase 3
                         if chosen_intake != "offline":
                             # ── Profile picker: let user select analysis profile ──
-                            _selected_profile_id = ""
-                            if _board_configured:
-                                try:
-                                    from yeaboi.team_profile import TeamProfileStore
-
-                                    _pp_db = _ana_dbp
-                                    if _pp_db.exists():
-                                        with TeamProfileStore(_pp_db) as _pp_store:
-                                            _pp_profiles = _pp_store.list_profiles()
-                                        if _pp_profiles:
-                                            from yeaboi.ui.mode_select.screens._screens_secondary import (
-                                                _build_profile_picker_screen,
-                                            )
-
-                                            _pp_sel = 0
-                                            _pp_n = len(_pp_profiles) + 1  # profiles + Skip
-                                            w, h = console.size
-                                            live.update(
-                                                _build_profile_picker_screen(
-                                                    _pp_profiles,
-                                                    _pp_sel,
-                                                    width=w,
-                                                    height=h,
-                                                )
-                                            )
-                                            while True:
-                                                pk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                                if pk in ("up", "scroll_up"):
-                                                    _pp_sel = (_pp_sel - 1) % _pp_n
-                                                elif pk in ("down", "scroll_down"):
-                                                    _pp_sel = (_pp_sel + 1) % _pp_n
-                                                elif pk == "enter":
-                                                    if _pp_sel < len(_pp_profiles):
-                                                        _selected_profile_id = _pp_profiles[_pp_sel].team_id
-                                                        logger.info(
-                                                            "Profile selected: %s",
-                                                            _selected_profile_id,
-                                                        )
-                                                    else:
-                                                        logger.info("Profile picker: Skip selected")
-                                                    break
-                                                elif pk in ("esc", "q"):
-                                                    break
-                                                w, h = console.size
-                                                live.update(
-                                                    _build_profile_picker_screen(
-                                                        _pp_profiles,
-                                                        _pp_sel,
-                                                        width=w,
-                                                        height=h,
-                                                    )
-                                                )
-                                except Exception:
-                                    logger.debug("Profile picker failed", exc_info=True)
-
+                            _selected_profile_id = _pick_analysis_profile(
+                                console,
+                                live,
+                                read_key,
+                                _FRAME_TIME,
+                                _supports_timeout,
+                                board_configured=_board_configured,
+                            )
                             from yeaboi.ui.session import run_session
 
                             run_session(
@@ -6024,8 +6573,8 @@ def select_mode(
                                 analysis_profile_id=_selected_profile_id,
                             )
                             # Session ended (Esc or completed) — return to project list
-                            projects = _load_projects()
-                            proj_n = len(projects) + 1
+                            projects = _load_planning_rows()
+                            proj_n = (len(projects) + 1) if projects else 2
                             proj_selected = min(proj_selected, proj_n - 1)
                             _restart_project_list = True
                             break  # break Phase 4 loop → restart Phase 3
