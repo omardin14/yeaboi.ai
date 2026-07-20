@@ -20,7 +20,7 @@ The skill is bundled with yeaboi. Install it with a single command:
 yeaboi --install-skill
 ```
 
-This copies SKILL.md, README.md, and the `references/` folder to the OpenClaw skills directory and sandbox workspace.
+This copies the whole skill folder (SKILL.md, README.md, `references/`, and the `scripts/` canvas helpers) to the OpenClaw skills directory and sandbox workspace.
 
 To install to a custom directory:
 
@@ -153,5 +153,5 @@ Skill: [runs yeaboi, presents results]
 ## Related
 
 - [yeaboi README](../../README.md) — full CLI docs and deployment guide
-- [SCRUM.md.example](../../SCRUM.md.example) — template for the generated SCRUM.md
+- [SCRUM.md.example](../../SCRUM.md.example) — template users can fill in and paste as `project_context`
 - [Lightsail deployment guide](../../README.md#deploy-on-aws-lightsail-openclaw) — full setup instructions

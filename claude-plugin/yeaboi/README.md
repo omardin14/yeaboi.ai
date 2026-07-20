@@ -33,7 +33,16 @@ claude plugin marketplace add omardin14/yeaboi.ai
 /plugin install yeaboi@yeaboi
 ```
 
-Or for development: `claude --plugin-dir /path/to/repo/claude-plugin/yeaboi`
+### Testing a local checkout (development)
+
+`claude --plugin-dir /path/to/repo/claude-plugin/yeaboi` loads the **skills** from
+your checkout — but `.mcp.json` launches the server via `uvx --from 'yeaboi[mcp]'`,
+which resolves yeaboi from **PyPI** (the last published release, not your branch).
+To test unreleased server changes, register a dev server pointing at the checkout:
+
+```bash
+claude mcp add yeaboi-dev -- uv run --project /path/to/repo --extra mcp yeaboi-mcp
+```
 
 ## Notes
 
@@ -41,4 +50,6 @@ Or for development: `claude --plugin-dir /path/to/repo/claude-plugin/yeaboi`
   means no LLM was reachable and `data` is a deterministic skeleton.
 - Plans generated here are saved as yeaboi sessions — resumable in the yeaboi
   TUI (`uvx yeaboi`) and shared with the standup/reporting/performance tools.
+- Past retrospectives are readable via `retro_history`; the live retro board
+  itself stays in the yeaboi TUI (it's a real-time LAN browser page).
 - Server logs: `~/.yeaboi/logs/mcp/mcp.log`.

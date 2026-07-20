@@ -70,9 +70,10 @@ After the canvas is created, post this summary in thread:
 
 ### Jira Push
 
-Check if configured: `grep -q "JIRA_BASE_URL" ~/.yeaboi/.env 2>/dev/null`
-- Configured → `uvx yeaboi --resume latest --export-only`
-- Not configured → tell user to run `yeaboi --setup`
+If the user wants the plan in Jira or Azure DevOps, call the `plan_sync` MCP tool
+(`destination: "jira"` or `"azdevops"`). It creates **real epics/stories/tasks** in the
+tracker — always confirm with the user before calling it. An `ok: false` envelope with
+an auth hint means credentials are missing → tell the user to run `uvx yeaboi --setup`.
 
 ### Notion / Confluence
 

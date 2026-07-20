@@ -18,5 +18,17 @@ description: "Run a daily scrum standup with yeaboi: collect team activity from 
 3. **History.** For trends or "how have standups been going", call
    `standup_history` and summarize confidence over time.
 
+4. **Configuration.** To view or change the standup setup (time, weekdays,
+   delivery channels, member aliases, user name), use `standup_config_get` /
+   `standup_config_set`. Installing the OS schedule that fires it daily is done
+   from the yeaboi TUI (it's machine-local).
+
 If there are no sessions yet, suggest planning first (`/yeaboi:plan-sprint`) —
 the standup needs a session for sprint dates and team context.
+
+## Error handling
+
+Every tool returns `{ok, llm_mode, warnings, data}`. If `ok` is false, relay
+`error.message` and its `hint` (usually credentials — `yeaboi --setup`); don't
+retry blindly. `llm_mode: "fallback"` means no LLM was reachable and the summary
+is a deterministic skeleton — suggest `yeaboi --setup`.

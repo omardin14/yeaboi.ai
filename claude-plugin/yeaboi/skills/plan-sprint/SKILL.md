@@ -46,6 +46,8 @@ moving, never rush.
 5. **Offer follow-ups.** The plan is saved as a session (`data.session_id`).
    Offer to:
    - export it to a file (`plan_export`, markdown or HTML),
+   - publish it to the user's docs (`plan_publish`, `destination: "notion"` or
+     `"confluence"` — confirm before publishing),
    - adjust and regenerate (gather the changes, call `plan_generate` again),
    - or leave it — it's resumable in the yeaboi TUI and usable by the other
      yeaboi tools (standup_run, report_delivery, perf_*).

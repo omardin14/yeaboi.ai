@@ -21,3 +21,10 @@ description: "Generate a business-friendly delivery report of the team's complet
 4. **Exports.** yeaboi auto-saves Markdown/HTML/slide-deck versions under
    `~/.yeaboi/exports/reporting/` — mention this when the user wants something
    to circulate or present.
+
+## Error handling
+
+Every tool returns `{ok, llm_mode, warnings, data}`. If `ok` is false, relay
+`error.message` and its `hint` (usually credentials — `yeaboi --setup`); don't
+retry blindly. `llm_mode: "fallback"` means no LLM was reachable and the report
+is a deterministic count-based skeleton — suggest `yeaboi --setup`.

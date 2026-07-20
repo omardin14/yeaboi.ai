@@ -377,7 +377,7 @@ You should see JSON output with features, stories, tasks, and sprints.
 
 ### 8. Install the OpenClaw skill
 
-The `scrum-planner` skill lets OpenClaw conduct conversational scrum planning — it asks intake questions (or skips them in quick mode), generates a temp SCRUM.md, invokes `yeaboi --non-interactive --output json`, and presents results phase-by-phase with accept/edit/regenerate options.
+The `scrum-planner` skill lets OpenClaw conduct conversational scrum planning — it asks intake questions (or skips them in quick mode), calls the **yeaboi MCP server's** `plan_generate` tool with the collected answers, and presents results phase-by-phase with accept/edit/regenerate options. It needs the `yeaboi-mcp` server registered in OpenClaw's MCP configuration (`uvx --from 'yeaboi[mcp]' yeaboi-mcp`).
 
 > **Tip:** After every `pipx install --force` (e.g., updating to a new version), re-run `yeaboi --install-skill` to update the skill files and refresh the configuration.
 
@@ -608,7 +608,7 @@ After confirmation, the bot runs `yeaboi` in the background (~3-5 minutes), then
 - **Review diagnostics** — Check `~/.yeaboi/logs/` for detailed run logs if anything looks off.
 - **Secure with Teleport** — For production use, add Teleport for identity-aware access to the Lightsail instance and OpenClaw dashboard.
 
-See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full skill documentation, question-to-CLI mapping, and troubleshooting.
+See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full skill documentation, question-to-tool mapping, and troubleshooting.
 
 </details>
 
@@ -1056,6 +1056,16 @@ claude mcp add yeaboi -- uvx --from 'yeaboi[mcp]' yeaboi-mcp
 command = "uvx"
 args = ["--from", "yeaboi[mcp]", "yeaboi-mcp"]
 ```
+
+**Testing a local checkout (development)**
+
+All the commands above resolve `yeaboi` from **PyPI** — they run the last published release, not your working tree. To test unreleased changes, point the client at the checkout instead:
+
+```bash
+claude mcp add yeaboi-dev -- uv run --project /path/to/yeaboi.ai --extra mcp yeaboi-mcp
+```
+
+(Note for plugin developers: `claude --plugin-dir` loads the *skills* from your checkout, but the plugin's `.mcp.json` still launches the published server — use the `yeaboi-dev` override above alongside it.)
 
 ### The tools
 

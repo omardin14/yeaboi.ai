@@ -24,3 +24,10 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
 4. **Close the loop.** The saved profile automatically calibrates future
    `plan_generate` runs. For "how did the last plan actually go?", call
    `team_compare_plan_to_actuals` on a planning session.
+
+## Error handling
+
+Every tool returns `{ok, llm_mode, warnings, data}`. If `ok` is false, relay
+`error.message` and its `hint` (no tracker configured / credentials — `yeaboi
+--setup`); don't retry blindly. `llm_mode: "fallback"` means no LLM was reachable
+and the insights are deterministic skeletons — suggest `yeaboi --setup`.

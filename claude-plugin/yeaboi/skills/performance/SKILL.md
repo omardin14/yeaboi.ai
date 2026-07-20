@@ -31,3 +31,10 @@ description: "Manage engineers with yeaboi: 1:1 prep from real delivery data, 1:
 4. **Sensitive data.** This is personnel material: keep it in the conversation,
    don't post it anywhere external unless explicitly asked. Exports auto-save
    under `~/.yeaboi/exports/performance/<engineer>/`.
+
+## Error handling
+
+Every tool returns `{ok, llm_mode, warnings, data}`. If `ok` is false, relay
+`error.message` and its `hint` (usually credentials — `yeaboi --setup`); don't
+retry blindly. `llm_mode: "fallback"` means no LLM was reachable and the artifact
+is a deterministic skeleton — suggest `yeaboi --setup`.

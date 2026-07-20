@@ -66,10 +66,8 @@ Trigger phrases: "just plan it", "skip questions", "quick", "fast mode", "no que
 In quick mode:
 1. Extract everything possible from the initial message
 2. Show a brief summary of what was extracted + defaults
-3. Go straight to CLI invocation — no confirmation gate
+3. Go straight to generation (call `plan_generate`) — no confirmation gate
 4. Present results phase-by-phase as normal
-
-This matches the lite skill's approach for users who want speed over thoroughness.
 
 ---
 
@@ -158,7 +156,7 @@ Present as a numbered list. The user can reply with a number from the list or ty
 **Adaptive follow-up:** If the user gave a specific team size, personalize the next question:
 > "You said 6 engineers — what are their roles? (e.g., 2 backend, 1 frontend, 1 fullstack, 1 DevOps, 1 QA)"
 
-This is optional context — if the user skips it, that's fine. Don't block on it. Include the answer in SCRUM.md `## Team Conventions` if provided.
+This is optional context — if the user skips it, that's fine. Don't block on it. Include the answer in the `project_context` you send to `plan_generate` if provided.
 
 ### Q8 — Sprint Length
 
@@ -189,7 +187,7 @@ And if they answered Q2 (project type), ask about constraints:
 > "Since this is a **greenfield** project, are there any architectural constraints? (e.g., microservices vs monolith, cloud provider, language choices)"
 > "Since this is an **existing codebase**, are there constraints to preserve? (e.g., existing APIs, database migrations, backward compatibility)"
 
-These are optional — skip if the user says "no" or "none". Include answers in SCRUM.md `## Constraints` if provided.
+These are optional — skip if the user says "no" or "none". Include answers in the `project_context` you send to `plan_generate` if provided.
 
 ### Q10 — Target Sprints
 
@@ -290,7 +288,7 @@ Reply with a number (1-8) to change your answers, type a default name
 (e.g., "velocity" or "estimation") to override a default, or *"go"* to generate.
 ```
 
-If the user overrides a default (e.g., "velocity 8" or "estimation t-shirt sizes"), update it and include it in the SCRUM.md. If the user replies with a number (1-8), re-ask that specific question. Show the updated list after each change. Only proceed when the user says "go", "yes", "looks good", etc.
+If the user overrides a default (e.g., "velocity 8" or "estimation t-shirt sizes"), update it and include it in the `answers`/`project_context` you send to `plan_generate`. If the user replies with a number (1-8), re-ask that specific question. Show the updated list after each change. Only proceed when the user says "go", "yes", "looks good", etc.
 
 ---
 
@@ -301,11 +299,7 @@ After the confirmation gate and before generation, assess the project complexity
 > "📋 *Heads up* — this looks like a multi-feature project. I'll generate the full plan here, but for the best experience (interactive editing, sprint visualisation, capacity planning), try the full TUI:"
 >
 > ```
-> # macOS
-> brew tap omardin14/tap && brew install yeaboi
->
-> # or via pip
-> pipx install yeaboi
+> uv tool install yeaboi    # or: pipx install yeaboi
 > ```
 >
 > "Then run `yeaboi` and select *Project Planning*. It has a full-screen dashboard where you can edit stories, adjust sprints, and push to Jira interactively."
@@ -327,7 +321,7 @@ For simple projects (1-2 features, small team, 1-2 sprints), skip this message e
 
 ## Generation & Output
 
-yeaboi runs as an MCP server — call its tools directly. There is no SCRUM.md temp file, no shell-out, no polling.
+yeaboi runs as an MCP server — call its tools directly. There is no SCRUM.md temp file, no shell-out for plan generation, no polling. (The only shell usage left is the Slack Canvas output script — see `references/output-and-review.md`.)
 
 When the user confirms (says "go"):
 
