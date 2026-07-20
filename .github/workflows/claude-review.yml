@@ -1,28 +1,35 @@
-# Async Claude code + security review on every PR.
+# Async Claude code + security review — runs ONLY after the full CI workflow
+# has passed on a PR.
 #
-# Deliberately NON-BLOCKING: this workflow is not a required check — ci.yml
-# remains the merge gate. The old per-PR review was removed for being slow;
-# this one can never block a merge, only add review comments when it lands.
-# Skips drafts, the auto-version bot's `chore: bump version` pushes, and
-# Dependabot PRs (those get the dedicated dependabot-auto.yml pipeline, and
-# Dependabot-triggered runs can't read the Actions secrets store anyway).
+# Trigger is `workflow_run` on CI completion (not `pull_request`): the review
+# never runs on a red PR (no tokens burned reviewing code that already fails
+# tests) and never parks a failing/pending check on the PR while CI is still
+# going. Still deliberately NON-BLOCKING: not a required check — ci.yml
+# remains the merge gate; this can only add review comments.
+#
+# Because workflow_run loses the PR context, the PR is resolved from the CI
+# run's head SHA, and the old trigger filters are reimplemented there: skip
+# drafts, Dependabot PRs (dependabot-auto.yml owns those), and the
+# auto-version bot's `chore: bump version` pushes (re-reviewing the same diff
+# plus a version line wastes tokens — the original review already posted).
 
 name: Claude Review
 
 on:
-  pull_request:
-    types: [opened, ready_for_review, synchronize]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
+  group: claude-review-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
   review:
     if: |
-      github.event.pull_request.draft == false &&
-      github.actor != 'github-actions[bot]' &&
-      github.actor != 'dependabot[bot]'
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      !startsWith(github.event.workflow_run.head_commit.message, 'chore: bump version')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,20 +38,48 @@ jobs:
       id-token: write
       actions: read
     steps:
+      - name: Resolve PR for this CI run
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            --jq '[.[] | select(.state == "open")][0]')
+          if [ -z "$pr" ] || [ "$pr" = "null" ]; then
+            echo "No open PR for this run — skipping review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          number=$(jq -r '.number' <<< "$pr")
+          draft=$(jq -r '.draft' <<< "$pr")
+          author=$(jq -r '.user.login' <<< "$pr")
+          echo "PR #$number by $author (draft=$draft)"
+          if [ "$draft" = "true" ] || [ "$author" = "dependabot[bot]" ] || [ "$author" = "github-actions[bot]" ]; then
+            echo "Draft or bot-authored PR — skipping review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
+        if: steps.pr.outputs.skip == 'false'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Run Claude review
+        if: steps.pr.outputs.skip == 'false'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+            Review PR #${{ steps.pr.outputs.number }} in ${{ github.repository }}.
+            The full CI suite has already passed on this PR — do not re-verify what
+            CI covers; focus on what tests cannot catch.
 
-            Read the diff with `gh pr diff ${{ github.event.pull_request.number }}` and the PR
-            description with `gh pr view ${{ github.event.pull_request.number }}`. Then review for:
+            Read the diff with `gh pr diff ${{ steps.pr.outputs.number }}` and the PR
+            description with `gh pr view ${{ steps.pr.outputs.number }}`. Then review for:
 
             1. **Correctness** — real bugs only: logic errors, broken edge cases, state
                serialization issues (frozen dataclass fields without defaults break --resume),
@@ -59,9 +94,9 @@ jobs:
                use, missing auth on new server endpoints.
 
             Post the result as a single PR review comment via
-            `gh pr comment ${{ github.event.pull_request.number }} --body "..."`:
+            `gh pr comment ${{ steps.pr.outputs.number }} --body "..."`:
             a short verdict line, then only findings that matter (file:line, what, why).
             If there are no significant findings, post one line saying the review passed.
             Do not comment on style that ruff already enforces. Do not request changes on
             nitpicks. This review is advisory — never attempt to approve, merge, or block.
-          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh run view:*),Read,Grep,Glob"'
+          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment ${{ steps.pr.outputs.number }}:*),Bash(gh run view:*),Read,Grep,Glob"'

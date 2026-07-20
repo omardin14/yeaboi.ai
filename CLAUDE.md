@@ -58,7 +58,7 @@ Slash commands (in `.claude/commands/`): `/wt` (worktree ops from inside a sessi
 
 - **Every turn (automatic)**: a Stop hook runs `make lint` + `make test-fast` whenever a turn ends with dirty `.py` files, and a PostToolUse hook ruff-formats every edited `.py` file. Hook scripts live in `scripts/claude-hooks/`; wiring is in `.claude/settings.json`.
 - **At ship time (`/ship`)**: an independent fresh-context agent reviews the diff against the task (spec-fit + CLAUDE.md conventions), then the full `make test` + `make lint` gate runs before commit/push/PR.
-- **In CI**: `claude-review.yml` posts an async code + security review on every PR (non-blocking; `ci.yml` remains the merge gate).
+- **In CI**: `claude-review.yml` posts an async code + security review once the full CI suite has passed on a PR (non-blocking; `ci.yml` remains the merge gate).
 
 ### Orchestration conventions
 
@@ -514,7 +514,7 @@ Workflows in `.github/workflows/`:
 | `ci.yml` | Every push | Lint + test |
 | `auto-version.yml` | PR | Claude classifies the diff and commits a `chore: bump version…` to the PR branch (skips docs/chore-only PRs; `semver:*` / `release:skip` labels override) |
 | `publish.yml` | Push to `main` | if `pyproject.toml` version has no tag yet: test → build → PyPI publish (OIDC) → tag + GitHub Release (else no-op) |
-| `claude-review.yml` | PR opened/synchronized | Async Claude code + security review comment; advisory only, never blocks merge (skips drafts, bots, and Dependabot PRs) |
+| `claude-review.yml` | CI workflow succeeds on a PR (`workflow_run`) | Async Claude code + security review comment; only fires when all CI checks passed (no tokens burned on red PRs); advisory only, never blocks merge (skips drafts, bots, and Dependabot PRs) |
 | `dependabot-auto.yml` | Dependabot PR | Claude verifies each bump (release notes vs our actual usage), posts a `SAFE-TO-MERGE` / `NEEDS-HUMAN` verdict comment, and enables auto-merge for safe ones. Pip **majors** and minor+ bumps of TUI/agent-critical packages (`rich`, `sqlite-vec`, `langgraph`, `langchain*`, `anthropic`) always get the `needs-human` label instead. Auto-merge waits on the required checks, so nothing red can land |
 | `smoke.yml` | Weekly cron | Live API smoke tests |
 | `security-scan.yml` | Weekly cron + manual | SAST + dependency CVE audit on `main`; findings get a Claude fix PR (PRs get the same scan via ci.yml's `make security` job) |
