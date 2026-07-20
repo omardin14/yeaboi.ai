@@ -56,6 +56,9 @@ openai = ["langchain-openai"]
 google = ["langchain-google-genai"]
 pdf = ["pymupdf"]
 bedrock = ["langchain-aws", "boto3"]
+# Local LLM via an Ollama server — free, private, no API key. See README:
+# "Local Mode (Ollama)".
+ollama = ["langchain-ollama"]
 # Voice input — record mic audio (sounddevice) and transcribe locally and
 # offline with faster-whisper. Lazy-imported in voice.py; needs no API key
 # (works with any LLM provider). The sounddevice wheels bundle PortAudio on
@@ -65,7 +68,7 @@ voice = ["sounddevice", "faster-whisper"]
 # Chart images embedded in exports (velocity / delivered-work PNGs). Lazy-
 # imported in charts.py — without the extra, exports simply skip the charts.
 charts = ["matplotlib>=3.8"]
-all-providers = ["langchain-openai", "langchain-google-genai", "langchain-aws", "boto3"]
+all-providers = ["langchain-openai", "langchain-google-genai", "langchain-aws", "boto3", "langchain-ollama"]
 dev = [
     "pytest",
     "pytest-asyncio",

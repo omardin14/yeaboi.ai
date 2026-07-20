@@ -8,12 +8,17 @@ from yeaboi.agent.llm import (
     _PROVIDER_DEFAULTS,
     DEFAULT_MODEL,
     build_multimodal_content,
+    estimate_tokens,
     get_llm,
     get_usage_stats,
+    invoke_json,
     invoke_with_images,
     load_image_b64,
     reset_usage_stats,
+    strip_json_fences,
+    strip_think_tags,
     track_usage,
+    warn_if_context_overflow,
 )
 
 
@@ -196,6 +201,85 @@ class TestGetLlmGoogle:
             get_llm()
 
 
+class TestGetLlmOllama:
+    """Tests for the local Ollama provider (keyless)."""
+
+    def test_ollama_provider_returns_chat_ollama(self, monkeypatch):
+        """LLM_PROVIDER=ollama must return a ChatOllama instance."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        from langchain_ollama import ChatOllama
+
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        llm = get_llm()
+        assert isinstance(llm, ChatOllama)
+
+    def test_ollama_default_model(self, monkeypatch):
+        """Ollama provider default model must match _PROVIDER_DEFAULTS."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        llm = get_llm()
+        assert llm.model == _PROVIDER_DEFAULTS["ollama"]
+
+    def test_ollama_needs_no_api_key(self, monkeypatch):
+        """The keyless guarantee: no API key env vars set → no exception."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "AWS_REGION", "AWS_DEFAULT_REGION"):
+            monkeypatch.delenv(var, raising=False)
+        llm = get_llm()
+        assert isinstance(llm, BaseChatModel)
+
+    def test_ollama_base_url_from_env(self, monkeypatch):
+        """OLLAMA_BASE_URL must be wired through to ChatOllama (trailing slash stripped)."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://10.0.0.5:11434/")
+        llm = get_llm()
+        assert llm.base_url == "http://10.0.0.5:11434"
+
+    def test_ollama_default_base_url(self, monkeypatch):
+        """Without OLLAMA_BASE_URL, the standard localhost address must be used."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        llm = get_llm()
+        assert llm.base_url == "http://localhost:11434"
+
+    def test_ollama_json_mode_sets_format(self, monkeypatch):
+        """json_mode=True must turn on Ollama's constrained JSON decoding."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert get_llm(json_mode=True).format == "json"
+        assert get_llm().format in ("", None)
+
+    def test_ollama_num_ctx_from_env(self, monkeypatch):
+        """OLLAMA_NUM_CTX must be wired through (default 16384)."""
+        pytest.importorskip("langchain_ollama", reason="langchain-ollama not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+        assert get_llm().num_ctx == 16384
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
+        assert get_llm().num_ctx == 8192
+
+    def test_ollama_missing_package_raises_import_error(self, monkeypatch):
+        """Must raise ImportError with install instructions if langchain-ollama is absent."""
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        import builtins
+
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "langchain_ollama":
+                raise ImportError("No module named 'langchain_ollama'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        with pytest.raises(ImportError, match="langchain-ollama is not installed"):
+            get_llm()
+
+
 class TestGetLlmUnknownProvider:
     """Tests for unknown/unsupported provider values."""
 
@@ -223,6 +307,9 @@ class TestProviderDefaults:
 
     def test_google_default_is_gemini_flash(self):
         assert _PROVIDER_DEFAULTS["google"] == "gemini-2.5-flash"
+
+    def test_ollama_default_is_qwen3(self):
+        assert _PROVIDER_DEFAULTS["ollama"] == "qwen3:8b"
 
     def test_default_model_constant_matches_anthropic(self):
         """DEFAULT_MODEL backward-compat constant must equal the Anthropic default."""
@@ -304,6 +391,31 @@ class TestTrackUsage:
         stats["input_tokens"] = 999999
         fresh = get_usage_stats()
         assert fresh["input_tokens"] != 999999
+
+    def test_usage_metadata_preferred(self):
+        """LangChain-standard usage_metadata (ChatOllama populates it) wins over response_metadata."""
+        from types import SimpleNamespace
+
+        resp = SimpleNamespace(
+            usage_metadata={"input_tokens": 40, "output_tokens": 15},
+            response_metadata={},
+        )
+        track_usage(resp)
+        stats = get_usage_stats()
+        assert stats["input_tokens"] == 40
+        assert stats["output_tokens"] == 15
+        assert stats["call_count"] == 1
+
+    def test_ollama_native_keys_in_response_metadata(self):
+        """Ollama-native prompt_eval_count/eval_count keys are understood as a fallback."""
+        from types import SimpleNamespace
+
+        resp = SimpleNamespace(response_metadata={"prompt_eval_count": 120, "eval_count": 30})
+        track_usage(resp)
+        stats = get_usage_stats()
+        assert stats["input_tokens"] == 120
+        assert stats["output_tokens"] == 30
+        assert stats["call_count"] == 1
 
     def test_reset_usage_stats_clears_counters(self):
         """reset_usage_stats clears counters."""
@@ -410,3 +522,175 @@ class TestInvokeWithImages:
         llm = self._FakeLLM(fail_first=True)
         with pytest.raises(ValueError):
             invoke_with_images(llm, "prompt", [])
+
+
+class TestStripThinkTags:
+    """strip_think_tags removes local models' chain-of-thought from prose output."""
+
+    def test_closed_block_removed(self):
+        assert strip_think_tags("<think>hmm, let me plan</think>\nHello!") == "Hello!"
+
+    def test_multiple_blocks_removed(self):
+        out = strip_think_tags("<think>a</think>one<think>b</think> two")
+        assert out == "one two"
+
+    def test_unclosed_leading_block_removed(self):
+        # Truncated generation: the model never closed its think block.
+        assert strip_think_tags("<think>rambling that never ends") == ""
+
+    def test_no_tags_passthrough(self):
+        assert strip_think_tags("plain answer") == "plain answer"
+
+    def test_non_string_passthrough(self):
+        blocks = [{"type": "text", "text": "hi"}]
+        assert strip_think_tags(blocks) is blocks
+
+
+class TestStripJsonFences:
+    """strip_json_fences must tolerate every common fencing style."""
+
+    def test_bare_json_unchanged(self):
+        assert strip_json_fences('{"a": 1}') == '{"a": 1}'
+
+    def test_plain_fence(self):
+        assert strip_json_fences('```\n{"a": 1}\n```') == '{"a": 1}'
+
+    def test_json_tagged_fence(self):
+        assert strip_json_fences('```json\n{"a": 1}\n```') == '{"a": 1}'
+
+    def test_whitespace_stripped(self):
+        assert strip_json_fences('  {"a": 1}  \n') == '{"a": 1}'
+
+    def test_empty_and_none_safe(self):
+        assert strip_json_fences("") == ""
+        assert strip_json_fences(None) == ""
+
+
+class TestInvokeJson:
+    """invoke_json: JSON-mode invoke with a one-shot repair re-ask."""
+
+    class _FakeResp:
+        def __init__(self, content):
+            self.content = content
+            self.response_metadata = {"usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    class _FakeLLM:
+        """Returns queued responses in order; records every invoke's messages."""
+
+        def __init__(self, contents):
+            self.queue = list(contents)
+            self.calls = []
+
+        def invoke(self, messages):
+            self.calls.append(messages)
+            return TestInvokeJson._FakeResp(self.queue.pop(0))
+
+    def _patch(self, monkeypatch, llm):
+        import yeaboi.agent.llm as llm_module
+
+        captured = {}
+
+        def fake_get_llm(model=None, temperature=0.0, json_mode=False):
+            captured["json_mode"] = json_mode
+            captured["temperature"] = temperature
+            return llm
+
+        monkeypatch.setattr(llm_module, "get_llm", fake_get_llm)
+        return captured
+
+    def setup_method(self):
+        reset_usage_stats()
+
+    def test_valid_first_try_single_invoke(self, monkeypatch):
+        llm = self._FakeLLM(['{"ok": true}'])
+        captured = self._patch(monkeypatch, llm)
+        resp = invoke_json("prompt")
+        assert resp.content == '{"ok": true}'
+        assert len(llm.calls) == 1
+        assert captured["json_mode"] is True
+
+    def test_fenced_valid_json_accepted_without_reask(self, monkeypatch):
+        llm = self._FakeLLM(['```json\n{"ok": true}\n```'])
+        self._patch(monkeypatch, llm)
+        resp = invoke_json("prompt")
+        assert len(llm.calls) == 1
+        assert "ok" in resp.content
+
+    def test_invalid_then_valid_reasks_once_with_error(self, monkeypatch):
+        llm = self._FakeLLM(["not json at all", '{"fixed": 1}'])
+        self._patch(monkeypatch, llm)
+        resp = invoke_json("prompt")
+        assert resp.content == '{"fixed": 1}'
+        assert len(llm.calls) == 2
+        # The repair round must carry: original prompt, the bad reply, and the parse error.
+        repair_messages = llm.calls[1]
+        assert repair_messages[0].content == "prompt"
+        assert repair_messages[1].content == "not json at all"
+        assert "not valid JSON" in repair_messages[2].content
+
+    def test_invalid_twice_returns_last_response(self, monkeypatch):
+        """Caller-fallback contract: after the repair budget, the last reply is returned as-is."""
+        llm = self._FakeLLM(["garbage one", "garbage two"])
+        self._patch(monkeypatch, llm)
+        resp = invoke_json("prompt")
+        assert resp.content == "garbage two"
+        assert len(llm.calls) == 2
+
+    def test_tracks_usage_per_attempt(self, monkeypatch):
+        llm = self._FakeLLM(["bad", '{"ok": 1}'])
+        self._patch(monkeypatch, llm)
+        invoke_json("prompt")
+        assert get_usage_stats()["call_count"] == 2
+
+    def test_temperature_forwarded(self, monkeypatch):
+        llm = self._FakeLLM(['{"ok": 1}'])
+        captured = self._patch(monkeypatch, llm)
+        invoke_json("prompt", temperature=0.3)
+        assert captured["temperature"] == 0.3
+
+    def test_repair_reask_keeps_image_blocks(self, monkeypatch, tmp_path):
+        """The repair round must rebuild the multimodal first message — a
+        text-only re-ask would silently drop pasted screenshots."""
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"\x89PNG-fake-bytes")
+        llm = self._FakeLLM(["not json at all", '{"fixed": 1}'])
+        self._patch(monkeypatch, llm)
+        invoke_json("prompt", image_paths=[str(img)])
+        assert len(llm.calls) == 2
+        first_repair_content = llm.calls[1][0].content
+        assert isinstance(first_repair_content, list)
+        assert any(isinstance(b, dict) and b.get("type") == "image" for b in first_repair_content)
+
+
+class TestEstimateTokens:
+    def test_roughly_four_chars_per_token(self):
+        assert estimate_tokens("a" * 400) == 100
+
+    def test_empty_string(self):
+        assert estimate_tokens("") == 0
+
+
+class TestWarnIfContextOverflow:
+    """Ollama silently truncates past num_ctx — the guard must make it loggable."""
+
+    def test_warns_for_oversized_ollama_prompt(self, monkeypatch, caplog):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+        # Default budget: 16384 ctx − 8192 output reserve → ~8192 prompt tokens
+        # (~32 768 chars). 40k chars is safely over.
+        with caplog.at_level("WARNING", logger="yeaboi.agent.llm"):
+            warn_if_context_overflow("x" * 40_000)
+        assert "OLLAMA_NUM_CTX" in caplog.text
+
+    def test_silent_for_small_prompt(self, monkeypatch, caplog):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+        with caplog.at_level("WARNING", logger="yeaboi.agent.llm"):
+            warn_if_context_overflow("a small prompt")
+        assert "OLLAMA_NUM_CTX" not in caplog.text
+
+    def test_noop_for_cloud_provider(self, monkeypatch, caplog):
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        with caplog.at_level("WARNING", logger="yeaboi.agent.llm"):
+            warn_if_context_overflow("x" * 200_000)
+        assert "OLLAMA_NUM_CTX" not in caplog.text

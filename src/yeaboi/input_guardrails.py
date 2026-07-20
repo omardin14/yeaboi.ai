@@ -224,6 +224,10 @@ _CLASSIFIER_MODELS: dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
     "google": "gemini-2.5-flash",
+    # ollama deliberately absent: .get() → None → the user's main model. A
+    # second local model here would force Ollama to swap models in RAM on
+    # every classifier call, which is far slower than just reusing the one
+    # already loaded.
 }
 
 _CLASSIFIER_PROMPT = """\
@@ -322,10 +326,28 @@ def check_off_topic(text: str) -> str | None:
         llm = _llm_module.get_llm(model=model, temperature=0.0)
         # Disable retries — this is a non-critical guardrail; failing fast is
         # better than blocking the REPL for seconds on API overload (529).
-        llm.max_retries = 0
+        # hasattr guard: ChatOllama has no max_retries field, and assigning an
+        # undefined field to a pydantic model raises — which the except below
+        # would silently turn into a disabled guardrail.
+        if hasattr(llm, "max_retries"):
+            llm.max_retries = 0
+        # Local models (ChatOllama) generate on the user's CPU/GPU — an
+        # uncapped call lets a think-by-default model (qwen3) burn seconds of
+        # <think> tokens before its one-word verdict, on the input critical
+        # path. Cap the generation and turn thinking off for this one call.
+        # Constructor-level reasoning=False was deliberately avoided in
+        # get_llm() (older servers reject the option for non-think models),
+        # but here the except below already fails open, so the risk is zero.
+        # Cloud LLMs lack both fields — the hasattr guards make this a no-op.
+        if hasattr(llm, "num_predict"):
+            llm.num_predict = 64
+        if hasattr(llm, "reasoning"):
+            llm.reasoning = False
 
         response = llm.invoke(f"{_CLASSIFIER_PROMPT}\n\nUser input: {text}")
-        result = response.content.strip().upper()
+        # Local think-by-default models can bury the verdict token in a
+        # <think> block — strip it before matching.
+        result = _llm_module.strip_think_tags(response.content).strip().upper()
 
         if "OFF_TOPIC" in result:
             return (

@@ -341,6 +341,42 @@ class TestCheckOffTopic:
         assert check_off_topic("do you love me") is None
 
     @patch(_LLM_PATCH)
+    @patch(_PROVIDER_PATCH, return_value="ollama")
+    def test_think_block_does_not_bury_verdict(self, _mock_provider, mock_get_llm):
+        # Local think-by-default models wrap the verdict in <think> reasoning —
+        # the verdict after the block must still be matched.
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response(
+            "<think>the user asks about the OFF_TOPIC-adjacent weather...</think>\nRELEVANT"
+        )
+        assert check_off_topic("how was your weekend") is None
+
+    @patch(_LLM_PATCH)
+    @patch(_PROVIDER_PATCH, return_value="ollama")
+    def test_local_classifier_capped(self, _mock_provider, mock_get_llm):
+        # ChatOllama-like models (they expose num_predict/reasoning fields) get
+        # their generation capped and thinking disabled — a one-word verdict
+        # must not cost seconds of local CPU per input.
+        mock_get_llm.return_value.invoke.return_value = _mock_llm_response("RELEVANT")
+        check_off_topic("how was your weekend")
+        assert mock_get_llm.return_value.num_predict == 64
+        assert mock_get_llm.return_value.reasoning is False
+
+    @patch(_LLM_PATCH)
+    @patch(_PROVIDER_PATCH, return_value="anthropic")
+    def test_llm_without_cap_fields_untouched(self, _mock_provider, mock_get_llm):
+        # Pydantic models raise on unknown-field assignment — the hasattr
+        # guards must prevent the assignment from ever being attempted.
+        class _RigidLLM:
+            def invoke(self, prompt):
+                return _mock_llm_response("RELEVANT")
+
+            def __setattr__(self, name, value):
+                raise ValueError(f"unknown field: {name}")
+
+        mock_get_llm.return_value = _RigidLLM()
+        assert check_off_topic("how was your weekend") is None
+
+    @patch(_LLM_PATCH)
     @patch(_PROVIDER_PATCH, return_value="openai")
     def test_uses_cheap_model_openai(self, _mock_provider, mock_get_llm):
         mock_get_llm.return_value.invoke.return_value = _mock_llm_response("RELEVANT")

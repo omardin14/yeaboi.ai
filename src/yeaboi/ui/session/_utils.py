@@ -177,6 +177,16 @@ def _classify_api_error(err: Exception) -> str:
     Optional-dependency SDKs are matched by class/module name + status code
     rather than isinstance, so this module never has to import them.
     """
+    # Local Ollama first — its failures carry generic shapes (httpx.ConnectError,
+    # a 404 ResponseError) that the branches below would mis-classify. The hint
+    # helper is provider-gated, so this is a no-op for every cloud provider.
+    # See README: "Local Mode (Ollama)" — reliability layer.
+    from yeaboi.agent.nodes import _local_llm_hint
+
+    local_hint = _local_llm_hint(err)
+    if local_hint:
+        return local_hint
+
     # Anthropic — the default provider, always installed.
     if isinstance(err, anthropic.AuthenticationError):
         return "Authentication failed — check your ANTHROPIC_API_KEY in .env (may be missing, expired, or invalid)."

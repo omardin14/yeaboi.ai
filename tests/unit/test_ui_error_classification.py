@@ -113,3 +113,25 @@ class TestGenericAndFallback:
 
     def test_short_fallback_passthrough(self):
         assert _classify_api_error(ValueError("boom")) == "Unexpected error: boom"
+
+
+class TestOllamaLocal:
+    """Local-Ollama failures get actionable hints instead of generic messages."""
+
+    def test_server_down_gets_serve_hint(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        msg = _classify_api_error(httpx.ConnectError("All connection attempts failed"))
+        assert "ollama serve" in msg
+
+    def test_model_not_pulled_gets_pull_hint(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("LLM_MODEL", "qwen3:32b")
+        msg = _classify_api_error(Exception("model 'qwen3:32b' not found, try pulling it first"))
+        assert "ollama pull qwen3:32b" in msg
+
+    def test_cloud_provider_unaffected(self, monkeypatch):
+        # The hint helper is provider-gated — cloud errors keep today's messages.
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        assert "Network error" in _classify_api_error(ConnectionError("refused"))

@@ -412,8 +412,10 @@ def _summarize_members(
         logger.warning("standup: LLM not configured (%s) — using deterministic fallback", why)
         return _fallback([f"AI summary unavailable — {why}."])
 
-    from yeaboi.agent.llm import get_llm, invoke_with_images, track_usage
-    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error
+    # invoke_json tracks usage + turns on JSON mode + re-asks once on bad JSON.
+    # See README: "Local Mode (Ollama)" — reliability layer.
+    from yeaboi.agent.llm import invoke_json
+    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error, _local_llm_hint
     from yeaboi.prompts.standup import get_standup_summary_prompt
 
     prompt = get_standup_summary_prompt(
@@ -436,13 +438,16 @@ def _summarize_members(
             len(member_payload),
             len(images),
         )
-        response = invoke_with_images(get_llm(temperature=0.0), prompt, images)
-        track_usage(response)
+        response = invoke_json(prompt, image_paths=images)
         parsed = _parse_standup_response(response.content)
     except Exception as exc:
         if _is_llm_auth_or_billing_error(exc):
             logger.warning("standup: LLM auth/billing error — surfacing as warning: %s", exc)
             return _fallback(["AI summary unavailable — API key invalid or billing issue."])
+        local_hint = _local_llm_hint(exc)
+        if local_hint:
+            logger.warning("standup: local Ollama failure: %s", exc)
+            return _fallback([f"AI summary unavailable — {local_hint}"])
         logger.warning("standup: LLM summarization failed, using fallback: %s", exc)
         return _fallback(["AI summary unavailable — LLM request failed (see logs)."])
 

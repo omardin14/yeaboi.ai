@@ -25,7 +25,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END
 
 from yeaboi.agent.ceremony_history import gather_ceremony_context
-from yeaboi.agent.llm import get_llm, invoke_with_images
+from yeaboi.agent.llm import get_llm, invoke_json
 from yeaboi.agent.repo_signals import analyze_context, scan_repo_signals
 from yeaboi.agent.state import (
     DOD_ITEMS,
@@ -123,6 +123,185 @@ def _is_llm_auth_or_billing_error(exc: Exception) -> bool:
     return False
 
 
+def _is_llm_connection_error(exc: Exception) -> bool:
+    """Check whether an exception means the LLM server could not be reached.
+
+    Matters for the local Ollama provider: a down server would otherwise be
+    swallowed by the deterministic-fallback net and silently degrade every
+    artifact. Guard sites re-raise these (only when provider == "ollama") so
+    the user gets an actionable "is Ollama running?" message instead.
+
+    Walks the __cause__/__context__ chain because langchain and the ollama
+    client wrap the underlying httpx transport error.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        # Builtin connection errors (ConnectionRefusedError, ConnectionResetError, ...)
+        if isinstance(current, ConnectionError):
+            return True
+        # httpx transport errors — the ollama client and langchain use httpx
+        try:
+            import httpx
+
+            if isinstance(current, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+                return True
+        except ImportError:
+            pass
+        msg = str(current).lower()
+        # "[Errno 61]" = macOS connection refused, "[Errno 111]" = Linux
+        if "connection refused" in msg or "[errno 61]" in msg or "[errno 111]" in msg:
+            return True
+        if "failed to connect" in msg and "ollama" in msg:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _ollama_connection_hint() -> str:
+    """Actionable message for a down/unreachable local Ollama server."""
+    from yeaboi.config import get_ollama_base_url
+
+    return (
+        f"Can't reach Ollama at {get_ollama_base_url()}. Is it running? "
+        "Start it with: ollama serve — or check OLLAMA_BASE_URL in your .env."
+    )
+
+
+def _is_local_llm_down(exc: Exception) -> bool:
+    """True when the active provider is the local Ollama server and it's unreachable.
+
+    Cloud transient network blips deliberately return False — they keep today's
+    graceful-fallback behaviour. Used by the mode engines to swap their generic
+    "request failed" warning for the actionable Ollama hint.
+    """
+    if not _is_llm_connection_error(exc):
+        return False
+    from yeaboi.config import get_llm_provider
+
+    return get_llm_provider() == "ollama"
+
+
+def _exception_chain(exc: Exception):
+    """Yield exc and every exception in its __cause__/__context__ chain (cycle-safe)."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _is_ollama_model_missing(exc: Exception) -> bool:
+    """True when the active provider is Ollama and the configured model isn't pulled.
+
+    The Ollama server answers 404 ``model '…' not found`` (ollama.ResponseError)
+    for a model that was never pulled or has been deleted. That's neither a
+    connection error nor an auth error, so without this check it would silently
+    degrade every artifact to its deterministic fallback — exactly what the
+    reliability layer exists to prevent.
+    """
+    from yeaboi.config import get_llm_provider
+
+    if get_llm_provider() != "ollama":
+        return False
+    for current in _exception_chain(exc):
+        try:
+            import ollama
+
+            if isinstance(current, ollama.ResponseError) and getattr(current, "status_code", None) == 404:
+                return True
+        except ImportError:
+            pass
+        msg = str(current).lower()
+        if "model" in msg and "not found" in msg:
+            return True
+    return False
+
+
+def _is_langchain_ollama_missing(exc: Exception) -> bool:
+    """True when the langchain-ollama package itself isn't installed.
+
+    It's an optional extra — a user can point LLM_PROVIDER=ollama at a working
+    server without ever installing the python package, and the first real call
+    would raise ImportError from get_llm(). Detected here so it surfaces as an
+    actionable install hint instead of a raw traceback or silent fallback.
+    """
+    for current in _exception_chain(exc):
+        if isinstance(current, ImportError) and "langchain" in str(current).lower():
+            return True
+    return False
+
+
+def _is_llm_read_timeout(exc: Exception) -> bool:
+    """True when the failure is a read timeout (server reachable but too slow)."""
+    try:
+        import httpx
+    except ImportError:
+        return False
+    return any(isinstance(current, httpx.ReadTimeout) for current in _exception_chain(exc))
+
+
+def _local_llm_hint(exc: Exception) -> str | None:
+    """Actionable message for a local-Ollama failure, or None for anything else.
+
+    The single decision point the REPL, TUI, and mode engines all share. Four
+    cases (package missing, model missing, timeout, server down), checked
+    most-specific first; cloud-provider errors always return None so their
+    graceful-fallback behaviour is untouched.
+    """
+    from yeaboi.config import get_llm_provider
+
+    if get_llm_provider() != "ollama":
+        return None
+    if _is_langchain_ollama_missing(exc):
+        return (
+            "Ollama support isn't installed — run: uv sync --extra ollama "
+            "(or: pip install langchain-ollama), then retry."
+        )
+    if _is_ollama_model_missing(exc):
+        from yeaboi.agent.llm import _PROVIDER_DEFAULTS
+        from yeaboi.config import get_llm_model
+
+        model = get_llm_model() or _PROVIDER_DEFAULTS["ollama"]
+        return f"Model '{model}' is not installed on the Ollama server. Pull it with: ollama pull {model}"
+    if _is_llm_read_timeout(exc):
+        return (
+            "Ollama timed out — the model may be too large or slow for this machine. "
+            "Try a smaller model (e.g. qwen3:8b) or a shorter project description."
+        )
+    if _is_llm_connection_error(exc):
+        return _ollama_connection_hint()
+    return None
+
+
+def _should_reraise_llm_error(exc: Exception) -> bool:
+    """Decide whether an LLM failure must surface to the user instead of falling back.
+
+    Cases that re-raise:
+    - Auth/billing errors on any provider (the user must fix credentials).
+    - Local-Ollama failures with an actionable fix — server down, model not
+      pulled, or timeout — which would otherwise silently degrade every
+      artifact to its deterministic fallback. Cloud transient network blips
+      keep today's graceful-fallback behaviour (the REPL already retries
+      rate limits).
+    """
+    return _is_llm_auth_or_billing_error(exc) or _local_llm_hint(exc) is not None
+
+
+def _invoke_json(prompt: str, *, image_paths=None):
+    """JSON-mode LLM invoke for this module's generation nodes.
+
+    Wraps agent/llm.py::invoke_json (constrained JSON decoding on Ollama + a
+    one-shot "fix your JSON" re-ask + track_usage) while routing model creation
+    through THIS module's ``get_llm`` reference — the lambda resolves it at call
+    time, so tests that patch ``yeaboi.agent.nodes.get_llm`` keep working.
+    # See README: "Local Mode (Ollama)" — reliability layer.
+    """
+    return invoke_json(prompt, image_paths=image_paths, get_llm_fn=lambda **kw: get_llm(**kw))
+
+
 # ---------------------------------------------------------------------------
 # High-risk tool constants
 # ---------------------------------------------------------------------------
@@ -182,6 +361,62 @@ def _attach_chat_images(state: ScrumState, all_messages: list[BaseMessage]) -> l
     return all_messages
 
 
+def _trim_history_for_local(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Trim chat history to fit a local model's context window. No-op for cloud.
+
+    # See README: "Local Mode (Ollama)" — context window reliability
+    Cloud windows are 200k+ tokens, but Ollama silently LEFT-truncates anything
+    beyond num_ctx − num_predict — which eats the *system prompt* first, the
+    worst possible loss. Instead, drop the OLDEST turns explicitly: keep the
+    head message (the system prompt) pinned, walk the rest accumulating a rough
+    token estimate, and cut only at HumanMessage boundaries so an
+    AIMessage(tool_calls) is never separated from its ToolMessage results
+    (a split pair is an API error on every provider). The latest exchange is
+    always kept, even if it alone exceeds the budget.
+    """
+    from yeaboi.config import get_llm_provider
+
+    if get_llm_provider() != "ollama" or len(messages) < 2:
+        return messages
+
+    from langchain_core.messages import HumanMessage
+
+    from yeaboi.agent.llm import _OLLAMA_NUM_PREDICT, estimate_tokens
+    from yeaboi.config import get_ollama_num_ctx
+
+    def _msg_tokens(msg: BaseMessage) -> int:
+        content = getattr(msg, "content", "")
+        return estimate_tokens(content if isinstance(content, str) else str(content))
+
+    system, history = messages[0], messages[1:]
+    budget = get_ollama_num_ctx() - _OLLAMA_NUM_PREDICT - _msg_tokens(system)
+    sizes = [_msg_tokens(m) for m in history]
+    remaining = sum(sizes)  # at index i this holds sum(sizes[i:])
+    if remaining <= budget:
+        return messages
+
+    cut = None  # first HumanMessage index whose tail fits the budget
+    last_human = None
+    for i, msg in enumerate(history):
+        if isinstance(msg, HumanMessage):
+            last_human = i
+            if remaining <= budget:
+                cut = i
+                break
+        remaining -= sizes[i]
+    if cut is None:
+        cut = last_human  # over budget even at the latest exchange — keep it anyway
+    if not cut:  # None (no human message to cut at) or 0 (nothing to drop)
+        return messages
+
+    logger.info(
+        "local context trim: dropping %d oldest chat messages to fit OLLAMA_NUM_CTX (budget ~%d tokens)",
+        cut,
+        budget,
+    )
+    return [system, *history[cut:]]
+
+
 def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, list[BaseMessage]]]:
     """Return a call_model node function with the given tools bound to the LLM.
 
@@ -208,25 +443,74 @@ def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, l
     # The graph wires it as: graph.add_node("agent", make_call_model(tools))
     """
     _bound_llm = None  # initialised lazily on first call
+    _tools_unsupported = False  # set once a local model rejects tool schemas
+
+    def _is_tools_unsupported_error(exc: Exception) -> bool:
+        """True when the (local) model rejected the request because of tool schemas."""
+        return any("does not support tools" in str(current).lower() for current in _exception_chain(exc))
 
     def call_model_with_tools(state: ScrumState) -> dict[str, list[BaseMessage]]:
         """LangGraph node: invoke the LLM with bound tools."""
-        nonlocal _bound_llm
-        if _bound_llm is None:
+        nonlocal _bound_llm, _tools_unsupported
+        if _bound_llm is None and not _tools_unsupported:
             # bind_tools() returns a new Runnable (RunnableBinding) that wraps
             # the LLM and injects the tool schemas into every API request.
             # Claude reads these schemas to know what tools are available and
             # generates tool_calls when it wants to use one.
             _bound_llm = get_llm().bind_tools(tools)
         system_message = SystemMessage(content=get_system_prompt())
-        all_messages = _attach_chat_images(state, [system_message, *state["messages"]])
-        response = _bound_llm.invoke(all_messages)
+        # Trim BEFORE attaching images: the estimate is text-based, and the
+        # latest human message (where images attach) is always kept.
+        all_messages = _attach_chat_images(state, _trim_history_for_local([system_message, *state["messages"]]))
+        if _tools_unsupported:
+            response = get_llm().invoke(all_messages)
+        else:
+            try:
+                response = _bound_llm.invoke(all_messages)
+            except Exception as exc:
+                # Some local models can't call tools — Ollama rejects the whole
+                # request ("… does not support tools"). Degrade to plain chat
+                # (once discovered, skip the doomed bound attempt on later turns)
+                # instead of surfacing "Unexpected error". Cloud models always
+                # support tools, so any other exception propagates unchanged.
+                if not _is_tools_unsupported_error(exc):
+                    raise
+                logger.warning("model does not support tool calling — degrading to plain chat: %s", exc)
+                _tools_unsupported = True
+                _bound_llm = None
+                response = get_llm().invoke(all_messages)
+                _strip_response_think_tags(response)
+                if isinstance(response.content, str):
+                    response.content += (
+                        "\n\n_Note: this local model doesn't support tool calling, so actions like "
+                        "Jira/Confluence sync are unavailable in chat. Pick a tool-capable model "
+                        "(e.g. qwen3:8b) in Setup to enable them._"
+                    )
+                out_deg: dict = {"messages": [response]}
+                if state.get("chat_images"):
+                    out_deg["chat_images"] = []
+                return out_deg
+        _strip_response_think_tags(response)
         out: dict = {"messages": [response]}
         if state.get("chat_images"):
             out["chat_images"] = []  # consumed — clear so later turns don't re-send
         return out
 
     return call_model_with_tools
+
+
+def _strip_response_think_tags(response) -> None:
+    """Strip <think> blocks from a chat response's prose content, in place.
+
+    Local think-by-default models (qwen3) embed reasoning in .content — see
+    agent/llm.py:strip_think_tags. Mutates the message (tool_calls untouched)
+    so callers keep returning the original AIMessage object.
+    """
+    from yeaboi.agent.llm import strip_think_tags
+
+    content = getattr(response, "content", None)
+    if isinstance(content, str) and "<think>" in content:
+        response.content = strip_think_tags(content)
 
 
 def call_model(state: ScrumState) -> dict[str, list[BaseMessage]]:
@@ -270,9 +554,11 @@ def call_model(state: ScrumState) -> dict[str, list[BaseMessage]]:
     # each invocation so different nodes can use different system context.
     # Pasted screenshots (chat_images) are attached to the latest human
     # message here, at invoke time only — stored history stays text-only.
-    all_messages = _attach_chat_images(state, [system_message, *state["messages"]])
+    # Local models get their history trimmed to the context window first.
+    all_messages = _attach_chat_images(state, _trim_history_for_local([system_message, *state["messages"]]))
 
     response = get_llm().invoke(all_messages)
+    _strip_response_think_tags(response)
 
     # Return single-item list — the add_messages reducer on ScrumState["messages"]
     # will append this response to the existing conversation history.
@@ -434,7 +720,7 @@ def _extract_answers_from_description(description: str) -> dict[int, str]:
     try:
         # Single LLM call with low temperature for deterministic extraction.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+        response = _invoke_json(prompt)
         raw = response.content
 
         # Strip markdown code fences that LLMs sometimes wrap JSON in
@@ -465,7 +751,7 @@ def _extract_answers_from_description(description: str) -> dict[int, str]:
         return result
 
     except Exception as exc:
-        if _is_llm_auth_or_billing_error(exc):
+        if _should_reraise_llm_error(exc):
             raise
         # Graceful fallback: if anything goes wrong (bad JSON, LLM timeout,
         # network error), return empty dict. The questionnaire will ask all
@@ -2863,7 +3149,7 @@ def _check_vague_answer(question: str, answer: str, q_num: int = 0) -> tuple[str
     )
 
     try:
-        response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+        response = _invoke_json(prompt)
         raw = response.content.strip()
 
         # Strip markdown code fences that LLMs sometimes wrap JSON in
@@ -2888,7 +3174,7 @@ def _check_vague_answer(question: str, answer: str, q_num: int = 0) -> tuple[str
         return None
 
     except Exception as exc:
-        if _is_llm_auth_or_billing_error(exc):
+        if _should_reraise_llm_error(exc):
             raise
         # Graceful fallback: if anything goes wrong (bad JSON, LLM timeout,
         # network error), accept the answer as-is. The feature never breaks
@@ -5620,7 +5906,7 @@ def project_analyzer(state: ScrumState) -> dict:
 
     # Pasted screenshots (Ctrl+V in the description/questionnaire inputs, plus any
     # attached to review-edit feedback) — file paths converted to multimodal image
-    # blocks at invoke time only. See agent/llm.py:invoke_with_images.
+    # blocks at invoke time only. See agent/llm.py:invoke_json/invoke_with_images.
     images = list(state.get("pasted_images") or []) + list(state.get("review_feedback_images") or [])
     if images:
         logger.info("project_analyzer: attaching %d pasted image(s)", len(images))
@@ -5628,10 +5914,10 @@ def project_analyzer(state: ScrumState) -> dict:
     try:
         # Single LLM call with low temperature for deterministic JSON extraction.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = invoke_with_images(get_llm(temperature=0.0), prompt, images)
+        response = _invoke_json(prompt, image_paths=images)
         analysis = _parse_analysis_response(response.content, questionnaire, team_size, velocity)
     except Exception as exc:
-        if _is_llm_auth_or_billing_error(exc):
+        if _should_reraise_llm_error(exc):
             raise
         # LLM call failed entirely — use deterministic fallback.
         logger.warning("LLM call failed in project_analyzer, using fallback", exc_info=True)
@@ -6014,10 +6300,10 @@ def feature_generator(state: ScrumState) -> dict:
     try:
         # Single LLM call with low temperature for deterministic JSON output.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
+        response = _invoke_json(prompt, image_paths=review_images)
         features = _parse_features_response(response.content, analysis)
     except Exception as exc:
-        if _is_llm_auth_or_billing_error(exc):
+        if _should_reraise_llm_error(exc):
             raise
         # LLM call failed entirely — use deterministic fallback.
         logger.warning("LLM call failed in feature_generator, using fallback", exc_info=True)
@@ -7071,10 +7357,10 @@ def story_writer(state: ScrumState) -> dict:
     try:
         # Single LLM call with low temperature for deterministic JSON output.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
+        response = _invoke_json(prompt, image_paths=review_images)
         stories = _parse_stories_response(response.content, features, analysis)
     except Exception as exc:
-        if _is_llm_auth_or_billing_error(exc):
+        if _should_reraise_llm_error(exc):
             raise
         # LLM call failed entirely — use deterministic fallback.
         logger.warning("LLM call failed in story_writer, using fallback", exc_info=True)
@@ -7472,10 +7758,10 @@ def _parallel_task_decompose(
         )
 
         try:
-            response = get_llm(temperature=0.0).invoke([HumanMessage(content=prompt)])
+            response = _invoke_json(prompt)
             return _parse_tasks_response(response.content, feature_stories)
         except Exception as exc:
-            if _is_llm_auth_or_billing_error(exc):
+            if _should_reraise_llm_error(exc):
                 raise
             logger.warning("LLM call failed for feature %s, using fallback", feature_id, exc_info=True)
             return _build_fallback_tasks(feature_stories)
@@ -7589,10 +7875,10 @@ def task_decomposer(state: ScrumState) -> dict:
         # Screenshots attached to review-edit feedback (Ctrl+V) — review passes only.
         review_images = list(state.get("review_feedback_images") or [])
         try:
-            response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
+            response = _invoke_json(prompt, image_paths=review_images)
             tasks = _parse_tasks_response(response.content, stories)
         except Exception as exc:
-            if _is_llm_auth_or_billing_error(exc):
+            if _should_reraise_llm_error(exc):
                 raise
             logger.warning("LLM call failed in task_decomposer (review), using fallback", exc_info=True)
             tasks = _build_fallback_tasks(stories)
@@ -8379,10 +8665,10 @@ def sprint_planner(state: ScrumState) -> dict:
     try:
         # Single LLM call with low temperature for deterministic JSON output.
         # See README: "Agentic Blueprint Reference" — using the LLM outside the main graph
-        response = invoke_with_images(get_llm(temperature=0.0), prompt, review_images)
+        response = _invoke_json(prompt, image_paths=review_images)
         sprints = _parse_sprints_response(response.content, stories, velocity, starting_sprint_number)
     except Exception as exc:
-        if _is_llm_auth_or_billing_error(exc):
+        if _should_reraise_llm_error(exc):
             raise
         # LLM call failed entirely — use greedy bin-packing fallback.
         logger.warning("LLM call failed in sprint_planner, using fallback", exc_info=True)

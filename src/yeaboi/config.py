@@ -452,7 +452,7 @@ def get_llm_provider() -> str:
     """Return the active LLM provider name (lowercase).
 
     Set LLM_PROVIDER in .env to switch providers. Defaults to 'anthropic'.
-    Supported values: 'anthropic', 'openai', 'google'.
+    Supported values: 'anthropic', 'openai', 'google', 'bedrock', 'ollama'.
     """
     return os.getenv("LLM_PROVIDER", "anthropic").lower()
 
@@ -511,6 +511,32 @@ def get_google_api_key() -> str | None:
     return os.getenv("GOOGLE_API_KEY") or None
 
 
+def get_ollama_base_url() -> str:
+    """Return the base URL of the local Ollama server.
+
+    Ollama runs entirely on the user's machine — no API key, no cloud account.
+    Override with OLLAMA_BASE_URL for a non-default port or a server elsewhere
+    on the network. Trailing slashes are stripped so URL joining is predictable.
+    """
+    return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+
+def get_ollama_num_ctx() -> int:
+    """Return the context window (tokens) requested from the Ollama model.
+
+    Ollama's server default context (2-4k tokens) is smaller than the biggest
+    assembled prompts in the planning pipeline (~5k tokens plus optional repo /
+    Confluence context). A too-small context silently truncates the prompt,
+    which destroys the JSON output the pipeline parses — so we default to 16384
+    and let power users tune it via OLLAMA_NUM_CTX (e.g. lower it on low-RAM
+    machines, raise it for very large projects).
+    """
+    try:
+        return int(os.getenv("OLLAMA_NUM_CTX", "16384"))
+    except ValueError:
+        return 16384
+
+
 def is_llm_configured() -> tuple[bool, str]:
     """Return (ok, message) for whether the selected LLM provider has credentials.
 
@@ -529,6 +555,10 @@ def is_llm_configured() -> tuple[bool, str]:
     if provider == "bedrock":
         ok = bool(os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or get_aws_profile())
         return (ok, "AWS credentials/region not configured for Bedrock")
+    if provider == "ollama":
+        # Local provider — no credentials to check. Server reachability is
+        # verified at call time (a down server surfaces an actionable error).
+        return (True, "")
     return (bool(os.getenv("ANTHROPIC_API_KEY")), f"No API key configured for provider '{provider}'")
 
 

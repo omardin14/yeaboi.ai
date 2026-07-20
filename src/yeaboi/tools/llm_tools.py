@@ -98,7 +98,13 @@ def estimate_complexity(
     try:
         response = get_llm(temperature=0.2).invoke([HumanMessage(content=prompt)])
         logger.debug("estimate_complexity completed (%d chars response)", len(response.content))
-        return response.content
+        # Local think-by-default models embed <think> blocks in prose output.
+        from yeaboi.agent.llm import strip_think_tags, track_usage
+
+        # ReAct-tool calls bill like any other — without this the Usage page
+        # undercounts every conversational estimation request.
+        track_usage(response)
+        return strip_think_tags(response.content)
     except Exception as e:
         logger.error("Error in estimate_complexity: %s", e)
         return f"Error estimating complexity: {e}"
@@ -152,7 +158,12 @@ def generate_acceptance_criteria(
     try:
         response = get_llm(temperature=0.3).invoke([HumanMessage(content=prompt)])
         logger.debug("generate_acceptance_criteria completed (%d chars)", len(response.content))
-        return response.content
+        # Local think-by-default models embed <think> blocks in prose output.
+        from yeaboi.agent.llm import strip_think_tags, track_usage
+
+        # ReAct-tool calls bill like any other — see estimate_complexity.
+        track_usage(response)
+        return strip_think_tags(response.content)
     except Exception as e:
         logger.error("Error in generate_acceptance_criteria: %s", e)
         return f"Error generating acceptance criteria: {e}"

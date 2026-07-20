@@ -216,6 +216,24 @@ class TestRunStandup:
         alice = next(m for m in report.member_updates if m.name == "Alice")
         assert "x" in alice.summary  # deterministic fallback used
 
+    def test_ollama_model_missing_becomes_pull_hint_warning(self, monkeypatch, db_path, seeded_session):
+        _patch_common(
+            monkeypatch,
+            items=[{"author": "Alice", "kind": "commit", "title": "x", "source": "github"}],
+            counts=[("github", 1)],
+        )
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("LLM_MODEL", "qwen3:8b")
+
+        def boom(self, m):
+            raise RuntimeError("model 'qwen3:8b' not found, try pulling it first")
+
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", lambda **k: type("L", (), {"invoke": boom})())
+        report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
+        assert any("ollama pull qwen3:8b" in w for w in report.warnings)
+        alice = next(m for m in report.member_updates if m.name == "Alice")
+        assert "x" in alice.summary  # deterministic fallback still used
+
     def test_no_api_key_warns(self, monkeypatch, db_path, seeded_session):
         _patch_common(
             monkeypatch,

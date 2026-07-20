@@ -25,6 +25,7 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "env_var": "ANTHROPIC_API_KEY",
         "provider_val": "anthropic",
         "prefix": "sk-ant-",
+        "tagline": "Recommended cloud \u00b7 API key required",
         "instructions": "Get yours at: https://console.anthropic.com \u2192 API Keys",
         "color": "rgb(70,100,180)",
         "models": {
@@ -43,6 +44,7 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "env_var": "GOOGLE_API_KEY",
         "provider_val": "google",
         "prefix": "AIza",
+        "tagline": "Fast, affordable cloud \u00b7 API key required",
         "instructions": "Get yours at: https://aistudio.google.com \u2192 Get API key",
         "color": "rgb(70,100,180)",
         "models": {
@@ -61,6 +63,7 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "env_var": "OPENAI_API_KEY",
         "provider_val": "openai",
         "prefix": "sk-",
+        "tagline": "Cloud \u00b7 API key required",
         "instructions": "Get yours at: https://platform.openai.com \u2192 API keys",
         "color": "rgb(70,100,180)",
         "models": {
@@ -79,6 +82,7 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
         "env_var": "AWS_REGION",
         "provider_val": "bedrock",
         "prefix": "",
+        "tagline": "AWS-hosted · IAM credentials, no API key",
         "instructions": "Uses IAM credentials from instance role, ~/.aws/credentials, or env vars",
         "color": "rgb(70,100,180)",
         "is_region_input": True,
@@ -89,6 +93,40 @@ _PROVIDER_CARDS: list[dict[str, Any]] = [
             "presets": [
                 "us.anthropic.claude-sonnet-4-6-v1:0",
             ],
+        },
+    },
+    {
+        "name": "Ollama",
+        "full_name": "Ollama (Local)",
+        "env_var": "OLLAMA_BASE_URL",
+        "provider_val": "ollama",
+        "prefix": "",
+        "tagline": "Free · local · private · no API key",
+        "instructions": "Free, private, no API key. Install: https://ollama.com then run: ollama pull qwen3:8b",
+        "color": "rgb(70,100,180)",
+        # Like Bedrock's is_region_input: the "key" field holds a URL, not a
+        # secret — rendered unmasked and pre-filled with default_input.
+        "is_base_url_input": True,
+        "default_input": "http://localhost:11434",
+        "models": {
+            "default": "qwen3:8b",
+            "presets": [
+                "qwen3:8b",
+                "qwen3:14b",
+                "qwen2.5:14b",
+                "llama3.1:8b",
+            ],
+        },
+        # One-line trade-off shown next to each known model in the model list —
+        # local models differ hugely in RAM needs and JSON discipline, so the
+        # user should pick with eyes open. See README: "Local Mode (Ollama)".
+        # Every hint carries the same ~download-size · RAM suffix so no model
+        # can be picked without a size warning.
+        "model_hints": {
+            "qwen3:8b": "best balance · ~5 GB · fine on 16 GB RAM",
+            "qwen3:14b": "better plans · ~9 GB · wants 24 GB+ RAM",
+            "qwen2.5:14b": "proven JSON discipline · ~9 GB · wants 24 GB+ RAM",
+            "llama3.1:8b": "weaker JSON → more fallbacks · ~5 GB · fine on 16 GB RAM",
         },
     },
 ]

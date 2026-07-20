@@ -389,6 +389,41 @@ class TestStandupConfig:
         assert ok is False
         assert "ANTHROPIC_API_KEY" in msg
 
+    def test_is_llm_configured_ollama_needs_no_credentials(self, monkeypatch):
+        """The keyless local provider is always 'configured' — reachability is checked at call time."""
+        from yeaboi.config import is_llm_configured
+
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        assert is_llm_configured() == (True, "")
+
+    def test_ollama_base_url_default(self, monkeypatch):
+        from yeaboi.config import get_ollama_base_url
+
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        assert get_ollama_base_url() == "http://localhost:11434"
+
+    def test_ollama_base_url_env_and_trailing_slash(self, monkeypatch):
+        from yeaboi.config import get_ollama_base_url
+
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://10.0.0.5:11434/")
+        assert get_ollama_base_url() == "http://10.0.0.5:11434"
+
+    def test_ollama_num_ctx_default_and_env(self, monkeypatch):
+        from yeaboi.config import get_ollama_num_ctx
+
+        monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+        assert get_ollama_num_ctx() == 16384
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
+        assert get_ollama_num_ctx() == 8192
+
+    def test_ollama_num_ctx_invalid_falls_back(self, monkeypatch):
+        from yeaboi.config import get_ollama_num_ctx
+
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "not-a-number")
+        assert get_ollama_num_ctx() == 16384
+
 
 class TestConfluenceConfig:
     """Confluence reuses the Jira Atlassian creds, but the CONFLUENCE_* vars win when set

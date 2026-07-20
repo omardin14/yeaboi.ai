@@ -2,11 +2,18 @@
 
 from unittest.mock import MagicMock
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END
 
 from yeaboi.agent.nodes import (
     _HIGH_RISK_TOOLS,
+    _is_llm_connection_error,
+    _is_local_llm_down,
+    _is_ollama_model_missing,
+    _local_llm_hint,
+    _should_reraise_llm_error,
+    _trim_history_for_local,
     _user_confirmed,
     call_model,
     human_review,
@@ -14,6 +21,272 @@ from yeaboi.agent.nodes import (
     should_continue,
 )
 from yeaboi.prompts import get_system_prompt
+
+# ── LLM error classification ─────────────────────────────────────────
+
+
+class TestLlmConnectionError:
+    """_is_llm_connection_error must catch a down local server, not auth errors."""
+
+    def test_builtin_connection_refused(self):
+        assert _is_llm_connection_error(ConnectionRefusedError("refused")) is True
+
+    def test_httpx_connect_error(self):
+        import httpx
+
+        assert _is_llm_connection_error(httpx.ConnectError("connection failed")) is True
+
+    def test_wrapped_cause_chain(self):
+        """langchain/ollama wrap the transport error — the __cause__ chain must be walked."""
+        inner = ConnectionRefusedError("refused")
+        outer = RuntimeError("request failed")
+        outer.__cause__ = inner
+        assert _is_llm_connection_error(outer) is True
+
+    def test_errno_message_patterns(self):
+        assert _is_llm_connection_error(Exception("[Errno 61] Connection refused")) is True
+        assert _is_llm_connection_error(Exception("[Errno 111] connection refused")) is True
+
+    def test_plain_error_is_not_connection(self):
+        assert _is_llm_connection_error(ValueError("bad json")) is False
+
+    def test_auth_error_is_not_connection(self):
+        assert _is_llm_connection_error(Exception("api key invalid")) is False
+
+
+class TestLocalLlmDown:
+    """_is_local_llm_down gates connection errors on the ollama provider."""
+
+    def test_true_for_ollama_provider(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _is_local_llm_down(ConnectionRefusedError("refused")) is True
+
+    def test_false_for_cloud_provider(self, monkeypatch):
+        """Cloud transient network blips keep the graceful-fallback behaviour."""
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        assert _is_local_llm_down(ConnectionRefusedError("refused")) is False
+
+    def test_false_for_non_connection_error(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _is_local_llm_down(ValueError("bad json")) is False
+
+
+class TestShouldReraiseLlmError:
+    def test_ollama_connection_error_reraises(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _should_reraise_llm_error(ConnectionRefusedError("refused")) is True
+
+    def test_cloud_connection_error_falls_back(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        assert _should_reraise_llm_error(ConnectionRefusedError("refused")) is False
+
+    def test_generic_error_falls_back(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _should_reraise_llm_error(ValueError("parse failed")) is False
+
+    def test_ollama_model_missing_reraises(self, monkeypatch):
+        """A not-pulled model must surface, never silently fall back."""
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _should_reraise_llm_error(Exception("model 'qwen3:8b' not found, try pulling it first")) is True
+
+
+class TestOllamaModelMissing:
+    """_is_ollama_model_missing must catch the server's 404 for un-pulled models."""
+
+    def test_message_pattern(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _is_ollama_model_missing(Exception("model 'qwen3:32b' not found")) is True
+
+    def test_real_ollama_response_error_404(self, monkeypatch):
+        ollama = pytest.importorskip("ollama", reason="ollama client not installed")
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        err = ollama.ResponseError("model 'x' not found", 404)
+        assert _is_ollama_model_missing(err) is True
+
+    def test_wrapped_cause_chain(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        inner = Exception("model 'qwen3:8b' not found")
+        outer = RuntimeError("request failed")
+        outer.__cause__ = inner
+        assert _is_ollama_model_missing(outer) is True
+
+    def test_false_for_cloud_provider(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        assert _is_ollama_model_missing(Exception("model 'x' not found")) is False
+
+    def test_false_for_other_errors(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _is_ollama_model_missing(ValueError("bad json")) is False
+
+
+class TestLocalLlmHint:
+    """_local_llm_hint is the shared decision point for REPL/TUI/engine messages."""
+
+    def test_model_missing_gets_pull_hint(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("LLM_MODEL", "qwen3:32b")
+        hint = _local_llm_hint(Exception("model 'qwen3:32b' not found"))
+        assert hint is not None
+        assert "ollama pull qwen3:32b" in hint
+
+    def test_model_missing_uses_provider_default_when_unset(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        hint = _local_llm_hint(Exception("model 'qwen3:8b' not found"))
+        assert "ollama pull qwen3:8b" in hint
+
+    def test_connection_refused_gets_serve_hint(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        hint = _local_llm_hint(ConnectionRefusedError("refused"))
+        assert hint is not None
+        assert "ollama serve" in hint
+
+    def test_read_timeout_gets_slowness_hint(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        hint = _local_llm_hint(httpx.ReadTimeout("timed out"))
+        assert hint is not None
+        assert "timed out" in hint.lower()
+        assert "ollama serve" not in hint  # not misreported as a down server
+
+    def test_none_for_cloud_provider(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        assert _local_llm_hint(ConnectionRefusedError("refused")) is None
+
+    def test_none_for_unrelated_errors(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _local_llm_hint(ValueError("bad json")) is None
+
+    def test_langchain_ollama_missing_gets_install_hint(self, monkeypatch):
+        # The optional extra was never installed — the wizard warns, but a
+        # hand-edited .env can still reach get_llm()'s ImportError at call time.
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        exc = ImportError("langchain-ollama is not installed. Run: uv sync --extra ollama")
+        hint = _local_llm_hint(exc)
+        assert hint is not None
+        assert "uv sync --extra ollama" in hint
+
+    def test_unrelated_import_error_no_hint(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        assert _local_llm_hint(ImportError("No module named 'pandas'")) is None
+
+
+class TestTrimHistoryForLocal:
+    """Chat history must fit Ollama's context window without splitting tool pairs."""
+
+    def _tokens_of(self, n_chars: int) -> str:
+        return "x" * n_chars
+
+    def test_cloud_provider_untouched(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        msgs = [SystemMessage(content="s"), HumanMessage(content=self._tokens_of(500_000))]
+        assert _trim_history_for_local(msgs) is msgs
+
+    def test_ollama_fits_untouched(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+        msgs = [SystemMessage(content="s"), HumanMessage(content="hi"), AIMessage(content="hello")]
+        assert _trim_history_for_local(msgs) is msgs
+
+    def test_overflow_drops_oldest_at_human_boundary(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        # Budget = 12000 − 8192 − sys ≈ 3800 tokens. Each message below is
+        # 1000 tokens (4000 chars): all four (4000) overflow, the last two
+        # (2000) fit — so the cut lands on the second HumanMessage.
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "12000")
+        h1 = HumanMessage(content=self._tokens_of(4000))
+        a1 = AIMessage(content=self._tokens_of(4000))
+        h2 = HumanMessage(content=self._tokens_of(4000))
+        a2 = AIMessage(content=self._tokens_of(4000))
+        result = _trim_history_for_local([SystemMessage(content="s"), h1, a1, h2, a2])
+        assert result == [result[0], h2, a2]
+        assert isinstance(result[0], SystemMessage)
+
+    def test_tool_call_pair_never_split(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "12000")
+        h1 = HumanMessage(content=self._tokens_of(4000))
+        a1 = AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "1"}])
+        t1 = ToolMessage(content=self._tokens_of(4000), tool_call_id="1")
+        a1b = AIMessage(content=self._tokens_of(4000))
+        h2 = HumanMessage(content=self._tokens_of(4000))
+        a2 = AIMessage(content="ok")
+        result = _trim_history_for_local([SystemMessage(content="s"), h1, a1, t1, a1b, h2, a2])
+        # The whole first exchange (incl. the AI/Tool pair) is dropped together.
+        assert result == [result[0], h2, a2]
+        assert not any(isinstance(m, ToolMessage) for m in result)
+
+    def test_latest_exchange_kept_even_over_budget(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "9000")  # budget ≈ 800 tokens
+        h1 = HumanMessage(content=self._tokens_of(8000))
+        a1 = AIMessage(content=self._tokens_of(8000))
+        h2 = HumanMessage(content=self._tokens_of(8000))  # alone exceeds budget
+        result = _trim_history_for_local([SystemMessage(content="s"), h1, a1, h2])
+        assert result == [result[0], h2]
+
+    def test_no_human_boundary_returns_unchanged(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("OLLAMA_NUM_CTX", "9000")
+        msgs = [SystemMessage(content="s"), AIMessage(content=self._tokens_of(40_000))]
+        assert _trim_history_for_local(msgs) is msgs
+
+
+class TestToolsUnsupportedDegradation:
+    """make_call_model must degrade to plain chat when a local model rejects tools."""
+
+    class _PlainLLM:
+        def __init__(self):
+            self.plain_invokes = 0
+            self.bind_calls = 0
+
+        def invoke(self, messages):
+            self.plain_invokes += 1
+            return AIMessage(content="plain reply")
+
+        def bind_tools(self, tools):
+            self.bind_calls += 1
+
+            class _Bound:
+                def invoke(self, messages):
+                    raise RuntimeError("registry.ollama.ai/library/foo does not support tools")
+
+            return _Bound()
+
+    def test_degrades_to_plain_chat_with_note(self, monkeypatch):
+        llm = self._PlainLLM()
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: llm)
+        node = make_call_model([])
+        result = node({"messages": [HumanMessage(content="hi")]})
+        reply = result["messages"][0]
+        assert "plain reply" in reply.content
+        assert "doesn't support tool calling" in reply.content
+        assert llm.plain_invokes == 1
+
+    def test_skips_bound_attempt_on_later_turns(self, monkeypatch):
+        llm = self._PlainLLM()
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: llm)
+        node = make_call_model([])
+        node({"messages": [HumanMessage(content="hi")]})
+        result2 = node({"messages": [HumanMessage(content="again")]})
+        assert llm.bind_calls == 1  # doomed binding not retried
+        assert result2["messages"][0].content == "plain reply"  # note appended only once
+
+    def test_other_errors_still_propagate(self, monkeypatch):
+        class _Llm:
+            def bind_tools(self, tools):
+                class _Bound:
+                    def invoke(self, messages):
+                        raise RuntimeError("boom")
+
+                return _Bound()
+
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: _Llm())
+        node = make_call_model([])
+        with pytest.raises(RuntimeError, match="boom"):
+            node({"messages": [HumanMessage(content="hi")]})
+
 
 # ── Core behaviour ───────────────────────────────────────────────────
 

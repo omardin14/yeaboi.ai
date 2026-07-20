@@ -11,6 +11,17 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Shared Ollama failure copy — the same situation is reachable from both
+# _verify_api_key and _verify_model, and the messages must stay identical so
+# tests (and users retrying) see one consistent instruction.
+_OLLAMA_PKG_MISSING = (
+    "Ollama support isn't installed — run: uv sync --extra ollama (or: pip install langchain-ollama), then retry"
+)
+_OLLAMA_UNREACHABLE = (
+    "Can't reach Ollama — is it running? Start it with: ollama serve"
+    "  ·  Not installed? https://ollama.com (or: brew install ollama)"
+)
+
 
 def _validate_key(provider: dict[str, Any], value: str) -> tuple[str, str]:
     """Realtime format validation of an API key (or region for Bedrock).
@@ -29,6 +40,14 @@ def _validate_key(provider: dict[str, Any], value: str) -> tuple[str, str]:
         if "-" in value and len(value) >= 7:
             return "valid_format", "Press Enter to verify \u2014 edit region or confirm"
         return "too_short", "Enter an AWS region (e.g. us-east-1, eu-west-2)"
+
+    # Ollama uses a local server URL, not an API key
+    if provider.get("is_base_url_input"):
+        if not value:
+            return "empty", ""
+        if value.startswith(("http://", "https://")):
+            return "valid_format", "Press Enter to verify \u2014 Ollama must be running"
+        return "bad_prefix", "Enter a URL (e.g. http://localhost:11434)"
 
     prefix = provider["prefix"]
     name = provider["full_name"]
@@ -129,8 +148,31 @@ def _verify_api_key(provider: dict[str, Any], api_key: str) -> tuple[bool, str]:
                 return True, "AWS credentials verified"
             return False, "Unexpected response from Bedrock"
 
+        elif provider_val == "ollama":
+            # Ollama verification — api_key is the local server base URL.
+            # langchain-ollama is an optional extra and everything below uses
+            # raw httpx, so without this guard setup would finish green and the
+            # first real LLM call would crash with an ImportError.
+            import importlib.util
+
+            if importlib.util.find_spec("langchain_ollama") is None:
+                return False, _OLLAMA_PKG_MISSING
+
+            # /api/tags lists installed models; a 200 proves the server is up.
+            import httpx
+
+            resp = httpx.get(f"{api_key.rstrip('/')}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                models = resp.json().get("models") or []
+                if models:
+                    return True, "Ollama server verified"
+                return True, "Server verified — no models installed yet; run: ollama pull qwen3:8b"
+            return False, f"Unexpected response: {resp.status_code}"
+
     except Exception as e:
         err_str = str(e)
+        if provider_val == "ollama":
+            return False, _OLLAMA_UNREACHABLE
         if "NoCredentialsError" in type(e).__name__ or "NoCredentialsError" in err_str:
             return False, "No AWS credentials found \u2014 configure IAM role, ~/.aws/credentials, or env vars"
         if "InvalidIdentityToken" in err_str or "AccessDenied" in err_str or "403" in err_str:
@@ -237,8 +279,24 @@ def _verify_model(provider: dict[str, Any], api_key: str, model: str) -> tuple[b
                 return True, "Model verified"
             return False, "Model not available in this region"
 
+        elif provider_val == "ollama":
+            # api_key is the local server base URL. A model is usable iff it's
+            # been pulled — match names with and without the ":latest" suffix.
+            import httpx
+
+            resp = httpx.get(f"{api_key.rstrip('/')}/api/tags", timeout=5)
+            if resp.status_code != 200:
+                return False, f"Unexpected response: {resp.status_code}"
+            names = {m.get("name", "") for m in resp.json().get("models") or []}
+            candidates = {model, f"{model}:latest", model.removesuffix(":latest")}
+            if names & candidates:
+                return True, "Model verified"
+            return False, f"Model not pulled — run: ollama pull {model}"
+
     except Exception as e:
         err_str = str(e)
+        if provider_val == "ollama":
+            return False, _OLLAMA_UNREACHABLE
         if "NoCredentialsError" in type(e).__name__ or "NoCredentialsError" in err_str:
             return False, "No AWS credentials found — configure IAM role, ~/.aws/credentials, or env vars"
         if "InvalidIdentityToken" in err_str or "AccessDenied" in err_str or "403" in err_str:
@@ -332,6 +390,17 @@ def fetch_available_models(provider: dict[str, Any], api_key: str) -> list[str]:
             entries = [(m["id"], int(m.get("created", 0))) for m in data if isinstance(m, dict) and m.get("id")]
             return _filter_openai_chat_models(entries)
 
+        if provider_val == "ollama":
+            # api_key carries the base URL (same repurposing as Bedrock's region).
+            # /api/tags lists pulled models; sort newest-modified first so the
+            # model the user just pulled tops the list.
+            resp = httpx.get(f"{api_key.rstrip('/')}/api/tags", timeout=5)
+            if resp.status_code != 200:
+                return []
+            models = [m for m in resp.json().get("models") or [] if isinstance(m, dict) and m.get("name")]
+            models.sort(key=lambda m: str(m.get("modified_at", "")), reverse=True)
+            return [m["name"] for m in models]
+
         if provider_val == "google":
             resp = httpx.get(
                 f"https://generativelanguage.googleapis.com/v1/models?key={api_key}&pageSize=200",
@@ -355,6 +424,58 @@ def fetch_available_models(provider: dict[str, Any], api_key: str) -> list[str]:
     except Exception:
         return []
     return []
+
+
+def pull_ollama_model(base_url: str, model: str, on_progress: Any, cancel_event: Any = None) -> tuple[bool, str]:
+    """Download *model* onto the Ollama server, streaming progress.
+
+    Uses the server's HTTP API (POST /api/pull) rather than shelling out to the
+    ``ollama`` binary — the server may be remote or containerised with no CLI on
+    this machine's PATH. The response is a stream of JSON lines
+    ({status, total, completed}); each is folded into
+    ``on_progress(status_text, fraction_or_None)``. A set ``cancel_event``
+    (threading.Event) aborts between chunks — Ollama keeps partial layers, so a
+    cancelled pull resumes where it left off next time.
+
+    Returns (success, message). Never raises.
+    """
+    logger.info("Pulling Ollama model '%s'", model)
+    try:
+        import json as _json
+
+        import httpx
+
+        with httpx.stream(
+            "POST",
+            f"{base_url.rstrip('/')}/api/pull",
+            json={"model": model},
+            # Model downloads run for many minutes — no read timeout.
+            timeout=httpx.Timeout(10, read=None),
+        ) as resp:
+            if resp.status_code != 200:
+                return False, f"Unexpected response: {resp.status_code}"
+            for line in resp.iter_lines():
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.info("Ollama pull cancelled for '%s'", model)
+                    return False, "Download cancelled — partial layers are kept, pulling again resumes"
+                if not line:
+                    continue
+                try:
+                    event = _json.loads(line)
+                except ValueError:
+                    continue
+                if event.get("error"):
+                    logger.warning("Ollama pull failed for '%s': %s", model, event["error"])
+                    return False, str(event["error"])
+                total = event.get("total") or 0
+                completed = event.get("completed") or 0
+                fraction = (completed / total) if total else None
+                on_progress(str(event.get("status", "")), fraction)
+        logger.info("Ollama model '%s' pulled", model)
+        return True, "Model downloaded"
+    except Exception as e:
+        logger.warning("Ollama pull error for '%s': %s", model, e)
+        return False, f"Download failed: {e}"
 
 
 def _verify_vc_token(vc: dict[str, Any], token: str) -> tuple[bool, str]:
