@@ -618,7 +618,25 @@ See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full 
 
 ```
 yeaboi [OPTIONS]
+yeaboi <command> [OPTIONS]     # headless mode runners: report, standup, perf, analyze
 ```
+
+### Subcommands (headless mode runners)
+
+Every TUI mode has a headless CLI path over the same engine:
+
+| Command | Description |
+|---------|-------------|
+| `yeaboi report [--period last_sprint\|last_month\|quarter] [--format json]` | Stakeholder delivery report from the tracker |
+| `yeaboi standup [--deliver] [--channels slack email ...] [--days N] [--format json]` | Run a Daily Standup (print, or deliver to channels) |
+| `yeaboi perf roster` | List the engineer roster from recent tracker assignees |
+| `yeaboi perf prep <engineer>` | 1:1 prep — talking points from real delivery data |
+| `yeaboi perf complete <engineer> --transcript @notes.txt [--deliver]` | Turn a held 1:1 into a summary + tracked action items |
+| `yeaboi perf review <engineer> [--months N]` | Draft a periodic performance review |
+| `yeaboi perf note <engineer> --text "..."` | Record a note (feeds future preps/reviews) |
+| `yeaboi analyze [--source jira\|azdevops] [--sprints N] [--samples] [--format json]` | Analyse board history into a team calibration profile |
+
+`--format json` keeps stdout machine-clean (warnings and progress go to stderr) for piping into CI or other tools.
 
 ### Interactive modes
 
@@ -1013,7 +1031,7 @@ claude plugin marketplace add omardin14/yeaboi.ai
 /plugin install yeaboi@yeaboi
 ```
 
-The plugin wires the server automatically and adds guided skills: `/yeaboi:plan-sprint` (conversational intake → full plan), `/yeaboi:standup`, `/yeaboi:delivery-report`.
+The plugin wires the server automatically and adds guided skills: `/yeaboi:plan-sprint` (conversational intake → full plan), `/yeaboi:standup`, `/yeaboi:delivery-report`, `/yeaboi:performance`, `/yeaboi:team-analysis`.
 
 **Claude Code (manual)**
 
@@ -1045,12 +1063,14 @@ args = ["--from", "yeaboi[mcp]", "yeaboi-mcp"]
 |------|--------------|-----|
 | `plan_generate` | Full planning pipeline: analysis → epics → stories → tasks → sprints; saves a resumable session | ✅ |
 | `intake_questions` | The 30-question intake contract (essentials, defaults, choice options) so the host agent runs the interview | — |
-| `plan_get` / `plan_export` | Read a saved plan as JSON / export Markdown or HTML | — |
+| `plan_get` / `plan_export` / `plan_publish` | Read a saved plan as JSON / export Markdown or HTML / publish to Notion or Confluence | — |
 | `sessions_list` / `session_get` | Browse saved sessions and artifact progress | — |
-| `standup_run` / `standup_history` | Daily standup (activity + confidence + summaries); past runs | ✅ / — |
-| `report_delivery` | Stakeholder delivery report for last sprint / month / quarter | ✅ |
-| `perf_roster`, `perf_one_on_one_prep`, `perf_one_on_one_complete`, `perf_six_month_review` | Performance mode workflows | ✅ (roster: —) |
+| `standup_run` / `standup_history` | Daily standup (activity + confidence + summaries, per-run channel override); past runs | ✅ / — |
+| `standup_config_get` / `standup_config_set` | Read/update the standup config (time, weekdays, channels, aliases) | — |
+| `report_delivery` | Stakeholder delivery report for last sprint / month / quarter (with explicit sprint windowing) | ✅ |
+| `perf_roster`, `perf_one_on_one_prep`, `perf_one_on_one_complete`, `perf_six_month_review`, `perf_note_add` | Performance mode workflows + engineer notes | ✅ (roster/notes: —) |
 | `retro_history` | Past retrospectives (the live retro board stays in the TUI — it's a real-time LAN page) | — |
+| `team_analyze` | Full board-history analysis into a calibration profile (heavy — several LLM calls) | ✅ |
 | `team_profile_get` / `team_compare_plan_to_actuals` | Calibration profiles; plan-vs-actuals comparison | — |
 
 Every tool returns one envelope: `{"ok", "llm_mode", "warnings", "data"}` — uniform success/error handling for the host agent, with `hint` strings on actionable failures.
