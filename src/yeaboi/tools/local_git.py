@@ -13,10 +13,25 @@ degrade gracefully to [] on any error so a standup never crashes.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def git_subprocess_env() -> dict[str, str]:
+    """Environment for spawned git commands with repo-targeting vars removed.
+
+    When this process itself runs inside a git hook (e.g. the pre-commit test
+    stage), git exports GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE to the hook.
+    A child ``git -C <path> …`` inherits them and silently targets the *hook's*
+    repository instead of ``<path>`` — for a mutating command that can corrupt
+    the outer repo's index. Every git subprocess in this codebase (and in
+    tests) must pass ``env=git_subprocess_env()``.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
 
 # Unit-separator delimited format: author name, author email, ISO date, subject.
 # %x1f is the ASCII unit separator — safe against commit messages containing
@@ -56,6 +71,7 @@ def local_git_recent_commits(repo_path: str, days: int = 1, since=None) -> list[
             text=True,
             timeout=15,
             check=False,
+            env=git_subprocess_env(),
         )
     except (FileNotFoundError, subprocess.SubprocessError) as e:
         logger.warning("local_git_recent_commits failed to run git: %s", e)

@@ -15,7 +15,7 @@ from yeaboi.tools.azure_devops import azdevops_recent_activity
 from yeaboi.tools.confluence import confluence_recent_pages
 from yeaboi.tools.github import github_recent_commits, github_recent_prs
 from yeaboi.tools.jira import jira_recent_activity
-from yeaboi.tools.local_git import local_git_recent_commits
+from yeaboi.tools.local_git import git_subprocess_env, local_git_recent_commits
 
 
 class TestJiraRecentActivity:
@@ -186,7 +186,10 @@ class TestLocalGitRecentCommits:
         repo.mkdir()
 
         def git(*args):
-            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+            # git_subprocess_env() strips GIT_DIR/GIT_INDEX_FILE — without it,
+            # running this suite inside a git hook (pre-commit) would make these
+            # mutating commands target the project repo instead of the tmp repo.
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=git_subprocess_env())
 
         git("init", "-q")
         git("config", "user.email", "dev@example.com")
@@ -209,6 +212,36 @@ class TestLocalGitRecentCommits:
 
     def test_non_repo_directory_returns_empty(self, tmp_path):
         assert local_git_recent_commits(str(tmp_path), days=1) == []
+
+    def test_git_subprocess_env_strips_repo_targeting_vars(self, monkeypatch):
+        monkeypatch.setenv("GIT_DIR", "/somewhere/.git")
+        monkeypatch.setenv("GIT_INDEX_FILE", "/somewhere/.git/index")
+        monkeypatch.setenv("GIT_WORK_TREE", "/somewhere")
+        monkeypatch.setenv("PATH", "/usr/bin")  # non-GIT_ vars survive
+        env = git_subprocess_env()
+        assert not any(k.startswith("GIT_") for k in env)
+        assert env["PATH"] == "/usr/bin"
+
+    def test_hook_style_git_dir_env_does_not_leak_other_repo(self, tmp_path, monkeypatch):
+        """Regression: with GIT_DIR exported (as inside a git hook), a non-repo
+        path must still return [] — not the GIT_DIR repo's commits."""
+        other = tmp_path / "other"
+        other.mkdir()
+
+        def git(*args):
+            subprocess.run(["git", "-C", str(other), *args], check=True, capture_output=True, env=git_subprocess_env())
+
+        git("init", "-q")
+        git("config", "user.email", "dev@example.com")
+        git("config", "user.name", "Dev Person")
+        (other / "a.txt").write_text("hi")
+        git("add", ".")
+        git("commit", "-q", "-m", "other repo commit")
+
+        monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert local_git_recent_commits(str(empty), days=1) == []
 
 
 class TestSinceWindow:
@@ -848,7 +881,9 @@ class TestLocalGitAuthorEmail:
         repo.mkdir()
 
         def git(*args):
-            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+            # See TestLocalGitRecentCommits.test_reads_real_repo — scrubbed env
+            # so a git-hook parent can never redirect these to the project repo.
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=git_subprocess_env())
 
         git("init", "-q")
         git("config", "user.email", "dev@example.com")
