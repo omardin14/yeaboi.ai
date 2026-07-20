@@ -1,0 +1,111 @@
+# CI sentinel — proactive responder to a red `main`.
+#
+# When CI fails ON MAIN (i.e. something merged and broke the build, or a flaky
+# failure slipped through), this diagnoses the failure and either opens a fix PR
+# or files an issue — instead of waiting for a human to notice the red badge.
+#
+# Trigger is `workflow_run` on CI completion filtered to conclusion == failure
+# AND head_branch == 'main'. That branch filter is the primary loop guard: the
+# sentinel's OWN fix PR runs CI on a `ci-sentinel/…` branch, whose failure can
+# never re-trigger this workflow. A bash dedupe step adds a second guard so it
+# doesn't pile up PRs/issues while a fix is already pending.
+#
+# It NEVER pushes to main — only a fix PR (which flows through the normal CI +
+# required-checks + human-merge gate) or an issue.
+
+name: CI Sentinel
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "A failed CI run id on main to diagnose (for manual testing)"
+        required: false
+
+concurrency:
+  group: ci-sentinel
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the fix branch
+  pull-requests: write # open the fix PR
+  issues: write # or file a diagnosis issue
+  id-token: write # claude-code-action OIDC
+  actions: read # read the failed run log
+
+jobs:
+  sentinel:
+    name: Diagnose red main
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dedupe — skip if a fix is already pending
+        id: dedupe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          open_pr=$(gh pr list --label ci-sentinel --state open --json number --jq 'length')
+          open_issue=$(gh issue list --label ci-sentinel --state open --json number --jq 'length')
+          if [ "$open_pr" != "0" ] || [ "$open_issue" != "0" ]; then
+            echo "A ci-sentinel PR/issue is already open — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "run_id=${{ github.event.inputs.run_id || github.event.workflow_run.id }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout main
+        if: steps.dedupe.outputs.skip == 'false'
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        if: steps.dedupe.outputs.skip == 'false'
+      - run: uv python install 3.11
+        if: steps.dedupe.outputs.skip == 'false'
+      - run: uv sync --extra dev
+        if: steps.dedupe.outputs.skip == 'false'
+
+      - name: Diagnose and remediate with Claude
+        if: steps.dedupe.outputs.skip == 'false'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILED_RUN_ID: ${{ steps.dedupe.outputs.run_id }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Diagnosis is the hard case — keep the default (Opus-tier) model.
+          claude_args: '--max-turns 40 --allowedTools "Bash,Read,Edit,Write,Glob,Grep"'
+          prompt: |
+            CI failed on `main` (run id: ${{ steps.dedupe.outputs.run_id }}). You are
+            on a fresh checkout of `main`. Diagnose the failure and act — NEVER push
+            or commit to `main` directly.
+
+            1. Read the failing logs: `gh run view ${{ steps.dedupe.outputs.run_id }} --log-failed`.
+               Identify which CI job failed and the specific failing test/lint/check.
+            2. Reproduce locally: run the matching command (`make test`, `make lint`,
+               or `make security`).
+            3. Decide:
+               - If it reproduces AND you are confident in a minimal, correct fix:
+                 create a branch `ci-sentinel/fix-${{ steps.dedupe.outputs.run_id }}`,
+                 apply the smallest fix, verify `make test` and `make lint` both pass,
+                 commit (lowercase imperative + the Co-Authored-By trailer from
+                 CLAUDE.md), push, and open a PR to `main` with the `ci-sentinel`
+                 label. The PR body must state the root cause and what you changed.
+               - If it does NOT reproduce (likely a flake) OR you are not confident:
+                 do NOT change code. Open an issue with labels `ci-red-main` and
+                 `ci-sentinel` describing the failure, what you tried, and your best
+                 hypothesis, so a human can take over.
+
+            Rules: never touch `main`; one PR or one issue, not both; keep any fix
+            minimal and scoped strictly to the failing check.
