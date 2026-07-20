@@ -1,0 +1,67 @@
+# Feedback remediation — nightly Agent-SDK triage of GitHub issues.
+#
+# The Step-4 (AI-native) pilot: unlike the other Claude workflows (which use the
+# hosted claude-code-action), this runs a Python Claude Agent SDK script that
+# classifies fresh issues and routes actionable bugs into the existing
+# `claude-implement` pathway (which opens a normal PR through CI + review + human
+# merge). The SDK owns triage/orchestration/rate-limiting only.
+#
+# Auth: the Agent SDK authenticates with ANTHROPIC_API_KEY (NOT the App's
+# CLAUDE_CODE_OAUTH_TOKEN, which is only for claude-code-action). Add an
+# ANTHROPIC_API_KEY repo secret before enabling this. The Python SDK is
+# self-contained (no Claude Code CLI install needed).
+#
+# Safety: `issues: write` only — cannot touch PRs or merge. Caps fixes per run,
+# idempotent via the `triaged` label, skips bot authors, and the workflow_dispatch
+# path defaults to dry-run. See automation/feedback_remediation/README.md.
+
+name: Feedback Remediation
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # nightly 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log intended actions without changing anything"
+        type: boolean
+        required: false
+        default: true
+
+concurrency:
+  group: feedback-remediation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write # label / comment / maintain the digest issue
+
+jobs:
+  triage:
+    name: Triage new feedback issues
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - uses: astral-sh/setup-uv@v7
+      - run: uv python install 3.11
+
+      - name: Triage
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          # Scheduled runs act for real; manual runs default to dry-run.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          # Weekly digest on Mondays (day-of-week 1); harmless on other days.
+          RUN_DIGEST: ${{ github.event.schedule == '0 2 * * *' }}
+        run: |
+          set -euo pipefail
+          ARGS=""
+          [ "$DRY_RUN" = "true" ] && ARGS="$ARGS --dry-run"
+          # Only build the digest on Mondays to avoid daily churn.
+          if [ "$(date -u +%u)" = "1" ]; then ARGS="$ARGS --digest"; fi
+          echo "running: triage.py$ARGS"
+          uv run automation/feedback_remediation/triage.py $ARGS
