@@ -43,10 +43,9 @@ jobs:
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
+          # Open-ended assistance keeps the default (Opus-tier) model; the turn
+          # cap is a cost guard against runaway sessions, not a quality lever.
+          claude_args: '--max-turns 50'
 
   # Issue-to-PR: adding the `claude-implement` label to an issue kicks off an
   # implementation run that opens a PR. The PR then flows through ci.yml,
@@ -73,6 +72,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Full implementation runs stay on the default (Opus-tier) model; the
+          # higher turn cap covers implement + verify + PR without being unbounded.
+          claude_args: '--max-turns 75'
           prompt: |
             Implement GitHub issue #${{ github.event.issue.number }} in ${{ github.repository }}.
 
