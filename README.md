@@ -92,6 +92,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 - [Intake Modes](#-intake-modes)
 - [Roadmap Intake](#%EF%B8%8F-roadmap-intake)
 - [Pipeline](#-pipeline)
+- [MCP Server — use yeaboi from your coding agent](#-mcp-server--use-yeaboi-from-your-coding-agent)
 - [Team Analysis Mode](#-team-analysis-mode)
 - [Analysis-Calibrated Planning](#-analysis-calibrated-planning)
 - [Export Formats](#-export-formats)
@@ -991,6 +992,80 @@ Reporting turns the work your team actually **delivered** into a business-friend
 - **Slide deck** (`-slides.html`) — a self-contained, offline **presentation**: open it in any browser and use ← / → / Space to present. Press **T** to cycle 4 built-in themes (midnight / aurora / sunset / mono); the **Theme** button in the TUI sets which palette is baked into the exported deck. Everything is inline (no CDN, no network) and every piece of ticket text is rendered inertly, so it's safe to share.
 
 Reporting runs are logged to `~/.yeaboi/logs/reporting/` and persisted to the `reporting_history` table.
+
+---
+
+## 🔌 MCP Server — use yeaboi from your coding agent
+
+Prefer working inside Claude Code, Cursor, Codex CLI, or VS Code instead of a separate TUI? yeaboi ships a **Model Context Protocol (MCP) server** — the standard through which AI coding agents call external tools — so your agent can plan sprints, run standups, and produce delivery reports directly.
+
+**What is MCP?** A stdio JSON-RPC protocol: the client (your coding agent) launches `yeaboi-mcp` as a subprocess and calls its *tools* — typed functions with JSON schemas. Every major AI coding tool speaks it, so one server covers them all.
+
+### Setup — any MCP client
+
+The server needs the `[mcp]` extra and runs via `uvx` (no permanent install):
+
+**Claude Code (plugin — recommended)**
+
+```bash
+claude plugin marketplace add omardin14/yeaboi.ai
+# then inside Claude Code:
+/plugin install yeaboi@yeaboi
+```
+
+The plugin wires the server automatically and adds guided skills: `/yeaboi:plan-sprint` (conversational intake → full plan), `/yeaboi:standup`, `/yeaboi:delivery-report`.
+
+**Claude Code (manual)**
+
+```bash
+claude mcp add yeaboi -- uvx --from 'yeaboi[mcp]' yeaboi-mcp
+```
+
+**Cursor** (`~/.cursor/mcp.json`) / **VS Code** (`.vscode/mcp.json`, use the `"servers"` key):
+
+```json
+{
+  "mcpServers": {
+    "yeaboi": { "command": "uvx", "args": ["--from", "yeaboi[mcp]", "yeaboi-mcp"] }
+  }
+}
+```
+
+**Codex CLI** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.yeaboi]
+command = "uvx"
+args = ["--from", "yeaboi[mcp]", "yeaboi-mcp"]
+```
+
+### The tools
+
+| Tool | What it does | LLM |
+|------|--------------|-----|
+| `plan_generate` | Full planning pipeline: analysis → epics → stories → tasks → sprints; saves a resumable session | ✅ |
+| `intake_questions` | The 30-question intake contract (essentials, defaults, choice options) so the host agent runs the interview | — |
+| `plan_get` / `plan_export` | Read a saved plan as JSON / export Markdown or HTML | — |
+| `sessions_list` / `session_get` | Browse saved sessions and artifact progress | — |
+| `standup_run` / `standup_history` | Daily standup (activity + confidence + summaries); past runs | ✅ / — |
+| `report_delivery` | Stakeholder delivery report for last sprint / month / quarter | ✅ |
+| `perf_roster`, `perf_one_on_one_prep`, `perf_one_on_one_complete`, `perf_six_month_review` | Performance mode workflows | ✅ (roster: —) |
+| `retro_history` | Past retrospectives (the live retro board stays in the TUI — it's a real-time LAN page) | — |
+| `team_profile_get` / `team_compare_plan_to_actuals` | Calibration profiles; plan-vs-actuals comparison | — |
+
+Every tool returns one envelope: `{"ok", "llm_mode", "warnings", "data"}` — uniform success/error handling for the host agent, with `hint` strings on actionable failures.
+
+### Who pays for the LLM? (sampling → provider → fallback)
+
+The interesting design question for an MCP server that itself uses an LLM. yeaboi resolves each call through a chain:
+
+1. **`sampling`** — if the client supports **MCP sampling** (Claude Code does), yeaboi sends its prompts *back through the client*, so the host's own model does the generation. **No yeaboi API key needed at all.** Internally a `SamplingChatModel` (a LangChain `BaseChatModel` over `session.create_message`) is injected into `get_llm()` via a ContextVar override — engines run unchanged.
+2. **`provider`** — otherwise, yeaboi's own configured provider from `~/.yeaboi/.env` (Anthropic/OpenAI/Google/Bedrock), exactly like the TUI. Force this mode with `YEABOI_MCP_LLM=provider` if a host's sampling is slow or rate-limited.
+3. **`fallback`** — with neither available, engines still answer with their deterministic fallback artifacts, and the envelope's `warnings` say so.
+
+The mode used is reported in every result's `llm_mode`. Sampling responses are capped at 8192 tokens by default (`YEABOI_MCP_MAX_TOKENS` to change).
+
+Server logs go to `~/.yeaboi/logs/mcp/mcp.log` (stdout is reserved for the JSON-RPC stream — nothing may print to it). Plans generated over MCP are ordinary yeaboi sessions: resumable in the TUI, visible to standup/reporting/performance.
 
 ---
 
