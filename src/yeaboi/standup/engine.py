@@ -121,6 +121,8 @@ def _detect_git_identity(repo_path: str) -> list[str]:
     """
     import subprocess
 
+    from yeaboi.tools.local_git import git_subprocess_env
+
     commands: list[list[str]] = []
     if (repo_path or "").strip():
         commands += [["git", "-C", repo_path, "config", key] for key in ("user.name", "user.email")]
@@ -129,7 +131,7 @@ def _detect_git_identity(repo_path: str) -> list[str]:
     identities: list[str] = []
     for cmd in commands:
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=2, env=git_subprocess_env())
             value = (result.stdout or "").strip()
             if result.returncode == 0 and value and value not in identities:
                 identities.append(value)

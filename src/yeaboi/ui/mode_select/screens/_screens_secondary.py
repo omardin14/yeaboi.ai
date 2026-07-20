@@ -2014,6 +2014,227 @@ def _build_changelog_screen(
     )
 
 
+def _build_feedback_screen(
+    view: str,
+    *,
+    kind_idx: int = 0,
+    area_idx: int = 0,
+    title_text: str = "",
+    description: str = "",
+    attachments_count: int = 0,
+    field_sel: int = 0,
+    focus: str = "fields",
+    action_sel: int = 0,
+    polished: tuple[str, str] | None = None,
+    result_url: str = "",
+    show_open_browser: bool = False,
+    status: str = "",
+    scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
+    width: int = 80,
+    height: int = 24,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
+    border_style: str = "",
+) -> Panel:
+    """Build the Feedback page (opened with `f` from mode select).
+
+    ``view`` selects the screen state: ``"form"`` (type/area/title/description
+    rows + Submit / AI Polish / Back), ``"busy"`` (worker running — the caller
+    animates ``border_style`` for the pulsing frame), ``"polish_preview"``
+    (AI-rewritten draft + Accept / Keep Original) and ``"result"`` (submission
+    outcome + Done / Open Browser). The area chip renders in that mode's accent
+    colour (``changelog.AREA_COLORS``) — the frame itself stays neutral silver
+    like the changelog page.
+    """
+    import textwrap
+
+    from yeaboi.changelog import AREA_COLORS
+    from yeaboi.feedback import FEEDBACK_AREAS, FEEDBACK_TYPES
+    from yeaboi.ui.shared._components import FEEDBACK_THEME, build_reveal_subtitle, feedback_title
+
+    theme = FEEDBACK_THEME
+    title = feedback_title(shimmer_tick, width=width)
+    subtitles = {
+        "form": "Report a bug or request a feature — filed as a GitHub issue",
+        "busy": "Working…",
+        "polish_preview": "AI-polished draft — accept it or keep your original",
+        "result": "Submission result",
+    }
+    sub = build_reveal_subtitle(subtitles.get(view, ""), sub_reveal, pad=PAD)
+
+    body_lines: list = []
+    wrap_w = max(24, width - len(PAD) - 12)
+
+    def _wrapped(text: str, style: str, *, indent: str = "    ") -> None:
+        for seg in text.split("\n"):
+            for chunk in textwrap.wrap(seg, width=wrap_w) or [""]:
+                body_lines.append(Text(PAD + indent + chunk, style=style, justify="left"))
+
+    kind = FEEDBACK_TYPES[kind_idx % len(FEEDBACK_TYPES)]
+    area = FEEDBACK_AREAS[area_idx % len(FEEDBACK_AREAS)]
+    area_color = AREA_COLORS.get(area, theme.muted)
+
+    if view in ("form", "busy"):
+        fields_focused = focus == "fields" and view == "form"
+
+        def _row(idx: int, label: str, render_value) -> None:
+            is_sel = fields_focused and field_sel == idx
+            line = Text(PAD + ("  ❯ " if is_sel else "    "), justify="left")
+            line.stylize(f"bold {theme.accent_bright}" if is_sel else theme.dim)
+            line.append(f"{label:<13}", style=f"bold {theme.accent_bright}" if is_sel else theme.muted)
+            render_value(line, is_sel)
+            body_lines.append(line)
+            body_lines.append(Text(""))
+
+        def _kind_value(line: Text, is_sel: bool) -> None:
+            line.append("◄ " if is_sel else "  ", style=theme.dim)
+            line.append(kind, style=f"bold {theme.value}" if is_sel else theme.desc)
+            line.append(" ►" if is_sel else "", style=theme.dim)
+
+        def _area_value(line: Text, is_sel: bool) -> None:
+            line.append("◄ " if is_sel else "  ", style=theme.dim)
+            line.append(area, style=f"bold {area_color}")
+            line.append(" ►" if is_sel else "", style=theme.dim)
+
+        def _title_value(line: Text, is_sel: bool) -> None:
+            if title_text:
+                shown = title_text if len(title_text) <= wrap_w - 20 else title_text[: wrap_w - 21] + "…"
+                line.append(shown, style=theme.value)
+            else:
+                line.append("(required — press Enter to write)", style=theme.dim)
+
+        # The value column starts after the 4-space selector gutter + 13-char label.
+        _val_indent = " " * 17
+        desc_wrap_w = max(24, wrap_w - len(_val_indent))
+        desc_lines: list[str] = []
+        for seg in description.split("\n"):
+            desc_lines.extend(textwrap.wrap(seg, width=desc_wrap_w) or [""])
+
+        def _desc_value(line: Text, is_sel: bool) -> None:
+            if description.strip():
+                line.append(desc_lines[0], style=theme.value)
+            else:
+                line.append("(press Enter to write — voice + Ctrl+V screenshots)", style=theme.dim)
+            if attachments_count:
+                line.append(f"  📎 {attachments_count}", style=theme.warn)
+
+        body_lines.append(Text(""))
+        _row(0, "Type", _kind_value)
+        _row(1, "Area", _area_value)
+        _row(2, "Title", _title_value)
+        _row(3, "Description", _desc_value)
+
+        # Continuation lines: fill the otherwise-empty viewport with the rest of
+        # the description instead of hiding it behind a "+N more lines" note —
+        # that note now only appears when the text genuinely overflows the page.
+        # (The blank line _row() appended after the Description row is dropped so
+        # the continuation reads as one block.)
+        continuations = desc_lines[1:] if description.strip() else []
+        if continuations:
+            body_lines.pop()
+            # Rows consumed above the continuation block: top blank + 4 field
+            # rows + 3 blanks between them, plus one trailing status/spacer row.
+            desc_budget = max(1, calc_viewport(height, header_h=10, action_h=4) - 10)
+            for cont in continuations[:desc_budget]:
+                body_lines.append(Text(PAD + _val_indent + cont, style=theme.value, justify="left"))
+            hidden = len(continuations) - desc_budget
+            if hidden > 0:
+                body_lines.append(
+                    Text(
+                        PAD + _val_indent + f"(+{hidden} more line{'s' if hidden > 1 else ''})",
+                        style=theme.dim,
+                        justify="left",
+                    )
+                )
+            body_lines.append(Text(""))
+
+    elif view == "polish_preview" and polished is not None:
+        p_title, p_desc = polished
+        body_lines.append(Text(""))
+        heading = Text(PAD + "  ", justify="left")
+        heading.append(f"[{kind}] {p_title}", style=f"bold {theme.accent_bright}")
+        body_lines.append(heading)
+        body_lines.append(Text(PAD + "  " + "─" * min(wrap_w, 40), style=theme.sep, justify="left"))
+        _wrapped(p_desc, theme.value)
+
+    elif view == "result":
+        body_lines.append(Text(""))
+        _wrapped(status, theme.value, indent="  ")
+        if result_url:
+            body_lines.append(Text(""))
+            _wrapped(result_url, f"bold {theme.accent_bright}", indent="  ")
+
+    if status and view not in ("result",):
+        body_lines.append(Text(""))
+        _wrapped(status, theme.warn, indent="  ")
+
+    # ── Layout using shared components (same skeleton as the changelog page) ──
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    if view == "form" and focus == "fields":
+        # Auto-scroll so the selected field row stays visible on short
+        # terminals (the form itself has no manual scroll keys — up/down
+        # move the selection instead).
+        sel_line = 1 + 2 * field_sel  # body index: top blank + 2 rows per field
+        scroll_offset = max(scroll_offset, sel_line - viewport_h + 1)
+    actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=view == "polish_preview")
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    buttons_by_view = {
+        "form": ["Submit", "AI Polish", "Back"],
+        "busy": [],
+        "polish_preview": ["Accept", "Keep Original"],
+        "result": (["Done", "Open Browser"] if show_open_browser else ["Done"]),
+    }
+    labels = buttons_by_view.get(view, ["Back"])
+    highlight = action_sel if (focus == "buttons" or view != "form") else -1
+    if labels:
+        btn_top, btn_mid, btn_bot = build_action_buttons(labels, highlight)
+    else:
+        btn_top, btn_mid, btn_bot = Text(""), Text(""), Text("")
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(show_header=False, show_edge=False, box=None, padding=0, pad_edge=False, expand=True)
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+
+    return Panel(
+        content,
+        border_style=border_style or "white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _performance_roster_window(selected: int, n: int, budget: int) -> tuple[int, int]:
     """Return the [start, end) engineer window that fits ``budget`` visual lines.
 

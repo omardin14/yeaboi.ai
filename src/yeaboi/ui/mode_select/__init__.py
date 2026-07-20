@@ -1848,6 +1848,7 @@ def _standup_read_line(
     box_rows: int = 1,
     attachments: list[str] | None = None,
     scope_id: str = "",
+    initial: str = "",
 ) -> str | None:
     """Collect a single line of input inside the Live display (themed, read_key-driven).
 
@@ -1867,6 +1868,8 @@ def _standup_read_line(
         (each marked by an [image #N] chip in the text; resolve survivors with
         referenced_images() after submit). None disables image paste — Ctrl+V
         shows the standard "not supported" notice instead.
+    initial: pre-seeds the buffer so a field can be re-opened for editing with
+        its existing text (e.g. the feedback form's Title/Description rows).
     """
     import time as _time
 
@@ -1874,7 +1877,7 @@ def _standup_read_line(
     from yeaboi.ui.shared._attachments import handle_ctrl_v, unsupported_notice
     from yeaboi.ui.shared._voice_input import DoubleTapSpace, record_voice_input, voice_indicator
 
-    value = ""
+    value = initial
     notice = ""
     _dts = DoubleTapSpace()
 
@@ -2094,6 +2097,289 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
             break
         _render()
     logger.info("changelog: page closed")
+
+
+def _run_feedback_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Event loop for the Feedback page (opened with `f` from mode select).
+
+    A small two-zone form (Type / Area / Title / Description rows + Submit /
+    AI Polish / Back buttons) that files a GitHub issue on the yeaboi repo:
+    via the API when GITHUB_TOKEN is set, else by opening a pre-filled
+    ``issues/new`` URL in the browser. Title/Description entry reuses
+    ``_standup_read_line`` so voice dictation (double-tap Space) and Ctrl+V
+    screenshot paste work for free; the optional AI Polish step previews an
+    LLM rewrite the user can accept or discard.
+    """
+    import threading
+    import webbrowser
+
+    from yeaboi.feedback import FEEDBACK_AREAS, FEEDBACK_TYPES, polish_feedback, submit_feedback
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_feedback_screen
+    from yeaboi.ui.shared._attachments import referenced_images
+    from yeaboi.ui.shared._components import FEEDBACK_THEME, build_popup, feedback_title
+
+    with mode_log("feedback"):
+        logger.info("feedback: page opened")
+        kind_idx, area_idx = 0, 0
+        title_text, description = "", ""
+        attachments: list[str] = []
+        field_sel, focus, action_sel = 0, "fields", 0
+        view, status = "form", ""
+        polished: tuple[str, str] | None = None
+        result = None  # FeedbackResult after a submit attempt
+        scroll = 0
+        _scroll_meta: dict = {}
+        anim_start = time.monotonic()
+
+        def _render(*, border_style: str = "") -> None:
+            w, h = console.size
+            elapsed = time.monotonic() - anim_start
+            live.update(
+                _build_feedback_screen(
+                    view,
+                    kind_idx=kind_idx,
+                    area_idx=area_idx,
+                    title_text=title_text,
+                    description=description,
+                    attachments_count=len(referenced_images(description, attachments)),
+                    field_sel=field_sel,
+                    focus=focus,
+                    action_sel=action_sel,
+                    polished=polished,
+                    result_url=result.url if result else "",
+                    show_open_browser=bool(result and not result.ok and result.url),
+                    status=status,
+                    scroll_offset=scroll,
+                    scroll_meta=_scroll_meta,
+                    width=w,
+                    height=max(10, h - 1),
+                    shimmer_tick=elapsed,
+                    sub_reveal=elapsed * _HEADER_SUB_SPEED,
+                    border_style=border_style,
+                )
+            )
+
+        def _run_busy(target, busy_label: str) -> list:
+            """Run ``target`` on a daemon thread with a pulsing border; keys are swallowed."""
+            nonlocal view, status
+            prev_view, prev_status = view, status
+            view, status = "busy", busy_label
+            out: list = []
+            thread = threading.Thread(target=lambda: out.append(target()), daemon=True)
+            thread.start()
+            pulse_start = time.monotonic()
+            while thread.is_alive():
+                elapsed = time.monotonic() - pulse_start
+                intensity = (math.sin(elapsed * 6) + 1) / 2
+                v = int(60 + 140 * intensity)
+                _render(border_style=f"rgb({v},{v},{v})")
+                time.sleep(frame_time)
+            thread.join()
+            view, status = prev_view, prev_status
+            return out
+
+        def _confirm_discard() -> bool:
+            """Popup guard so Esc can't silently destroy a long draft."""
+            from rich.align import Align
+            from rich.console import Group
+            from rich.panel import Panel
+            from rich.text import Text
+
+            while True:
+                w, h = console.size
+                lines: list = [Text(""), feedback_title(width=w), Text("")]
+                lines.append(
+                    Align.center(
+                        build_popup(
+                            "Discard this feedback draft?\nEnter discard  ·  Esc keep editing",
+                            width=min(w - 8, 50),
+                            border_style=FEEDBACK_THEME.warn,
+                        )
+                    )
+                )
+                live.update(Panel(Group(*lines), height=max(10, h - 1), padding=(1, 2)))
+                k = read_key(timeout=frame_time) if supports_timeout else read_key()
+                if not k:
+                    continue
+                if k == "enter":
+                    return True
+                if k in ("esc", "q"):
+                    return False
+
+        def _edit_field(which: str) -> None:
+            nonlocal title_text, description
+            if which == "title":
+                new = _standup_read_line(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    prompt="Title",
+                    step="Feedback · a one-line summary",
+                    theme=FEEDBACK_THEME,
+                    title=feedback_title(),
+                    initial=title_text,
+                )
+                if new is not None:
+                    title_text = new
+            else:
+                new = _standup_read_line(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    prompt="Description",
+                    step="Feedback · what happened / what you'd like",
+                    theme=FEEDBACK_THEME,
+                    title=feedback_title(),
+                    box_rows=8,
+                    attachments=attachments,
+                    scope_id="feedback",
+                    initial=description,
+                )
+                if new is not None:
+                    description = new
+            logger.info("feedback: %s edited (%d chars)", which, len(title_text if which == "title" else description))
+
+        def _do_submit() -> None:
+            nonlocal view, status, result, focus, field_sel, action_sel, scroll
+            if not title_text.strip():
+                status = "Title is required"
+                focus, field_sel = "fields", 2
+                logger.info("feedback: submit blocked — empty title")
+                return
+            kind = FEEDBACK_TYPES[kind_idx]
+            area = FEEDBACK_AREAS[area_idx]
+            images = referenced_images(description, attachments)
+            out = _run_busy(lambda: submit_feedback(kind, area, title_text, description, images), "Submitting…")
+            result = out[0] if out else None
+            view, status, action_sel, scroll = "result", result.message if result else "Submission failed", 0, 0
+
+        def _do_polish() -> None:
+            nonlocal view, status, polished, action_sel, scroll
+            if not title_text.strip() and not description.strip():
+                status = "Write a title or description first"
+                return
+            kind = FEEDBACK_TYPES[kind_idx]
+            area = FEEDBACK_AREAS[area_idx]
+            images = referenced_images(description, attachments)
+            out = _run_busy(lambda: polish_feedback(kind, area, title_text, description, images), "AI polishing…")
+            new_polished, msg = out[0] if out else (None, "AI polish failed")
+            if new_polished is not None:
+                polished, status, action_sel, scroll = new_polished, "", 0, 0
+                view = "polish_preview"
+            else:
+                status = msg
+
+        _render()
+        while True:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+            if not k:
+                _render()
+                continue
+
+            if view == "form":
+                status = "" if k in ("enter", " ") else status
+                if focus == "fields":
+                    if k in ("up", "scroll_up"):
+                        field_sel = max(0, field_sel - 1)
+                    elif k in ("down", "scroll_down"):
+                        if field_sel >= 3:
+                            focus, action_sel = "buttons", 0
+                        else:
+                            field_sel += 1
+                    elif k in ("left", "right") and field_sel == 0:
+                        kind_idx = (kind_idx + (1 if k == "right" else -1)) % len(FEEDBACK_TYPES)
+                    elif k in ("left", "right") and field_sel == 1:
+                        area_idx = (area_idx + (1 if k == "right" else -1)) % len(FEEDBACK_AREAS)
+                    elif k in ("left", "right"):
+                        focus, action_sel = "buttons", 0
+                    elif k == "enter":
+                        if field_sel == 0:
+                            kind_idx = (kind_idx + 1) % len(FEEDBACK_TYPES)
+                        elif field_sel == 1:
+                            area_idx = (area_idx + 1) % len(FEEDBACK_AREAS)
+                        elif field_sel == 2:
+                            _edit_field("title")
+                        else:
+                            _edit_field("description")
+                    elif k in ("esc", "q"):
+                        if not title_text.strip() and not description.strip():
+                            break
+                        if _confirm_discard():
+                            logger.info("feedback: draft discarded")
+                            break
+                else:  # buttons: Submit / AI Polish / Back
+                    if k == "left":
+                        action_sel = max(0, action_sel - 1)
+                    elif k == "right":
+                        action_sel = min(2, action_sel + 1)
+                    elif k in ("up", "scroll_up"):
+                        focus, field_sel = "fields", 3
+                    elif k == "enter":
+                        if action_sel == 0:
+                            _do_submit()
+                        elif action_sel == 1:
+                            _do_polish()
+                        else:
+                            if not title_text.strip() and not description.strip():
+                                break
+                            if _confirm_discard():
+                                logger.info("feedback: draft discarded")
+                                break
+                    elif k in ("esc", "q"):
+                        if not title_text.strip() and not description.strip():
+                            break
+                        if _confirm_discard():
+                            logger.info("feedback: draft discarded")
+                            break
+
+            elif view == "polish_preview":
+                if k in SCROLL_KEYS:
+                    _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
+                    if _ns != scroll:
+                        scroll = _ns
+                elif k == "left":
+                    action_sel = max(0, action_sel - 1)
+                elif k == "right":
+                    action_sel = min(1, action_sel + 1)
+                elif k == "enter":
+                    if action_sel == 0 and polished is not None:  # Accept
+                        title_text, description = polished
+                        logger.info("feedback: AI polish accepted")
+                    else:
+                        logger.info("feedback: AI polish discarded — keeping original")
+                    polished, view, status, scroll = None, "form", "", 0
+                    focus, action_sel = "buttons", 0
+                elif k in ("esc", "q"):  # Esc = Keep Original
+                    polished, view, status, scroll = None, "form", "", 0
+                    focus, action_sel = "buttons", 0
+
+            elif view == "result":
+                has_browser_btn = bool(result and not result.ok and result.url)
+                if k in SCROLL_KEYS:
+                    _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
+                    if _ns != scroll:
+                        scroll = _ns
+                elif k == "left":
+                    action_sel = max(0, action_sel - 1)
+                elif k == "right" and has_browser_btn:
+                    action_sel = min(1, action_sel + 1)
+                elif k == "enter":
+                    if action_sel == 1 and has_browser_btn and result:
+                        try:
+                            webbrowser.open(result.url)
+                            logger.info("feedback: opened fallback browser URL")
+                        except Exception as exc:
+                            logger.warning("feedback: browser open failed: %s", exc)
+                    else:
+                        break  # Done
+                elif k in ("esc", "q"):
+                    break
+            _render()
+        logger.info("feedback: page closed")
 
 
 def _run_standup_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
@@ -3669,6 +3955,13 @@ def select_mode(
                     logger.info("changelog opened from mode select")
                     play_wordmark_intro(console, live, "Changelog", "rgb(160,160,180)", frame_time=_FRAME_TIME)
                     _run_changelog_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                    select_time = time.monotonic()  # restart the description typewriter
+                elif key == "f":
+                    # Open the Feedback form (bottom-left hint) — same inline
+                    # pattern as the Changelog page above.
+                    logger.info("feedback opened from mode select")
+                    play_wordmark_intro(console, live, "Feedback", "rgb(160,160,180)", frame_time=_FRAME_TIME)
+                    _run_feedback_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                     select_time = time.monotonic()  # restart the description typewriter
 
                 elapsed = time.monotonic() - select_time

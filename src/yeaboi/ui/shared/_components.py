@@ -63,6 +63,9 @@ REPORTING_THEME = Theme(accent="rgb(140,120,230)", accent_bright="rgb(180,160,25
 # Silver chrome on purpose — the changelog page's per-feature area tags carry the
 # colour (each tag uses its mode's accent), so the page frame stays neutral.
 CHANGELOG_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
+# Same rationale as CHANGELOG_THEME: the feedback form's area chip carries the
+# selected mode's colour, so the page frame stays neutral silver.
+FEEDBACK_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
 
 # Button color scheme: (accent_border, accent_label, grey_border, grey_label)
 _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
@@ -108,6 +111,11 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Back": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     # Advisory action on the analysis review when a Small project looks bigger.
     "Switch to Large": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
+    # Feedback form (silver chrome; Submit green like Accept, Open Browser blue like Export).
+    "Submit": ("rgb(60,160,80)", "rgb(80,200,100)", "rgb(40,50,40)", "rgb(50,60,50)"),
+    "AI Polish": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    "Keep Original": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    "Open Browser": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
 }
 _BTN_DEFAULT = ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)")
 _BTN_MIN_W = 12
@@ -252,6 +260,11 @@ def reporting_title(shimmer_tick: float | None = None, *, width: int | None = No
 def changelog_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
     """Return the Changelog ASCII title (silver accent). Optionally shimmering."""
     return build_ascii_title("Changelog", "rgb(160,160,180)", shimmer_tick=shimmer_tick, width=width)
+
+
+def feedback_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
+    """Return the Feedback ASCII title (silver accent). Optionally shimmering."""
+    return build_ascii_title("Feedback", "rgb(160,160,180)", shimmer_tick=shimmer_tick, width=width)
 
 
 def build_popup(
