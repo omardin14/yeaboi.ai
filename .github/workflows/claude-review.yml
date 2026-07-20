@@ -3,7 +3,9 @@
 # Deliberately NON-BLOCKING: this workflow is not a required check — ci.yml
 # remains the merge gate. The old per-PR review was removed for being slow;
 # this one can never block a merge, only add review comments when it lands.
-# Skips drafts and the auto-version bot's `chore: bump version` pushes.
+# Skips drafts, the auto-version bot's `chore: bump version` pushes, and
+# Dependabot PRs (those get the dedicated dependabot-auto.yml pipeline, and
+# Dependabot-triggered runs can't read the Actions secrets store anyway).
 
 name: Claude Review
 
@@ -19,7 +21,8 @@ jobs:
   review:
     if: |
       github.event.pull_request.draft == false &&
-      github.actor != 'github-actions[bot]'
+      github.actor != 'github-actions[bot]' &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
