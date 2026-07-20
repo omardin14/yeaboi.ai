@@ -8,7 +8,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKETPLACE_DIR = REPO_ROOT / "claude-plugin"
 PLUGIN_DIR = MARKETPLACE_DIR / "yeaboi"
 
-EXPECTED_SKILLS = {"plan-sprint", "standup", "delivery-report"}
+# The skill inventory itself is asserted by tests/unit/test_surface_parity.py
+# (single source of truth) — this file checks each skill's internal validity.
 
 
 def _frontmatter(text: str) -> dict:
@@ -56,10 +57,6 @@ class TestPluginManifest:
 
 
 class TestSkills:
-    def test_expected_skills_present(self):
-        found = {p.parent.name for p in PLUGIN_DIR.glob("skills/*/SKILL.md")}
-        assert found == EXPECTED_SKILLS
-
     def test_skill_frontmatter(self):
         for skill_md in PLUGIN_DIR.glob("skills/*/SKILL.md"):
             fields = _frontmatter(skill_md.read_text())
