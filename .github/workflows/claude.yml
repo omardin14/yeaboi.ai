@@ -80,6 +80,8 @@ jobs:
             2. Create a branch named `feature/issue-${{ github.event.issue.number }}-<short-slug>` off main.
             3. Implement the change following CLAUDE.md conventions (observability pillars,
                TUI component standards, frozen-dataclass defaults, tests for every new function).
+               Conventions are split across CLAUDE.md and `.claude/skills/*/SKILL.md` — Read
+               the SKILL.md for each area you touch (see the skills index table in CLAUDE.md).
             4. Verify: `make test` and `make lint` must both pass before you commit.
             5. Commit (lowercase imperative message + the Co-Authored-By trailer from CLAUDE.md),
                push the branch, and open a PR against main whose body summarizes the change,
