@@ -548,6 +548,27 @@ class SessionStore:
         inp, out, calls = row if row else (0, 0, 0)
         return {"input_tokens": inp, "output_tokens": out, "total_tokens": inp + out, "call_count": calls}
 
+    def get_lifetime_usage_by_provider(self) -> dict[str, dict]:
+        """Return cumulative token usage grouped by provider.
+
+        Lets the Usage page price each provider's tokens at its own rate — a
+        history mixing Anthropic and (free) Ollama sessions must neither hide
+        real past cloud spend behind a $0 local rate nor price local tokens at
+        cloud rates. Rows recorded before providers were stamped group under "".
+        """
+        usage: dict[str, dict] = {}
+        for provider, inp, out, calls in self._conn.execute(
+            "SELECT provider, COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COUNT(*) "
+            "FROM token_usage GROUP BY provider"
+        ).fetchall():
+            usage[provider] = {
+                "input_tokens": inp,
+                "output_tokens": out,
+                "total_tokens": inp + out,
+                "call_count": calls,
+            }
+        return usage
+
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     def close(self) -> None:

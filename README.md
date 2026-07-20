@@ -86,6 +86,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 - [Quick Start](#-quick-start)
 - [Features](#-features)
 - [Getting Started](#-getting-started)
+- [Local Mode (Ollama)](#-local-mode-ollama)
 - [Deploy on AWS Lightsail](#-deploy-on-aws-lightsail-openclaw)
 - [CLI Reference](#%EF%B8%8F-cli-reference)
 - [Intake Modes](#-intake-modes)
@@ -125,7 +126,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 
 📤 **5 Export Formats** — Markdown, HTML, JSON, Jira sync, Azure DevOps Boards sync
 
-🤖 **4 LLM Providers** — Claude (default), GPT, Gemini, AWS Bedrock
+🤖 **5 LLM Providers** — Claude (default), GPT, Gemini, AWS Bedrock, Ollama (local, free, no API key)
 
 💾 **Session Persistence** — SQLite-backed sessions that survive terminal restarts; resume with `--resume`
 
@@ -207,6 +208,60 @@ OPENAI_API_KEY=sk-...
 LLM_PROVIDER=google
 GOOGLE_API_KEY=AIza...
 ```
+
+#### Ollama — no API key needed (see [Local Mode](#-local-mode-ollama))
+
+```
+LLM_PROVIDER=ollama
+```
+
+## 🏠 Local Mode (Ollama)
+
+yeaboi runs **completely free, offline, and private** on a local model via [Ollama](https://ollama.com) — no API key, no cloud account, nothing leaves your machine.
+
+### Setup
+
+```bash
+# 1. Install the Ollama extra
+uv sync --extra ollama          # (or: pipx inject yeaboi langchain-ollama)
+
+# 2. Install Ollama and pull a model
+brew install ollama             # or download from https://ollama.com
+ollama serve                    # usually auto-starts on install
+ollama pull qwen3:8b
+
+# 3. Point yeaboi at it — or just pick "Ollama (Local)" in the setup wizard
+echo "LLM_PROVIDER=ollama" >> ~/.yeaboi/.env
+```
+
+The setup wizard's **Ollama (Local)** card pre-fills `http://localhost:11434`, verifies the server is running, and lists every model you've pulled (live from `/api/tags`). You don't even need step 2's `ollama pull` — pick any preset and the wizard offers to **download it for you** (press `P` on the "Model not pulled" notice) with live progress, straight from the Ollama server API.
+
+### Choosing a model
+
+All presets work — they differ in RAM appetite, download size, and how disciplined their JSON output is (which drives plan quality):
+
+| Model | Size | RAM | Trade-off |
+|-------|------|-----|-----------|
+| `qwen3:8b` (default) | ~5 GB | 16 GB | Best balance — strong JSON + tool calling |
+| `qwen3:14b` | ~9 GB | 24 GB+ | Noticeably better plans, heavier |
+| `qwen2.5:14b` | ~9 GB | 24 GB+ | Proven JSON discipline, slightly older |
+| `llama3.1:8b` | ~5 GB | 16 GB | Familiar name; weaker JSON → more fallback artifacts |
+
+Any other Ollama model works too (`Custom…` in the wizard) — prefer models advertised as good at JSON/tool-calling.
+
+### How reliability is achieved
+
+Local models are weaker than cloud models at emitting valid JSON, and every yeaboi pipeline stage parses JSON. Local mode stays reliable through three layers:
+
+1. **Constrained decoding** — on Ollama, JSON-producing calls run with `format="json"`, so the model *cannot* emit anything but syntactically valid JSON.
+2. **One-shot repair** — if a reply still fails to parse (e.g. truncation), yeaboi sends the exact parse error back and asks the model to fix it (`invoke_json()` — applied to every provider, cloud included).
+3. **Deterministic fallbacks** — as always, a failed generation degrades to a deterministic artifact instead of crashing.
+
+On top of that, chat history is automatically trimmed to fit the local context window (oldest turns first, never mid-exchange), and `<think>` reasoning blocks from thinking models like qwen3 are stripped before display.
+
+Config knobs: `OLLAMA_BASE_URL` (default `http://localhost:11434`), `OLLAMA_NUM_CTX` (default 16384 — yeaboi requests a bigger context than Ollama's 2-4k default because the planning prompts are large; lower it on low-RAM machines).
+
+**Limitations:** the post-planning conversational agent (Jira/Confluence writes via chat) depends on the model's tool-calling quality, which varies by model — planning itself never needs tool calling; a model that can't call tools automatically degrades to plain chat with a one-time notice. If something's wrong locally, yeaboi tells you exactly what instead of silently degrading: server down → "Start it with: ollama serve", model not pulled → "ollama pull <model>", package missing → "uv sync --extra ollama", model too slow → "try a smaller model".
 
 <details>
 <summary>🔍 LangSmith (optional tracing)</summary>
@@ -2022,7 +2077,7 @@ Every pipeline stage has an accept/edit/reject checkpoint. High-risk tool calls 
 
 ## 🤖 Multi-Provider LLM Support
 
-The agent supports four LLM providers. Set via `LLM_PROVIDER` in `.env`:
+The agent supports five LLM providers. Set via `LLM_PROVIDER` in `.env`:
 
 | Provider | Env Var | Key Format | Value |
 |----------|---------|------------|-------|
@@ -2030,10 +2085,13 @@ The agent supports four LLM providers. Set via `LLM_PROVIDER` in `.env`:
 | OpenAI | `OPENAI_API_KEY` | `sk-...` | `openai` |
 | Google | `GOOGLE_API_KEY` | `AIza...` | `google` |
 | AWS Bedrock | `AWS_REGION` | IAM credentials (no key) | `bedrock` |
+| Ollama (local) | `OLLAMA_BASE_URL` | none — local server URL | `ollama` |
 
-OpenAI, Google, and Bedrock are lazy-imported — install with `uv sync --extra all-providers` or individually with `--extra openai` / `--extra google` / `--extra bedrock`.
+OpenAI, Google, Bedrock, and Ollama are lazy-imported — install with `uv sync --extra all-providers` or individually with `--extra openai` / `--extra google` / `--extra bedrock` / `--extra ollama`.
 
 Bedrock uses IAM credentials automatically (instance role, `~/.aws/credentials`, or env vars). On Lightsail/EC2, the AWS profile is auto-detected from `~/.aws/config`. No API key required.
+
+Ollama needs no credentials at all — see [Local Mode (Ollama)](#-local-mode-ollama) for setup, model trade-offs, and how reliability is achieved on smaller local models.
 
 ---
 

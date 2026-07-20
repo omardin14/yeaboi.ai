@@ -41,18 +41,51 @@ def track_usage(response) -> None:
     Call this after every LLM invoke() to track token consumption.
     Works with all providers (Anthropic, OpenAI, Google, Bedrock).
     """
-    meta = getattr(response, "response_metadata", None) or {}
-    logger.info("track_usage: response_metadata keys=%s", list(meta.keys()) if meta else "empty")
 
-    # Anthropic: meta has 'usage' dict with input_tokens/output_tokens
-    # OpenAI: meta has 'token_usage' dict with prompt_tokens/completion_tokens
-    usage = meta.get("usage", {}) or meta.get("token_usage", {})
-    if not usage:
-        usage = meta
-    logger.info("track_usage: usage keys=%s, values=%s", list(usage.keys()) if isinstance(usage, dict) else "?", usage)
+    def _as_int(value) -> int:
+        # Defensive: metadata shapes vary per provider (and mocks in tests) —
+        # anything non-numeric counts as "no data" rather than crashing a call.
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
 
-    inp = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
-    out = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+    # Preferred source: LangChain's provider-neutral `usage_metadata` attribute
+    # (an AIMessage field with input_tokens/output_tokens). ChatOllama populates
+    # this while its response_metadata uses Ollama-native keys (prompt_eval_count/
+    # eval_count) that the metadata fallback below also understands.
+    usage_meta = getattr(response, "usage_metadata", None)
+    inp = out = 0
+    if isinstance(usage_meta, dict):
+        inp = _as_int(usage_meta.get("input_tokens", 0))
+        out = _as_int(usage_meta.get("output_tokens", 0))
+        if inp or out:
+            logger.info("track_usage: using usage_metadata (in=%d, out=%d)", inp, out)
+    if not (inp or out):
+        meta = getattr(response, "response_metadata", None)
+        meta = meta if isinstance(meta, dict) else {}
+        logger.info("track_usage: response_metadata keys=%s", list(meta.keys()) if meta else "empty")
+
+        # Anthropic: meta has 'usage' dict with input_tokens/output_tokens
+        # OpenAI: meta has 'token_usage' dict with prompt_tokens/completion_tokens
+        # Ollama: meta itself carries prompt_eval_count/eval_count
+        usage = meta.get("usage", {}) or meta.get("token_usage", {})
+        if not isinstance(usage, dict) or not usage:
+            usage = meta
+        logger.info(
+            "track_usage: usage keys=%s, values=%s", list(usage.keys()) if isinstance(usage, dict) else "?", usage
+        )
+
+        inp = (
+            _as_int(usage.get("input_tokens", 0))
+            or _as_int(usage.get("prompt_tokens", 0))
+            or _as_int(usage.get("prompt_eval_count", 0))
+        )
+        out = (
+            _as_int(usage.get("output_tokens", 0))
+            or _as_int(usage.get("completion_tokens", 0))
+            or _as_int(usage.get("eval_count", 0))
+        )
     if inp or out:
         _usage_stats["input_tokens"] += inp
         _usage_stats["output_tokens"] += out
@@ -103,13 +136,22 @@ _PROVIDER_DEFAULTS: dict[str, str] = {
     "openai": "gpt-4o",
     "google": "gemini-2.5-flash",
     "bedrock": "us.anthropic.claude-sonnet-4-6-v1:0",
+    # Local default: best small model for JSON adherence + tool calling that
+    # fits comfortably on a 16 GB machine. See README: "Local Mode (Ollama)"
+    # for the full model trade-off table.
+    "ollama": "qwen3:8b",
 }
 
 # Kept for backward compatibility — callers that imported DEFAULT_MODEL still work.
 DEFAULT_MODEL = _PROVIDER_DEFAULTS["anthropic"]
 
+# Output-token cap requested from Ollama. Single-sourced: get_llm() passes it
+# as num_predict, and the context-budget maths (warn_if_context_overflow,
+# nodes._trim_history_for_local) reserve the same amount out of OLLAMA_NUM_CTX.
+_OLLAMA_NUM_PREDICT = 8192
 
-def get_llm(model: str | None = None, temperature: float = 0.0) -> BaseChatModel:
+
+def get_llm(model: str | None = None, temperature: float = 0.0, json_mode: bool = False) -> BaseChatModel:
     """Create an LLM instance for the configured provider.
 
     # See README: "Agentic Blueprint Reference" — Core Graph Setup
@@ -132,6 +174,13 @@ def get_llm(model: str | None = None, temperature: float = 0.0) -> BaseChatModel
         model: Model ID override. None means use LLM_MODEL env var or provider default.
         temperature: Sampling temperature. 0.0 = deterministic (default for structured
             artifact generation). Use 0.2–0.5 for tools that benefit from variety.
+        json_mode: When True and the provider is Ollama, enables constrained JSON
+            decoding (ChatOllama's ``format="json"``) — the model literally cannot
+            emit anything but syntactically valid JSON, which is the main
+            reliability lever for weaker local models. A documented no-op for the
+            cloud providers (their JSON discipline comes from the prompts plus the
+            invoke_json() repair loop). Never set this for prose calls (the
+            conversational agent, llm_tools, guardrail classifiers).
 
     Returns:
         A configured BaseChatModel ready for use in LangGraph nodes.
@@ -226,8 +275,57 @@ def get_llm(model: str | None = None, temperature: float = 0.0) -> BaseChatModel
             temperature=temperature,
         )
 
+    if provider == "ollama":
+        # langchain-ollama is an optional dependency (install with: uv sync --extra ollama)
+        # # See README: "Local Mode (Ollama)" — keyless local provider. The model
+        # runs entirely on the user's machine via the Ollama server; there are no
+        # credentials, so get_llm() never raises OSError for this provider.
+        try:
+            from langchain_ollama import ChatOllama
+        except ImportError as e:
+            raise ImportError("langchain-ollama is not installed. Run: uv sync --extra ollama") from e
+
+        from yeaboi.config import get_ollama_base_url, get_ollama_num_ctx
+
+        base_url = get_ollama_base_url()
+        num_ctx = get_ollama_num_ctx()
+        llm = ChatOllama(
+            model=resolved_model,
+            base_url=base_url,
+            temperature=temperature,
+            # Request a context large enough for the biggest assembled prompts —
+            # Ollama's server default (2-4k tokens) silently truncates, which
+            # destroys JSON output. See config.get_ollama_num_ctx().
+            num_ctx=num_ctx,
+            # Cap output generously; Ollama's small default can cut JSON mid-array.
+            num_predict=_OLLAMA_NUM_PREDICT,
+            # The planning pipeline runs 5 sequential nodes — keep the model
+            # loaded in RAM between them instead of reloading every call.
+            keep_alive="10m",
+            # Local inference on CPU can be slow; mirror bedrock's read_timeout.
+            client_kwargs={"timeout": 300},
+            # format="json" is Ollama's constrained decoding — see json_mode docs.
+            format="json" if json_mode else "",
+            # Thinking models (qwen3) spend generation budget on a reasoning
+            # pass BEFORE the constrained JSON — on a big planning prompt that
+            # can consume the entire num_predict and return EMPTY content after
+            # minutes of local compute. JSON calls therefore disable thinking
+            # (reasoning=False → "think": false); prose calls keep the model's
+            # default (thinking improves prose; strip_think_tags() handles the
+            # tags). None = omit the option entirely for maximum server compat.
+            reasoning=False if json_mode else None,
+        )
+        logger.info(
+            "LLM ready: provider=ollama, model=%s, base_url=%s, num_ctx=%d, json_mode=%s",
+            resolved_model,
+            base_url,
+            num_ctx,
+            json_mode,
+        )
+        return llm
+
     raise ValueError(
-        f"Unknown LLM_PROVIDER: {provider!r}. Valid options are: anthropic (default), openai, google, bedrock."
+        f"Unknown LLM_PROVIDER: {provider!r}. Valid options are: anthropic (default), openai, google, bedrock, ollama."
     )
 
 
@@ -308,3 +406,160 @@ def invoke_with_images(llm: BaseChatModel, prompt: str, image_paths=None):
     except Exception as exc:
         logger.warning("model rejected image blocks (%s); retrying text-only", exc)
         return llm.invoke([HumanMessage(content=prompt)])
+
+
+# ---------------------------------------------------------------------------
+# Reliable JSON invocation — constrained decoding + one-shot repair loop
+# ---------------------------------------------------------------------------
+#
+# # See README: "Local Mode (Ollama)" — how reliability is achieved
+# The planning pipeline and the mode engines all parse the model's reply as
+# JSON, and every parser falls back to a deterministic artifact when parsing
+# fails. That fallback never crashes — but it silently downgrades quality.
+# invoke_json() closes that gap for every provider:
+#   1. json_mode=True turns on Ollama's constrained JSON decoding (no-op for
+#      cloud providers).
+#   2. If the reply still fails json.loads (truncation, prose, fences), we
+#      re-ask ONCE with the exact parse error so the model can repair it.
+# The return value is the raw response object, so existing call sites keep
+# their `_parse_*_response(response.content)` line and fallback untouched.
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars per token for English prose/JSON).
+
+    Deliberately heuristic — an exact count needs the model's own tokenizer.
+    Used only for local context-window budget checks (warnings + history
+    trimming), where ±25% accuracy is plenty.
+    """
+    return len(text) // 4
+
+
+def warn_if_context_overflow(prompt: str) -> None:
+    """Log a warning when a local-Ollama prompt likely exceeds the context window.
+
+    Ollama silently LEFT-truncates anything beyond num_ctx − num_predict — no
+    error, just a prompt missing its beginning, which destroys structured
+    output. We can't prevent it from here; this makes it diagnosable in the
+    logs instead of an invisible quality cliff. No-op for cloud providers
+    (their windows are 200k+).
+    """
+    from yeaboi.config import get_llm_provider, get_ollama_num_ctx
+
+    if get_llm_provider() != "ollama":
+        return
+    est = estimate_tokens(prompt)
+    num_ctx = get_ollama_num_ctx()
+    if est + _OLLAMA_NUM_PREDICT > num_ctx:
+        logger.warning(
+            "prompt ~%d tokens + %d output reserve exceeds OLLAMA_NUM_CTX=%d — "
+            "Ollama truncates silently; raise OLLAMA_NUM_CTX in .env if output quality degrades",
+            est,
+            _OLLAMA_NUM_PREDICT,
+            num_ctx,
+        )
+
+
+def strip_think_tags(text: str) -> str:
+    """Remove ``<think>…</think>`` reasoning blocks from prose LLM output.
+
+    Think-by-default local models (e.g. qwen3, the Ollama default) embed their
+    chain-of-thought in the response content. JSON calls are protected by
+    constrained decoding (format="json"), but prose paths — the conversational
+    agent, llm_tools, the guardrail classifier — would show the raw tags to the
+    user. Stripping at the consumption point is the zero-risk fix: cloud models
+    never emit these, and prose calls deliberately keep the model's default
+    thinking (it improves prose quality; JSON calls disable it in get_llm —
+    see the reasoning= comment there).
+    """
+    import re
+
+    if not isinstance(text, str) or "<think>" not in text:
+        return text
+    # Closed blocks first; then an unclosed leading block (truncated generation).
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"^\s*<think>.*", "", text, flags=re.DOTALL)
+    return text.strip()
+
+
+def strip_json_fences(raw: str) -> str:
+    """Strip a surrounding markdown code fence from an LLM reply, if present.
+
+    Models often wrap JSON in ```json ... ``` despite instructions. This is the
+    shared version of the fence-strip idiom used by the `_parse_*_response`
+    helpers; invoke_json() uses it for validation only.
+    """
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = raw[raw.find("\n") + 1 :]
+    if raw.endswith("```"):
+        raw = raw[: raw.rfind("```")]
+    return raw.strip()
+
+
+def invoke_json(prompt: str, *, temperature: float = 0.0, image_paths=None, max_reasks: int = 1, get_llm_fn=None):
+    """Invoke the configured LLM expecting a JSON reply, with a repair re-ask.
+
+    Drop-in replacement for ``get_llm(temperature=...).invoke([HumanMessage(prompt)])``
+    (or ``invoke_with_images(...)``) at call sites whose response is parsed as
+    JSON. Calls track_usage() on every attempt, so callers must NOT track again.
+
+    Args:
+        prompt: The full prompt text.
+        temperature: Sampling temperature (0.0 for structured artifacts).
+        image_paths: Optional pasted-screenshot paths (see invoke_with_images).
+        max_reasks: How many repair rounds to attempt after an invalid reply.
+            Default 1 — one round captures nearly all the value; more just
+            doubles latency on slow local models for rare wins.
+        get_llm_fn: Optional factory used instead of this module's get_llm().
+            nodes.py passes its own module-level reference so the established
+            test seam (patching ``yeaboi.agent.nodes.get_llm``) keeps working.
+
+    Returns:
+        The last LLM response object. Its ``.content`` is best-effort valid
+        JSON; if every repair attempt failed, callers' existing deterministic
+        fallbacks take over exactly as before.
+    """
+    import json
+
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    warn_if_context_overflow(prompt)
+    llm = (get_llm_fn or get_llm)(temperature=temperature, json_mode=True)
+    response = invoke_with_images(llm, prompt, image_paths)
+    track_usage(response)
+
+    for attempt in range(1, max_reasks + 1):
+        try:
+            json.loads(strip_json_fences(response.content))
+            if attempt > 1:
+                logger.info("invoke_json: repair re-ask produced valid JSON (attempt %d)", attempt)
+            return response
+        except (json.JSONDecodeError, TypeError) as err:
+            logger.warning("invoke_json: reply is not valid JSON (attempt %d): %s — re-asking", attempt, err)
+            previous = response.content if isinstance(response.content, str) else str(response.content)
+            response = llm.invoke(
+                [
+                    # Rebuild the original message with its image blocks — a
+                    # text-only repair round would silently drop pasted
+                    # screenshots the first attempt could see.
+                    HumanMessage(content=build_multimodal_content(prompt, image_paths)),
+                    AIMessage(content=previous),
+                    HumanMessage(
+                        content=(
+                            f"Your previous reply was not valid JSON ({err}). "
+                            "Reply again with ONLY the corrected JSON — no prose, no code fences."
+                        )
+                    ),
+                ]
+            )
+            track_usage(response)
+
+    # Final validation purely for logging — the caller's parser + deterministic
+    # fallback handle an invalid reply gracefully either way.
+    try:
+        json.loads(strip_json_fences(response.content))
+        logger.info("invoke_json: repair re-ask produced valid JSON")
+    except (json.JSONDecodeError, TypeError) as err:
+        logger.warning("invoke_json: reply still invalid after %d re-ask(s): %s — caller fallback", max_reasks, err)
+    return response

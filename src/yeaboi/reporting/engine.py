@@ -24,8 +24,6 @@ from collections import Counter
 from dataclasses import asdict
 from datetime import date, timedelta
 
-from langchain_core.messages import HumanMessage
-
 from yeaboi.agent.state import DeliveredItem, DeliveryReport
 from yeaboi.reporting import activity as activity_mod
 
@@ -109,18 +107,23 @@ def _invoke_llm(prompt: str) -> tuple[dict, list[str]]:
         logger.warning("reporting: LLM not configured (%s)", why)
         return {}, [f"AI narrative unavailable — {why}. Showing a plain summary."]
 
-    from yeaboi.agent.llm import get_llm, track_usage
-    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error
+    # invoke_json tracks usage + turns on JSON mode + re-asks once on bad JSON.
+    # See README: "Local Mode (Ollama)" — reliability layer.
+    from yeaboi.agent.llm import invoke_json
+    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error, _local_llm_hint
 
     try:
         logger.info("reporting: invoking LLM design pass")
-        response = get_llm(temperature=0.3).invoke([HumanMessage(content=prompt)])
-        track_usage(response)
+        response = invoke_json(prompt, temperature=0.3)
         return _parse_json_response(response.content), []
     except Exception as exc:  # noqa: BLE001 — turn any LLM failure into a warning + fallback
         if _is_llm_auth_or_billing_error(exc):
             logger.warning("reporting: LLM auth/billing error: %s", exc)
             return {}, ["AI narrative unavailable — API key invalid or billing issue. Showing a plain summary."]
+        local_hint = _local_llm_hint(exc)
+        if local_hint:
+            logger.warning("reporting: local Ollama failure: %s", exc)
+            return {}, [f"AI narrative unavailable — {local_hint} Showing a plain summary."]
         logger.warning("reporting: LLM request failed: %s", exc)
         return {}, ["AI narrative unavailable — LLM request failed (see logs). Showing a plain summary."]
 

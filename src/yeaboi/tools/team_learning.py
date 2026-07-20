@@ -45,14 +45,15 @@ logger = logging.getLogger(__name__)
 
 
 def _llm_invoke(prompt: str, *, temperature: float = 0.0):
-    """Invoke the LLM with a prompt and track token usage."""
-    from langchain_core.messages import HumanMessage
+    """Invoke the LLM expecting a JSON reply; tracks token usage internally.
 
-    from yeaboi.agent.llm import get_llm, track_usage
+    Every caller of this wrapper parses the response as JSON, so it routes
+    through invoke_json — JSON mode on Ollama plus a one-shot repair re-ask.
+    # See README: "Local Mode (Ollama)" — reliability layer.
+    """
+    from yeaboi.agent.llm import invoke_json
 
-    response = get_llm(temperature=temperature).invoke([HumanMessage(content=prompt)])
-    track_usage(response)
-    return response
+    return invoke_json(prompt, temperature=temperature)
 
 
 def _safe_float(val: object) -> float:

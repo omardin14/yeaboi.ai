@@ -57,6 +57,15 @@ _PROVIDERS: dict[str, dict[str, str]] = {
         "prefix": "",
         "instructions": "Uses IAM credentials from instance role, ~/.aws/credentials, or env vars",
     },
+    "5": {
+        "name": "Ollama (Local & Free — no API key)",
+        "env_var": "OLLAMA_BASE_URL",
+        "provider_val": "ollama",
+        "prefix": "",
+        "instructions": "Free, private, no API key. Install: https://ollama.com then run: ollama pull qwen3:8b",
+        # Not a secret — the local server URL; Enter accepts this default.
+        "default_input": "http://localhost:11434",
+    },
 }
 
 
@@ -170,6 +179,23 @@ def _collect_api_key(console: Console, provider: dict[str, str]) -> str | None:
     console.print("\n[bold]Step 2/3[/bold] API Key [required]")
     console.print(f"  {provider['instructions']}")
 
+    # Keyless providers (Ollama): the value is a server URL with a sensible
+    # default, not a secret — Enter accepts the default, input is unmasked.
+    default_input = provider.get("default_input", "")
+    if default_input:
+        # langchain-ollama is an optional extra — warn here rather than letting
+        # the first planning run crash with an ImportError after a green setup.
+        if provider.get("provider_val") == "ollama":
+            import importlib.util
+
+            if importlib.util.find_spec("langchain_ollama") is None:
+                console.print(
+                    "[yellow]Ollama support isn't installed — run: uv sync --extra ollama "
+                    "(or: pip install langchain-ollama) before your first planning run.[/yellow]"
+                )
+        value = prompt(f"  {provider['env_var']} [{default_input}]: ").strip()
+        return value or default_input
+
     while True:
         key = prompt(f"  {provider['env_var']}: ", is_password=True).strip()
         if not key:
@@ -199,8 +225,9 @@ def run_setup_wizard(console: Console) -> bool:
     # Welcome panel
     body = Text.from_markup(
         "[bold cyan]Welcome to yeaboi.ai — First-Time Setup[/bold cyan]\n\n"
-        "We'll collect your API credentials now. Everything is stored locally\n"
-        "in [cyan]~/.yeaboi/.env[/cyan] — never sent anywhere else."
+        "We'll set up your AI provider now — cloud (API key) or free local\n"
+        "(Ollama, no key needed). Everything is stored locally in\n"
+        "[cyan]~/.yeaboi/.env[/cyan] — never sent anywhere else."
     )
     console.print(Panel(body, border_style="cyan", padding=(1, 2)))
 

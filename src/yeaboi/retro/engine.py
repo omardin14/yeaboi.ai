@@ -19,8 +19,6 @@ from __future__ import annotations
 import json
 import logging
 
-from langchain_core.messages import HumanMessage
-
 from yeaboi.retro.board import RetroBoard
 
 logger = logging.getLogger(__name__)
@@ -85,20 +83,26 @@ def generate_action_items(board: RetroBoard) -> str:
         added = board.add_ai_cards(_build_fallback_action_items(didnt_raw))
         return f"AI unavailable ({why}) — added {added} basic action item(s)."
 
-    from yeaboi.agent.llm import get_llm, track_usage
-    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error
+    # invoke_json tracks usage + turns on JSON mode + re-asks once on bad JSON.
+    # See README: "Local Mode (Ollama)" — reliability layer.
+    from yeaboi.agent.llm import invoke_json
+    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error, _local_llm_hint
     from yeaboi.prompts.retro import get_retro_action_items_prompt
 
     prompt = get_retro_action_items_prompt(went_well=went, didnt_go_well=didnt)
     try:
-        response = get_llm(temperature=0.2).invoke([HumanMessage(content=prompt)])
-        track_usage(response)
+        response = invoke_json(prompt, temperature=0.2)
         items = _parse_action_items(response.content)
     except Exception as exc:
         if _is_llm_auth_or_billing_error(exc):
             logger.warning("retro: LLM auth/billing error — surfacing as warning: %s", exc)
             added = board.add_ai_cards(_build_fallback_action_items(didnt_raw))
             return f"AI unavailable (API key/billing) — added {added} basic action item(s)."
+        local_hint = _local_llm_hint(exc)
+        if local_hint:
+            logger.warning("retro: local Ollama failure: %s", exc)
+            added = board.add_ai_cards(_build_fallback_action_items(didnt_raw))
+            return f"{local_hint} Added {added} basic action item(s)."
         logger.warning("retro: LLM request failed, using fallback: %s", exc)
         added = board.add_ai_cards(_build_fallback_action_items(didnt_raw))
         return f"AI request failed — added {added} basic action item(s) (see logs)."

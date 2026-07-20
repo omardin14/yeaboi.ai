@@ -1582,6 +1582,8 @@ def _build_usage_screen(
         lt_cost = lifetime.get("estimated_cost", 0.0)
         if lt_cost > 0:
             _row("Estimated total cost", f"${lt_cost:.4f}", theme.warn)
+        elif usage_data.get("provider") == "ollama":
+            _row("Estimated total cost", "$0.00 — local model, runs on your hardware", theme.good)
 
     # ── Current Session Usage ─────────────────────────────────────
     _heading("Current Session")
@@ -1594,6 +1596,8 @@ def _build_usage_screen(
         cost = tokens.get("estimated_cost", 0.0)
         if cost > 0:
             _row("Session cost", f"${cost:.4f}", theme.warn)
+        elif usage_data.get("provider") == "ollama":
+            _row("Session cost", "$0.00 — local model", theme.good)
     else:
         body_lines.append(Text(_PAD + "    No calls in this session yet.", style=theme.muted, justify="left"))
 
@@ -3212,6 +3216,11 @@ def _build_settings_screen(
     _row("Anthropic Key", config_data.get("ANTHROPIC_API_KEY", ""), masked=True)
     _row("OpenAI Key", config_data.get("OPENAI_API_KEY", ""), masked=True)
     _row("Google Key", config_data.get("GOOGLE_API_KEY", ""), masked=True)
+    # Ollama is keyless — its server URL/context rows only appear when the user
+    # runs local mode (or has customised the vars), keeping the page uncluttered.
+    if config_data.get("LLM_PROVIDER", "") == "ollama" or config_data.get("OLLAMA_BASE_URL", ""):
+        _row("Ollama URL", config_data.get("OLLAMA_BASE_URL", "") or "http://localhost:11434 (default)")
+        _row("Ollama Context", config_data.get("OLLAMA_NUM_CTX", "") or "16384 (default)")
 
     # ── Jira ──────────────────────────────────────────────────────
     _heading("Jira")

@@ -1099,25 +1099,19 @@ def _collect_usage_data() -> dict:
     provider = os.environ.get("LLM_PROVIDER", "anthropic")
     model = os.environ.get("LLM_MODEL", "")
     if not model:
-        _defaults = {
-            "anthropic": "claude-sonnet-4-6",
-            "openai": "gpt-4o",
-            "google": "gemini-2.5-flash",
-            "bedrock": "us.anthropic.claude-sonnet-4-6-v1:0",
-        }
-        model = _defaults.get(provider, "unknown")
+        # Single source of truth — was a drifting local copy before ollama landed.
+        from yeaboi.agent.llm import _PROVIDER_DEFAULTS
+
+        model = _PROVIDER_DEFAULTS.get(provider, "unknown")
     data["provider"] = provider
     data["model"] = model
 
-    # API key status
-    _key_vars = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "google": "GOOGLE_API_KEY",
-        "bedrock": "AWS_REGION",
-    }
-    key_var = _key_vars.get(provider, "ANTHROPIC_API_KEY")
-    data["api_key_status"] = "configured" if os.environ.get(key_var) else "not configured"
+    # API key status — is_llm_configured knows each provider's real requirement
+    # (ollama needs none, bedrock accepts a profile without AWS_REGION, ...).
+    from yeaboi.config import is_llm_configured
+
+    _configured, _ = is_llm_configured()
+    data["api_key_status"] = "configured" if _configured else "not configured"
 
     # Session history
     try:
@@ -1166,9 +1160,15 @@ def _collect_usage_data() -> dict:
         data["profiles"] = []
 
     # Token usage — session (in-memory) + lifetime (from DB)
-    def _calc_cost(inp: int, out: int) -> float:
+    def _cloud_cost(inp: int, out: int) -> float:
         # Claude Sonnet 4: $3/MTok input, $15/MTok output
-        return round((inp * 3.0 + out * 15.0) / 1_000_000, 4)
+        return (inp * 3.0 + out * 15.0) / 1_000_000
+
+    def _calc_cost(inp: int, out: int) -> float:
+        # Ollama runs on the user's own hardware — there is no per-token bill.
+        if provider == "ollama":
+            return 0.0
+        return round(_cloud_cost(inp, out), 4)
 
     try:
         from yeaboi.agent.llm import get_usage_stats
@@ -1195,16 +1195,27 @@ def _collect_usage_data() -> dict:
         from yeaboi.sessions import SessionStore
 
         with SessionStore(_ana_dbp) as store:
-            lifetime = store.get_lifetime_usage()
-            if lifetime.get("call_count", 0) > 0:
-                lt_inp = lifetime["input_tokens"]
-                lt_out = lifetime["output_tokens"]
+            # Grouped by provider so mixed histories price correctly: ollama
+            # rows are free, everything else (incl. legacy rows without a
+            # provider stamp, which predate local mode) at the cloud estimate.
+            by_provider = store.get_lifetime_usage_by_provider()
+            lt_inp = sum(u["input_tokens"] for u in by_provider.values())
+            lt_out = sum(u["output_tokens"] for u in by_provider.values())
+            lt_calls = sum(u["call_count"] for u in by_provider.values())
+            lt_cost = round(
+                sum(
+                    0.0 if prov == "ollama" else _cloud_cost(u["input_tokens"], u["output_tokens"])
+                    for prov, u in by_provider.items()
+                ),
+                4,
+            )
+            if lt_calls > 0:
                 data["lifetime_tokens"] = {
                     "input": lt_inp,
                     "output": lt_out,
                     "total": lt_inp + lt_out,
-                    "calls": lifetime["call_count"],
-                    "estimated_cost": _calc_cost(lt_inp, lt_out),
+                    "calls": lt_calls,
+                    "estimated_cost": lt_cost,
                 }
             else:
                 data["lifetime_tokens"] = {}
@@ -1228,6 +1239,9 @@ def _collect_settings_data() -> dict:
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "GOOGLE_API_KEY",
+        # Ollama (local provider — server URL + requested context window)
+        "OLLAMA_BASE_URL",
+        "OLLAMA_NUM_CTX",
         "JIRA_BASE_URL",
         "JIRA_EMAIL",
         "JIRA_API_TOKEN",

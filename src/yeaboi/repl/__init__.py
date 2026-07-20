@@ -1107,11 +1107,14 @@ def run_repl(
                 result = graph.invoke(invoke_state)
             elapsed = time.time() - start_time
             logger.info("Graph invoke complete: %.1fs", elapsed)
-        except anthropic.AuthenticationError:
+        except anthropic.AuthenticationError as e:
             console.print(
                 "[error]Authentication failed.[/error] "
                 "[warning]Check your ANTHROPIC_API_KEY in .env — it may be missing, expired, or invalid.[/warning]"
             )
+            if export_only:
+                # Headless auto-drive would retry the same doomed call forever.
+                raise SystemExit(1) from e
             continue
         except anthropic.RateLimitError:
             logger.warning("Rate limited — starting retry backoff")
@@ -1128,8 +1131,24 @@ def run_repl(
             console.print(f"[error]API error (status {e.status_code}):[/error] [warning]{e.message}[/warning]")
             continue
         except Exception as e:
+            # Local Ollama failures — actionable hint (server down / model not
+            # pulled / timeout), not a raw error. The node guards re-raise these
+            # only for the ollama provider (see nodes._should_reraise_llm_error).
+            from yeaboi.agent.nodes import _local_llm_hint
+
+            local_hint = _local_llm_hint(e)
+            if local_hint:
+                logger.error("Local Ollama failure: %s", e)
+                console.print(f"[error]{local_hint}[/error]")
+                if export_only:
+                    # Headless auto-drive would re-inject "continue" and hit the
+                    # same error forever — a broken local setup must exit instead.
+                    raise SystemExit(1) from e
+                continue
             logger.error("Unexpected graph invoke error: %s", e, exc_info=True)
             console.print(f"[error]Unexpected error: {e}[/error]")
+            if export_only:
+                raise SystemExit(1) from e
             continue
 
         # ── Outer try: post-processing (rendering, hints, state update) ──

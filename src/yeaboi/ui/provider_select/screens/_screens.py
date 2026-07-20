@@ -186,7 +186,7 @@ def _build_select_screen(
     show = visible if visible is not None else list(range(len(_PROVIDER_CARDS)))
     fading = fade_indices or []
 
-    rows: list[Text] = []
+    rows: list[tuple[int, Text]] = []
     for i, p in enumerate(_PROVIDER_CARDS):
         if i in show:
             if i == selected and selected_style:
@@ -196,18 +196,32 @@ def _build_select_screen(
             else:
                 override = ""
             rows.append(
-                _build_provider_row(
-                    p,
-                    selected=(i == selected),
-                    override_style=override,
-                    shimmer_tick=shimmer_tick,
+                (
+                    i,
+                    _build_provider_row(
+                        p,
+                        selected=(i == selected),
+                        override_style=override,
+                        shimmer_tick=shimmer_tick,
+                    ),
                 )
             )
 
-    body = [item for row in rows for item in (Align.center(row), Text(""))]
-    if body:
-        body = body[:-1]  # remove trailing blank
-    body_h = len(rows) * 3 - 1 if rows else 0
+    body: list = []
+    body_h = 0
+    for pos, (i, row) in enumerate(rows):
+        body.append(Align.center(row))
+        body_h += 2
+        # The selected card's separator row doubles as its tagline — a one-line
+        # "what am I signing up for" (e.g. Ollama's "Free · local · no API
+        # key") so the free option is visible before any card is entered.
+        tagline = _PROVIDER_CARDS[i].get("tagline", "") if i == selected else ""
+        if tagline:
+            body.append(Align.center(Text(tagline, style="dim")))
+            body_h += 1
+        elif pos < len(rows) - 1:
+            body.append(Text(""))
+            body_h += 1
 
     return _build_screen_frame(
         subtitle="Select your LLM provider",
@@ -251,8 +265,8 @@ def _build_input_screen(
     # Input box content — env var label goes in the panel border title.
     # Scroll: only show the rightmost chars that fit in one line.
     box_inner_w = min(70, width - 10) - 2 - 4  # panel border(2) + padding(4)
-    # Bedrock uses a region name (not a secret) — never mask it
-    if provider.get("is_region_input"):
+    # Bedrock uses a region name and Ollama a base URL (not secrets) — never mask
+    if provider.get("is_region_input") or provider.get("is_base_url_input"):
         masked = False
     display_val = "\u2022" * len(input_value) if masked else input_value
     cursor = "\u2588" if not verifying else ""
@@ -391,8 +405,12 @@ def _build_model_select_screen(
     height: int = 24,
     shimmer_tick: float = 0.0,  # accepted for caller compatibility; cards are static
     error: str = "",
+    status: str = "",
 ) -> Panel:
     """Build the model-selection screen — a stack of rounded, arrow-selectable cards.
+
+    ``status`` is a neutral live-progress line (e.g. an in-flight Ollama model
+    download) rendered in the accent colour where ``error`` would go.
 
     Each ``entries`` item (presets/live models + a trailing "Custom…") renders as
     a rounded card matching the app's project cards / action buttons. The list is
@@ -407,7 +425,7 @@ def _build_model_select_screen(
 
     # Vertical budget: the frame's header + footer inside its inner height.
     middle_h = max(_MODEL_CARD_H, (height - 4) - _FRAME_HEADER_H - _FRAME_FOOTER_H)
-    reserve = 2 if error else 0
+    reserve = 2 if (error or status) else 0
     avail = max(_MODEL_CARD_H, middle_h - reserve)
     max_cards = max(1, avail // _MODEL_CARD_H)
 
@@ -430,7 +448,11 @@ def _build_model_select_screen(
         body.append(Align.center(Text(f"↑↓  {hidden} more", style="dim")))
         body_h += 1
 
-    if error:
+    if status:
+        body.append(Text(""))
+        body.append(Align.center(Text(status, style=_ACCENT)))
+        body_h += 2
+    elif error:
         body.append(Text(""))
         body.append(Align.center(Text(f"✗ {error}", style="bright_red")))
         body_h += 2
@@ -485,8 +507,12 @@ def _build_model_input_screen(
     verified: bool | None = None,
     verifying: bool = False,
     border_override: str = "",
+    status: str = "",
 ) -> Panel:
     """Build the custom-model text-input screen.
+
+    ``status`` is a neutral live-progress line (e.g. an in-flight Ollama model
+    download) rendered in the accent colour in place of the error/hint lines.
 
     A near-clone of _build_input_screen, but model ids are never secrets — the
     value is always shown in plaintext (no masking).
@@ -529,14 +555,16 @@ def _build_model_input_screen(
         width=min(70, width - 10),
     )
 
-    if verifying or verified is True:
+    if status:
+        status_text = Text(status, style=_ACCENT, justify="center")
+    elif verifying or verified is True:
         status_text = Text("")
     elif verified is False or error:
         status_text = Text(f"✗ {error}", style="bright_red", justify="center")
     else:
         status_text = Text("")
 
-    if verifying or verified is True:
+    if status or verifying or verified is True:
         hint_text = Text("")
     else:
         hint_text = Text(

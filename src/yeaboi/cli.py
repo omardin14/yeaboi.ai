@@ -1107,7 +1107,7 @@ def main(argv: list[str] | None = None) -> None:
     # ── First-run setup wizard ────────────────────────────────────────────────
     # Triggers when ~/.scrum-agent/.env is absent (first run) or --setup is passed.
     # If the user cancels the wizard, exit early — the agent can't run without
-    # a valid ANTHROPIC_API_KEY.
+    # a configured provider (a cloud API key, or a local Ollama server).
     # Runs immediately after splash — both use fullscreen Live, so no console
     # prints happen in between (avoids visible flicker on alt-screen exit).
     if args.setup or is_first_run():

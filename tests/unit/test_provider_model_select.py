@@ -15,6 +15,7 @@ from rich.panel import Panel
 
 from yeaboi.agent.llm import _PROVIDER_DEFAULTS
 from yeaboi.setup_wizard import _PROVIDERS, run_setup_wizard
+from yeaboi.ui.provider_select import _existing_model_for
 from yeaboi.ui.provider_select._constants import (
     _AZDEVOPS_TRACKING_FIELDS,
     _CONFLUENCE_FIELDS,
@@ -32,6 +33,7 @@ from yeaboi.ui.provider_select._verification import (
     _verify_confluence,
     _verify_model,
     fetch_available_models,
+    pull_ollama_model,
 )
 from yeaboi.ui.provider_select.screens._screens import (
     _STEPS,
@@ -229,6 +231,289 @@ class TestVerifyModelUnknownProvider:
         ok, msg = _verify_model({"provider_val": "mystery"}, "key", "some-model")
         assert ok is False
         assert "Unknown provider" in msg
+
+
+# ---------------------------------------------------------------------------
+# Ollama — _validate_key / _verify_api_key / _verify_model / fetch_available_models
+# (the "api_key" argument carries the local server base URL)
+# ---------------------------------------------------------------------------
+
+_OLLAMA_TAGS = {
+    "models": [
+        {"name": "qwen3:8b", "modified_at": "2026-07-01T10:00:00Z"},
+        {"name": "llama3.1:8b", "modified_at": "2026-06-01T10:00:00Z"},
+    ]
+}
+
+
+class TestValidateKeyOllama:
+    def test_url_accepted(self):
+        from yeaboi.ui.provider_select._verification import _validate_key
+
+        status, hint = _validate_key(_card("ollama"), "http://localhost:11434")
+        assert status == "valid_format"
+        assert "Ollama" in hint
+
+    def test_non_url_rejected(self):
+        from yeaboi.ui.provider_select._verification import _validate_key
+
+        status, _ = _validate_key(_card("ollama"), "localhost:11434")
+        assert status == "bad_prefix"
+
+    def test_empty(self):
+        from yeaboi.ui.provider_select._verification import _validate_key
+
+        assert _validate_key(_card("ollama"), "")[0] == "empty"
+
+
+@pytest.fixture
+def ollama_pkg_installed(monkeypatch):
+    """Pretend langchain-ollama is importable.
+
+    CI runs without the optional ``ollama`` extra, so these tests must not
+    depend on the real environment: any test exercising the post-install
+    verification paths stubs the package check to "installed" here (and
+    the missing-package test stubs it to None), making both paths
+    deterministic everywhere.
+    """
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        if name == "langchain_ollama":
+            return object()  # any non-None value means "installed"
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+
+class TestVerifyApiKeyOllama:
+    def test_server_up_with_models(self, monkeypatch, ollama_pkg_installed):
+        import httpx
+
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, _OLLAMA_TAGS))
+        ok, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert ok is True
+        assert "verified" in msg.lower()
+
+    def test_server_up_no_models_still_ok_with_pull_hint(self, monkeypatch, ollama_pkg_installed):
+        import httpx
+
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, {"models": []}))
+        ok, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert ok is True
+        assert "ollama pull" in msg
+
+    def test_server_down_actionable_message(self, monkeypatch, ollama_pkg_installed):
+        import httpx
+
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        ok, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert ok is False
+        assert "ollama serve" in msg
+
+
+class TestVerifyModelOllama:
+    def test_pulled_model_verified(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, _OLLAMA_TAGS))
+        ok, _ = _verify_model(_card("ollama"), "http://localhost:11434", "qwen3:8b")
+        assert ok is True
+
+    def test_latest_suffix_matches(self, monkeypatch):
+        import httpx
+
+        tags = {"models": [{"name": "qwen3:8b:latest"}]}
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, tags))
+        ok, _ = _verify_model(_card("ollama"), "http://localhost:11434", "qwen3:8b")
+        assert ok is True
+
+    def test_missing_model_pull_hint(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, _OLLAMA_TAGS))
+        ok, msg = _verify_model(_card("ollama"), "http://localhost:11434", "qwen3:14b")
+        assert ok is False
+        assert "ollama pull qwen3:14b" in msg
+
+    def test_server_down(self, monkeypatch):
+        import httpx
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        ok, msg = _verify_model(_card("ollama"), "http://localhost:11434", "qwen3:8b")
+        assert ok is False
+        assert "ollama serve" in msg
+
+
+class TestFetchAvailableModelsOllama:
+    def test_lists_newest_first(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, _OLLAMA_TAGS))
+        models = fetch_available_models(_card("ollama"), "http://localhost:11434")
+        assert models == ["qwen3:8b", "llama3.1:8b"]
+
+    def test_server_down_returns_empty(self, monkeypatch):
+        import httpx
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        assert fetch_available_models(_card("ollama"), "http://localhost:11434") == []
+
+
+class TestOllamaPackageCheck:
+    """Setup must not finish green when the langchain-ollama extra isn't installed."""
+
+    def test_missing_package_blocks_before_network(self, monkeypatch):
+        import importlib.util
+
+        import httpx
+
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+
+        def _no_network(*a, **kw):
+            raise AssertionError("must not touch the network when the package is missing")
+
+        monkeypatch.setattr(httpx, "get", _no_network)
+        ok, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert ok is False
+        assert "uv sync --extra ollama" in msg
+
+    def test_installed_package_proceeds_to_server_check(self, monkeypatch, ollama_pkg_installed):
+        # With the package present, the check passes through to the normal
+        # /api/tags verification.
+        import httpx
+
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **kw: _FakeResponse(200, _OLLAMA_TAGS))
+        ok, _ = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert ok is True
+
+
+class TestOllamaInstallGuidance:
+    def test_unreachable_message_says_how_to_install(self, monkeypatch, ollama_pkg_installed):
+        import httpx
+
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        _, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert "https://ollama.com" in msg
+        _, msg = _verify_model(_card("ollama"), "http://localhost:11434", "qwen3:8b")
+        assert "https://ollama.com" in msg
+
+
+class _FakePullStream:
+    """Context-manager stand-in for httpx.stream() yielding /api/pull JSON lines."""
+
+    def __init__(self, status_code: int, lines: list[str]):
+        self.status_code = status_code
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def iter_lines(self):
+        yield from self._lines
+
+
+class TestPullOllamaModel:
+    def test_success_streams_progress(self, monkeypatch):
+        import httpx
+
+        lines = [
+            '{"status": "pulling manifest"}',
+            '{"status": "downloading", "total": 100, "completed": 50}',
+            '{"status": "success"}',
+        ]
+        monkeypatch.setattr(httpx, "stream", lambda *a, **kw: _FakePullStream(200, lines))
+        seen: list[tuple[str, float | None]] = []
+        ok, msg = pull_ollama_model("http://localhost:11434", "qwen3:8b", lambda s, f: seen.append((s, f)))
+        assert ok is True
+        assert msg == "Model downloaded"
+        assert ("downloading", 0.5) in seen
+
+    def test_server_error_event(self, monkeypatch):
+        import httpx
+
+        lines = ['{"error": "pull model manifest: file does not exist"}']
+        monkeypatch.setattr(httpx, "stream", lambda *a, **kw: _FakePullStream(200, lines))
+        ok, msg = pull_ollama_model("http://localhost:11434", "nope:1b", lambda s, f: None)
+        assert ok is False
+        assert "does not exist" in msg
+
+    def test_non_200_response(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(httpx, "stream", lambda *a, **kw: _FakePullStream(500, []))
+        ok, msg = pull_ollama_model("http://localhost:11434", "qwen3:8b", lambda s, f: None)
+        assert ok is False
+        assert "500" in msg
+
+    def test_cancel_event_aborts(self, monkeypatch):
+        import threading
+
+        import httpx
+
+        lines = ['{"status": "downloading", "total": 100, "completed": 1}'] * 5
+        monkeypatch.setattr(httpx, "stream", lambda *a, **kw: _FakePullStream(200, lines))
+        cancel = threading.Event()
+        cancel.set()
+        ok, msg = pull_ollama_model("http://localhost:11434", "qwen3:8b", lambda s, f: None, cancel_event=cancel)
+        assert ok is False
+        assert "cancel" in msg.lower()
+
+    def test_network_error_never_raises(self, monkeypatch):
+        import httpx
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "stream", _boom)
+        ok, msg = pull_ollama_model("http://localhost:11434", "qwen3:8b", lambda s, f: None)
+        assert ok is False
+        assert "failed" in msg.lower()
+
+
+class TestExistingModelFor:
+    """A saved LLM_MODEL is only offered for the provider it was saved with."""
+
+    def test_same_provider_carries_over(self):
+        cfg = {"LLM_PROVIDER": "ollama", "LLM_MODEL": "qwen3:14b"}
+        assert _existing_model_for(cfg, "ollama") == "qwen3:14b"
+
+    def test_switched_provider_drops_stale_model(self):
+        cfg = {"LLM_PROVIDER": "anthropic", "LLM_MODEL": "claude-sonnet-4-6"}
+        assert _existing_model_for(cfg, "ollama") == ""
+
+    def test_no_config(self):
+        assert _existing_model_for(None, "ollama") == ""
+        assert _existing_model_for({}, "anthropic") == ""
 
 
 # ---------------------------------------------------------------------------

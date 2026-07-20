@@ -31,6 +31,7 @@ from yeaboi.ui.provider_select._verification import (
     _verify_model,
     _verify_vc_token,
     fetch_available_models,
+    pull_ollama_model,
 )
 from yeaboi.ui.provider_select.screens._screens import (
     _build_input_screen,
@@ -57,6 +58,24 @@ logger = logging.getLogger(__name__)
 # Cap the live-discovered model list so the (non-scrolling) select screen stays
 # usable; "Custom…" covers anything beyond the newest few.
 _MAX_LIVE_MODELS = 8
+
+# Verification failures that can be self-served with an in-app pull (Ollama
+# only) — matched against _verify_model's message.
+_NOT_PULLED_PREFIX = "Model not pulled"
+
+
+def _existing_model_for(existing_config: dict[str, str] | None, provider_val: str) -> str:
+    """The saved LLM_MODEL, but only if it was saved for *this* provider.
+
+    A saved model only makes sense for the provider it was saved with —
+    offering e.g. claude-sonnet-4-6 as "(current)" after switching to Ollama
+    would pre-select a model whose verification can only fail
+    ("ollama pull claude-sonnet-4-6").
+    """
+    cfg = existing_config or {}
+    if cfg.get("LLM_PROVIDER") != provider_val:
+        return ""
+    return cfg.get("LLM_MODEL", "")
 
 
 def _detect_aws_region() -> str | None:
@@ -187,6 +206,10 @@ def select_provider(
             models_cfg = provider.get("models") or {}
             presets = list(models_cfg.get("presets") or [])
             default_model = models_cfg.get("default", "")
+            # Ollama only: True when the shown presets are offline seeds the
+            # server does NOT have — they get a "not pulled" label and a P-to-
+            # download offer instead of a dead-end verification failure.
+            seeds_unpulled = False
 
             # Live discovery: ask the provider what this key can actually run, so
             # the menu never offers a retired id. The hardcoded presets above are
@@ -216,6 +239,8 @@ def select_provider(
                 logger.debug("provider_select: discovered %d models for %s", len(discovered), provider["provider_val"])
                 if discovered:
                     presets = discovered[:_MAX_LIVE_MODELS]
+                elif provider.get("provider_val") == "ollama":
+                    seeds_unpulled = True
 
             # A detected Bedrock model (from OpenClaw) or a previously-saved LLM_MODEL
             # is offered at the top of the list and pre-selected, preserving zero-config.
@@ -227,20 +252,29 @@ def select_provider(
                     detected = _detect_openclaw_bedrock_model()
                 except Exception:
                     detected = None
-            existing_model = (existing_config or {}).get("LLM_MODEL", "")
+            existing_model = _existing_model_for(existing_config, provider.get("provider_val", ""))
 
             model_ids: list[str] = []  # actual model id per entry ("" marks Custom…)
             labels: list[str] = []  # display label per entry
+            # Local models differ hugely in RAM needs and JSON discipline —
+            # the card's model_hints map one-liner trade-offs onto known ids
+            # (works for both seed presets and live-discovered names).
+            model_hints: dict[str, str] = provider.get("model_hints") or {}
 
-            def _add(mid: str, tag: str = "") -> None:
+            def _add(mid: str, tag: str = "", extra: str = "") -> None:
                 if mid and mid not in model_ids:
                     model_ids.append(mid)
+                    hint = model_hints.get(mid) or model_hints.get(mid.removesuffix(":latest"))
+                    if not tag and hint:
+                        tag = f"({hint})"
+                    if extra:
+                        tag = f"{tag} {extra}".strip()
                     labels.append(f"{mid}  {tag}" if tag else mid)
 
             _add(detected, "(detected)")
             _add(existing_model, "(current)")
             for m in presets:
-                _add(m)
+                _add(m, extra="· not pulled" if seeds_unpulled else "")
             model_ids.append("")  # Custom… sentinel
             labels.append("Custom…")
 
@@ -268,11 +302,54 @@ def select_provider(
                 thread.join()
                 return result[0]
 
+            def _run_model_pull(model_id: str, render_progress) -> tuple[bool, str]:
+                """Download *model_id* onto the Ollama server with live progress.
+
+                Runs pull_ollama_model on a worker thread (downloads take
+                minutes) while the frame loop keeps rendering via
+                ``render_progress(status_line)``; Esc cancels (Ollama keeps
+                partial layers, so a re-pull resumes). Returns (success, msg).
+                """
+                import threading
+
+                logger.info("in-app ollama pull requested: %s", model_id)
+                cancel = threading.Event()
+                prog: dict = {"status": "connecting…", "frac": None}
+
+                def _on_progress(status_text: str, frac) -> None:
+                    # Called from the worker thread — single dict-key writes
+                    # are atomic under the GIL, no lock needed for a progress
+                    # line the render loop merely reads.
+                    if status_text:
+                        prog["status"] = status_text
+                    if frac is not None:
+                        prog["frac"] = frac
+
+                result: list[tuple[bool, str]] = []
+
+                def _do() -> None:
+                    result.append(pull_ollama_model(api_key_val, model_id, _on_progress, cancel_event=cancel))
+
+                thread = threading.Thread(target=_do, daemon=True)
+                thread.start()
+                while thread.is_alive():
+                    frac = prog["frac"]
+                    pct = f"{frac * 100:3.0f}% · " if frac is not None else ""
+                    render_progress(f"⬇ Downloading {model_id} — {pct}{prog['status']}  ·  Esc cancels")
+                    if _supports_timeout:
+                        if read_key(timeout=FRAME_TIME_30FPS) == "esc":
+                            cancel.set()
+                    else:
+                        time.sleep(FRAME_TIME_30FPS)
+                thread.join()
+                return result[0] if result else (False, "Download failed")
+
             def _run_custom_input() -> str | None:
                 """Text-input loop for a typed model id. Returns id or None (back)."""
                 val = existing_model if existing_model not in presets else ""
                 err = ""
                 verified: bool | None = None
+                offer_pull = ""  # model id whose last verify failed with "not pulled"
                 while True:
                     w, h = console.size
                     live.update(
@@ -294,6 +371,24 @@ def select_provider(
                                 )
                             )
 
+                        # Second Enter on the same not-pulled id → download it
+                        # in-app (text input has no spare letter key: p types).
+                        if offer_pull and offer_pull == model_id:
+                            offer_pull = ""
+
+                            def _render_pull(status_line: str) -> None:
+                                w2, h2 = console.size
+                                live.update(
+                                    _build_model_input_screen(provider, val, width=w2, height=h2, status=status_line)
+                                )
+
+                            ok_pull, pull_msg = _run_model_pull(model_id, _render_pull)
+                            if not ok_pull:
+                                err = pull_msg
+                                verified = False
+                                continue
+                            # fall through to verify the freshly pulled model
+
                         ok, msg = _verify_pulsing(model_id, _render)
                         if ok:
                             logger.info("LLM model verified (custom): %s", model_id)
@@ -302,6 +397,9 @@ def select_provider(
                             time.sleep(0.5)
                             return model_id
                         logger.warning("LLM model verification failed (custom): %s — %s", model_id, msg)
+                        if msg.startswith(_NOT_PULLED_PREFIX):
+                            offer_pull = model_id
+                            msg = f"Model not pulled — press Enter again to download it, or run: ollama pull {model_id}"
                         err = msg
                         verified = False
                     elif key == "esc":
@@ -327,7 +425,19 @@ def select_provider(
 
             # Preset-list selection loop.
             err = ""
+            pull_offer = ""  # model id whose last verify failed with "not pulled"
             start_time = time.monotonic()
+
+            def _render_list(_border: str = "") -> None:
+                w2, h2 = console.size
+                live.update(_build_model_select_screen(provider, labels, selected, width=w2, height=h2))
+
+            def _render_list_status(status_line: str) -> None:
+                w2, h2 = console.size
+                live.update(
+                    _build_model_select_screen(provider, labels, selected, width=w2, height=h2, status=status_line)
+                )
+
             while True:
                 w, h = console.size
                 tick = time.monotonic() - start_time
@@ -340,9 +450,11 @@ def select_provider(
                 if key in ("up", "scroll_up"):
                     selected = (selected - 1) % len(labels)
                     err = ""
+                    pull_offer = ""
                 elif key in ("down", "scroll_down"):
                     selected = (selected + 1) % len(labels)
                     err = ""
+                    pull_offer = ""
                 elif key == "enter":
                     chosen_id = model_ids[selected]
                     if chosen_id == "":  # Custom…
@@ -352,15 +464,26 @@ def select_provider(
                         continue  # Esc from custom input → back to preset list
                     logger.info("LLM model chosen (preset): %s", chosen_id)
 
-                    def _render(_border: str) -> None:
-                        w2, h2 = console.size
-                        live.update(_build_model_select_screen(provider, labels, selected, width=w2, height=h2))
-
-                    ok, msg = _verify_pulsing(chosen_id, _render)
+                    ok, msg = _verify_pulsing(chosen_id, _render_list)
                     if ok:
                         logger.info("LLM model verified (preset): %s", chosen_id)
                         return chosen_id
                     logger.warning("LLM model verification failed (preset): %s — %s", chosen_id, msg)
+                    if msg.startswith(_NOT_PULLED_PREFIX):
+                        pull_offer = chosen_id
+                        msg = f"Model not pulled — press P to download it now, or run: ollama pull {chosen_id}"
+                    err = msg
+                elif key in ("p", "P") and pull_offer:
+                    model_to_pull = pull_offer
+                    pull_offer = ""
+                    ok_pull, pull_msg = _run_model_pull(model_to_pull, _render_list_status)
+                    if not ok_pull:
+                        err = pull_msg
+                        continue
+                    ok, msg = _verify_pulsing(model_to_pull, _render_list)
+                    if ok:
+                        logger.info("LLM model pulled + verified (preset): %s", model_to_pull)
+                        return model_to_pull
                     err = msg
                 elif key in ("q", "esc"):
                     return None
@@ -405,6 +528,10 @@ def select_provider(
                 input_value = _cfg.get(provider["env_var"], "")
                 if provider.get("is_region_input") and not input_value:
                     input_value = _detect_aws_region() or ""
+                # Ollama: the field holds the server URL, not a secret — pre-fill
+                # the standard localhost address so Enter-to-verify just works.
+                if provider.get("is_base_url_input") and not input_value:
+                    input_value = provider.get("default_input", "")
                 error = ""
                 verified: bool | None = None
 

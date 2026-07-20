@@ -80,18 +80,23 @@ def _invoke_llm(prompt: str, *, what: str, images: Sequence[str] = ()) -> tuple[
         logger.warning("performance[%s]: LLM not configured (%s)", what, why)
         return {}, [f"AI output unavailable — {why}."]
 
-    from yeaboi.agent.llm import get_llm, invoke_with_images, track_usage
-    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error
+    # invoke_json tracks usage + turns on JSON mode + re-asks once on bad JSON.
+    # See README: "Local Mode (Ollama)" — reliability layer.
+    from yeaboi.agent.llm import invoke_json
+    from yeaboi.agent.nodes import _is_llm_auth_or_billing_error, _local_llm_hint
 
     try:
         logger.info("performance[%s]: invoking LLM (%d image(s))", what, len(images))
-        response = invoke_with_images(get_llm(temperature=0.2), prompt, images)
-        track_usage(response)
+        response = invoke_json(prompt, temperature=0.2, image_paths=images)
         return _parse_json_response(response.content), []
     except Exception as exc:  # noqa: BLE001 — turn any LLM failure into a warning + fallback
         if _is_llm_auth_or_billing_error(exc):
             logger.warning("performance[%s]: LLM auth/billing error: %s", what, exc)
             return {}, ["AI output unavailable — API key invalid or billing issue."]
+        local_hint = _local_llm_hint(exc)
+        if local_hint:
+            logger.warning("performance[%s]: local Ollama failure: %s", what, exc)
+            return {}, [f"AI output unavailable — {local_hint}"]
         logger.warning("performance[%s]: LLM request failed: %s", what, exc)
         return {}, ["AI output unavailable — LLM request failed (see logs)."]
 
