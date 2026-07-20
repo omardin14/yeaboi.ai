@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from yeaboi.agent.llm import (
     _PROVIDER_DEFAULTS,
     DEFAULT_MODEL,
+    _extract_local_perf,
     _supports_temperature,
     build_multimodal_content,
     estimate_tokens,
@@ -483,6 +484,111 @@ class TestTrackUsage:
         assert stats["output_tokens"] == 0
         assert stats["total_tokens"] == 0
         assert stats["call_count"] == 0
+
+
+class TestExtractLocalPerf:
+    """The Ollama timing extractor: nanoseconds → milliseconds + tokens/sec."""
+
+    def _as_int(self, v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    def test_ollama_metadata_converted(self):
+        meta = {
+            "total_duration": 2_000_000_000,  # 2 s
+            "eval_duration": 1_000_000_000,  # 1 s
+            "load_duration": 500_000_000,  # 0.5 s
+            "eval_count": 40,
+        }
+        perf = _extract_local_perf(meta, self._as_int)
+        assert perf["duration_ms"] == 2000.0
+        assert perf["eval_duration_ms"] == 1000.0
+        assert perf["load_duration_ms"] == 500.0
+        assert perf["tokens_per_sec"] == 40.0  # 40 tokens / 1 s
+
+    def test_cloud_metadata_returns_empty(self):
+        # Anthropic-style metadata has no Ollama timing keys.
+        assert _extract_local_perf({"usage": {"input_tokens": 1}}, self._as_int) == {}
+
+    def test_non_dict_returns_empty(self):
+        assert _extract_local_perf(None, self._as_int) == {}
+
+    def test_missing_eval_count_leaves_tps_none(self):
+        perf = _extract_local_perf({"total_duration": 1_000_000_000, "eval_duration": 500_000_000}, self._as_int)
+        assert perf["tokens_per_sec"] is None
+
+
+class TestTrackUsagePersistsPerf:
+    """track_usage must forward the extracted perf kwargs to record_token_usage."""
+
+    def setup_method(self):
+        reset_usage_stats()
+
+    def _capture(self, monkeypatch, resp, provider="ollama"):
+        import yeaboi.agent.llm as llm_mod
+
+        captured = {}
+
+        class _FakeStore:
+            def __init__(self, *a, **kw):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def record_token_usage(self, inp, out, model="", provider="", **perf):
+                captured["inp"] = inp
+                captured["out"] = out
+                captured["perf"] = perf
+
+        monkeypatch.setattr("yeaboi.sessions.SessionStore", _FakeStore)
+        monkeypatch.setattr(llm_mod, "get_llm_provider", lambda: provider)
+        monkeypatch.setattr(
+            llm_mod, "get_llm_model", lambda: "qwen3:8b" if provider == "ollama" else "claude-sonnet-4-6"
+        )
+        track_usage(resp)
+        return captured
+
+    def test_ollama_perf_forwarded(self, monkeypatch):
+        from types import SimpleNamespace
+
+        resp = SimpleNamespace(
+            usage_metadata={"input_tokens": 200, "output_tokens": 100},
+            response_metadata={
+                "total_duration": 3_000_000_000,
+                "eval_duration": 2_000_000_000,
+                "load_duration": 100_000_000,
+                "eval_count": 100,
+            },
+        )
+        captured = self._capture(monkeypatch, resp)
+        assert captured["inp"] == 200
+        assert captured["perf"]["duration_ms"] == 3000.0
+        assert captured["perf"]["tokens_per_sec"] == 50.0  # 100 tokens / 2 s
+
+    def test_cloud_response_forwards_no_perf(self, monkeypatch):
+        from types import SimpleNamespace
+
+        resp = SimpleNamespace(response_metadata={"usage": {"input_tokens": 100, "output_tokens": 50}})
+        captured = self._capture(monkeypatch, resp, provider="anthropic")
+        assert captured["perf"] == {}
+
+    def test_local_call_logs_info_line(self, monkeypatch, caplog):
+        import logging
+        from types import SimpleNamespace
+
+        resp = SimpleNamespace(
+            usage_metadata={"input_tokens": 10, "output_tokens": 5},
+            response_metadata={"total_duration": 1_000_000_000, "eval_duration": 500_000_000, "eval_count": 20},
+        )
+        with caplog.at_level(logging.INFO, logger="yeaboi.agent.llm"):
+            self._capture(monkeypatch, resp)
+        assert "local call:" in caplog.text
 
 
 class TestMultimodalHelpers:

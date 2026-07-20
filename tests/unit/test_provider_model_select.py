@@ -16,6 +16,7 @@ from rich.panel import Panel
 from yeaboi.agent.llm import _PROVIDER_DEFAULTS
 from yeaboi.setup_wizard import _PROVIDERS, run_setup_wizard
 from yeaboi.ui.provider_select import _existing_model_for
+from yeaboi.ui.provider_select._config import _save_progress
 from yeaboi.ui.provider_select._constants import (
     _AZDEVOPS_TRACKING_FIELDS,
     _CONFLUENCE_FIELDS,
@@ -1202,6 +1203,69 @@ class TestWizardModelPropagation:
         run_setup_wizard(console)
         content = config_file.read_text()
         assert "LLM_MODEL" not in content
+
+    def test_provider_switch_drops_stale_model(self, monkeypatch, tmp_path):
+        """Ollama→Anthropic without a model choice must not keep qwen3:8b on disk."""
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        monkeypatch.setenv("LLM_MODEL", "qwen3:8b")
+        result = dict(_PROVIDERS["1"])  # anthropic
+        result["api_key"] = "sk-ant-key"  # no llm_model key — model phase abandoned
+        monkeypatch.setattr("yeaboi.setup_wizard.select_provider", lambda *a, **kw: result)
+        console = Console(file=StringIO(), highlight=False)
+        run_setup_wizard(console)
+        content = config_file.read_text()
+        assert "LLM_PROVIDER=anthropic" in content
+        assert "LLM_MODEL" not in content
+        import os
+
+        assert "LLM_MODEL" not in os.environ
+
+
+# ---------------------------------------------------------------------------
+# _save_progress — the incremental .env writer must never leave a model from
+# a different provider on disk (the "(current)" ghost-entry bug)
+# ---------------------------------------------------------------------------
+
+
+class TestSaveProgressProviderSwitch:
+    def _patch_config_file(self, monkeypatch, tmp_path):
+        config_file = tmp_path / ".env"
+        monkeypatch.setattr("yeaboi.config.get_config_file", lambda: config_file)
+        return config_file
+
+    def test_switch_clears_model_from_file_and_env(self, monkeypatch, tmp_path):
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        monkeypatch.setenv("LLM_MODEL", "qwen3:8b")
+        _save_progress({"LLM_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "sk-ant-x"})
+        content = config_file.read_text()
+        assert "LLM_PROVIDER=anthropic" in content
+        assert "LLM_MODEL" not in content
+        import os
+
+        assert "LLM_MODEL" not in os.environ
+
+    def test_same_provider_keeps_model(self, monkeypatch, tmp_path):
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        _save_progress({"LLM_PROVIDER": "ollama", "OLLAMA_BASE_URL": "http://localhost:11434"})
+        assert "LLM_MODEL=qwen3:8b" in config_file.read_text()
+
+    def test_switch_with_explicit_model_keeps_new_model(self, monkeypatch, tmp_path):
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        _save_progress({"LLM_PROVIDER": "anthropic", "LLM_MODEL": "claude-opus-4-8"})
+        content = config_file.read_text()
+        assert "LLM_MODEL=claude-opus-4-8" in content
+        assert "qwen3:8b" not in content
+
+    def test_no_provider_in_data_keeps_model(self, monkeypatch, tmp_path):
+        """Writes that don't touch the provider (e.g. Jira creds) leave the model alone."""
+        config_file = self._patch_config_file(monkeypatch, tmp_path)
+        config_file.write_text("LLM_PROVIDER=ollama\nLLM_MODEL=qwen3:8b\n")
+        _save_progress({"JIRA_BASE_URL": "https://x.atlassian.net"})
+        assert "LLM_MODEL=qwen3:8b" in config_file.read_text()
 
 
 # ---------------------------------------------------------------------------

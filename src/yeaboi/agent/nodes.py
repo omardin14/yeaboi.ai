@@ -25,7 +25,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END
 
 from yeaboi.agent.ceremony_history import gather_ceremony_context
-from yeaboi.agent.llm import get_llm, invoke_json
+from yeaboi.agent.llm import get_llm, invoke_json, track_usage
 from yeaboi.agent.repo_signals import analyze_context, scan_repo_signals
 from yeaboi.agent.state import (
     DOD_ITEMS,
@@ -479,6 +479,7 @@ def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, l
                 _tools_unsupported = True
                 _bound_llm = None
                 response = get_llm().invoke(all_messages)
+                track_usage(response)  # prose chat path — count tokens + local timing
                 _strip_response_think_tags(response)
                 if isinstance(response.content, str):
                     response.content += (
@@ -490,6 +491,7 @@ def make_call_model(tools: list[BaseTool]) -> Callable[[ScrumState], dict[str, l
                 if state.get("chat_images"):
                     out_deg["chat_images"] = []
                 return out_deg
+        track_usage(response)  # covers both the tools-unsupported and bound-LLM invokes above
         _strip_response_think_tags(response)
         out: dict = {"messages": [response]}
         if state.get("chat_images"):
@@ -558,6 +560,7 @@ def call_model(state: ScrumState) -> dict[str, list[BaseMessage]]:
     all_messages = _attach_chat_images(state, _trim_history_for_local([system_message, *state["messages"]]))
 
     response = get_llm().invoke(all_messages)
+    track_usage(response)  # prose chat path — count tokens + local timing
     _strip_response_think_tags(response)
 
     # Return single-item list — the add_messages reducer on ScrumState["messages"]

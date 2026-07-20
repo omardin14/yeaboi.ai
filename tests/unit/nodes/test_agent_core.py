@@ -288,6 +288,56 @@ class TestToolsUnsupportedDegradation:
             node({"messages": [HumanMessage(content="hi")]})
 
 
+class TestProseInvokesTrackUsage:
+    """Prose chat invokes must feed track_usage so local timing/tokens are counted."""
+
+    def test_call_model_tracks(self, monkeypatch):
+        calls = []
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="hi")
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
+        monkeypatch.setattr("yeaboi.agent.nodes.track_usage", lambda resp: calls.append(resp))
+        call_model({"messages": [HumanMessage(content="hello")]})
+        assert len(calls) == 1
+
+    def test_bound_path_tracks(self, monkeypatch):
+        calls = []
+
+        class _Llm:
+            def bind_tools(self, tools):
+                class _Bound:
+                    def invoke(self, messages):
+                        return AIMessage(content="bound reply")
+
+                return _Bound()
+
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: _Llm())
+        monkeypatch.setattr("yeaboi.agent.nodes.track_usage", lambda resp: calls.append(resp))
+        node = make_call_model([])
+        node({"messages": [HumanMessage(content="hi")]})
+        assert len(calls) == 1
+
+    def test_degraded_path_tracks(self, monkeypatch):
+        calls = []
+
+        class _Llm:
+            def invoke(self, messages):
+                return AIMessage(content="plain reply")
+
+            def bind_tools(self, tools):
+                class _Bound:
+                    def invoke(self, messages):
+                        raise RuntimeError("model does not support tools")
+
+                return _Bound()
+
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: _Llm())
+        monkeypatch.setattr("yeaboi.agent.nodes.track_usage", lambda resp: calls.append(resp))
+        node = make_call_model([])
+        node({"messages": [HumanMessage(content="hi")]})
+        assert len(calls) == 1  # tracked once on the degraded plain invoke, not double
+
+
 # ── Core behaviour ───────────────────────────────────────────────────
 
 

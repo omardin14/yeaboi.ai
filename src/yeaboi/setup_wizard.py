@@ -291,6 +291,16 @@ def run_setup_wizard(console: Console) -> bool:
     # collected values win over existing so --setup re-runs update keys
     existing = _read_existing_config(config_file)
     merged = {**existing, **collected}
+    # Switching provider without an explicit model drops the old provider's
+    # model — a stale pair like LLM_PROVIDER=anthropic + LLM_MODEL=qwen3:8b
+    # would surface as a bogus "(current)" entry on the next reconfigure.
+    if (
+        collected.get("LLM_PROVIDER")
+        and collected["LLM_PROVIDER"] != existing.get("LLM_PROVIDER")
+        and "LLM_MODEL" not in collected
+    ):
+        merged.pop("LLM_MODEL", None)
+        os.environ.pop("LLM_MODEL", None)
     save_config(merged)
 
     # Load into current process so keys are immediately active for this session

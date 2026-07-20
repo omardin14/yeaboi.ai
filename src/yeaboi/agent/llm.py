@@ -86,6 +86,14 @@ def track_usage(response) -> None:
             or _as_int(usage.get("completion_tokens", 0))
             or _as_int(usage.get("eval_count", 0))
         )
+    # Local-model performance metrics. Ollama echoes timing in response_metadata
+    # (nanoseconds) — total_duration/eval_duration/load_duration/eval_count. These
+    # are read *unconditionally* (not just in the token fallback above): ChatOllama
+    # populates usage_metadata, so the token branch short-circuits before ever
+    # touching response_metadata, and the timing would otherwise be lost. Cloud
+    # providers lack these keys → perf stays empty and the columns stay NULL.
+    perf = _extract_local_perf(getattr(response, "response_metadata", None), _as_int)
+
     if inp or out:
         _usage_stats["input_tokens"] += inp
         _usage_stats["output_tokens"] += out
@@ -108,11 +116,43 @@ def track_usage(response) -> None:
 
             db = get_db_path()
             with SessionStore(db) as store:
-                store.record_token_usage(inp, out, model=model, provider=provider)
+                store.record_token_usage(inp, out, model=model, provider=provider, **perf)
+            if perf:
+                logger.info(
+                    "local call: model=%s in=%d out=%d duration=%.0fms tok/s=%s",
+                    model,
+                    inp,
+                    out,
+                    perf.get("duration_ms") or 0.0,
+                    perf.get("tokens_per_sec"),
+                )
         except Exception:
             logger.debug("Failed to persist token usage to DB", exc_info=True)
     else:
         logger.warning("track_usage: no token data found in response metadata")
+
+
+def _extract_local_perf(meta, _as_int) -> dict:
+    """Pull Ollama's per-call timing out of response_metadata (ns → ms).
+
+    Returns {} for cloud providers (keys absent) so callers pass no perf kwargs.
+    tokens_per_sec = generated tokens / generation seconds — the headline local
+    throughput number surfaced on the Usage page.
+    """
+    if not isinstance(meta, dict):
+        return {}
+    total_ns = _as_int(meta.get("total_duration", 0))
+    eval_ns = _as_int(meta.get("eval_duration", 0))
+    load_ns = _as_int(meta.get("load_duration", 0))
+    eval_cnt = _as_int(meta.get("eval_count", 0))
+    if not (total_ns or eval_ns):
+        return {}
+    return {
+        "duration_ms": (total_ns / 1e6) or None,
+        "eval_duration_ms": (eval_ns / 1e6) or None,
+        "load_duration_ms": (load_ns / 1e6) or None,
+        "tokens_per_sec": round(eval_cnt / (eval_ns / 1e9), 2) if (eval_ns and eval_cnt) else None,
+    }
 
 
 def get_usage_stats() -> dict:

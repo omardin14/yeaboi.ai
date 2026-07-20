@@ -260,6 +260,11 @@ Local models are weaker than cloud models at emitting valid JSON, and every yeab
 
 On top of that, chat history is automatically trimmed to fit the local context window (oldest turns first, never mid-exchange), and `<think>` reasoning blocks from thinking models like qwen3 are stripped before display.
 
+### Performance & housekeeping
+
+- **Track your model's speed** — because the model runs on your own hardware, the **Usage** page shows a *Local Model Performance* section: average and peak throughput (tokens/sec), average call and model-load times, and your last call's speed. Every call also logs a one-line perf trace to `~/.yeaboi/logs/tui/yeaboi.log`. Useful for comparing models or spotting when a model is too big for your machine.
+- **Stop the server on exit** — yeaboi doesn't start Ollama, but when you quit (Esc/Q, or Ctrl-C) with a local server running it offers to stop it: a full `brew services stop ollama` if Homebrew manages it, otherwise it unloads the model to free RAM (~5 GB) while leaving the server idling. Declining leaves everything running.
+
 Config knobs: `OLLAMA_BASE_URL` (default `http://localhost:11434`), `OLLAMA_NUM_CTX` (default 16384 — yeaboi requests a bigger context than Ollama's 2-4k default because the planning prompts are large; lower it on low-RAM machines).
 
 **Limitations:** the post-planning conversational agent (Jira/Confluence writes via chat) depends on the model's tool-calling quality, which varies by model — planning itself never needs tool calling; a model that can't call tools automatically degrades to plain chat with a one-time notice. If something's wrong locally, yeaboi tells you exactly what instead of silently degrading: server down → "Start it with: ollama serve", model not pulled → "ollama pull <model>", package missing → "uv sync --extra ollama", model too slow → "try a smaller model".

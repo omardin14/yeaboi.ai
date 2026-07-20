@@ -40,8 +40,10 @@ class TestSchemaVersion:
         # v6 added the Daily Standup tables; v7 added the Retro tables (retro_history);
         # v8 added the Performance tables (1:1s, reviews, notes); v9 added the
         # Reporting table (reporting_history); v10 added the Roadmap tables
-        # (roadmap_config, roadmap_history); v11 added the multi-row roadmaps list.
-        assert CURRENT_SCHEMA_VERSION == 11
+        # (roadmap_config, roadmap_history); v11 added the multi-row roadmaps
+        # list; v12 added the token_usage performance columns (duration_ms /
+        # eval_duration_ms / load_duration_ms / tokens_per_sec) for local metrics.
+        assert CURRENT_SCHEMA_VERSION == 12
 
     def test_new_db_has_session_mode_column(self, store: SessionStore):
         """A freshly created DB should have the session_mode column."""
@@ -292,6 +294,95 @@ class TestMigrationV3ToV4:
             # None should show up as analysis sessions
             analysis = store.list_analysis_sessions()
             assert len(analysis) == 0
+
+
+# ---------------------------------------------------------------------------
+# Schema v12 — local-model performance columns on token_usage
+# ---------------------------------------------------------------------------
+
+
+def _make_v9_db(db_path: Path) -> None:
+    """Build a minimal v9 DB with the pre-perf token_usage shape (no perf cols)."""
+    import sqlite3
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_info (schema_version INT NOT NULL)")
+    conn.execute("INSERT INTO schema_info (schema_version) VALUES (9)")
+    conn.execute(
+        """CREATE TABLE token_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            input_tokens INT NOT NULL DEFAULT 0,
+            output_tokens INT NOT NULL DEFAULT 0,
+            model TEXT NOT NULL DEFAULT '',
+            provider TEXT NOT NULL DEFAULT ''
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO token_usage (timestamp, input_tokens, output_tokens, model, provider) "
+        "VALUES ('2026-01-01T00:00:00', 100, 50, 'claude-sonnet-4-6', 'anthropic')"
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestMigrationV12:
+    def test_migration_adds_perf_columns(self, tmp_path: Path):
+        db_path = tmp_path / "v9.db"
+        _make_v9_db(db_path)
+        with SessionStore(db_path) as store:
+            cols = {row[1] for row in store._conn.execute("PRAGMA table_info(token_usage)").fetchall()}
+            for expected in ("duration_ms", "eval_duration_ms", "load_duration_ms", "tokens_per_sec"):
+                assert expected in cols
+            # Version stamped to current.
+            ver = store._conn.execute("SELECT schema_version FROM schema_info").fetchone()[0]
+            assert ver == CURRENT_SCHEMA_VERSION
+
+    def test_old_rows_still_readable(self, tmp_path: Path):
+        db_path = tmp_path / "v9b.db"
+        _make_v9_db(db_path)
+        with SessionStore(db_path) as store:
+            usage = store.get_lifetime_usage()
+            assert usage["input_tokens"] == 100
+            assert usage["output_tokens"] == 50
+            # A pre-perf row has no timing → excluded from the perf summary.
+            assert store.get_local_perf_summary() == {}
+
+
+class TestLocalPerfSummary:
+    def test_empty_when_no_local_rows(self, store: SessionStore):
+        store.record_token_usage(100, 50, model="claude-sonnet-4-6", provider="anthropic")
+        assert store.get_local_perf_summary() == {}
+
+    def test_aggregates_ollama_rows(self, store: SessionStore):
+        store.record_token_usage(
+            200,
+            100,
+            model="qwen3:8b",
+            provider="ollama",
+            duration_ms=2000.0,
+            load_duration_ms=500.0,
+            tokens_per_sec=40.0,
+        )
+        store.record_token_usage(
+            180,
+            90,
+            model="qwen3:8b",
+            provider="ollama",
+            duration_ms=1000.0,
+            load_duration_ms=100.0,
+            tokens_per_sec=60.0,
+        )
+        # A cloud row must not pollute the local aggregates.
+        store.record_token_usage(50, 25, model="claude-sonnet-4-6", provider="anthropic")
+        summary = store.get_local_perf_summary()
+        assert summary["calls"] == 2
+        assert summary["avg_tps"] == 50.0
+        assert summary["max_tps"] == 60.0
+        assert summary["avg_duration_ms"] == 1500.0
+        # Last call is the most recently inserted ollama row.
+        assert summary["last"]["model"] == "qwen3:8b"
+        assert summary["last"]["tps"] == 60.0
 
 
 # ---------------------------------------------------------------------------

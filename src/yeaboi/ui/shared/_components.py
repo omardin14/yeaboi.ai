@@ -99,6 +99,8 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Close": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Share Remotely": ("rgb(50,170,170)", "rgb(90,220,220)", "rgb(40,52,52)", "rgb(50,62,62)"),
     "Stop Sharing": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
+    # Quit-time popup: stop the local Ollama server before exiting.
+    "Stop": ("rgb(180,140,60)", "rgb(220,180,90)", "rgb(50,46,36)", "rgb(60,56,46)"),
     # Performance mode actions (coral accent).
     "1:1 Prep": ("rgb(200,90,70)", "rgb(240,130,110)", "rgb(52,42,40)", "rgb(62,52,50)"),
     "1:1 Complete": ("rgb(200,90,70)", "rgb(240,130,110)", "rgb(52,42,40)", "rgb(62,52,50)"),
