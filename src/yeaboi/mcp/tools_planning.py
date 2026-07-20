@@ -153,6 +153,24 @@ def _plan_export(session_id: str, format: str) -> dict:
     return {"session_id": resolved, "format": format, "path": str(path)}
 
 
+def _plan_publish(session_id: str, destination: str) -> dict:
+    if destination not in ("notion", "confluence"):
+        raise ValueError(f"Unsupported destination {destination!r} — use 'notion' or 'confluence'.")
+    resolved, state = _load_state(session_id)
+    from yeaboi.export_targets import publish_markdown
+    from yeaboi.repl._io import build_plan_markdown
+
+    name = getattr(state.get("project_analysis"), "project_name", "")
+    title = f"Sprint Plan — {name}" if name else "Sprint Plan"
+    result = publish_markdown(destination, title=title, markdown=build_plan_markdown(state))
+    if not result.ok:
+        # publish_markdown never raises — surface its failure message as the
+        # tool error so the agent gets the setup hint instead of a silent no-op.
+        raise ValueError(result.message)
+    logger.info("Plan published via MCP: session=%s dest=%s url=%s", resolved, destination, result.url)
+    return {"session_id": resolved, "destination": destination, "url": result.url, "message": result.message}
+
+
 def register(app) -> None:
     """Attach the planning tools to the FastMCP app."""
 
@@ -207,3 +225,11 @@ def register(app) -> None:
         """Export a saved plan to a file (format: 'markdown' or 'html') and return its path.
         Blank session_id = most recent session."""
         return await run_readonly(_plan_export, session_id, format)
+
+    @app.tool()
+    async def plan_publish(session_id: str = "", destination: str = "notion") -> dict:
+        """Publish a saved plan as a page in the user's configured Notion or Confluence
+        (destination: 'notion' or 'confluence') and return the page URL. This creates a page
+        in an external workspace — confirm with the user before calling. Blank session_id =
+        most recent session."""
+        return await run_readonly(_plan_publish, session_id, destination)

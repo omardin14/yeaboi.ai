@@ -30,7 +30,9 @@ def _one_on_one_prep(engineer: str, session_id: str, jira_project: str, azdo_pro
     )
 
 
-def _one_on_one_complete(engineer: str, transcript: str, session_id: str, deliver: bool, recipients: list | None):
+def _one_on_one_complete(
+    engineer: str, transcript: str, session_id: str, deliver: bool, recipients: list | None, images: list | None
+):
     if not transcript.strip():
         raise ValueError("transcript is required — the 1:1 notes or transcript text.")
     from yeaboi.performance.engine import complete_one_on_one
@@ -41,7 +43,21 @@ def _one_on_one_complete(engineer: str, transcript: str, session_id: str, delive
         session_id=session_id,
         deliver=deliver,
         recipients=recipients or None,
+        images=tuple(images or ()),
     )
+
+
+def _note_add(engineer: str, note_text: str) -> dict:
+    if not engineer.strip():
+        raise ValueError("engineer is required — a name from perf_roster.")
+    if not note_text.strip():
+        raise ValueError("note_text is required — the observation to record.")
+    from yeaboi.paths import get_db_path
+    from yeaboi.performance.store import PerformanceStore
+
+    with PerformanceStore(get_db_path()) as store:
+        note_id = store.add_note(engineer.strip(), note_text.strip())
+    return {"engineer": engineer.strip(), "note_id": note_id}
 
 
 def _six_month_review(engineer: str, period_months: int, session_id: str, jira_project: str, azdo_project: str):
@@ -85,11 +101,21 @@ def register(app) -> None:
         session_id: str = "",
         deliver: bool = False,
         recipients: list[str] | None = None,
+        images: list[str] | None = None,
     ) -> dict:
         """Complete a held 1:1 from its notes/transcript: produces a summary and tracked action
-        items (carried into the next prep). deliver=true emails the summary via the configured
+        items (carried into the next prep). images takes local file paths of photographed notes
+        to include in the multimodal call. deliver=true emails the summary via the configured
         SMTP — ask the user before enabling."""
-        return await run_engine(ctx, _one_on_one_complete, engineer, transcript, session_id, deliver, recipients)
+        return await run_engine(
+            ctx, _one_on_one_complete, engineer, transcript, session_id, deliver, recipients, images
+        )
+
+    @app.tool()
+    async def perf_note_add(engineer: str, note_text: str) -> dict:
+        """Record a free-text note about an engineer (an observation, kudos, a concern).
+        Notes feed the next 1:1 prep and the periodic review for that engineer."""
+        return await run_readonly(_note_add, engineer, note_text)
 
     @app.tool()
     async def perf_six_month_review(

@@ -67,7 +67,7 @@ class Exempt(NamedTuple):
 CAPABILITIES: dict[str, dict] = {
     "planning": {
         "engines": {("yeaboi.agent.headless", "run_planning_pipeline")},
-        "mcp_tools": {"plan_generate", "intake_questions", "plan_get", "plan_export"},
+        "mcp_tools": {"plan_generate", "intake_questions", "plan_get", "plan_export", "plan_publish"},
         "tui_mode": "project-planning",
         "cli": {
             "--non-interactive",
@@ -92,7 +92,7 @@ CAPABILITIES: dict[str, dict] = {
     },
     "standup": {
         "engines": {("yeaboi.standup.engine", "run_standup")},
-        "mcp_tools": {"standup_run", "standup_history"},
+        "mcp_tools": {"standup_run", "standup_history", "standup_config_get", "standup_config_set"},
         "tui_mode": "daily-standup",
         "cli": {"--standup-run", "--standup-session", "--standup-output", "--standup-interactive"},
         "skill": "standup",
@@ -115,6 +115,7 @@ CAPABILITIES: dict[str, dict] = {
             "perf_one_on_one_prep",
             "perf_one_on_one_complete",
             "perf_six_month_review",
+            "perf_note_add",
         },
         "tui_mode": "performance",
         "cli": Exempt("no headless performance path yet — tracked gap, lands with the CLI subcommands"),
@@ -187,18 +188,6 @@ HIDDEN_PARAMS: dict[str, dict[str, str]] = {
         "session_id": "plan_generate always mints a fresh session; the id is returned in data",
         "save_session": "MCP plans are always persisted — the session id IS the handle",
         "max_steps": "internal runaway-loop guard, not a user knob",
-    },
-    "standup_run": {
-        "channels": "TODO known drift — expose in the MCP gap-closure commit",
-    },
-    "report_delivery": {
-        "window_start": "TODO known drift — expose in the MCP gap-closure commit",
-        "window_end": "TODO known drift — expose in the MCP gap-closure commit",
-        "sprint_names": "TODO known drift — expose in the MCP gap-closure commit",
-        "period_label_override": "TODO known drift — expose in the MCP gap-closure commit",
-    },
-    "perf_one_on_one_complete": {
-        "images": "TODO known drift — expose in the MCP gap-closure commit",
     },
 }
 

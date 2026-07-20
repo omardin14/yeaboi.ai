@@ -15,7 +15,16 @@ logger = logging.getLogger(__name__)
 _PERIODS = ("last_sprint", "last_month", "quarter")
 
 
-def _report_delivery(period: str, session_id: str, jira_project: str, azdo_project: str):
+def _report_delivery(
+    period: str,
+    session_id: str,
+    jira_project: str,
+    azdo_project: str,
+    window_start: str,
+    window_end: str,
+    sprint_names: list | None,
+    period_label_override: str,
+):
     if period not in _PERIODS:
         raise ValueError(f"period must be one of {', '.join(_PERIODS)} — got {period!r}")
     from yeaboi.reporting.engine import run_delivery_report
@@ -25,6 +34,10 @@ def _report_delivery(period: str, session_id: str, jira_project: str, azdo_proje
         session_id=session_id,
         jira_project=jira_project,
         azdo_project=azdo_project,
+        window_start=window_start,
+        window_end=window_end,
+        sprint_names=tuple(sprint_names or ()),
+        period_label_override=period_label_override,
     )
 
 
@@ -38,9 +51,26 @@ def register(app) -> None:
         session_id: str = "",
         jira_project: str = "",
         azdo_project: str = "",
+        window_start: str = "",
+        window_end: str = "",
+        sprint_names: list[str] | None = None,
+        period_label_override: str = "",
     ) -> dict:
         """Generate a stakeholder-friendly delivery report of completed work from the team's
         tracker (Jira/Azure DevOps): executive summary, outcome themes, metrics, highlights.
-        period: 'last_sprint', 'last_month', or 'quarter'. Blank session_id = most recent
-        session (used for sprint length and project name)."""
-        return await run_engine(ctx, _report_delivery, period, session_id, jira_project, azdo_project)
+        period: 'last_sprint', 'last_month', or 'quarter'. For 'quarter', optionally frame the
+        window explicitly: window_start/window_end (YYYY-MM-DD) bound the reporting span,
+        sprint_names lists the sprints it covers, and period_label_override renames the period
+        (e.g. 'Q3 2026'). Blank session_id = most recent session (sprint length/project name)."""
+        return await run_engine(
+            ctx,
+            _report_delivery,
+            period,
+            session_id,
+            jira_project,
+            azdo_project,
+            window_start,
+            window_end,
+            sprint_names,
+            period_label_override,
+        )

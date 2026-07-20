@@ -25,15 +25,19 @@ EXPECTED_TOOLS = {
     "intake_questions",
     "plan_get",
     "plan_export",
+    "plan_publish",
     "sessions_list",
     "session_get",
     "standup_run",
     "standup_history",
+    "standup_config_get",
+    "standup_config_set",
     "report_delivery",
     "perf_roster",
     "perf_one_on_one_prep",
     "perf_one_on_one_complete",
     "perf_six_month_review",
+    "perf_note_add",
     "retro_history",
     "team_profile_get",
     "team_compare_plan_to_actuals",
@@ -317,6 +321,62 @@ class TestEngineTools:
         assert payload["ok"] is True
         assert payload["data"]["months"] == 12
 
+    def test_standup_run_channels_passthrough(self, seeded_session, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_run_standup(session_id, *, deliver, days=None, channels=None, **kwargs):
+            captured.update(channels=channels)
+            return {"team_summary": "ok", "warnings": []}
+
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", fake_run_standup)
+        payload = call_tool("standup_run", {"channels": ["slack", "email"]})
+        assert payload["ok"] is True
+        assert captured["channels"] == ["slack", "email"]
+
+    def test_standup_run_rejects_bad_channel(self, seeded_session, provider_mode):
+        payload = call_tool("standup_run", {"channels": ["pager"]})
+        assert payload["ok"] is False
+        assert "unknown delivery channel" in payload["error"]["message"]
+
+    def test_report_delivery_window_passthrough(self, tmp_db, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_report(period, **kwargs):
+            captured.update(kwargs)
+            return {"executive_summary": "q3", "warnings": []}
+
+        monkeypatch.setattr("yeaboi.reporting.engine.run_delivery_report", fake_report)
+        payload = call_tool(
+            "report_delivery",
+            {
+                "period": "quarter",
+                "window_start": "2026-04-01",
+                "window_end": "2026-06-30",
+                "sprint_names": ["Sprint 7", "Sprint 8"],
+                "period_label_override": "Q2 2026",
+            },
+        )
+        assert payload["ok"] is True
+        assert captured["window_start"] == "2026-04-01"
+        assert captured["window_end"] == "2026-06-30"
+        assert captured["sprint_names"] == ("Sprint 7", "Sprint 8")
+        assert captured["period_label_override"] == "Q2 2026"
+
+    def test_perf_one_on_one_complete_images_passthrough(self, tmp_db, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_complete(engineer, transcript, *, images=(), **kwargs):
+            captured.update(images=images)
+            return {"summary": "done", "warnings": []}
+
+        monkeypatch.setattr("yeaboi.performance.engine.complete_one_on_one", fake_complete)
+        payload = call_tool(
+            "perf_one_on_one_complete",
+            {"engineer": "Sam", "transcript": "notes", "images": ["/tmp/board.png"]},
+        )
+        assert payload["ok"] is True
+        assert captured["images"] == ("/tmp/board.png",)
+
     def test_team_compare_plan_to_actuals(self, tmp_db, monkeypatch):
         from types import SimpleNamespace
 
@@ -330,6 +390,94 @@ class TestEngineTools:
         payload = call_tool("team_compare_plan_to_actuals")
         assert payload["ok"] is True
         assert payload["data"]["accuracy_pct"] == 82
+
+
+class TestPlanPublish:
+    def test_publish_success(self, seeded_session, monkeypatch):
+        from yeaboi.export_targets import PublishResult
+
+        captured: dict = {}
+
+        def fake_publish(destination, *, title, markdown):
+            captured.update(destination=destination, title=title)
+            assert markdown  # a real markdown document was built
+            return PublishResult(ok=True, message="Published", url="https://notion.so/x")
+
+        monkeypatch.setattr("yeaboi.export_targets.publish_markdown", fake_publish)
+        payload = call_tool("plan_publish", {"destination": "notion"})
+        assert payload["ok"] is True
+        assert payload["data"]["url"] == "https://notion.so/x"
+        assert captured["destination"] == "notion"
+        assert captured["title"].startswith("Sprint Plan")
+
+    def test_publish_failure_surfaces_message(self, seeded_session, monkeypatch):
+        from yeaboi.export_targets import PublishResult
+
+        monkeypatch.setattr(
+            "yeaboi.export_targets.publish_markdown",
+            lambda destination, *, title, markdown: PublishResult(ok=False, message="Notion not configured"),
+        )
+        payload = call_tool("plan_publish", {"destination": "notion"})
+        assert payload["ok"] is False
+        assert "Notion not configured" in payload["error"]["message"]
+
+    def test_publish_bad_destination(self, seeded_session):
+        payload = call_tool("plan_publish", {"destination": "sharepoint"})
+        assert payload["ok"] is False
+        assert "Unsupported destination" in payload["error"]["message"]
+
+
+class TestPerfNotes:
+    def test_note_add_and_visible_to_store(self, tmp_db):
+        payload = call_tool("perf_note_add", {"engineer": "Sam", "note_text": "great incident response"})
+        assert payload["ok"] is True
+        assert payload["data"]["note_id"] > 0
+
+        from yeaboi.performance.store import PerformanceStore
+
+        with PerformanceStore(tmp_db) as store:
+            notes = store.get_notes("Sam")
+        assert notes[0]["note_text"] == "great incident response"
+
+    def test_note_add_requires_text(self, tmp_db):
+        payload = call_tool("perf_note_add", {"engineer": "Sam", "note_text": "  "})
+        assert payload["ok"] is False
+        assert "note_text is required" in payload["error"]["message"]
+
+
+class TestStandupConfigTools:
+    def test_config_get_unset(self, seeded_session):
+        payload = call_tool("standup_config_get")
+        assert payload["ok"] is True
+        assert payload["data"]["config"] is None
+        assert "slack" in payload["data"]["valid_channels"]
+
+    def test_config_set_creates_with_defaults(self, seeded_session):
+        payload = call_tool("standup_config_set", {"time": "09:15", "delivery_channels": ["slack"]})
+        assert payload["ok"] is True
+        config = payload["data"]["config"]
+        assert config["time"] == "09:15"
+        assert config["delivery_channels"] == ["slack"]
+        assert config["weekdays"] == "1-5"  # default kept
+        assert config["enabled"] is False  # not enabled unless asked
+
+    def test_config_set_merges_over_existing(self, seeded_session):
+        call_tool("standup_config_set", {"time": "09:15", "delivery_channels": ["slack"]})
+        payload = call_tool("standup_config_set", {"enabled": True})
+        config = payload["data"]["config"]
+        assert config["enabled"] is True
+        assert config["time"] == "09:15"  # earlier value preserved
+        assert config["delivery_channels"] == ["slack"]
+
+    def test_config_set_rejects_bad_time(self, seeded_session):
+        payload = call_tool("standup_config_set", {"time": "quarter past nine"})
+        assert payload["ok"] is False
+        assert "HH:MM" in payload["error"]["message"]
+
+    def test_config_set_rejects_bad_channel(self, seeded_session):
+        payload = call_tool("standup_config_set", {"delivery_channels": ["pager"]})
+        assert payload["ok"] is False
+        assert "unknown delivery channel" in payload["error"]["message"]
 
 
 class TestServerEntry:
