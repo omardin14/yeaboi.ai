@@ -20,6 +20,28 @@ def _console(buf=None):
     return Console(file=buf or io.StringIO(), width=100)
 
 
+def test_no_subcommand_flag_abbreviation_collides_with_main_flags():
+    """Guard the argparse prefix-matching trap: a subcommand flag that is a
+    strict prefix of >=2 top-level flags raises 'ambiguous option' during the
+    main parser's pre-scan on Python <3.14 (it bit `retro --export` vs the
+    top-level --export-questionnaire/--export-only). CI runs 3.11, so this
+    must be caught statically rather than only where 3.14 is lenient."""
+    parser = build_parser()
+    main_opts = [s for a in parser._actions for s in a.option_strings if s.startswith("--")]
+    subs = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    problems = []
+    for name, sp in subs.choices.items():
+        groups = [(name, sp)]
+        for nested in (a for a in sp._actions if isinstance(a, argparse._SubParsersAction)):
+            groups += [(f"{name} {nn}", nsp) for nn, nsp in nested.choices.items()]
+        for label, p in groups:
+            for opt in (s for a in p._actions for s in a.option_strings if s.startswith("--")):
+                clashes = [m for m in main_opts if m != opt and m.startswith(opt)]
+                if len(clashes) >= 2:
+                    problems.append(f"{label}: {opt} abbreviation-collides with {clashes}")
+    assert not problems, "argparse ambiguity (fails on Python <3.14):\n" + "\n".join(problems)
+
+
 class TestParsing:
     def test_bare_invocation_has_no_command(self):
         args = build_parser().parse_args([])
@@ -364,7 +386,7 @@ class TestRetroCommand:
         (tmp_path / "out").mkdir()
         with RetroStore(db) as store:
             store.record_run(RetroReport(date="2026-07-18", session_id="sid", project_name="P"))
-        args = build_parser().parse_args(["retro", "--export"])
+        args = build_parser().parse_args(["retro", "--export-latest"])
         assert _cmd_retro(args, _console()) == 0
         assert (tmp_path / "out" / "retro-2026-07-18.md").exists()
 
@@ -373,7 +395,7 @@ class TestRetroCommand:
 
         monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
         monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
-        args = build_parser().parse_args(["retro", "--export"])
+        args = build_parser().parse_args(["retro", "--export-latest"])
         assert _cmd_retro(args, _console()) == 2
 
 

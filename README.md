@@ -634,7 +634,7 @@ Every TUI mode has a headless CLI path over the same engine:
 | `yeaboi perf complete <engineer> --transcript @notes.txt [--images ...] [--deliver]` | Turn a held 1:1 into a summary + tracked action items |
 | `yeaboi perf review <engineer> [--months N]` | Draft a periodic performance review |
 | `yeaboi perf note <engineer> --text "..."` | Record a note (feeds future preps/reviews) |
-| `yeaboi retro [--limit N] [--export] [--format json]` | Read past retrospectives / export the latest (the live board runs in the TUI) |
+| `yeaboi retro [--limit N] [--export-latest] [--format json]` | Read past retrospectives / export the latest (the live board runs in the TUI) |
 | `yeaboi analyze [--source jira\|azdevops] [--sprints N] [--samples] [--format json]` | Analyse board history into a team calibration profile |
 
 `--format json` keeps stdout machine-clean (warnings and progress go to stderr) for piping into CI or other tools. Add `--strict` to any runner to exit 3 on a degraded run (warnings present, or an empty report) — by default degraded runs still exit 0 with warnings on stderr.

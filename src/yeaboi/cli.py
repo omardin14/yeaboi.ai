@@ -552,7 +552,15 @@ def build_parser() -> argparse.ArgumentParser:
     retro_p = subparsers.add_parser("retro", help="Read past retrospectives (the live board runs in the TUI)")
     retro_p.add_argument("--session", default="", metavar="ID", help="Session to read (default: most recent)")
     retro_p.add_argument("--limit", type=int, default=10, help="Number of past retros to show (default 10)")
-    retro_p.add_argument("--export", action="store_true", help="Also export the latest retro to Markdown + HTML")
+    # dest stays "export"; the flag is spelled out because a bare "--export"
+    # abbreviation-collides with the top-level --export-questionnaire/--export-only
+    # under argparse's prefix matching (Python <3.14).
+    retro_p.add_argument(
+        "--export-latest",
+        dest="export",
+        action="store_true",
+        help="Also export the latest retro to Markdown + HTML",
+    )
     retro_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     analyze_p = subparsers.add_parser("analyze", help="Analyse team board history into a calibration profile")
