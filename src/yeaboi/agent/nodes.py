@@ -160,12 +160,20 @@ def _is_llm_connection_error(exc: Exception) -> bool:
 
 
 def _ollama_connection_hint() -> str:
-    """Actionable message for a down/unreachable local Ollama server."""
-    from yeaboi.config import get_ollama_base_url
+    """Actionable message for a down/unreachable local Ollama server.
 
+    Mirrors the setup-screen copy (_ollama_unreachable_message): distinguish
+    "not installed" from "installed but not running" so the hint matches reality.
+    """
+    from yeaboi.config import get_ollama_base_url
+    from yeaboi.ollama_control import is_ollama_installed
+
+    base = get_ollama_base_url()
+    if is_ollama_installed():
+        return f"Can't reach Ollama at {base}. Start it with: ollama serve — or check OLLAMA_BASE_URL in your .env."
     return (
-        f"Can't reach Ollama at {get_ollama_base_url()}. Is it running? "
-        "Start it with: ollama serve — or check OLLAMA_BASE_URL in your .env."
+        f"Can't reach Ollama at {base}. Ollama isn't installed — get it at https://ollama.com "
+        "(or: brew install ollama), then start it with: ollama serve."
     )
 
 

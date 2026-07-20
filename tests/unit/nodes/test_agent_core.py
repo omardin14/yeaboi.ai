@@ -136,9 +136,23 @@ class TestLocalLlmHint:
         assert "ollama pull qwen3:8b" in hint
 
     def test_connection_refused_gets_serve_hint(self, monkeypatch):
+        import yeaboi.ollama_control as ollama_control
+
         monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: True)
         hint = _local_llm_hint(ConnectionRefusedError("refused"))
         assert hint is not None
+        assert "ollama serve" in hint
+        assert "https://ollama.com" not in hint  # installed → don't tell them to install
+
+    def test_connection_refused_when_not_installed_says_install(self, monkeypatch):
+        import yeaboi.ollama_control as ollama_control
+
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: False)
+        hint = _local_llm_hint(ConnectionRefusedError("refused"))
+        assert hint is not None
+        assert "https://ollama.com" in hint
         assert "ollama serve" in hint
 
     def test_read_timeout_gets_slowness_hint(self, monkeypatch):

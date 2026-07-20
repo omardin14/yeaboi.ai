@@ -30,6 +30,11 @@ _BREW_STOP_TIMEOUT = 15
 _UNLOAD_TIMEOUT = 10
 
 
+def is_ollama_installed() -> bool:
+    """True when the ollama CLI is on PATH (installed, regardless of running)."""
+    return shutil.which("ollama") is not None
+
+
 def _is_localhost(base_url: str) -> bool:
     """True when the Ollama base URL points at this machine (only then is the
     server plausibly ours to stop)."""

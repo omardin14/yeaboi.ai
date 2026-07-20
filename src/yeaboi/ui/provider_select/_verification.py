@@ -17,10 +17,23 @@ logger = logging.getLogger(__name__)
 _OLLAMA_PKG_MISSING = (
     "Ollama support isn't installed — run: uv sync --extra ollama (or: pip install langchain-ollama), then retry"
 )
-_OLLAMA_UNREACHABLE = (
-    "Can't reach Ollama — is it running? Start it with: ollama serve"
-    "  ·  Not installed? https://ollama.com (or: brew install ollama)"
-)
+
+
+def _ollama_unreachable_message() -> str:
+    """'Can't reach Ollama' copy that distinguishes not-installed from not-running.
+
+    Reached from both _verify_api_key and _verify_model — keep the branching in
+    one place so the two paths stay consistent. Both variants keep the literal
+    ``ollama serve`` so "start the server" is always the final step.
+    """
+    from yeaboi.ollama_control import is_ollama_installed  # lazy: keep module import-light
+
+    if is_ollama_installed():
+        return "Ollama is installed but not running — start it with: ollama serve"
+    return (
+        "Ollama isn't installed — get it at https://ollama.com "
+        "(or: brew install ollama), then start it with: ollama serve"
+    )
 
 
 def _validate_key(provider: dict[str, Any], value: str) -> tuple[str, str]:
@@ -172,7 +185,7 @@ def _verify_api_key(provider: dict[str, Any], api_key: str) -> tuple[bool, str]:
     except Exception as e:
         err_str = str(e)
         if provider_val == "ollama":
-            return False, _OLLAMA_UNREACHABLE
+            return False, _ollama_unreachable_message()
         if "NoCredentialsError" in type(e).__name__ or "NoCredentialsError" in err_str:
             return False, "No AWS credentials found \u2014 configure IAM role, ~/.aws/credentials, or env vars"
         if "InvalidIdentityToken" in err_str or "AccessDenied" in err_str or "403" in err_str:
@@ -296,7 +309,7 @@ def _verify_model(provider: dict[str, Any], api_key: str, model: str) -> tuple[b
     except Exception as e:
         err_str = str(e)
         if provider_val == "ollama":
-            return False, _OLLAMA_UNREACHABLE
+            return False, _ollama_unreachable_message()
         if "NoCredentialsError" in type(e).__name__ or "NoCredentialsError" in err_str:
             return False, "No AWS credentials found — configure IAM role, ~/.aws/credentials, or env vars"
         if "InvalidIdentityToken" in err_str or "AccessDenied" in err_str or "403" in err_str:

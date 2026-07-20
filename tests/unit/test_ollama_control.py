@@ -31,6 +31,16 @@ class TestIsLocalhost:
         assert ollama_control._is_localhost(url) is False
 
 
+class TestIsOllamaInstalled:
+    def test_true_when_binary_on_path(self, monkeypatch):
+        monkeypatch.setattr(ollama_control.shutil, "which", lambda name: "/usr/local/bin/ollama")
+        assert ollama_control.is_ollama_installed() is True
+
+    def test_false_when_binary_absent(self, monkeypatch):
+        monkeypatch.setattr(ollama_control.shutil, "which", lambda name: None)
+        assert ollama_control.is_ollama_installed() is False
+
+
 class TestShouldOfferOllamaStop:
     def _patch(self, monkeypatch, *, provider="ollama", base="http://localhost:11434", status=200, raise_probe=False):
         import yeaboi.config as config

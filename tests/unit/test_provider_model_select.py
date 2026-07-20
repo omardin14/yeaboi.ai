@@ -411,19 +411,38 @@ class TestOllamaPackageCheck:
 
 
 class TestOllamaInstallGuidance:
-    def test_unreachable_message_says_how_to_install(self, monkeypatch, ollama_pkg_installed):
+    def test_not_installed_message_says_how_to_install(self, monkeypatch, ollama_pkg_installed):
         import httpx
 
+        import yeaboi.ollama_control as ollama_control
         from yeaboi.ui.provider_select._verification import _verify_api_key
 
         def _boom(*a, **kw):
             raise httpx.ConnectError("connection refused")
 
         monkeypatch.setattr(httpx, "get", _boom)
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: False)
         _, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
         assert "https://ollama.com" in msg
+        assert "ollama serve" in msg
         _, msg = _verify_model(_card("ollama"), "http://localhost:11434", "qwen3:8b")
         assert "https://ollama.com" in msg
+
+    def test_installed_but_down_message_says_start_not_install(self, monkeypatch, ollama_pkg_installed):
+        import httpx
+
+        import yeaboi.ollama_control as ollama_control
+        from yeaboi.ui.provider_select._verification import _verify_api_key
+
+        def _boom(*a, **kw):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx, "get", _boom)
+        monkeypatch.setattr(ollama_control, "is_ollama_installed", lambda: True)
+        _, msg = _verify_api_key(_card("ollama"), "http://localhost:11434")
+        assert "not running" in msg
+        assert "ollama serve" in msg
+        assert "https://ollama.com" not in msg
 
 
 class _FakePullStream:
