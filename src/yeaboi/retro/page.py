@@ -31,12 +31,21 @@ import json
 import logging
 
 from yeaboi.music import CHANNELS
-from yeaboi.retro.board import AVATARS, REACTION_EMOJIS, RETRO_GRID_LABELS, RETRO_GRIDS
+from yeaboi.retro.board import (
+    AVATARS,
+    CARRIED_STATUS_LABELS,
+    CARRIED_STATUSES,
+    REACTION_EMOJIS,
+    RETRO_GRID_LABELS,
+    RETRO_GRIDS,
+)
 
 logger = logging.getLogger(__name__)
 
 # Grid (key, label) pairs for the client, kept in server order.
 _GRID_JS = [[k, RETRO_GRID_LABELS[k]] for k in RETRO_GRIDS]
+# Carried-item status (value, label) pairs for the review column's <select>.
+_CARRIED_STATUS_JS = [[k, CARRIED_STATUS_LABELS[k]] for k in CARRIED_STATUSES]
 
 # Fun random-name word lists (cosmetic, client-only). Kept tasteful-but-silly.
 _ADJECTIVES = [
@@ -195,6 +204,21 @@ header .spacer { flex:1; }
 .swatch.sel { border-color:var(--accent); }
 .swatch .dot { position:absolute; right:4px; bottom:4px; width:9px; height:9px; border-radius:50%; }
 
+/* ── Carried-over review column ("Last sprint's actions") ───────── */
+.carried { margin:18px 18px 0; background:var(--panel); border:1px solid var(--line);
+           border-radius:10px; padding:12px 14px; }
+.carried h2 { font-size:14px; margin:0; color:var(--accent2); letter-spacing:.02em; }
+.carried .sub { color:var(--muted); font-size:12px; margin:3px 0 11px; }
+.carried .items { display:flex; flex-direction:column; gap:8px; }
+.carried .ci { display:flex; align-items:flex-start; gap:10px; }
+.carried .ci .txt { flex:1; white-space:pre-wrap; word-break:break-word; padding-top:4px; }
+.carried .ci select { background:var(--card); color:var(--text); border:1px solid var(--line);
+        border-radius:8px; padding:5px 7px; font:inherit; font-size:13px; cursor:pointer; }
+.carried .ci select:hover { border-color:var(--accent); }
+.carried .ci[data-status="done"] .txt,
+.carried .ci[data-status="not_relevant"] .txt { color:var(--muted); text-decoration:line-through; }
+.carried .ci[data-status="carried_over"] select { border-color:var(--accent2); }
+
 .grids { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; padding:18px; }
 @media (max-width:900px) { .grids { grid-template-columns:1fr 1fr; } }
 @media (max-width:560px) { .grids { grid-template-columns:1fr; } }
@@ -276,6 +300,7 @@ textarea { width:100%; background:var(--card); color:var(--text); border:1px sol
 
 _JS = r"""
 const GRIDS = __GRIDS__;
+const CARRIED_STATUSES = __CARRIED_STATUSES__;
 const EMOJIS = __EMOJIS__;
 const AVATARS = __AVATARS__;
 const ADJS = __ADJS__;
@@ -456,6 +481,31 @@ async function deleteCard(cardId) {
   try { const r = await postJSON("/api/card/delete", { card_id: cardId }); if (r.ok) render((await r.json()).state); } catch (e) {}
 }
 
+/* ── Carried-over action items (last sprint's actions review) ─── */
+function renderCarried(state) {
+  const wrap = document.getElementById("carried-wrap");
+  if (!wrap) return;
+  const items = state.carried || [];
+  if (!items.length) { wrap.classList.add("hidden"); return; }
+  // Don't clobber a <select> the user is mid-change on (poll fires every ~1.2s).
+  const ae = document.activeElement;
+  if (ae && ae.matches && ae.matches(".carried select")) return;
+  wrap.classList.remove("hidden");
+  const box = document.getElementById("carried-list");
+  box.innerHTML = items.map(c => {
+    const st = c.status || "pending";
+    const opts = CARRIED_STATUSES.map(([v, label]) =>
+      '<option value="' + v + '"' + (v === st ? " selected" : "") + '>' + esc(label) + '</option>').join("");
+    return '<div class="ci" data-status="' + esc(st) + '"><div class="txt">' + esc(c.text) + '</div>' +
+      '<select data-item="' + esc(c.id) + '">' + opts + '</select></div>';
+  }).join("");
+  box.querySelectorAll("select[data-item]").forEach(sel =>
+    sel.onchange = () => setCarriedStatus(sel.getAttribute("data-item"), sel.value));
+}
+async function setCarriedStatus(itemId, status) {
+  try { const r = await postJSON("/api/carried/status", { item_id: itemId, status }); if (r.ok) render((await r.json()).state); } catch (e) {}
+}
+
 /* ── Drag & drop ────────────────────────────────────────────── */
 function onDrop(e, box) {
   e.preventDefault();
@@ -518,6 +568,7 @@ function render(state) {
     if (tl) { const names = (typingByGrid[k] || []).filter(n => n !== NAME); tl.textContent = names.length ? (names.join(", ") + (names.length > 1 ? " are" : " is") + " typing…") : ""; }
   });
   wireCards();
+  renderCarried(state);
 
   const pr = document.getElementById("presence");
   if (pr) {
@@ -768,6 +819,7 @@ def build_board_html() -> str:
 
     js = (
         _JS.replace("__GRIDS__", _lit(_GRID_JS))
+        .replace("__CARRIED_STATUSES__", _lit(_CARRIED_STATUS_JS))
         .replace("__EMOJIS__", _lit(list(REACTION_EMOJIS)))
         .replace("__AVATARS__", _lit(list(AVATARS)))
         .replace("__ADJS__", _lit(_ADJECTIVES))
@@ -827,6 +879,14 @@ def build_board_html() -> str:
         '<div id="room-pop" class="pop left hidden">\n'
         "  <label>In the room</label>\n"
         '  <div class="roster" id="room-list"></div>\n'
+        "</div>\n"
+        # Last sprint's actions — a review column seeded from the previous retro;
+        # hidden until the poll returns carried items (empty for a first-ever retro).
+        '<div id="carried-wrap" class="carried hidden">\n'
+        "  <h2>Last sprint's actions</h2>\n"
+        '  <p class="sub">Review what happened to each — set a status to close the loop. '
+        '"Carried Over" re-adds it to this sprint.</p>\n'
+        '  <div class="items" id="carried-list"></div>\n'
         "</div>\n"
         '<div class="grids" id="grids"></div>\n'
         '<canvas id="confetti"></canvas>\n'

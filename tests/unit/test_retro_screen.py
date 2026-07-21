@@ -1,12 +1,22 @@
 """Render tests for the Retro TUI screen builder, theme, and page wiring."""
 
+from io import StringIO
+
+from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from yeaboi.agent.state import RetroCard
 from yeaboi.retro.board import RetroBoard
 from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS
 from yeaboi.ui.mode_select.screens._screens_secondary import _build_retro_screen
 from yeaboi.ui.shared._components import RETRO_THEME, retro_title
+
+
+def _render(panel: Panel, width: int = 100, height: int = 40) -> str:
+    console = Console(file=StringIO(), width=width, height=height)
+    console.print(panel)
+    return console.file.getvalue()
 
 
 class TestComponents:
@@ -80,3 +90,23 @@ class TestBuildRetroScreen:
             height=24,
         )
         assert isinstance(panel, Panel)
+
+
+class TestCarriedActionItems:
+    def test_carried_block_renders_with_status(self):
+        b = RetroBoard("s")
+        data = _data(b)
+        data["carried"] = [
+            RetroCard(id="k1", grid="action_items", text="finish the docs", origin="carryover", status="done"),
+            RetroCard(id="k2", grid="action_items", text="revisit CI", origin="carryover", status="carried_over"),
+        ]
+        out = _render(_build_retro_screen(data, width=100, height=40))
+        assert "Last sprint's actions" in out
+        assert "1/2 resolved" in out
+        assert "finish the docs" in out and "[Done]" in out
+        assert "[Carried Over]" in out
+
+    def test_no_carried_block_when_empty(self):
+        b = RetroBoard("s")
+        out = _render(_build_retro_screen(_data(b), width=100, height=40))
+        assert "Last sprint's actions" not in out

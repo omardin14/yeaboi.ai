@@ -1207,7 +1207,8 @@ def _cmd_retro(args: argparse.Namespace, console: "Console") -> int:
         return 2
     with RetroStore(get_db_path()) as store:
         history = store.get_history(session_id, limit=args.limit)
-        latest = store.get_latest_report(session_id) if args.export else None
+        # Load the latest report for the carried-items summary (and for --export).
+        latest = store.get_latest_report(session_id)
     exported: dict = {}
     if args.export:
         if latest is None:
@@ -1216,8 +1217,30 @@ def _cmd_retro(args: argparse.Namespace, console: "Console") -> int:
         from yeaboi.retro.export import export_retro
 
         exported = {k: str(v) for k, v in export_retro(latest).items()}
+    # Summarise the latest retro's carried-over action items by status.
+    carried = list(latest.carried_action_items) if latest else []
+    carried_summary = ""
+    if carried:
+        from collections import Counter
+
+        from yeaboi.retro.board import CARRIED_STATUS_LABELS
+
+        counts = Counter((c.status or "pending") for c in carried)
+        carried_summary = " · ".join(
+            f"{n} {CARRIED_STATUS_LABELS.get(st, st).lower()}" for st, n in counts.most_common()
+        )
     if args.format == "json":
-        print(json.dumps({"session_id": session_id, "history": history, "exported": exported}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "session_id": session_id,
+                    "history": history,
+                    "exported": exported,
+                    "carried_action_items": [{"text": c.text, "status": c.status or "pending"} for c in carried],
+                },
+                indent=2,
+            )
+        )
         return 0
     if not history:
         console.print("[yellow]No retros recorded for this session yet — run one from the TUI Retro page.[/yellow]")
@@ -1227,6 +1250,8 @@ def _cmd_retro(args: argparse.Namespace, console: "Console") -> int:
             f"  • {row['retro_date'] or row['run_at'][:10]}  {row['project_name'] or session_id}"
             f"  — {row['card_count']} cards"
         )
+    if carried_summary:
+        console.print(f"  Last sprint's actions: {carried_summary}")
     for kind, path in exported.items():
         console.print(f"  Exported {kind}: {path}")
     return 0

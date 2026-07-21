@@ -57,8 +57,9 @@ def _dict_to_retro_report(d: dict) -> RetroReport:
     older version (missing keys) still deserialize — see CLAUDE.md
     "Frozen dataclass backward compatibility".
     """
-    cards = tuple(
-        RetroCard(
+
+    def _card(c: dict) -> RetroCard:
+        return RetroCard(
             id=c.get("id", ""),
             grid=c.get("grid", ""),
             text=c.get("text", ""),
@@ -67,9 +68,12 @@ def _dict_to_retro_report(d: dict) -> RetroReport:
             origin=c.get("origin", "web"),
             # JSON turned each (emoji, count) tuple into an [emoji, count] list — rebuild tuples.
             reactions=tuple((str(r[0]), int(r[1])) for r in c.get("reactions", ()) if len(r) == 2),
+            status=c.get("status", ""),
         )
-        for c in d.get("cards", ())
-    )
+
+    cards = tuple(_card(c) for c in d.get("cards", ()))
+    # Carried action items are RetroCards too (last sprint's items + their statuses).
+    carried = tuple(_card(c) for c in d.get("carried_action_items", ()))
     return RetroReport(
         date=d.get("date", ""),
         session_id=d.get("session_id", ""),
@@ -78,6 +82,7 @@ def _dict_to_retro_report(d: dict) -> RetroReport:
         cards=cards,
         participants=tuple(d.get("participants", ())),
         generated_at=d.get("generated_at", ""),
+        carried_action_items=carried,
     )
 
 

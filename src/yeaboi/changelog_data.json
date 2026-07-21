@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.26.0",
+      "date": "2026-07-21",
+      "summary": "Retro now carries action items forward from the previous retro to this one, showing them in a dedicated \"Last sprint's actions\" review column on the browser board and TUI host view. Your team sets a status for each carried item — Done, Pending, In Progress, Carried Over, or Not Relevant — and these statuses persist in the report. Items marked as Carried Over re-enter the current sprint's action grid and keep the team focused on the context that still matters; Done and Not Relevant items drop out. Carry-forward works whether an item was AI-generated or typed in by hand, and now also survives closing and reopening a retro under the same session. The \"Share Remotely\" button also hardened: it now waits until the Cloudflare tunnel hostname is externally resolvable before advertising the URL, so opening the link doesn't hit an NXDOMAIN that resolvers will cache for 30 minutes.",
+      "highlights": [
+        {"text": "Carried-forward action items from the previous retro with status tracking (Done/Pending/In Progress/Carried Over/Not Relevant)", "areas": ["retro"]},
+        {"text": "Previous retro's items re-enter the current sprint's action grid if marked Carried Over", "areas": ["retro"]},
+        {"text": "Hardened Share Remotely: waits for DNS resolution before advertising the Cloudflare tunnel URL", "areas": ["retro"]}
+      ]
+    },
+    {
       "version": "2.25.0",
       "date": "2026-07-21",
       "summary": "The token setup wizard now shows you exactly where to create each credential and what access to grant it. GitHub PAT, Azure DevOps PAT, and Jira/Notion/Confluence token fields display a clickable creation URL as an OSC-8 terminal hyperlink and show the required scopes underneath — the same scopes that power all your integrations. The Settings page's credential dashboard now shows these links and scopes too, so you can review them any time and quickly re-create or upgrade a token without searching the documentation.",

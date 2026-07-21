@@ -291,6 +291,7 @@ class _RetroHandler(BaseHTTPRequestHandler):
             "/api/card/edit",
             "/api/card/delete",
             "/api/card/move",
+            "/api/carried/status",
         )
         if path not in authed_paths or not self._authed():
             self._send_json(403, {"error": "forbidden"})
@@ -335,6 +336,14 @@ class _RetroHandler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 index = 0
             ok = self._board.move_card(str(payload.get("card_id", "")), str(payload.get("grid", "")), index, pid)
+            self._send_json(200 if ok else 400, {"ok": ok, "state": _state()})
+            return
+
+        if path == "/api/carried/status":
+            # Set the progress status on a carried-over action item (last sprint's
+            # actions). Open to any authed peer, like moving a card — reviewing the
+            # prior actions is collaborative. board validates the status enum.
+            ok = self._board.set_carried_status(str(payload.get("item_id", "")), str(payload.get("status", "")))
             self._send_json(200 if ok else 400, {"ok": ok, "state": _state()})
             return
 

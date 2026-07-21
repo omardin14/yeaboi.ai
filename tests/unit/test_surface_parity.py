@@ -122,8 +122,13 @@ CAPABILITIES: dict[str, dict] = {
         "skill": "performance",
     },
     "retro-board": {
-        "engines": {("yeaboi.retro.engine", "generate_action_items")},
-        "mcp_tools": {"retro_history", "retro_export"},
+        # carried_action_items_for_session: the headless carry-forward load (prior
+        # retro's action items) the TUI/browser adapt for the review column.
+        "engines": {
+            ("yeaboi.retro.engine", "generate_action_items"),
+            ("yeaboi.retro.engine", "carried_action_items_for_session"),
+        },
+        "mcp_tools": {"retro_history", "retro_export"},  # carried data rides along in retro_history's report
         "tui_mode": "retro",
         "cli": {"retro"},  # history read-back + export; the live LAN board itself stays TUI-hosted
         "skill": Exempt("live board is TUI-only by design; history stays readable via retro_history"),

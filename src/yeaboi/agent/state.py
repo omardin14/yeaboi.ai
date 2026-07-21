@@ -335,11 +335,16 @@ class RetroCard:
     text: str = ""  # raw card text — escaped only at render time, never pre-escaped
     author: str = ""  # display name from the browser name prompt (or "AI")
     created_at: str = ""  # ISO-8601 UTC timestamp
-    origin: str = "web"  # "web" (a teammate) | "ai" (LLM-generated action item)
+    origin: str = "web"  # "web" (a teammate) | "ai" (LLM action item) | "carryover" (re-added from last retro)
     # (emoji, count) pairs — a tuple (not a dict) so the card stays frozen/hashable and
     # serializes cleanly, exactly like StandupReport.activity_counts. Populated only at
     # report time by board_to_report(); the live board keeps reactions in its own map.
     reactions: tuple[tuple[str, int], ...] = ()
+    # Progress on a *carried-over* action item from the previous retro. Empty for
+    # normal authoring-grid cards; one of retro.board.CARRIED_STATUSES for the items
+    # surfaced in the "Last sprint's actions" review column so the team can close the
+    # loop (pending/done/in_progress/carried_over/not_relevant). See CLAUDE.md retro.
+    status: str = ""
 
 
 @dataclass(frozen=True)
@@ -357,6 +362,11 @@ class RetroReport:
     cards: tuple[RetroCard, ...] = ()  # every card across all four grids
     participants: tuple[str, ...] = ()  # distinct human authors who contributed
     generated_at: str = ""  # ISO-8601 UTC timestamp the report was assembled
+    # Last sprint's action items reviewed *during* this retro, each carrying the
+    # ``status`` the team set (see RetroCard.status). Seeded at board open from the
+    # prior run's action_items grid; the Prep↔Completion carry-forward loop for retro
+    # (mirrors Performance mode). Empty when there was no prior retro for the session.
+    carried_action_items: tuple[RetroCard, ...] = ()
 
     def by_grid(self) -> dict[str, list[RetroCard]]:
         """Group this report's cards by grid key, preserving insertion order."""

@@ -32,6 +32,7 @@ import stat
 import subprocess
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -187,12 +188,15 @@ class CloudflareTunnel:
         self._proc: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
         self._url = ""
+        # Last stderr lines from cloudflared — surfaced on failure so the real reason
+        # (QUIC blocked, trycloudflare 5xx, protocol deprecated, rate-limit) is visible.
+        self._log_tail: deque[str] = deque(maxlen=15)
 
     @property
     def public_url(self) -> str:
         return self._url
 
-    def start(self, *, timeout: float = 30.0) -> str | None:
+    def start(self, *, timeout: float = 45.0) -> str | None:
         """Launch cloudflared and wait up to ``timeout`` s for the public URL.
 
         Returns the ``https://…trycloudflare.com`` URL, or ``None`` on failure
@@ -221,8 +225,14 @@ class CloudflareTunnel:
         def _drain() -> None:
             # Keep reading stderr for the tunnel's whole life: capture the URL once,
             # then keep draining so cloudflared's pipe buffer never fills and blocks it.
+            # Every line is logged (DEBUG) + kept in a small tail so a failure is
+            # diagnosable — previously cloudflared's own output was discarded.
             assert self._proc is not None and self._proc.stderr is not None
             for line in self._proc.stderr:
+                line = line.rstrip()
+                if line:
+                    self._log_tail.append(line)
+                    logger.debug("cloudflared: %s", line)
                 if not self._url:
                     m = _URL_RE.search(line)
                     if m:
@@ -242,10 +252,89 @@ class CloudflareTunnel:
                 break
 
         if not self._url:
+            # Surface cloudflared's own last words at warning level so the reason is
+            # visible in retro.log without enabling DEBUG.
+            if self._log_tail:
+                logger.warning(
+                    "retro: cloudflare tunnel failed to produce a URL — cloudflared said:\n%s",
+                    "\n".join(self._log_tail),
+                )
+            else:
+                logger.warning("retro: cloudflare tunnel failed to produce a URL (no cloudflared output)")
             self.stop()
             return None
+
+        # cloudflared prints the URL several seconds BEFORE the quick-tunnel hostname's DNS
+        # record actually goes live. Handing the URL out at that instant means a teammate
+        # who opens it immediately hits NXDOMAIN — which their browser/OS then *negatively
+        # caches*, so even retries keep failing for a while. Wait until the record is
+        # globally resolvable before declaring the tunnel ready.
+        host = self._url.split("://", 1)[-1].split("/", 1)[0]
+        self._wait_dns_live(host, deadline=time.monotonic() + 30.0)
         logger.info("retro: tunnel ready at %s", self._url)
         return self._url
+
+    def _dns_query(self, base: str, host: str) -> bool | None:
+        """DoH A-record lookup. Returns True (resolves), False (NXDOMAIN), None (endpoint error)."""
+        import json
+        import urllib.parse
+        import urllib.request
+
+        try:
+            q = urllib.parse.urlencode({"name": host, "type": "A"})
+            # Fixed, trusted public DoH endpoints (dns.google / 1.1.1.1).
+            req = urllib.request.Request(f"{base}?{q}", headers={"Accept": "application/dns-json"})  # noqa: S310
+            with urllib.request.urlopen(req, timeout=4) as resp:  # noqa: S310
+                data = json.load(resp)
+            return bool(data.get("Status") == 0 and data.get("Answer"))
+        except Exception:  # noqa: BLE001 - any DoH hiccup means "unknown, try again"
+            return None
+
+    def _wait_dns_live(self, host: str, *, deadline: float) -> bool:
+        """Block until ``host`` resolves on an *external* resolver, so we never advertise a
+        not-yet-propagated URL.
+
+        A quick tunnel's DNS record propagates ~4 s after cloudflared prints the URL. If a
+        browser opens it before then, the resolver *negatively caches* the NXDOMAIN for the
+        full SOA window (30 min for trycloudflare.com) — so the URL is dead-on-arrival even
+        once it goes live. We therefore wait until it's resolvable before handing it out.
+
+        Crucially we gate on **Google DoH (dns.google)**, not Cloudflare's own 1.1.1.1:
+        1.1.1.1 knows about Cloudflare's quick tunnels *instantly*, so it would report
+        "ready" seconds before an ordinary (non-Cloudflare) resolver — exactly the window
+        that poisons a joining teammate's cache. Google resolving it means external resolvers
+        genuinely see it. We fall back to Cloudflare only if Google DoH is unreachable.
+
+        Best-effort: on timeout we still return the URL (the tunnel is up per cloudflared),
+        but log a warning — a persistently-unresolvable host usually means the joining
+        network blocks ``trycloudflare.com``.
+        """
+        google, cloudflare = "https://dns.google/resolve", "https://1.1.1.1/dns-query"
+        start = time.monotonic()
+        google_reachable = False
+        while time.monotonic() < deadline:
+            ext = self._dns_query(google, host)
+            if ext:  # an ordinary public resolver sees it → joining teammates will too
+                logger.info("retro: tunnel DNS propagated for %s", host)
+                time.sleep(3.0)  # small settle for slower downstream resolvers
+                return True
+            if ext is not None:  # reachable (just NXDOMAIN for now) — keep waiting on Google
+                google_reachable = True
+            # Only fall back to Cloudflare's own resolver if Google DoH has been
+            # *persistently* unreachable (restricted network) — never on a single hiccup,
+            # which would forfeit the external-propagation guarantee and re-poison caches.
+            elif not google_reachable and (time.monotonic() - start) > (deadline - start) * 0.5:
+                if self._dns_query(cloudflare, host):
+                    logger.info("retro: tunnel DNS live for %s (cloudflare resolver; google unreachable)", host)
+                    time.sleep(3.0)
+                    return True
+            time.sleep(1.5)
+        logger.warning(
+            "retro: tunnel host %s not resolvable via public DNS yet — give it a few more "
+            "seconds, or the joining network may block/slow trycloudflare.com (NXDOMAIN).",
+            host,
+        )
+        return False
 
     def stop(self) -> None:
         """Terminate the tunnel process and free its resources."""

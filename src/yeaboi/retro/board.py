@@ -45,6 +45,22 @@ RETRO_GRID_LABELS: dict[str, str] = {
     "demos": "Demos",
 }
 
+# Carried-over action items — last sprint's actions surfaced in this retro's review
+# column so the team can close the loop on each. These are NOT one of RETRO_GRIDS:
+# they live in the board's own ``_carried`` list (not the authoring grids), so they
+# can't be edited/deleted as fresh cards and don't feed the AI as new *problems*.
+# The status set is server-validated (LAN peers untrusted), like REACTION_EMOJIS.
+CARRIED_STATUSES: tuple[str, ...] = ("pending", "done", "in_progress", "carried_over", "not_relevant")
+CARRIED_STATUS_LABELS: dict[str, str] = {
+    "pending": "Pending",
+    "done": "Done",
+    "in_progress": "In Progress",
+    "carried_over": "Carried Over",
+    "not_relevant": "Not Relevant",
+}
+# Statuses that still count as "open" for the Planning/Analysis feed (ceremony_history).
+CARRIED_OPEN_STATUSES: tuple[str, ...] = ("pending", "in_progress", "carried_over")
+
 # Canonical, server-validated sets shared with the browser page (retro/page.py
 # injects these so client and server agree). Reactions/avatars from a LAN peer are
 # rejected unless they're in these tuples — bounding what can be stored/rendered.
@@ -102,6 +118,10 @@ class RetroBoard:
         self.sprint_name = sprint_name
         self.created_at = _now_iso()
         self._cards: list[RetroCard] = []
+        # Last sprint's action items surfaced for review (each a RetroCard with a
+        # ``status`` from CARRIED_STATUSES). Guarded by _lock, same as _cards. Seeded
+        # once at board open via seed_carried(); never authored by teammates.
+        self._carried: list[RetroCard] = []
         self._revision = 0
         self._lock = threading.Lock()
         # All guarded by _lock, same as _cards.
@@ -170,6 +190,84 @@ class RetroBoard:
                 added += 1
         logger.info("retro board: %d AI card(s) added to action_items", added)
         return added
+
+    def add_carryover_cards(self, texts: list[str]) -> int:
+        """Re-add carried-over action items (origin="carryover"). Returns the count added.
+
+        Used when the team marks a prior action "Carried Over" — it re-enters this
+        sprint's ``action_items`` grid, badged distinctly from fresh AI/human cards.
+        Skips any text already present in the grid so re-generating can't duplicate it.
+        """
+        added = 0
+        with self._lock:
+            existing = {c.text.strip() for c in self._cards if c.grid == "action_items"}
+            for t in texts:
+                t = (t or "").strip()[:_MAX_TEXT]
+                if not t or t in existing or len(self._cards) >= _MAX_CARDS:
+                    continue
+                self._cards.append(
+                    RetroCard(
+                        id=uuid4().hex[:12],
+                        grid="action_items",
+                        text=t,
+                        author="carried over",
+                        created_at=_now_iso(),
+                        origin="carryover",
+                    )
+                )
+                existing.add(t)
+                self._revision += 1
+                added += 1
+        logger.info("retro board: %d carried-over card(s) re-added to action_items", added)
+        return added
+
+    # ── Carried-over action items (last sprint's actions) ─────────────────
+    #
+    # Seeded once at board open from the previous retro's action_items grid; the
+    # team then sets a status on each in the browser review column. Kept separate
+    # from _cards so they never mix with this sprint's authoring grids.
+
+    def seed_carried(self, cards: list[RetroCard]) -> int:
+        """Seed last sprint's action items for review (status reset to "pending").
+
+        Called once at board open (before the server starts). Preserves each card's
+        id/text/author; forces origin="carryover" and status="pending" so a fresh
+        review starts every retro. Returns the count seeded.
+        """
+        from dataclasses import replace
+
+        seeded = [replace(c, origin="carryover", status="pending") for c in cards if c.text.strip()]
+        with self._lock:
+            self._carried = seeded
+            self._revision += 1
+        logger.info("retro board: seeded %d carried-over action item(s) for review", len(seeded))
+        return len(seeded)
+
+    def set_carried_status(self, item_id: str, status: str) -> bool:
+        """Set the progress status on a carried action item. Returns True on success.
+
+        Open to any LAN peer (like move_card) — reviewing last sprint's actions is a
+        collaborative act. Rejects an unknown status or a missing item.
+        """
+        from dataclasses import replace
+
+        if status not in CARRIED_STATUSES:
+            return False
+        with self._lock:
+            for i, c in enumerate(self._carried):
+                if c.id == item_id:
+                    self._carried[i] = replace(c, status=status)
+                    self._revision += 1
+                    break
+            else:
+                return False
+        logger.info("retro board: carried item status set — id=%s status=%s", item_id, status)
+        return True
+
+    def carried_snapshot(self) -> list[RetroCard]:
+        """Return a copy of the carried action items (safe outside the lock)."""
+        with self._lock:
+            return list(self._carried)
 
     def snapshot(self) -> tuple[int, list[RetroCard]]:
         """Return an atomic (revision, cards-copy). Callers never see a torn list."""
@@ -415,9 +513,11 @@ class RetroBoard:
                 for p in self._active_presence_locked()
                 if p["typing_grid"]
             ]
+            carried = [asdict(c) for c in self._carried]
             return {
                 "revision": self._revision,
                 "cards": cards,
+                "carried": carried,
                 "presence": presence,
                 "typing": typing,
                 "timer": self._timer_locked(),
@@ -449,4 +549,7 @@ def board_to_report(board: RetroBoard, *, sprint_name: str = "", today: date | N
         cards=tuple(cards),
         participants=tuple(seen),
         generated_at=_now_iso(),
+        # Persist last sprint's actions with the statuses the team set this session,
+        # so the next retro (and Planning) can see what was actually resolved.
+        carried_action_items=tuple(board.carried_snapshot()),
     )

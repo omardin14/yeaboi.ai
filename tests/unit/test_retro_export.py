@@ -76,6 +76,36 @@ class TestHtml:
         assert "<b>x</b>" not in html
 
 
+def _report_with_carried():
+    return RetroReport(
+        date="2026-07-10",
+        carried_action_items=(
+            RetroCard(grid="action_items", text="ship the docs", status="done"),
+            RetroCard(grid="action_items", text="keep <b>going</b>", status="carried_over"),
+        ),
+    )
+
+
+class TestCarriedSection:
+    def test_markdown_lists_carried_with_status_labels(self):
+        md = build_retro_markdown(_report_with_carried())
+        assert "Last sprint's action items — progress" in md
+        assert "**[Done]** ship the docs" in md
+        assert "**[Carried Over]** keep" in md
+
+    def test_html_lists_carried_and_escapes(self):
+        html = build_retro_html(_report_with_carried())
+        assert "Last sprint" in html and "progress" in html
+        assert "[Done]" in html and "[Carried Over]" in html
+        # Untrusted carried text is escaped.
+        assert "keep <b>going</b>" not in html
+        assert "&lt;b&gt;going&lt;/b&gt;" in html
+
+    def test_no_carried_section_when_empty(self):
+        md = build_retro_markdown(RetroReport(date="2026-07-10"))
+        assert "Last sprint's action items — progress" not in md
+
+
 class TestExportWrites:
     def test_writes_md_and_html(self, tmp_path, monkeypatch):
         # Redirect the export dir into tmp_path.

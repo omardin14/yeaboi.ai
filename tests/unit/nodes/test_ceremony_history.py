@@ -115,6 +115,52 @@ class TestThemesAndActionItems:
         items = _dedup_action_items(reports)
         assert items == ("Fix CI", "Add dashboards")
 
+    def test_resolved_carried_items_excluded(self):
+        # A later retro reviewed the older retro's actions: "Fix CI" is done, "Add
+        # dashboards" is not_relevant, "Ship API" is still carried_over. Only the
+        # still-open action survives into the Planning feed.
+        newest = RetroReport(
+            cards=(_ac("Ship API"),),
+            carried_action_items=(
+                RetroCard(grid="action_items", text="Fix CI", origin="carryover", status="done"),
+                RetroCard(grid="action_items", text="Add dashboards", origin="carryover", status="not_relevant"),
+            ),
+        )
+        older = RetroReport(cards=(_ac("Fix CI"), _ac("Add dashboards"), _ac("Ship API")))
+        items = _dedup_action_items([newest, older])
+        assert items == ("Ship API",)
+
+    def test_open_carried_items_remain(self):
+        newest = RetroReport(
+            cards=(),
+            carried_action_items=(
+                RetroCard(grid="action_items", text="Fix CI", origin="carryover", status="carried_over"),
+            ),
+        )
+        older = RetroReport(cards=(_ac("Fix CI"),))
+        assert _dedup_action_items([newest, older]) == ("Fix CI",)
+
+    def test_manual_web_action_item_reaches_planning_feed(self):
+        # A human-authored action item (origin="web", never AI-generated) must feed
+        # Planning like any other — _dedup_action_items is origin-agnostic.
+        report = RetroReport(cards=(RetroCard(grid="action_items", text="Update runbook", author="Sam", origin="web"),))
+        assert "Update runbook" in _dedup_action_items([report])
+
+    def test_kept_open_carried_item_not_in_grid_is_emitted(self):
+        # "Carried Over" recorded only in carried_action_items (team never clicked
+        # Generate to re-add it to the grid) must still reach the Planning feed.
+        report = RetroReport(
+            cards=(_ac("Grid action"),),
+            carried_action_items=(
+                RetroCard(grid="action_items", text="Kept for next sprint", status="carried_over"),
+                RetroCard(grid="action_items", text="Resolved one", status="done"),
+            ),
+        )
+        items = _dedup_action_items([report])
+        assert "Grid action" in items
+        assert "Kept for next sprint" in items  # open, emitted
+        assert "Resolved one" not in items  # done, excluded
+
 
 class TestFormat:
     def test_empty_context_renders_empty(self):

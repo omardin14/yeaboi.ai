@@ -48,6 +48,33 @@ class TestSerialization:
         assert dict(got.cards[0].reactions) == {"👍": 3, "🔥": 1}
 
 
+class TestCarriedActionItems:
+    def test_status_and_carried_round_trip(self):
+        rep = RetroReport(
+            session_id="s",
+            cards=(RetroCard(id="c1", grid="action_items", text="fix ci", origin="ai"),),
+            carried_action_items=(
+                RetroCard(id="k1", grid="action_items", text="last one", origin="carryover", status="done"),
+                RetroCard(id="k2", grid="action_items", text="still going", origin="carryover", status="carried_over"),
+            ),
+        )
+        got = _dict_to_retro_report(__import__("json").loads(_retro_report_to_json(rep)))
+        assert got == rep
+        assert got.carried_action_items[0].status == "done"
+        assert got.carried_action_items[1].status == "carried_over"
+
+    def test_old_row_without_carried_or_status_deserializes(self):
+        # A report serialized before the carry-forward feature (no carried_action_items,
+        # cards missing `status`) must still load with defaults.
+        d = {
+            "session_id": "x",
+            "cards": [{"grid": "action_items", "text": "hi", "origin": "ai"}],
+        }
+        rep = _dict_to_retro_report(d)
+        assert rep.carried_action_items == ()
+        assert rep.cards[0].status == ""
+
+
 class TestStore:
     def test_record_and_get_latest(self, tmp_path):
         db = tmp_path / "sessions.db"
