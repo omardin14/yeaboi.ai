@@ -434,12 +434,15 @@ class TestSettingsScreen:
         return buf.getvalue()
 
     def test_storage_section_rendered(self):
-        output = self._render({"YEABOI_HOME": "/data/yeaboi"})
+        # Storage sits below the token sections (each of which now carries a
+        # create-link + scope sub-line), so render tall enough to bring it into
+        # the viewport rather than requiring a scroll.
+        output = self._render({"YEABOI_HOME": "/data/yeaboi"}, height=80)
         assert "Storage" in output
         assert "/data/yeaboi" in output
 
     def test_data_dir_default_label_when_unset(self):
-        output = self._render({})
+        output = self._render({}, height=80)
         assert "~/.yeaboi (default)" in output
 
     def test_data_dir_button_rendered(self):
@@ -453,6 +456,32 @@ class TestSettingsScreen:
     def test_notion_token_masked(self):
         output = self._render({"NOTION_TOKEN": "ntn_verysecretvalue12345"})
         assert "verysecretvalue12345" not in output
+
+    def test_token_help_link_and_scope_rendered(self):
+        # Each token row carries a "create: <url> · scope: <...>" sub-line so a
+        # user knows where to make the token and what access to grant it.
+        output = self._render(
+            {"GITHUB_TOKEN": "ghp_x", "AZURE_DEVOPS_TOKEN": "az", "JIRA_API_TOKEN": "jt", "NOTION_TOKEN": "nt"},
+            height=80,
+        )
+        assert "create:" in output
+        assert "scope:" in output
+        assert "github.com/settings/tokens" in output  # creation link
+        assert "Work Items" in output  # Azure scope text
+
+    def test_token_help_url_is_clickable(self):
+        # The creation URL is an OSC-8 hyperlink in the read-only dashboard too.
+        from io import StringIO
+
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_settings_screen
+
+        result = _build_settings_screen({"GITHUB_TOKEN": "ghp_x"}, width=120, height=80)
+        buf = StringIO()
+        Console(file=buf, width=120, force_terminal=True).print(result)
+        assert "https://github.com/settings/tokens" in buf.getvalue()
+        assert "\x1b]8;" in buf.getvalue()  # OSC-8 hyperlink escape
 
 
 class TestCollectSettingsData:

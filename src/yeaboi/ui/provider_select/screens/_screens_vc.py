@@ -7,51 +7,44 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from rich.align import Align
 from rich.panel import Panel
 from rich.text import Text
 
-from yeaboi.ui.provider_select._constants import _ISSUE_TRACKING_FIELDS, _VC_OPTIONS
+from yeaboi.ui.provider_select._constants import _ISSUE_TRACKING_FIELDS, _VC_OPTIONS, TOKEN_HELP
 from yeaboi.ui.provider_select.screens._screens import (
     _ACCENT,
     _FRAME_FOOTER_H,
     _FRAME_HEADER_H,
+    _HINT_MUTED,
+    _HINT_URL,
+    _HINT_URL_RE,
     _build_provider_row,
+    _build_scope_text,
     _build_screen_frame,
+    _link_target,
+    _linkify,
 )
-
-# Field-hint palette. The where-to-get-it line is styled as *help*, distinct from
-# the pure-dim keyboard footer and the red error line: an accent-blue info glyph,
-# soft blue-grey lead-in text, and a brighter/underlined URL so the eye lands on
-# the actionable part.
-_HINT_MUTED = "rgb(120,130,150)"
-_HINT_URL = "rgb(140,170,235)"
-
-# Matches the first URL / domain-path token in a hint (the actionable bit): a
-# full http(s) URL, or a lowercase domain (any 2+ letter TLD — .com, .so, .net…)
-# with an optional path. Bounded by whitespace/commas so trailing prose
-# ("…, then share …") isn't swallowed, and lowercase-only so uppercase prose like
-# "MYPROJ-123" never false-matches.
-_HINT_URL_RE = re.compile(r"https?://[^\s,]+|[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:/[^\s,]*)?")
 
 
 def _build_hint_text(hint: str) -> Text:
-    """Render a where-to-get-it hint with an info glyph and emphasized URL.
+    """Render a where-to-get-it hint with an info glyph and clickable URL.
 
     The leading ``ⓘ`` glyph (accent blue) flags the line as help; the lead-in
-    prose is soft blue-grey; any URL/domain token is brightened + underlined so
-    the actionable part stands out. Hints without a URL render entirely in the
-    muted style. Pure rendering — returns a centered Rich ``Text``.
+    prose is soft blue-grey; any URL/domain token is brightened, underlined and
+    rendered as a clickable OSC-8 hyperlink so the actionable part stands out.
+    Hints without a URL render entirely in the muted style. Pure rendering —
+    returns a centered Rich ``Text``.
     """
     text = Text(justify="center")
     text.append("ⓘ  ", style=_ACCENT)  # ⓘ info glyph
     match = _HINT_URL_RE.search(hint)
     if match:
+        url = _link_target(match.group(0))
         text.append(hint[: match.start()], style=_HINT_MUTED)
-        text.append(match.group(0), style=f"{_HINT_URL} underline")
+        text.append(match.group(0), style=f"{_HINT_URL} underline link {url}")
         text.append(hint[match.end() :], style=_HINT_MUTED)
     else:
         text.append(hint, style=_HINT_MUTED)
@@ -121,9 +114,13 @@ def _build_vc_input_screen(
     """Build the PAT token input screen for version control."""
     import rich.box
 
-    # Provider identity is carried by the tall ANSI-Shadow frame title.
-    instr_style = input_fade if input_fade else "dim"
-    instructions = Text(vc["instructions"], style=instr_style, justify="center")
+    # Provider identity is carried by the tall ANSI-Shadow frame title. The
+    # "get yours at: <url>" line renders the URL as a clickable OSC-8 link; during
+    # the fade-in animation we keep it flat so the whole line fades evenly.
+    if input_fade:
+        instructions = Text(vc["instructions"], style=input_fade, justify="center")
+    else:
+        instructions = _linkify(vc["instructions"], lead_style="dim", url_style=_HINT_URL)
 
     box_inner_w = min(70, width - 10) - 2 - 4
     display_val = "\u2022" * len(input_value)
@@ -169,13 +166,22 @@ def _build_vc_input_screen(
     else:
         status_text = Text("")
 
+    # Required-scope line for the PAT — shown under the input box so the user
+    # sees what access to grant it. Hidden during the fade-in so the intro reads
+    # cleanly. GitHub is the only VC token, but keying off TOKEN_HELP keeps this
+    # generic for any future provider.
+    help_entry = TOKEN_HELP.get(vc["env_var"])
+    show_scope = help_entry is not None and not input_fade
+
     body = [
         Align.center(instructions),
         Text(""),
         Align.center(input_box),
         Align.center(status_text),
     ]
-    body_h = 8
+    if show_scope:
+        body.append(Align.center(_build_scope_text(help_entry["scope"])))
+    body_h = 8 + (1 if show_scope else 0)
 
     return _build_screen_frame(
         subtitle="Enter your PAT token",
@@ -351,6 +357,15 @@ def _build_issue_tracking_screen(
         hint = field.get("hint", "")
         if hint and is_active and not err and not border_overrides:
             body.append(_build_hint_text(hint))
+            body_h += 1
+
+        # Required-scope line for credential-token fields (Azure DevOps PAT, Jira/
+        # Notion/Confluence tokens) — shown under the where-to-get-it hint on the
+        # focused field so the user sees both where to create the token and what
+        # access to grant it. Same suppression rules as the hint above.
+        help_entry = TOKEN_HELP.get(field["env_var"])
+        if help_entry and is_active and not err and not border_overrides:
+            body.append(_build_scope_text(help_entry["scope"]))
             body_h += 1
 
     # Keyboard hint — makes editing/clearing/skipping discoverable, matching the
