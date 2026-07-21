@@ -9,6 +9,40 @@ from __future__ import annotations
 from typing import Any
 
 # ---------------------------------------------------------------------------
+# Token help — where to create each credential token and the minimum scope it
+# needs. Single source of truth shared by the setup wizard (provider_select
+# screens) and the read-only Settings dashboard (mode_select), so the two token
+# surfaces stay consistent. Keyed by the token's env var.
+#
+# Scope text mirrors the per-token comments in .env.example and README.md — keep
+# them in sync. The scopes are the minimum the tools/*.py integrations actually
+# exercise (e.g. Azure DevOps creates work items, so it needs Work Items R/W).
+# ---------------------------------------------------------------------------
+TOKEN_HELP: dict[str, dict[str, str]] = {
+    "GITHUB_TOKEN": {
+        "url": "https://github.com/settings/tokens",
+        "scope": "Fine-grained: Contents Read · Issues Read · Metadata Read "
+        "(classic: public_repo, or repo for private)",
+    },
+    "AZURE_DEVOPS_TOKEN": {
+        "url": "https://dev.azure.com",
+        "scope": "Work Items Read & Write · Project and Team Read · Code Read",
+    },
+    "JIRA_API_TOKEN": {
+        "url": "https://id.atlassian.com/manage-profile/security/api-tokens",
+        "scope": "Token inherits your Jira role — account needs browse project, create/edit issues, manage sprints",
+    },
+    "NOTION_TOKEN": {
+        "url": "https://notion.so/my-integrations",
+        "scope": "Capabilities: Read + Insert + Update content — then share your pages with the integration",
+    },
+    "CONFLUENCE_API_TOKEN": {
+        "url": "https://id.atlassian.com/manage-profile/security/api-tokens",
+        "scope": "Account needs view + create/update pages (and attachments) in the target space",
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Provider definitions (order matters — matches row layout top-to-bottom)
 # ---------------------------------------------------------------------------
 

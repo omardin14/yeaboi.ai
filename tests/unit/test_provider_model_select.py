@@ -20,9 +20,12 @@ from yeaboi.ui.provider_select._config import _save_progress
 from yeaboi.ui.provider_select._constants import (
     _AZDEVOPS_TRACKING_FIELDS,
     _CONFLUENCE_FIELDS,
+    _CONFLUENCE_STANDALONE_FIELDS,
     _ISSUE_TRACKING_FIELDS,
     _NOTION_FIELDS,
     _PROVIDER_CARDS,
+    _VC_OPTIONS,
+    TOKEN_HELP,
 )
 from yeaboi.ui.provider_select._nav import (
     _LAST_STEP,
@@ -38,13 +41,20 @@ from yeaboi.ui.provider_select._verification import (
 )
 from yeaboi.ui.provider_select.screens._screens import (
     _STEPS,
+    _build_input_screen,
     _build_model_input_screen,
     _build_model_loading_screen,
     _build_model_select_screen,
     _build_progress,
     _build_screen_frame,
+    _link_target,
+    _linkify,
 )
-from yeaboi.ui.provider_select.screens._screens_vc import _build_hint_text, _build_issue_tracking_screen
+from yeaboi.ui.provider_select.screens._screens_vc import (
+    _build_hint_text,
+    _build_issue_tracking_screen,
+    _build_vc_input_screen,
+)
 from yeaboi.ui.shared._wordmarks import get_shadow_wordmark
 
 # ---------------------------------------------------------------------------
@@ -775,6 +785,84 @@ class TestConnectionFieldHints:
     def test_all_fields_have_hints(self, fields):
         for field in fields:
             assert field.get("hint"), f"{field['env_var']} is missing a where-to-get-it hint"
+
+
+class TestLinkify:
+    """`_linkify` / `_link_target` — clickable-URL rendering helpers."""
+
+    def test_link_target_keeps_full_url(self):
+        assert _link_target("https://github.com/settings/tokens") == "https://github.com/settings/tokens"
+
+    def test_link_target_prefixes_bare_domain(self):
+        assert _link_target("id.atlassian.com/x") == "https://id.atlassian.com/x"
+
+    def test_linkify_wraps_url_span(self):
+        text = _linkify("Get yours at: https://example.com/x", lead_style="dim", url_style="blue")
+        assert text.plain == "Get yours at: https://example.com/x"
+        assert any("link https://example.com/x" in str(sp.style) for sp in text.spans)
+
+    def test_linkify_no_url_renders_plainly(self):
+        text = _linkify("no link here at all", lead_style="dim", url_style="blue")
+        assert text.plain == "no link here at all"
+        assert not any("link " in str(sp.style) for sp in text.spans)
+
+
+class TestTokenHelp:
+    """Credential-token screens surface the required scope + a clickable link."""
+
+    def test_hint_url_is_clickable(self):
+        # The where-to-get-it URL is rendered as an OSC-8 hyperlink (Rich `link`
+        # style) so it's click/cmd-clickable in modern terminals.
+        text = _build_hint_text("Create at: id.atlassian.com/manage-profile/security/api-tokens")
+        assert any("link https://id.atlassian.com" in str(sp.style) for sp in text.spans)
+
+    def test_scope_line_shown_for_token_field(self):
+        # Field 2 of the Azure DevOps form is AZURE_DEVOPS_TOKEN → its scope shows.
+        out = _render(
+            _build_issue_tracking_screen(
+                2, {}, width=100, height=30, fields=_AZDEVOPS_TRACKING_FIELDS, title_text="Azure"
+            )
+        )
+        assert "Work Items" in out
+
+    def test_no_scope_line_for_non_token_field(self):
+        # Field 0 is AZURE_DEVOPS_ORG_URL (not a credential) → no scope line.
+        out = _render(
+            _build_issue_tracking_screen(
+                0, {}, width=100, height=30, fields=_AZDEVOPS_TRACKING_FIELDS, title_text="Azure"
+            )
+        )
+        assert "Scope:" not in out
+
+    def test_github_pat_screen_shows_scope(self):
+        # _VC_OPTIONS[0] is GitHub → the PAT screen shows the required scope.
+        out = _render(_build_vc_input_screen(_VC_OPTIONS[0], "ghp_x", width=100, height=30))
+        assert "Contents Read" in out
+
+    def test_llm_key_screen_has_no_scope(self):
+        # LLM API keys have no granular scopes — the scope line must not appear.
+        out = _render(_build_input_screen(_PROVIDER_CARDS[0], "sk-ant-x", width=100, height=30))
+        assert "Scope:" not in out
+
+    def test_registry_entries_complete(self):
+        for env_var, entry in TOKEN_HELP.items():
+            assert entry.get("url", "").startswith("http"), f"{env_var} url"
+            assert entry.get("scope"), f"{env_var} scope"
+
+    def test_masked_token_fields_are_covered(self):
+        # Every API-token credential in the connection forms is covered by
+        # TOKEN_HELP so the user always sees what access to grant. (Space keys /
+        # page ids are masked=False and not credentials — they stay uncovered.)
+        credential_env = {"JIRA_API_TOKEN", "AZURE_DEVOPS_TOKEN", "NOTION_TOKEN", "CONFLUENCE_API_TOKEN"}
+        for fields in (
+            _ISSUE_TRACKING_FIELDS,
+            _AZDEVOPS_TRACKING_FIELDS,
+            _NOTION_FIELDS,
+            _CONFLUENCE_STANDALONE_FIELDS,
+        ):
+            for field in fields:
+                if field["env_var"] in credential_env:
+                    assert field["env_var"] in TOKEN_HELP, f"{field['env_var']} missing scope help"
 
 
 class TestHintStyling:
