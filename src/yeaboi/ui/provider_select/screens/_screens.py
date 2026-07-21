@@ -7,13 +7,14 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from rich.align import Align
 from rich.panel import Panel
 from rich.text import Text
 
-from yeaboi.ui.provider_select._constants import _PROVIDER_CARDS
+from yeaboi.ui.provider_select._constants import _PROVIDER_CARDS, TOKEN_HELP
 from yeaboi.ui.provider_select._verification import _validate_key
 from yeaboi.ui.shared._animations import shimmer_style
 from yeaboi.ui.shared._ascii_font import render_ascii_text
@@ -37,6 +38,66 @@ _ACCENT = "rgb(70,100,180)"
 _FRAME_TITLE_ROWS = 6
 _FRAME_HEADER_H = _FRAME_TITLE_ROWS + 3  # title + blank + subtitle + blank
 _FRAME_FOOTER_H = 2  # blank + progress bar
+
+# Field-hint palette. The where-to-get-it line is styled as *help*, distinct from
+# the pure-dim keyboard footer and the red error line: soft blue-grey lead-in
+# prose with a brighter/underlined + clickable URL so the eye lands on the
+# actionable part. Shared with _screens_vc.py's hint renderer.
+_HINT_MUTED = "rgb(120,130,150)"
+_HINT_URL = "rgb(140,170,235)"
+_SCOPE_LOCK = "rgb(150,150,120)"
+
+# Matches the first URL / domain-path token in a hint (the actionable bit): a
+# full http(s) URL, or a lowercase domain (any 2+ letter TLD — .com, .so, .net…)
+# with an optional path. Bounded by whitespace/commas so trailing prose
+# ("…, then share …") isn't swallowed, and lowercase-only so uppercase prose like
+# "MYPROJ-123" never false-matches.
+_HINT_URL_RE = re.compile(r"https?://[^\s,]+|[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:/[^\s,]*)?")
+
+
+def _link_target(matched: str) -> str:
+    """Full https URL for an OSC-8 hyperlink from a matched URL/domain token."""
+    return matched if matched.startswith("http") else f"https://{matched}"
+
+
+def _linkify(text: str, *, lead_style: str, url_style: str, justify: str = "center") -> Text:
+    """Render prose with its first URL/domain token as a clickable OSC-8 link.
+
+    The matched URL span carries a ``link <url>`` attribute (Rich emits an OSC-8
+    hyperlink) plus ``url_style`` + underline; surrounding prose uses
+    ``lead_style``. Text with no URL renders entirely in ``lead_style``. Pure
+    rendering — returns a Rich ``Text``.
+    """
+    out = Text(justify=justify)
+    match = _HINT_URL_RE.search(text)
+    if match:
+        url = _link_target(match.group(0))
+        out.append(text[: match.start()], style=lead_style)
+        out.append(match.group(0), style=f"{url_style} underline link {url}")
+        out.append(text[match.end() :], style=lead_style)
+    else:
+        out.append(text, style=lead_style)
+    return out
+
+
+def _build_scope_text(scope: str, *, style: str = _HINT_MUTED) -> Text:
+    """Render a required-scope help line for a credential token.
+
+    A leading lock glyph flags the line as an access requirement; the scope text
+    is rendered in the muted help style. Pairs with the where-to-get-it link so a
+    user filling in a token sees both *where to create it* and *what access to
+    grant it*. Pure rendering.
+
+    The line is forced to a single visual row (``no_wrap`` + ellipsis): the
+    callers reserve exactly one row in their ``body_height`` math, so a wrapped
+    scope would drift the frame's centering / progress footer. Full scope shows on
+    normal-width terminals and truncates gracefully on narrow ones (mirrors the
+    settings dashboard's token-help lines).
+    """
+    text = Text(justify="center", no_wrap=True, overflow="ellipsis")
+    text.append("\U0001f512  ", style=_SCOPE_LOCK)  # 🔒 lock glyph
+    text.append(f"Scope: {scope}", style=style)
+    return text
 
 
 def _build_progress(current_step: int) -> Text:
@@ -256,8 +317,12 @@ def _build_input_screen(
 
     # The provider identity is carried by the tall ANSI-Shadow frame title now, so
     # the body starts at the instructions (no duplicate compact provider art).
-    instr_style = input_fade if input_fade else "dim"
-    instructions = Text(provider["instructions"], style=instr_style, justify="center")
+    # The "get yours at: <url>" line renders the URL as a clickable OSC-8 link;
+    # during the fade-in animation we keep it flat so the whole line fades evenly.
+    if input_fade:
+        instructions = Text(provider["instructions"], style=input_fade, justify="center")
+    else:
+        instructions = _linkify(provider["instructions"], lead_style="dim", url_style=_HINT_URL)
 
     # Realtime format validation
     status, validation_hint = _validate_key(provider, input_value)
@@ -337,15 +402,23 @@ def _build_input_screen(
             justify="center",
         )
 
-    body = [
-        Align.center(instructions),
+    # Required-scope line for credential tokens (not shown for LLM API keys, which
+    # don't have granular scopes). Suppressed during the fade animation so the
+    # intro reads cleanly, matching the keyboard hint above.
+    _help = TOKEN_HELP.get(provider["env_var"])
+    show_scope = _help is not None and not input_fade
+
+    body = [Align.center(instructions)]
+    if show_scope:
+        body.append(Align.center(_build_scope_text(_help["scope"])))
+    body += [
         Text(""),
         Align.center(input_box),
         Align.center(status_text),
         Align.center(error_text),
         Align.center(hint_text),
     ]
-    body_h = 9  # instructions(1) + blank + input_box(5) + status + error + hint
+    body_h = 9 + (1 if show_scope else 0)  # instructions[+scope] + blank + input_box(5) + status + error + hint
 
     return _build_screen_frame(
         subtitle="Enter your API key",

@@ -3551,6 +3551,31 @@ def _build_settings_screen(
             r.append("not set", style=theme.dim)
         body_lines.append(r)
 
+    # Token help sub-lines: where to create the token + the minimum scope it needs.
+    # Sourced from the shared TOKEN_HELP registry (same one the setup wizard uses)
+    # so both token surfaces stay consistent. The creation URL is a clickable
+    # OSC-8 hyperlink; both lines are dim so they read as a secondary hint.
+    #
+    # Each line MUST render as exactly one visual row — the viewport height math
+    # below (visible = body_lines[scroll : scroll + viewport_h]) assumes one row
+    # per body line, so a wrapped line would overflow the fixed-height panel. We
+    # force single-row with no_wrap + ellipsis; the full scope is always visible in
+    # the setup wizard, and wide terminals show it in full here too.
+    from yeaboi.ui.provider_select._constants import TOKEN_HELP
+
+    def _token_help(env_var: str) -> None:
+        entry = TOKEN_HELP.get(env_var)
+        if not entry:
+            return
+        link = Text(_PAD + "      ", justify="left", no_wrap=True, overflow="ellipsis")
+        link.append("↳ create: ", style=theme.muted)
+        link.append(entry["url"], style=f"{theme.dim} underline link {entry['url']}")
+        body_lines.append(link)
+        scope = Text(_PAD + "        ", justify="left", no_wrap=True, overflow="ellipsis")
+        scope.append("scope: ", style=theme.muted)
+        scope.append(entry["scope"], style=theme.dim)
+        body_lines.append(scope)
+
     # ── LLM Provider ──────────────────────────────────────────────
     _heading("LLM Provider")
     _row("Provider", config_data.get("LLM_PROVIDER", "anthropic"))
@@ -3569,6 +3594,7 @@ def _build_settings_screen(
     _row("Base URL", config_data.get("JIRA_BASE_URL", ""))
     _row("Email", config_data.get("JIRA_EMAIL", ""))
     _row("API Token", config_data.get("JIRA_API_TOKEN", ""), masked=True)
+    _token_help("JIRA_API_TOKEN")
     _row("Project Key", config_data.get("JIRA_PROJECT_KEY", ""))
     _row("Confluence Space", config_data.get("CONFLUENCE_SPACE_KEY", ""))
 
@@ -3577,16 +3603,19 @@ def _build_settings_screen(
     _row("Org URL", config_data.get("AZURE_DEVOPS_ORG_URL", ""))
     _row("Project", config_data.get("AZURE_DEVOPS_PROJECT", ""))
     _row("PAT", config_data.get("AZURE_DEVOPS_TOKEN", ""), masked=True)
+    _token_help("AZURE_DEVOPS_TOKEN")
     _row("Team", config_data.get("AZURE_DEVOPS_TEAM", ""))
 
     # ── GitHub ────────────────────────────────────────────────────
     _heading("GitHub")
     _row("Token", config_data.get("GITHUB_TOKEN", ""), masked=True)
+    _token_help("GITHUB_TOKEN")
 
     # ── Notion ────────────────────────────────────────────────────
     # Independent doc tool (its own integration token, unlike Confluence).
     _heading("Notion")
     _row("Token", config_data.get("NOTION_TOKEN", ""), masked=True)
+    _token_help("NOTION_TOKEN")
     _row("Root Page/DB", config_data.get("NOTION_ROOT_PAGE_ID", ""))
 
     # ── Storage ───────────────────────────────────────────────────

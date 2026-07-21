@@ -11,6 +11,10 @@ else
   GREEN=""; YELLOW=""; DIM=""; BOLD=""; RESET=""
 fi
 
+# Self-heal a stray `core.bare=true` left by an interrupted parallel session
+# (see scripts/wt.sh) so `make wt-list` never dies with "must be run in a work tree".
+git config core.bare false 2>/dev/null || true
+
 MAIN_ROOT="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
 
 printf "%s%-24s  %-7s  %s%s\n" "$BOLD" "BRANCH" "STATUS" "PATH" "$RESET"
