@@ -90,7 +90,8 @@ src/yeaboi/
   analysis/             — Team-analysis engine (headless pipeline behind the TUI Analysis mode)
     engine.py           — run_team_analysis(): fetch history → _run_parallel_analysis → save profile → insights/samples
   anonymize/            — Anonymize action (mask any mode's output for public sharing; post-processing, not a mode)
-    engine.py           — run_anonymize(text): deterministic config-seeded mask → one invoke_json LLM pass → parse → seed-only fallback; never raises
+    engine.py           — run_anonymize(text): deterministic config-seeded mask → one invoke_json LLM pass → parse → seed-only fallback; never raises. Returns the (original→placeholder) replacement map.
+    apply.py            — in-place masker: apply_replacements(text) / mask_lines(list[str]) / mask_artifact(frozen via asdict→_dict_to_*) / mask_obj — re-render each mode's OWN screen masked, not a separate view
     export.py           — AnonymizedOutput → Markdown + HTML (paths.get_anonymize_export_dir; embeds a small MD→HTML renderer)
   usage_export.py       — build_usage_text(): serialize the Usage dashboard dict to pasteable plaintext (Copy-to-clipboard)
   mcp/                  — MCP stdio server (yeaboi-mcp entry point, optional [mcp] extra)

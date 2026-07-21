@@ -1220,20 +1220,6 @@ def _phase_pipeline(
         is_feature_stage = pending == "feature_generator"
         is_task_stage = pending == "task_decomposer"
         is_sprint_stage = pending == "sprint_planner"
-        if is_story_stage or is_feature_stage or is_task_stage or is_sprint_stage:
-            actions = ["Accept", "Edit", "Regenerate", "Export"]
-        elif is_analysis_stage and graph_state.get("_small_project_oversized"):
-            # Small-project scope advisory — offer a switch to Large (answers
-            # are preserved). See README: "Guardrails" — human-in-the-loop (advisory).
-            actions = ["Accept", "Edit", "Switch to Large", "Export"]
-        else:
-            actions = ["Accept", "Edit", "Export"]
-
-        # The full plan (analysis → sprints) exists once the sprint stage renders,
-        # so offer Anonymize there — a masked copy for public sharing.
-        if is_sprint_stage:
-            actions.append("Anonymize")
-
         # Add tracker sync buttons to stages that produce syncable artifacts.
         # When the user chose a preferred tracker at intake (both were configured),
         # only show that tracker's button. Otherwise show all configured trackers.
@@ -1245,10 +1231,57 @@ def _phase_pipeline(
         if _pref:
             # User chose a preferred tracker — only show that one
             _active_trackers = [_pref] if _pref in _active_trackers else _active_trackers
-        if _active_trackers and (is_story_stage or is_task_stage or is_sprint_stage):
-            for _trk in _active_trackers:
-                actions.append("Jira" if _trk == "jira" else "Azure DevOps")
+
+        # Anonymize state for the sprint stage: None = real plan; set = mask in place.
+        # See README: "Guardrails" — output masking for public sharing
+        anon = None
+        anon_instruction = ""
+
+        def _compute_actions() -> list[str]:
+            if is_story_stage or is_feature_stage or is_task_stage or is_sprint_stage:
+                acts = ["Accept", "Edit", "Regenerate", "Export"]
+            elif is_analysis_stage and graph_state.get("_small_project_oversized"):
+                # Small-project scope advisory — offer a switch to Large (answers
+                # are preserved). See README: "Guardrails" — human-in-the-loop (advisory).
+                acts = ["Accept", "Edit", "Switch to Large", "Export"]
+            else:
+                acts = ["Accept", "Edit", "Export"]
+            # The full plan (analysis → sprints) exists once the sprint stage renders,
+            # so offer Anonymize there — a masked copy for public sharing. While masked,
+            # swap it for Adjust (refine) + Revert (restore real names).
+            if is_sprint_stage:
+                acts.extend(["Adjust", "Revert"] if anon is not None else ["Anonymize"])
+            if _active_trackers and (is_story_stage or is_task_stage or is_sprint_stage):
+                for _trk in _active_trackers:
+                    acts.append("Jira" if _trk == "jira" else "Azure DevOps")
+            return acts
+
+        actions = _compute_actions()
         num_actions = len(actions)
+
+        def _rl():
+            """Return (content_lines, sticky_headers), masked in place when anonymized."""
+            if anon is None:
+                return content_lines, sticky_headers
+            from yeaboi.anonymize.apply import apply_replacements, mask_lines
+
+            reps = anon.replacements
+            return (
+                mask_lines(content_lines, reps),
+                [(i, apply_replacements(t, reps)) for i, t in sticky_headers],
+            )
+
+        def _anon_banner() -> str:
+            """The sprint-stage banner: the anonymized indicator wins over the capacity note."""
+            if anon is not None:
+                return f"Anonymized · {len(anon.replacements)} masked — review before sharing"
+            return cap_warning_text if is_sprint_stage else ""
+
+        def _plan_document() -> tuple[str, str]:
+            from yeaboi.repl._io import build_plan_markdown
+
+            _pn = getattr(graph_state.get("project_analysis"), "project_name", "") or ""
+            return (f"Sprint Plan — {_pn}" if _pn else "Sprint Plan"), build_plan_markdown(graph_state)
 
         # Capacity warning state — shown as a banner on the sprint review screen.
         # The user already made their choice before sprint generation, so this is
@@ -1261,11 +1294,12 @@ def _phase_pipeline(
         btn_targets = list(btn_fades)
 
         w, h = console.size
+        _ml, _sh = _rl()
         live.update(
             _build_pipeline_screen(
                 stage_label,
                 progress,
-                content_lines,
+                _ml,
                 scroll_offset,
                 menu_selected,
                 status="complete",
@@ -1274,9 +1308,9 @@ def _phase_pipeline(
                 btn_fades=btn_fades,
                 step=step,
                 total=total,
-                sticky_headers=sticky_headers,
+                sticky_headers=_sh,
                 actions=actions,
-                warning_text=cap_warning_text if is_sprint_stage else "",
+                warning_text=_anon_banner(),
                 scroll_meta=_scroll_meta,
             )
         )
@@ -1511,15 +1545,34 @@ def _phase_pipeline(
                     # Cancel — stay on review
                 elif action == "Export":
                     logger.info("Review decision: Export for %s", pending)
-                    _plan_export_flow(live, console, _key, graph_state, pending)
+                    if anon is not None:  # export the masked copy, matching the screen
+                        from yeaboi.ui.mode_select import _anon_export
+
+                        _dt, _md = _plan_document()
+                        _plan_name = getattr(graph_state.get("project_analysis"), "project_name", "") or ""
+                        _anon_export(
+                            console,
+                            live,
+                            _key,
+                            0.05,
+                            False,
+                            anon=anon,
+                            doc_title=_dt,
+                            markdown=_md,
+                            project_name=_plan_name,
+                            source_mode="planning",
+                        )
+                    else:
+                        _plan_export_flow(live, console, _key, graph_state, pending)
                     status_msg = ""
                     # Force immediate redraw
                     w, h = console.size
+                    _ml, _sh = _rl()
                     live.update(
                         _build_pipeline_screen(
                             stage_label,
                             progress,
-                            content_lines,
+                            _ml,
                             scroll_offset,
                             menu_selected,
                             status="complete",
@@ -1529,39 +1582,64 @@ def _phase_pipeline(
                             btn_fades=btn_fades,
                             step=step,
                             total=total,
-                            sticky_headers=sticky_headers,
+                            sticky_headers=_sh,
                             actions=actions,
-                            warning_text=cap_warning_text if is_sprint_stage else "",
+                            warning_text=_anon_banner(),
                             scroll_meta=_scroll_meta,
                         )
                     )
-                elif action == "Anonymize":
-                    logger.info("Review decision: Anonymize for %s", pending)
-                    from yeaboi.repl._io import build_plan_markdown
-                    from yeaboi.ui.mode_select import _anonymize_flow
+                elif action in ("Anonymize", "Adjust"):
+                    # In-place mask (or refine): re-render the SAME pipeline with only the
+                    # sensitive words swapped. The blocking _key() drives the loading screen.
+                    logger.info("Review decision: %s for %s", action, pending)
+                    from yeaboi.ui.mode_select import _run_anonymize_pass
                     from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
 
                     _plan_name = getattr(graph_state.get("project_analysis"), "project_name", "") or ""
-
-                    def _plan_anon_document() -> tuple[str, str]:
-                        title = f"Sprint Plan — {_plan_name}" if _plan_name else "Sprint Plan"
-                        return title, build_plan_markdown(graph_state)
-
-                    # The pipeline review reads keys with a blocking _key() (no timeout),
-                    # so drive the flow in blocking mode; its worker-thread progress loop
-                    # animates without polling keys.
-                    _anonymize_flow(
-                        console,
-                        live,
-                        _key,
-                        0.05,
-                        False,
-                        source_mode="planning",
-                        theme=PLANNING_THEME,
-                        title=planning_title(),
-                        get_document=_plan_anon_document,
-                        project_name=_plan_name,
-                    )
+                    if action == "Adjust":
+                        adj = _get_edit_input(
+                            live,
+                            console,
+                            _key,
+                            "Also mask …  ·  don't mask … (it's public/safe):",
+                            attachments=[],
+                            scope_id=graph_state.get("_attachment_scope", ""),
+                        )
+                        if adj and adj.strip():
+                            anon_instruction = f"{anon_instruction}\n{adj.strip()}".strip()
+                        else:
+                            adj = None  # cancelled — leave the current mask untouched
+                    else:
+                        anon_instruction = ""
+                        adj = "run"  # sentinel: always run on first Anonymize
+                    if adj:
+                        res = _run_anonymize_pass(
+                            console,
+                            live,
+                            _key,
+                            0.05,
+                            False,
+                            markdown=_plan_document()[1],
+                            instruction=anon_instruction,
+                            project_name=_plan_name,
+                            source_mode="planning",
+                            theme=PLANNING_THEME,
+                            title=planning_title(),
+                        )
+                        if res is not None:
+                            anon = res
+                            actions = _compute_actions()
+                            num_actions = len(actions)
+                            menu_selected = min(menu_selected, num_actions - 1)
+                            btn_targets = [1.0 if i == menu_selected else 0.0 for i in range(num_actions)]
+                            btn_fades = list(btn_targets)
+                elif action == "Revert":  # restore the real names (no LLM call)
+                    anon, anon_instruction = None, ""
+                    actions = _compute_actions()
+                    num_actions = len(actions)
+                    menu_selected = min(menu_selected, num_actions - 1)
+                    btn_targets = [1.0 if i == menu_selected else 0.0 for i in range(num_actions)]
+                    btn_fades = list(btn_targets)
                 elif action in ("Jira", "Azure DevOps"):
                     _btn_tracker = "jira" if action == "Jira" else "azdevops"
                     logger.info("%s sync requested for %s", action, pending)
@@ -1596,11 +1674,12 @@ def _phase_pipeline(
                     btn_fades[i] = max(btn_fades[i] - _fade_step, btn_targets[i])
 
             w, h = console.size
+            _ml, _sh = _rl()
             live.update(
                 _build_pipeline_screen(
                     stage_label,
                     progress,
-                    content_lines,
+                    _ml,
                     scroll_offset,
                     menu_selected,
                     status="complete",
@@ -1610,9 +1689,9 @@ def _phase_pipeline(
                     btn_fades=btn_fades,
                     step=step,
                     total=total,
-                    sticky_headers=sticky_headers,
+                    sticky_headers=_sh,
                     actions=actions,
-                    warning_text=cap_warning_text if is_sprint_stage else "",
+                    warning_text=_anon_banner(),
                     shimmer_tick=time.monotonic() - _pl_anim0,
                     scroll_meta=_scroll_meta,
                 )

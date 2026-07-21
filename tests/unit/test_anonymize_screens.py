@@ -1,4 +1,10 @@
-"""Render tests for the Anonymize review screen + the generalized progress screen."""
+"""Render tests for the in-place anonymize indicator (`anon_note`) + the progress screen.
+
+The old raw-Markdown review screen is gone: anonymizing now re-renders each mode's OWN
+screen with masked words and a slim `anon_note` subtitle. These tests assert every result
+builder surfaces that note while still rendering its native content, and that the shared
+progress screen still themes for the "Anonymizing output" loading state.
+"""
 
 from __future__ import annotations
 
@@ -8,81 +14,66 @@ from rich.console import Console
 from rich.panel import Panel
 
 from yeaboi.ui.mode_select.screens._screens_secondary import (
-    _build_anonymize_review_screen,
+    _build_performance_screen,
+    _build_reporting_screen,
+    _build_retro_screen,
+    _build_roadmap_screen,
     _build_standup_progress_screen,
+    _build_standup_screen,
+    _build_team_analysis_screen,
 )
 from yeaboi.ui.shared._components import REPORTING_THEME, reporting_title
 
+NOTE = "Anonymized · 3 masked"
 
-def _render(panel: Panel) -> str:
-    console = Console(file=StringIO(), width=90, height=30)
+
+def _render(panel: Panel, width: int = 100, height: int = 40) -> str:
+    console = Console(file=StringIO(), width=width, height=height)
     console.print(panel)
     return console.file.getvalue()
 
 
-def _review_data(**over) -> dict:
-    base = {
-        "anonymized_text": "# Sprint plan\n\n- [PROJECT] epic\n- [TEAM] work",
-        "replacements": [("Acme", "[COMPANY]"), ("Falcon", "[PROJECT]")],
-        "warnings": [],
-        "actions": ["Adjust", "Export", "Copy", "Back"],
-        "message": "",
-    }
-    base.update(over)
-    return base
+class TestAnonNoteRendersPerBuilder:
+    """Each result builder shows the anon_note subtitle when anonymized."""
 
+    def test_standup(self):
+        out = _render(_build_standup_screen({"session_name": "Team", "report": None}, anon_note=NOTE, sub_reveal=999.0))
+        assert "3 masked" in out
 
-class TestReviewScreen:
-    def test_returns_panel(self):
-        panel = _build_anonymize_review_screen(
-            _review_data(), theme=REPORTING_THEME, title=reporting_title(), height=30
-        )
-        assert isinstance(panel, Panel)
+    def test_performance_detail(self):
+        data = {"view": "detail", "detail_lines": ["• shipped it"], "detail_title": "1:1 — X"}
+        out = _render(_build_performance_screen(data, anon_note=NOTE, sub_reveal=999.0))
+        assert "3 masked" in out
+        assert "shipped it" in out  # native content still renders
 
-    def test_renders_masked_text_and_replacements(self):
-        out = _render(
-            _build_anonymize_review_screen(_review_data(), theme=REPORTING_THEME, title=reporting_title(), height=30)
-        )
-        assert "Sprint plan" in out
-        assert "masked" in out.lower()  # subtitle "N item(s) masked"
-        # The "what was masked" summary shows originals (review-only).
-        assert "Acme" in out
+    def test_reporting_detail(self):
+        data = {"view": "detail", "detail_lines": ["delivered 5 items"], "detail_title": "Report"}
+        out = _render(_build_reporting_screen(data, anon_note=NOTE, sub_reveal=999.0))
+        assert "3 masked" in out
+        assert "delivered 5 items" in out
 
-    def test_handles_empty_text(self):
-        panel = _build_anonymize_review_screen(
-            _review_data(anonymized_text="", replacements=[]),
-            theme=REPORTING_THEME,
-            title=reporting_title(),
-            height=30,
-        )
-        assert isinstance(panel, Panel)
-        out = _render(panel)
-        assert "nothing to show" in out.lower()
+    def test_retro(self):
+        out = _render(_build_retro_screen({"session_name": "Team", "grids": {}}, anon_note=NOTE, sub_reveal=999.0))
+        assert "3 masked" in out
 
-    def test_scrolls_long_content(self):
-        long_text = "\n".join(f"line {i}" for i in range(200))
-        meta: dict = {}
-        _build_anonymize_review_screen(
-            _review_data(anonymized_text=long_text),
-            theme=REPORTING_THEME,
-            title=reporting_title(),
-            height=30,
-            scroll_offset=5,
-            scroll_meta=meta,
-        )
-        # publish_geometry populated the scroll meta with a positive max offset.
-        assert meta.get("max_offset", 0) > 0
+    def test_roadmap_results(self):
+        from yeaboi.agent.state import RoadmapAnalysis
 
-    def test_renders_notices(self):
-        out = _render(
-            _build_anonymize_review_screen(
-                _review_data(warnings=["AI masking unavailable — review manually."]),
-                theme=REPORTING_THEME,
-                title=reporting_title(),
-                height=30,
-            )
-        )
-        assert "Notices" in out
+        data = {"view": "results", "analysis": RoadmapAnalysis(summary="s"), "actions": ["Back"]}
+        out = _render(_build_roadmap_screen(data, anon_note=NOTE, sub_reveal=999.0))
+        assert "3 masked" in out
+
+    def test_analysis(self):
+        from yeaboi.team_profile import TeamProfile
+
+        profile = TeamProfile(team_id="t", source="jira", project_key="KEY")
+        out = _render(_build_team_analysis_screen(profile, anon_note=NOTE))
+        assert "3 masked" in out
+
+    def test_no_note_when_empty(self):
+        # Empty anon_note ⇒ the native subtitle is unchanged (no "masked" indicator).
+        out = _render(_build_standup_screen({"session_name": "Team", "report": None}, sub_reveal=999.0))
+        assert "masked" not in out.lower()
 
 
 class TestProgressScreenTheming:
@@ -95,10 +86,10 @@ class TestProgressScreenTheming:
             title=reporting_title(),
             label="Anonymizing output",
         )
-        out = _render(panel)
+        out = _render(panel, width=90, height=30)
         assert "Anonymizing output" in out
 
     def test_default_is_standup(self):
         panel = _build_standup_progress_screen(["Starting"], width=90, height=24)
-        out = _render(panel)
+        out = _render(panel, width=90, height=30)
         assert "Generating standup" in out
