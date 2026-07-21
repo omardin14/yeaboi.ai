@@ -5136,12 +5136,7 @@ def select_mode(
                     if _team_popup_result.startswith("analyse"):
                         import threading
 
-                        from yeaboi.team_profile import TeamProfileStore
-                        from yeaboi.tools.team_learning import (
-                            _fetch_azdevops_history,
-                            _fetch_jira_history,
-                            _run_parallel_analysis,
-                        )
+                        from yeaboi.analysis import run_team_analysis
 
                         if _team_popup_result == "analyse_jira":
                             _ta_source = "jira"
@@ -5177,22 +5172,21 @@ def select_mode(
 
                         def _run_team_analysis_mode():
                             try:
-                                if _ta_source == "jira":
-                                    sprint_data = _fetch_jira_history(_ta_project_key, 8)
-                                else:
-                                    sprint_data = _fetch_azdevops_history(_ta_project_key, 8)
-                                if not sprint_data:
-                                    _ta_error_box[0] = "No closed sprints found."
-                                else:
-                                    _ta_sprint_names_box[0] = [sd.get("sprint_name", "") for sd in sprint_data]
-                                    _result = _run_parallel_analysis(
-                                        _ta_source,
-                                        _ta_project_key or "unknown",
-                                        sprint_data,
-                                        _ta_progress,
-                                    )
-                                    _ta_profile_box[0] = _result[0]
-                                    _ta_examples_box[0] = _result[1]
+                                # One code path with CLI/MCP: the engine fetches,
+                                # analyses, saves the profile, and writes the log.
+                                _res = run_team_analysis(
+                                    source=_ta_source,
+                                    project_key=_ta_project_key,
+                                    team_name=_ta_team_name,
+                                    include_insights=False,
+                                    progress=_ta_progress,
+                                    db_path=_ana_dbp,
+                                )
+                                _ta_profile_box[0] = _res["profile"]
+                                _ta_examples_box[0] = _res["examples"]
+                                _ta_sprint_names_box[0] = _res["sprint_names"]
+                            except ValueError as exc:
+                                _ta_error_box[0] = str(exc)
                             except Exception as exc:
                                 from yeaboi.ui.session._utils import _classify_api_error
 
@@ -5247,27 +5241,8 @@ def select_mode(
                         elif _ta_error_box[0]:
                             logger.error("Analysis failed: %s", _ta_error_box[0])
                         if _ta_profile:
-                            # Attach AzDO team name to profile before saving
-                            if _ta_team_name and not _ta_profile.team_name:
-                                from dataclasses import replace as _dc_replace
-
-                                _ta_profile = _dc_replace(_ta_profile, team_name=_ta_team_name)
-                            # Save to the same DB every list/resume path reads from
-                            # (_ana_dbp = ~/.yeaboi/data/sessions.db) so a just-finished
-                            # analysis is visible immediately, not only after a restart.
-                            with TeamProfileStore(_ana_dbp) as store:
-                                store.save(_ta_profile, examples=_ta_examples_box[0])
-                            try:
-                                from yeaboi.team_profile_exporter import write_analysis_log
-
-                                write_analysis_log(
-                                    _ta_profile,
-                                    examples=_ta_examples_box[0],
-                                    sprint_names=_ta_sprint_names_box[0],
-                                    duration_secs=_ta_duration,
-                                )
-                            except Exception:
-                                pass
+                            # Persist + analysis log already handled inside
+                            # run_team_analysis (one code path with CLI/MCP).
 
                             # Show results (overview + section cards)
                             _ta_examples = _ta_examples_box[0] or {}
@@ -6336,12 +6311,7 @@ def select_mode(
                 if _team_popup_result.startswith("analyse"):
                     import threading
 
-                    from yeaboi.team_profile import TeamProfileStore
-                    from yeaboi.tools.team_learning import (
-                        _fetch_azdevops_history,
-                        _fetch_jira_history,
-                        _run_parallel_analysis,
-                    )
+                    from yeaboi.analysis import run_team_analysis
 
                     # Determine source from popup result
                     if _team_popup_result == "analyse_jira":
@@ -6377,19 +6347,21 @@ def select_mode(
 
                     def _run_team_analysis():
                         try:
-                            if _ta_source == "jira":
-                                sprint_data = _fetch_jira_history(_ta_project_key, 8)
-                            else:
-                                sprint_data = _fetch_azdevops_history(_ta_project_key, 8)
-                            if not sprint_data:
-                                _ta_error_box[0] = "No closed sprints found."
-                            else:
-                                _ta_sprint_names_box[0] = [sd.get("sprint_name", "") for sd in sprint_data]
-                                _result = _run_parallel_analysis(
-                                    _ta_source, _ta_project_key or "unknown", sprint_data, _ta_progress
-                                )
-                                _ta_profile_box[0] = _result[0]
-                                _ta_examples_box[0] = _result[1]
+                            # One code path with CLI/MCP: the engine fetches,
+                            # analyses, saves the profile, and writes the log.
+                            _res = run_team_analysis(
+                                source=_ta_source,
+                                project_key=_ta_project_key,
+                                team_name=_ta_team_name,
+                                include_insights=False,
+                                progress=_ta_progress,
+                                db_path=_ana_dbp,
+                            )
+                            _ta_profile_box[0] = _res["profile"]
+                            _ta_examples_box[0] = _res["examples"]
+                            _ta_sprint_names_box[0] = _res["sprint_names"]
+                        except ValueError as exc:
+                            _ta_error_box[0] = str(exc)
                         except Exception as exc:
                             from yeaboi.ui.session._utils import _classify_api_error
 
@@ -6440,32 +6412,8 @@ def select_mode(
                             _ta_duration,
                         )
 
-                        # Attach AzDO team name to profile before saving
-                        if _ta_team_name and not _ta_profile.team_name:
-                            from dataclasses import replace as _dc_replace
-
-                            _ta_profile = _dc_replace(_ta_profile, team_name=_ta_team_name)
-
-                        # Save the fresh profile to the same DB every list/resume path
-                        # reads from (_ana_dbp = ~/.yeaboi/data/sessions.db) so it's
-                        # visible immediately, not only after a restart.
-                        with TeamProfileStore(_ana_dbp) as store:
-                            store.save(_ta_profile, examples=_ta_examples_box[0])
-                        logger.info("Profile saved to %s", _ana_dbp)
-
-                        # Write structured analysis log to ~/.scrum-agent/logs/
-                        try:
-                            from yeaboi.team_profile_exporter import write_analysis_log
-
-                            _log_path = write_analysis_log(
-                                _ta_profile,
-                                examples=_ta_examples_box[0],
-                                sprint_names=_ta_sprint_names_box[0],
-                                duration_secs=_ta_duration,
-                            )
-                            logger.info("Analysis log: %s", _log_path)
-                        except Exception as _log_exc:
-                            logger.warning("Failed to write analysis log: %s", _log_exc)
+                        # Persist + analysis log already handled inside
+                        # run_team_analysis (one code path with CLI/MCP).
 
                         # Show results screen (overview + section cards).
                         # Continue shows the coaching insights first (Back

@@ -1,0 +1,120 @@
+"""MCP tools: team-learning (calibration profiles + full board analysis)."""
+
+from __future__ import annotations
+
+import logging
+
+# Context must be importable from module globals — FastMCP evaluates the
+# stringified type hints (PEP 563) of tool functions against this namespace.
+from mcp.server.fastmcp import Context
+
+from yeaboi.mcp.runtime import run_engine, run_readonly
+
+logger = logging.getLogger(__name__)
+
+
+class _BridgedProgress(list):
+    """The analysis engine's `progress` seam is a shared list its workers append
+    status lines to (the TUI reads it every frame). Here each append also fires
+    an MCP progress notification. The appends come from the engine's own worker
+    threads (not anyio's), so the bridge uses run_coroutine_threadsafe against
+    the server loop captured at tool-call time — fire-and-forget."""
+
+    def __init__(self, loop, ctx):
+        super().__init__()
+        self._loop = loop
+        self._ctx = ctx
+
+    def append(self, item) -> None:
+        super().append(item)
+        try:
+            import asyncio
+
+            asyncio.run_coroutine_threadsafe(self._ctx.report_progress(float(len(self)), None, str(item)), self._loop)
+        except Exception:
+            logger.debug("analysis progress bridge failed (continuing)", exc_info=True)
+
+
+def _team_analyze(
+    source: str, project_key: str, sprint_count: int, generate_samples: bool, include_insights: bool, progress=None
+):
+    if source not in ("", "jira", "azdevops"):
+        raise ValueError(f"source must be 'jira' or 'azdevops' (blank auto-detects) — got {source!r}")
+    from yeaboi.analysis import run_team_analysis
+
+    return run_team_analysis(
+        source=source,
+        project_key=project_key,
+        sprint_count=sprint_count,
+        generate_samples=generate_samples,
+        include_insights=include_insights,
+        progress=progress,
+    )
+
+
+def _team_profile_get() -> dict:
+    from yeaboi.paths import get_db_path
+    from yeaboi.team_profile import TeamProfileStore
+
+    db_path = get_db_path()
+    if not db_path.exists():
+        return {"profiles": []}
+    with TeamProfileStore(db_path) as store:
+        profiles = store.list_profiles()
+    return {"profiles": profiles}
+
+
+def _compare_plan_to_actuals(session_id: str, source: str, project_key: str) -> dict:
+    import json
+
+    from yeaboi.tools.team_learning import compare_plan_to_actuals
+
+    # A LangChain @tool — .invoke() runs the underlying function; it returns
+    # a JSON string (all yeaboi tools do, for the agent loop).
+    raw = compare_plan_to_actuals.invoke({"session_id": session_id, "source": source, "project_key": project_key})
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return {"raw": raw}
+
+
+def register(app) -> None:
+    """Attach the team-learning tools to the FastMCP app."""
+
+    @app.tool()
+    async def team_analyze(
+        ctx: Context,
+        source: str = "",
+        project_key: str = "",
+        sprint_count: int = 8,
+        generate_samples: bool = False,
+        include_insights: bool = True,
+    ) -> dict:
+        """Analyse the team's tracker history (closed sprints) into a calibration profile:
+        velocity, story-point calibration, writing style, DoD signals, plus coaching insights
+        and headline stats. The profile is saved and feeds future planning. HEAVY: several LLM
+        calls plus tracker API paging — takes minutes; warn the user before running.
+        source: 'jira' or 'azdevops' (blank auto-detects); generate_samples additionally drafts
+        sample tickets in the team's style (more LLM calls)."""
+        import asyncio
+
+        try:
+            progress = _BridgedProgress(asyncio.get_running_loop(), ctx)
+        except RuntimeError:  # non-asyncio backend — run without progress
+            progress = None
+        return await run_engine(
+            ctx, _team_analyze, source, project_key, sprint_count, generate_samples, include_insights, progress
+        )
+
+    @app.tool()
+    async def team_profile_get() -> dict:
+        """Get stored team calibration profiles (velocity, estimation accuracy, completion rate)
+        learned from tracker history via yeaboi --learn."""
+        return await run_readonly(_team_profile_get)
+
+    @app.tool()
+    async def team_compare_plan_to_actuals(session_id: str = "", source: str = "", project_key: str = "") -> dict:
+        """Compare a generated plan to actual sprint outcomes from the tracker: estimated vs
+        actual points, planned vs actual sprints, added/removed stories, cycle times. Blank
+        session_id = most recent session; source: 'jira' or 'azdo' (auto-detected when blank)."""
+        return await run_readonly(_compare_plan_to_actuals, session_id, source, project_key)

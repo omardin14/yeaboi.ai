@@ -226,6 +226,20 @@ def _fallback_report(
 # ---------------------------------------------------------------------------
 
 
+def _validate_window_dates(window_start: str, window_end: str) -> None:
+    """Fail fast with a friendly message instead of a deep strptime error —
+    the window strings arrive verbatim from the CLI flags and the MCP tool."""
+    for name, value in (("window_start", window_start), ("window_end", window_end)):
+        if not value:
+            continue
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"{name} must be an ISO date (YYYY-MM-DD) — got {value!r}") from None
+    if window_start and window_end and window_end < window_start:
+        raise ValueError(f"window_end ({window_end}) is before window_start ({window_start})")
+
+
 def run_delivery_report(
     period: str = activity_mod.PERIOD_LAST_MONTH,
     *,
@@ -254,6 +268,7 @@ def run_delivery_report(
         sprint_names: the sprint names that make up a quarter report (for framing).
         period_label_override: label to show for a quarter report (e.g. "Q3 2026").
     """
+    _validate_window_dates(window_start, window_end)
     today = today or date.today()
     period_end = today.isoformat()
     db_path = _resolve_db_path(db_path)

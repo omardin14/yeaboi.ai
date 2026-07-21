@@ -97,16 +97,32 @@ Every new feature MUST include all three pillars before it can be considered com
 2. **Log directory** — all paths come from `src/yeaboi/paths.py`; never hardcode `Path.home() / ".yeaboi"`. Each mode logs to its own directory under `~/.yeaboi/logs/` (see the `logging` skill).
 3. **Tests** — every new function gets at least one unit test (happy path + error case); every `_build_*_screen` gets render tests; every LLM-dependent function gets mock tests (success, error fallback, code fences); every new state field gets serialization round-trip tests; secret/sensitive rendering must be tested for masking. Tests live in `tests/unit/` — one file per source module.
 
+## REQUIRED: Surface Parity
+
+yeaboi ships on **six surfaces**: the TUI, CLI flags/subcommands, the Python engines, the MCP server, the Claude Code plugin skills, and the OpenClaw skill. Features MUST NOT land TUI-only. This is machine-enforced by `tests/unit/test_surface_parity.py` — a declarative capability registry plus discovery checks over engines, MCP tools, `_MODE_CARDS`, `build_parser()`, and plugin skills.
+
+The contract:
+
+1. **New mode / feature → engine first.** Implement the pipeline as a headless engine (`src/yeaboi/<mode>/engine.py`, parse → fallback → format, frozen-dataclass artifacts). The TUI, CLI, and MCP are thin adapters over it.
+2. **Propagate to every surface** (or record a reasoned exemption): an MCP tool in `src/yeaboi/mcp/tools_*.py`, a CLI flag/subcommand in `cli.py`, a TUI card + handler, and — for user-facing workflows — a plugin skill in `claude-plugin/yeaboi/skills/`.
+3. **Register it.** Add/extend the capability row in `CAPABILITIES` (and `PARAM_PAIRS` for engine-backed MCP tools) in `tests/unit/test_surface_parity.py`. Until you do, `make test` fails with a message naming the exact edit.
+4. **New engine params must reach the MCP tool.** The param-parity check compares the engine signature against the tool schema; expose the new param or add it to `HIDDEN_PARAMS` with a reason. `db_path`/`today`/`on_progress`/`dry_run` are injection seams, always hidden.
+5. **Deliberate absences use `Exempt("reason")`** — e.g. the retro live board is TUI-only by design. Exemptions are visible, reviewed gaps, not silent ones.
+6. **Removals count too.** Every check is two-way set equality: deleting a tool/card/skill without updating the registry also fails.
+
+The MCP server internals and the module map (including `mcp/`, `roadmap/`, `analysis/`, `agent/headless.py`) are in the `project-map` skill; per-mode blueprints (including Roadmap Intake) are in `mode-blueprints`.
+
 ## Project Structure (top level)
 
 ```
 src/yeaboi/
   cli.py / config.py / paths.py      — entry point, env/config, all filesystem paths
   sessions.py / persistence.py       — SQLite session store, state serialization, schema versioning
-  agent/                             — ScrumState, graph wiring, node functions, LLM provider factory
+  agent/                             — ScrumState, graph wiring, node functions, LLM factory, headless.py
   prompts/                           — one factory function per prompt (ARC framework)
   tools/                             — @tool-decorated integrations (GitHub, Jira, AzDO, Confluence, Notion, …)
-  standup/ retro/ performance/ reporting/  — the four standalone modes (shared blueprint)
+  standup/ retro/ performance/ reporting/ roadmap/ analysis/  — standalone modes (shared blueprint)
+  mcp/                               — stdio MCP server (yeaboi-mcp; 25 tools over the engines)
   repl/                              — legacy REPL for CLI-flag-driven flows
   ui/                                — full-screen TUI (mode_select, provider_select, session, shared)
   input_guardrails.py / output_guardrails.py / formatters.py / *_exporter.py / *_sync.py
@@ -132,10 +148,10 @@ Deep reference lives in `.claude/skills/` and loads on demand in interactive ses
 |---|---|
 | `tui-standards` | `ui/`, any `_build_*_screen`, themes, shared components |
 | `agent-and-state` | `agent/`, `prompts/`, `tools/`, state fields, `sessions.py`, tests |
-| `mode-blueprints` | `standup/`, `retro/`, `performance/`, `reporting/`, or adding a new mode |
+| `mode-blueprints` | `standup/`, `retro/`, `performance/`, `reporting/`, `roadmap/`, or adding a new mode |
 | `logging` | logging calls, log files, `logging_setup.py` |
 | `ci-and-release` | `.github/workflows`, versioning, releasing, Dependabot, deployment |
-| `project-map` | full module map, CLI flags, env vars, app flow, OpenClaw product skill |
+| `project-map` | full module map, CLI flags/subcommands, env vars, app flow, the MCP server + plugin, OpenClaw product skill |
 
 Note: `.claude/skills/` holds **dev-workflow** conventions; `src/yeaboi/skills/` (symlinked as `skills/`) is the **shipped OpenClaw product skill** — don't confuse them.
 

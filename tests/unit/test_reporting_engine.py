@@ -186,3 +186,21 @@ class TestPeriodDays:
         assert activity_mod.period_days("last_month", sprint_length_weeks=1) == 28
         assert activity_mod.period_days("last_month", sprint_length_weeks=2) == 28
         assert activity_mod.period_days("last_month", sprint_length_weeks=3) == 42
+
+
+class TestWindowValidation:
+    """Bad window dates fail fast with a friendly message — the strings arrive
+    verbatim from the CLI flags and the MCP tool (validation runs before any
+    DB or tracker access)."""
+
+    def test_bad_window_start_raises(self):
+        with pytest.raises(ValueError, match="YYYY-MM-DD"):
+            engine.run_delivery_report("quarter", window_start="July 1st")
+
+    def test_bad_window_end_raises(self):
+        with pytest.raises(ValueError, match="window_end"):
+            engine.run_delivery_report("quarter", window_start="2026-04-01", window_end="30/06/2026")
+
+    def test_inverted_window_raises(self):
+        with pytest.raises(ValueError, match="before window_start"):
+            engine.run_delivery_report("quarter", window_start="2026-06-30", window_end="2026-04-01")

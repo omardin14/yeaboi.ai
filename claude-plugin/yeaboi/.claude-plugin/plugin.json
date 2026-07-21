@@ -1,0 +1,12 @@
+{
+  "name": "yeaboi",
+  "displayName": "yeaboi — AI Scrum Master",
+  "description": "Sprint planning, daily standups, stakeholder delivery reports, and engineer 1:1 prep — from inside your coding agent.",
+  "author": {
+    "name": "Omar Din"
+  },
+  "homepage": "https://yeaboi.ai",
+  "repository": "https://github.com/omardin14/yeaboi.ai",
+  "license": "MIT",
+  "keywords": ["scrum", "agile", "sprint-planning", "standup", "project-management"]
+}

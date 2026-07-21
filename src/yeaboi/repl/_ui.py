@@ -9,6 +9,10 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 
+# _predict_next_node lives in agent/headless.py so the headless pipeline
+# driver (MCP server) can use it without importing prompt-toolkit. Re-exported
+# here because the REPL, TUI phases, and tests all import it from this module.
+from yeaboi.agent.headless import _predict_next_node  # noqa: F401
 from yeaboi.agent.state import QuestionnaireState
 
 logger = logging.getLogger(__name__)
@@ -35,33 +39,6 @@ _PIPELINE_STEPS: tuple[str, ...] = (
     "task_decomposer",
     "sprint_planner",
 )
-
-
-def _predict_next_node(state: dict) -> str:
-    """Predict which graph node will run next, mirroring route_entry() logic.
-
-    Used to pick the right spinner message before graph.invoke().
-    We duplicate the routing checks here (rather than importing route_entry)
-    because route_entry expects a ScrumState TypedDict while the REPL works
-    with a plain dict. The logic is intentionally kept in sync.
-    """
-    qs = state.get("questionnaire")
-    if qs is None or not qs.completed:
-        return "project_intake"
-    if state.get("project_analysis") is None:
-        return "project_analyzer"
-    if not state.get("features"):
-        analysis = state.get("project_analysis")
-        if analysis and getattr(analysis, "skip_features", False):
-            return "feature_skip"
-        return "feature_generator"
-    if not state.get("stories"):
-        return "story_writer"
-    if not state.get("tasks"):
-        return "task_decomposer"
-    if not state.get("sprints"):
-        return "sprint_planner"
-    return "agent"
 
 
 def _build_spinner_message(node_name: str) -> str:

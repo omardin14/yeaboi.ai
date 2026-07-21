@@ -103,7 +103,7 @@ The `_dict_to_*()` functions in `sessions.py` use `.get()` for optional fields s
 
 ### Schema versioning
 
-- `CURRENT_SCHEMA_VERSION = 9` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup config/history/updates, v7=retro history, v8=performance 1:1s/reviews/notes, v9=reporting history)
+- `CURRENT_SCHEMA_VERSION = 12` tracked in a `schema_info` table (v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup config/history/updates, v7=retro history, v8=performance 1:1s/reviews/notes, v9=reporting history, v10=roadmap config/history, v11=multi-row roadmaps list seeded from the v10 singleton, v12=token_usage local-perf columns)
 - On startup: if stored version > current → `schema_mismatch = True` (warn user); if stored version < current → run migrations
 - Session IDs: internal `new-<8hex>-<YYYY-MM-DD>`, display `<project-slug>-<YYYY-MM-DD>`
 

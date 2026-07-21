@@ -1,6 +1,6 @@
 ---
 name: project-map
-description: Full annotated module map of src/yeaboi/, app flow, the complete CLI flags table, all environment variables, and the bundled OpenClaw scrum-planner product skill. Use when navigating unfamiliar modules, adding CLI flags, changing env/config, or working on the OpenClaw skill.
+description: Full annotated module map of src/yeaboi/ (incl. the MCP server, roadmap, analysis, and agent/headless.py), app flow, the complete CLI flags + subcommands, all environment variables, the MCP server internals + Claude Code plugin, and the OpenClaw skill. Use when navigating unfamiliar modules, adding CLI flags/subcommands, changing env/config, or working on the MCP server, plugin, or OpenClaw skill.
 ---
 
 # Project Map
@@ -31,6 +31,7 @@ src/yeaboi/
     graph.py            — Graph compilation and wiring (create_graph())
     nodes.py            — Node functions (intake, analyzer, generators, planner)
     llm.py              — LLM provider factory (Anthropic/OpenAI/Google/Bedrock/Ollama, lazy imports)
+    headless.py         — run_planning_pipeline(): auto-driven graph loop (no UI), used by the MCP plan_generate
   prompts/
     system.py           — Base system prompt (Scrum Master persona)
     intake.py           — 30 questions, smart/standard modes, adaptive templates, validation
@@ -82,6 +83,17 @@ src/yeaboi/
     export.py           — DeliveryReport → Markdown + HTML + slide deck (paths.get_reporting_export_dir)
     presentation.py     — build_presentation_html(): self-contained keyboard-nav slide deck (E501-exempt asset)
     store.py            — ReportingStore (reporting_history table, schema v9)
+  roadmap/              — Roadmap Intake mode (proactive Planning: quarterly roadmap → ranked candidate projects)
+    engine.py           — run_roadmap_analysis(): fetch source → LLM analysis → ranked projects (parse → fallback → format)
+    store.py            — RoadmapStore (roadmaps list + roadmap_history run log, schema v10/v11)
+    export.py           — RoadmapAnalysis → Markdown + HTML (paths.get_roadmap_export_dir)
+  analysis/             — Team-analysis engine (headless pipeline behind the TUI Analysis mode)
+    engine.py           — run_team_analysis(): fetch history → _run_parallel_analysis → save profile → insights/samples
+  mcp/                  — MCP stdio server (yeaboi-mcp entry point, optional [mcp] extra)
+    server.py           — create_app() + main(): FastMCP app, guarded mcp import, logs to logs/mcp/
+    runtime.py          — {ok, llm_mode, warnings, data} envelope + run_engine()/run_readonly() dispatch
+    sampling.py         — SamplingChatModel (LangChain model over MCP sampling) + sampling→provider→fallback chain
+    tools_*.py          — one module per domain (planning, sessions, standup, reporting, performance, retro, team)
   tools/
     __init__.py         — get_tools() factory (lazy imports all tool modules)
     github.py           — GitHub repo/file/issues/readme (4 tools) + recent-activity helpers
@@ -159,10 +171,24 @@ Key flags to know about when modifying the CLI:
 | `--standup-session ID` | Session to run the standup for (default: most recent) |
 | `--standup-output {terminal,desktop,slack,email,all}` | Override the session's saved delivery channels |
 
+**Subcommands** (additive `add_subparsers(dest="command")` — every flat flag keeps working): `yeaboi report`, `yeaboi standup`, `yeaboi perf {roster,prep,complete,review,note}`, `yeaboi analyze`. Thin `_cmd_*` handlers in `cli.py` over the shared engines; `--format json` keeps stdout machine-clean. Dispatched in `main()` before the flag-guard sequence. Tests in `tests/unit/test_cli_subcommands.py` (the flat-flag assertions in `tests/integration/test_cli.py` must stay untouched).
+
 Validation rules in `main()`:
 - `--non-interactive` requires `--description`
 - `--output` requires `--non-interactive` or `--export-only`
 - `--export-only` requires `--quick` or `--questionnaire`
+
+## MCP Server
+
+The `src/yeaboi/mcp/` package exposes yeaboi to AI coding agents (Claude Code, Cursor, Codex CLI, VS Code…) as a **stdio MCP server** — entry point `yeaboi-mcp`, optional extra `mcp = ["mcp>=1.9,<2"]` (the `<2` pin is load-bearing; SDK v2 is a breaking pre-release). See README section "MCP Server" for the user-facing docs.
+
+**Design:**
+- **25 tools across 7 `tools_*.py` modules**, registered by `server.create_app()`. Tool bodies lazy-import engines (repo convention); `mcp` itself is imported only inside `create_app()`/`main()` so `import yeaboi.mcp.server` always succeeds without the extra. Exception: `tools_*.py` import `Context` at module level — FastMCP evaluates PEP 563 stringified hints against module globals.
+- **Envelope** (`runtime.py`): every tool returns `{ok, llm_mode, warnings, data}`; exceptions become structured `{ok: false, error, hint}` payloads (auth-looking messages get an actionable hint). A tool call never crashes the server. `run_engine()` is the single dispatch point: worker thread (`anyio.to_thread`) + process-wide `threading.Lock` (engines aren't concurrency-safe).
+- **LLM chain** (`sampling.py`): `resolve_llm_mode()` picks `sampling` (client advertises the capability) → `provider` (`is_llm_configured()`) → `fallback` (deterministic artifacts + warning). Sampling injects `SamplingChatModel` via `llm_override()` in `agent/llm.py` (a ContextVar that short-circuits `get_llm()`; propagates into anyio worker threads). The model's sync `_generate` bridges to the loop with `anyio.from_thread.run(...)` — only ever call it from a `run_engine` worker thread. `YEABOI_MCP_LLM=provider` forces mode 2; `YEABOI_MCP_MAX_TOKENS` caps sampling responses (default 8192).
+- **Planning** runs through `agent/headless.py:run_planning_pipeline()` — a UI-free replica of run_repl's export-only auto-drive (confirm → continue → accept, capacity auto-accepted, `_predict_next_node` == "agent" → done). `repl/_ui.py` re-exports `_predict_next_node` from there.
+- **stdio rule**: stdout carries JSON-RPC — nothing may `print()` to it (there's a capsys test). Logs: `~/.yeaboi/logs/mcp/mcp.log` via `attach_mode_handler("mcp")`.
+- **Claude Code plugin** at `claude-plugin/` (repo doubles as a marketplace): `yeaboi/.claude-plugin/plugin.json` (no `version` field — commit-SHA versioning), `.mcp.json` at the plugin root (NOT inside `.claude-plugin/`), and five skills (`plan-sprint`, `standup`, `delivery-report`, `performance`, `team-analysis`). Validate with `claude plugin validate claude-plugin/yeaboi`. Tests: `tests/unit/test_mcp_server.py`, `test_mcp_sampling.py`, `test_headless_pipeline.py`, `test_claude_plugin.py`; surface coverage is enforced by `tests/unit/test_surface_parity.py` (see CLAUDE.md "REQUIRED: Surface Parity").
 
 ## Environment Setup
 
@@ -200,17 +226,16 @@ Validation rules in `main()`:
 
 ## OpenClaw Skill
 
-The `skills/scrum-planner/` directory contains an OpenClaw skill that replicates the smart intake TUI experience conversationally. OpenClaw acts as the front-end (asks questions, handles follow-ups), then invokes `yeaboi --non-interactive` as the back-end.
+The `src/yeaboi/skills/scrum-planner/` directory contains an OpenClaw skill that replicates the smart intake TUI experience conversationally. OpenClaw acts as the front-end (asks questions, handles follow-ups), then calls the **yeaboi MCP server's tools** as the back-end (the old SCRUM.md temp-file + `--non-interactive` shell-out + JSON-polling pattern was removed).
 
 **How it works:**
 1. OpenClaw asks ~7 essential questions (matching `SMART_ESSENTIALS` from `prompts/intake.py`)
-2. Answers map to: Q1/Q6/Q8 → CLI args, everything else → temp `SCRUM.md` in CWD
-3. Invokes: `yeaboi --non-interactive --description "Q1" --team-size Q6 --sprint-length Q8 --output json`
-4. `_load_user_context()` in `nodes.py` reads the SCRUM.md from CWD, `_keyword_extract_fallback()` does keyword scanning
-5. JSON output is parsed and presented to the user
+2. Answers map to `plan_generate` params: Q1 → `description`, Q6/Q8 → `team_size`/`sprint_length_weeks`, the rest → `answers` {number: answer}, extras → `project_context`
+3. Requires the `yeaboi-mcp` server registered in OpenClaw's MCP config (`uvx --from 'yeaboi[mcp]' yeaboi-mcp`)
+4. The returned envelope is presented phase-by-phase; `plan_export`/`plan_publish` handle output
 
 **Key files:**
-- `skills/scrum-planner/SKILL.md` — agent instructions (persona, conversation flow, SCRUM.md generation, CLI invocation, output formatting)
+- `skills/scrum-planner/SKILL.md` — agent instructions (persona, conversation flow, MCP tool invocation, output formatting)
 - `skills/scrum-planner/README.md` — installation and usage docs
 - `skills/scrum-planner/scripts/` — helper scripts for the skill
 - `skills/scrum-planner/references/` — reference material

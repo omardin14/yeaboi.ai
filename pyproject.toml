@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yeaboi"
-version = "2.22.0"
+version = "2.23.0"
 description = "yeaboi.ai — a team lead's best friend. A terminal AI agent that decomposes projects into epics, user stories, tasks, and sprint plans."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -72,6 +72,10 @@ voice = ["sounddevice", "faster-whisper"]
 # Chart images embedded in exports (velocity / delivered-work PNGs). Lazy-
 # imported in charts.py — without the extra, exports simply skip the charts.
 charts = ["matplotlib>=3.8"]
+# MCP server — expose yeaboi's modes as tools to AI coding agents
+# (Claude Code, Cursor, Codex CLI, VS Code, …). Official python-sdk, v1 line;
+# v2 is a pre-release with breaking API changes, so the <2 pin is load-bearing.
+mcp = ["mcp>=1.9,<2"]
 all-providers = ["langchain-openai", "langchain-google-genai", "langchain-aws", "boto3", "langchain-ollama"]
 dev = [
     "pytest",
@@ -81,6 +85,8 @@ dev = [
     "pre-commit",
     # so CI exercises the chart-generation tests
     "matplotlib>=3.8",
+    # so CI exercises the MCP server tests
+    "mcp>=1.9,<2",
 ]
 
 [project.urls]
@@ -93,6 +99,9 @@ yeaboi = "yeaboi.cli:main"
 # Back-compat alias (one release) — existing installs / the standup scheduler
 # may still reference the old command name.
 scrum-agent = "yeaboi.cli:main"
+# MCP stdio server (requires the [mcp] extra):
+#   uvx --from 'yeaboi[mcp]' yeaboi-mcp
+yeaboi-mcp = "yeaboi.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yeaboi"]

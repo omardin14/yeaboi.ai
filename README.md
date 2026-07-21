@@ -92,6 +92,7 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 - [Intake Modes](#-intake-modes)
 - [Roadmap Intake](#%EF%B8%8F-roadmap-intake)
 - [Pipeline](#-pipeline)
+- [MCP Server — use yeaboi from your coding agent](#-mcp-server--use-yeaboi-from-your-coding-agent)
 - [Team Analysis Mode](#-team-analysis-mode)
 - [Analysis-Calibrated Planning](#-analysis-calibrated-planning)
 - [Export Formats](#-export-formats)
@@ -376,7 +377,7 @@ You should see JSON output with features, stories, tasks, and sprints.
 
 ### 8. Install the OpenClaw skill
 
-The `scrum-planner` skill lets OpenClaw conduct conversational scrum planning — it asks intake questions (or skips them in quick mode), generates a temp SCRUM.md, invokes `yeaboi --non-interactive --output json`, and presents results phase-by-phase with accept/edit/regenerate options.
+The `scrum-planner` skill lets OpenClaw conduct conversational scrum planning — it asks intake questions (or skips them in quick mode), calls the **yeaboi MCP server's** `plan_generate` tool with the collected answers, and presents results phase-by-phase with accept/edit/regenerate options. It needs the `yeaboi-mcp` server registered in OpenClaw's MCP configuration (`uvx --from 'yeaboi[mcp]' yeaboi-mcp`).
 
 > **Tip:** After every `pipx install --force` (e.g., updating to a new version), re-run `yeaboi --install-skill` to update the skill files and refresh the configuration.
 
@@ -607,7 +608,7 @@ After confirmation, the bot runs `yeaboi` in the background (~3-5 minutes), then
 - **Review diagnostics** — Check `~/.yeaboi/logs/` for detailed run logs if anything looks off.
 - **Secure with Teleport** — For production use, add Teleport for identity-aware access to the Lightsail instance and OpenClaw dashboard.
 
-See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full skill documentation, question-to-CLI mapping, and troubleshooting.
+See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full skill documentation, question-to-tool mapping, and troubleshooting.
 
 </details>
 
@@ -617,7 +618,26 @@ See [`skills/scrum-planner/README.md`](skills/scrum-planner/README.md) for full 
 
 ```
 yeaboi [OPTIONS]
+yeaboi <command> [OPTIONS]     # headless mode runners: report, standup, perf, retro, analyze
 ```
+
+### Subcommands (headless mode runners)
+
+Every TUI mode has a headless CLI path over the same engine:
+
+| Command | Description |
+|---------|-------------|
+| `yeaboi report [--period last_sprint\|last_month\|quarter] [--window-start/--window-end YYYY-MM-DD] [--sprint-names A,B] [--label "Q3 2026"] [--format json]` | Stakeholder delivery report from the tracker (quarter reports take explicit sprint windowing) |
+| `yeaboi standup [--deliver] [--channels slack email ...] [--days N] [--schedule install\|remove\|status] [--format json]` | Run a Daily Standup (print/deliver), or manage the OS schedule that runs it daily |
+| `yeaboi perf roster` | List the engineer roster from recent tracker assignees |
+| `yeaboi perf prep <engineer>` | 1:1 prep — talking points from real delivery data |
+| `yeaboi perf complete <engineer> --transcript @notes.txt [--images ...] [--deliver]` | Turn a held 1:1 into a summary + tracked action items |
+| `yeaboi perf review <engineer> [--months N]` | Draft a periodic performance review |
+| `yeaboi perf note <engineer> --text "..."` | Record a note (feeds future preps/reviews) |
+| `yeaboi retro [--limit N] [--export-latest] [--format json]` | Read past retrospectives / export the latest (the live board runs in the TUI) |
+| `yeaboi analyze [--source jira\|azdevops] [--sprints N] [--samples] [--format json]` | Analyse board history into a team calibration profile |
+
+`--format json` keeps stdout machine-clean (warnings and progress go to stderr) for piping into CI or other tools. Add `--strict` to any runner to exit 3 on a degraded run (warnings present, or an empty report) — by default degraded runs still exit 0 with warnings on stderr.
 
 ### Interactive modes
 
@@ -991,6 +1011,94 @@ Reporting turns the work your team actually **delivered** into a business-friend
 - **Slide deck** (`-slides.html`) — a self-contained, offline **presentation**: open it in any browser and use ← / → / Space to present. Press **T** to cycle 4 built-in themes (midnight / aurora / sunset / mono); the **Theme** button in the TUI sets which palette is baked into the exported deck. Everything is inline (no CDN, no network) and every piece of ticket text is rendered inertly, so it's safe to share.
 
 Reporting runs are logged to `~/.yeaboi/logs/reporting/` and persisted to the `reporting_history` table.
+
+---
+
+## 🔌 MCP Server — use yeaboi from your coding agent
+
+Prefer working inside Claude Code, Cursor, Codex CLI, or VS Code instead of a separate TUI? yeaboi ships a **Model Context Protocol (MCP) server** — the standard through which AI coding agents call external tools — so your agent can plan sprints, run standups, and produce delivery reports directly.
+
+**What is MCP?** A stdio JSON-RPC protocol: the client (your coding agent) launches `yeaboi-mcp` as a subprocess and calls its *tools* — typed functions with JSON schemas. Every major AI coding tool speaks it, so one server covers them all.
+
+### Setup — any MCP client
+
+The server needs the `[mcp]` extra and runs via `uvx` (no permanent install):
+
+**Claude Code (plugin — recommended)**
+
+```bash
+claude plugin marketplace add omardin14/yeaboi.ai
+# then inside Claude Code:
+/plugin install yeaboi@yeaboi
+```
+
+The plugin wires the server automatically and adds guided skills: `/yeaboi:plan-sprint` (conversational intake → full plan), `/yeaboi:standup`, `/yeaboi:delivery-report`, `/yeaboi:performance`, `/yeaboi:team-analysis`.
+
+**Claude Code (manual)**
+
+```bash
+claude mcp add yeaboi -- uvx --from 'yeaboi[mcp]' yeaboi-mcp
+```
+
+**Cursor** (`~/.cursor/mcp.json`) / **VS Code** (`.vscode/mcp.json`, use the `"servers"` key):
+
+```json
+{
+  "mcpServers": {
+    "yeaboi": { "command": "uvx", "args": ["--from", "yeaboi[mcp]", "yeaboi-mcp"] }
+  }
+}
+```
+
+**Codex CLI** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.yeaboi]
+command = "uvx"
+args = ["--from", "yeaboi[mcp]", "yeaboi-mcp"]
+```
+
+**Testing a local checkout (development)**
+
+All the commands above resolve `yeaboi` from **PyPI** — they run the last published release, not your working tree. To test unreleased changes, point the client at the checkout instead:
+
+```bash
+claude mcp add yeaboi-dev -- uv run --project /path/to/yeaboi.ai --extra mcp yeaboi-mcp
+```
+
+(Note for plugin developers: `claude --plugin-dir` loads the *skills* from your checkout, but the plugin's `.mcp.json` still launches the published server — use the `yeaboi-dev` override above alongside it.)
+
+### The tools
+
+| Tool | What it does | LLM |
+|------|--------------|-----|
+| `plan_generate` | Full planning pipeline: analysis → epics → stories → tasks → sprints; saves a resumable session | ✅ |
+| `intake_questions` | The 30-question intake contract (essentials, defaults, choice options) so the host agent runs the interview | — |
+| `plan_get` / `plan_export` / `plan_publish` | Read a saved plan as JSON / export Markdown or HTML / publish to Notion or Confluence | — |
+| `plan_sync` | Push a plan into the tracker — creates the real epic/stories/tasks/sprints in Jira or Azure DevOps (idempotent; the tool docstring requires user confirmation) | — |
+| `sessions_list` / `session_get` / `session_delete` | Browse saved sessions and artifact progress; delete one by exact id (destructive, confirmation required) | — |
+| `usage_get` | Lifetime LLM token usage recorded by yeaboi (sampling-mode calls are host-billed and not counted) | — |
+| `standup_run` / `standup_history` | Daily standup (activity + confidence + summaries, per-run channel override); past runs | ✅ / — |
+| `standup_config_get` / `standup_config_set` | Read/update the standup config (time, weekdays, channels, aliases) | — |
+| `report_delivery` | Stakeholder delivery report for last sprint / month / quarter (with explicit sprint windowing) | ✅ |
+| `perf_roster`, `perf_one_on_one_prep`, `perf_one_on_one_complete`, `perf_six_month_review`, `perf_note_add` | Performance mode workflows + engineer notes | ✅ (roster/notes: —) |
+| `retro_history` / `retro_export` | Past retrospectives, and Markdown/HTML export of the latest (the live retro board stays in the TUI — it's a real-time LAN page) | — |
+| `team_analyze` | Full board-history analysis into a calibration profile (heavy — several LLM calls) | ✅ |
+| `team_profile_get` / `team_compare_plan_to_actuals` | Calibration profiles; plan-vs-actuals comparison | — |
+
+Every tool returns one envelope: `{"ok", "llm_mode", "warnings", "data"}` — uniform success/error handling for the host agent, with `hint` strings on actionable failures.
+
+### Who pays for the LLM? (sampling → provider → fallback)
+
+The interesting design question for an MCP server that itself uses an LLM. yeaboi resolves each call through a chain:
+
+1. **`sampling`** — if the client supports **MCP sampling** (Claude Code does), yeaboi sends its prompts *back through the client*, so the host's own model does the generation. **No yeaboi API key needed at all.** Internally a `SamplingChatModel` (a LangChain `BaseChatModel` over `session.create_message`) is injected into `get_llm()` via a ContextVar override — engines run unchanged.
+2. **`provider`** — otherwise, yeaboi's own configured provider from `~/.yeaboi/.env` (Anthropic/OpenAI/Google/Bedrock), exactly like the TUI. Force this mode with `YEABOI_MCP_LLM=provider` if a host's sampling is slow or rate-limited.
+3. **`fallback`** — with neither available, engines still answer with their deterministic fallback artifacts, and the envelope's `warnings` say so.
+
+The mode used is reported in every result's `llm_mode`. Sampling responses are capped at 8192 tokens by default (`YEABOI_MCP_MAX_TOKENS` to change).
+
+Server logs go to `~/.yeaboi/logs/mcp/mcp.log` (stdout is reserved for the JSON-RPC stream — nothing may print to it). Plans generated over MCP are ordinary yeaboi sessions: resumable in the TUI, visible to standup/reporting/performance.
 
 ---
 

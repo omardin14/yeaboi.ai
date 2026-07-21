@@ -15,6 +15,7 @@ from yeaboi.agent.llm import (
     get_usage_stats,
     invoke_json,
     invoke_with_images,
+    llm_override,
     load_image_b64,
     reset_usage_stats,
     strip_json_fences,
@@ -22,6 +23,57 @@ from yeaboi.agent.llm import (
     track_usage,
     warn_if_context_overflow,
 )
+
+
+class TestLlmOverride:
+    """The llm_override() injection hook used by the MCP sampling mode."""
+
+    def _fake_model(self):
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+        return FakeListChatModel(responses=["ok"])
+
+    def test_override_returned_ignoring_args(self, monkeypatch):
+        # No API key needed — the override short-circuits provider selection,
+        # and model/temperature args are ignored while it is active.
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        fake = self._fake_model()
+        with llm_override(fake):
+            assert get_llm() is fake
+            assert get_llm(model="anything", temperature=0.7) is fake
+
+    def test_override_resets_after_block(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+        fake = self._fake_model()
+        with llm_override(fake):
+            pass
+        assert isinstance(get_llm(), ChatAnthropic)
+
+    def test_override_resets_on_exception(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+        fake = self._fake_model()
+        with pytest.raises(ValueError):  # noqa: PT012 — asserting cleanup after the raise
+            with llm_override(fake):
+                raise ValueError("boom")
+        assert isinstance(get_llm(), ChatAnthropic)
+
+    def test_override_propagates_into_worker_threads(self, monkeypatch):
+        # The MCP server sets the override in an async handler, then runs the
+        # engine in an anyio worker thread — the ContextVar must follow.
+        import anyio
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        fake = self._fake_model()
+        result: list[object] = []
+
+        async def main():
+            with llm_override(fake):
+                await anyio.to_thread.run_sync(lambda: result.append(get_llm()))
+
+        anyio.run(main)
+        assert result[0] is fake
 
 
 class TestGetLlmAnthropic:
