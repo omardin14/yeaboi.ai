@@ -86,7 +86,10 @@ jobs:
             CI covers; focus on what tests cannot catch.
 
             Read the diff with `gh pr diff ${{ steps.pr.outputs.number }}` and the PR
-            description with `gh pr view ${{ steps.pr.outputs.number }}`. Then review for:
+            description with `gh pr view ${{ steps.pr.outputs.number }}`. Repo conventions
+            are split across CLAUDE.md and `.claude/skills/*/SKILL.md` — Read the SKILL.md
+            for each area the diff touches (see the skills index table in CLAUDE.md)
+            before judging convention violations. Then review for:
 
             1. **Correctness** — real bugs only: logic errors, broken edge cases, state
                serialization issues (frozen dataclass fields without defaults break --resume),
@@ -106,4 +109,6 @@ jobs:
             If there are no significant findings, post one line saying the review passed.
             Do not comment on style that ruff already enforces. Do not request changes on
             nitpicks. This review is advisory — never attempt to approve, merge, or block.
-          claude_args: '--allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment ${{ steps.pr.outputs.number }}:*),Bash(gh run view:*),Read,Grep,Glob"'
+          # Review stays on the default (Opus-tier) model — judgment quality is
+          # the point, and volume is already gated to green PRs by workflow_run.
+          claude_args: '--max-turns 25 --allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment ${{ steps.pr.outputs.number }}:*),Bash(gh run view:*),Read,Grep,Glob"'

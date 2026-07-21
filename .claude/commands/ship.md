@@ -8,11 +8,7 @@ Follow these steps **in order**. If any step fails, stop, report what failed, an
 
 1. **Sanity check** — run `git branch --show-current`. If on `main`, stop: create a feature branch first.
 
-2. **Independent verification (fresh context, no author bias)** — spawn a review agent via the Agent tool. Give it ONLY: (a) the output of `git diff main...HEAD`, (b) a one-paragraph description of what this branch was supposed to do — NOT this conversation's history. Instruct it to check:
-   - Does the diff actually accomplish the stated task? Any spec gaps?
-   - CLAUDE.md conventions: three-pillar observability (logging, log directory, tests), TUI component standards (shared components, themes, no hardcoded colours), frozen-dataclass fields have defaults, paths come from `paths.py`.
-   - Obvious correctness bugs.
-   Resolve every finding the reviewer confirms before proceeding (fix it, or explain in the PR body why it's intentionally not addressed).
+2. **Independent verification (fresh context, no author bias)** — spawn the `code-reviewer` subagent (defined in `.claude/agents/code-reviewer.md`). Give it ONLY: (a) the output of `git diff main...HEAD`, (b) a one-paragraph description of what this branch was supposed to do — NOT this conversation's history. Its checklist (spec fit, skill-based conventions, correctness) lives in the agent definition. Resolve every finding it reports at `blocker` or `should-fix` severity before proceeding (fix it, or explain in the PR body why it's intentionally not addressed).
 
 3. **Full test gate** — run `make test` and `make lint`. Both must pass (CLAUDE.md REQUIRED: Verification). `make test-fast` is not enough at ship time.
 

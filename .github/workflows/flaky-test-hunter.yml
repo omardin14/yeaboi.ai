@@ -1,0 +1,147 @@
+# Weekly flaky-test hunter — proactive Step-3 routine.
+#
+# Flaky tests erode trust in the whole verification loop (a red CI that "just
+# needs a re-run" trains everyone to ignore red). This job hunts them down on a
+# schedule so they get filed and fixed instead of silently re-run.
+#
+# Deterministic-FIRST: a bash stage does all the detection with zero Claude
+# tokens — (a) it scans recent CI history for the same commit passing AND
+# failing (a re-run that flipped to green is a flake signal), and (b) it reruns
+# the suite several times and diffs the JUnit XML for tests that fail in some
+# runs but not others. Claude runs ONLY if flakes are found, and only to file /
+# update issues (cheap formatting work → Haiku). It opens ISSUES, not fix PRs —
+# a flake fix needs judgment; a human escalates by adding `claude-implement`.
+#
+# Loop-safe: the issues it files are `github-actions[bot]`-authored and labeled
+# `flaky-test`, which triggers nothing (claude.yml only fires on the
+# `claude-implement` label; the feedback pipeline skips bot authors).
+
+name: Flaky Test Hunter
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      reruns:
+        description: "How many times to rerun the suite (default 5)"
+        required: false
+        default: "5"
+
+concurrency:
+  group: flaky-test-hunter
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write # file / update flaky-test issues
+  id-token: write # claude-code-action OIDC
+  actions: read # read CI run history
+
+jobs:
+  hunt:
+    name: Detect flaky tests and file issues
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - uses: astral-sh/setup-uv@v7
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
+
+      - name: Detect flakes (deterministic, no Claude)
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RERUNS: ${{ github.event.inputs.reruns || '5' }}
+        run: |
+          set -uo pipefail
+
+          # (a) History scan: a commit on main whose ci.yml produced BOTH a
+          #     failure and a success run is flaky by definition (a re-run
+          #     flipped it). Purely informational context for Claude.
+          gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&per_page=100" \
+            --jq '[.workflow_runs[] | {sha: .head_sha, c: .conclusion}]' > runs.json || echo "[]" > runs.json
+          python - <<'PY'
+          import json, collections
+          runs = json.load(open("runs.json"))
+          by_sha = collections.defaultdict(set)
+          for r in runs:
+              if r["c"]:
+                  by_sha[r["sha"]].add(r["c"])
+          flapped = [s[:10] for s, cs in by_sha.items() if "failure" in cs and "success" in cs]
+          json.dump(flapped, open("flapped_shas.json", "w"))
+          print(f"history: {len(flapped)} commit(s) both passed and failed")
+          PY
+
+          # (b) Active reruns: run the suite N times capturing JUnit XML, then
+          #     flag any test that is not consistent across runs.
+          rc=0
+          for i in $(seq 1 "$RERUNS"); do
+            uv run pytest tests/unit tests/integration \
+              --junitxml="junit-$i.xml" -p no:cacheprovider -q || rc=1
+          done
+
+          python - <<'PY'
+          import glob, json, xml.etree.ElementTree as ET
+          from collections import defaultdict
+          outcomes = defaultdict(set)  # test id -> {"pass","fail"}
+          files = sorted(glob.glob("junit-*.xml"))
+          for f in files:
+              root = ET.parse(f).getroot()
+              for tc in root.iter("testcase"):
+                  tid = f'{tc.get("classname")}::{tc.get("name")}'
+                  failed = any(c.tag in ("failure", "error") for c in tc)
+                  outcomes[tid].add("fail" if failed else "pass")
+          flaky = sorted(t for t, o in outcomes.items() if {"pass", "fail"} <= o)
+          json.dump({"reruns": len(files), "flaky": flaky}, open("flaky.json", "w"))
+          print(f"reruns: {len(files)}; flaky-by-rerun: {len(flaky)}")
+          for t in flaky:
+              print("  FLAKY:", t)
+          PY
+
+          COUNT=$(python -c "import json;print(len(json.load(open('flaky.json'))['flaky']))")
+          FLAPPED=$(python -c "import json;print(len(json.load(open('flapped_shas.json'))))")
+          if [ "$COUNT" != "0" ] || [ "$FLAPPED" != "0" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No flaky tests detected."
+          fi
+
+      - name: File / update flaky-test issues with Claude
+        if: steps.detect.outputs.found == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Filing issues from a prepared JSON is classification + formatting,
+          # not deep reasoning — routed to Haiku.
+          claude_args: '--model claude-haiku-4-5 --max-turns 15 --allowedTools "Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue create:*),Bash(gh issue comment:*),Read,Grep"'
+          prompt: |
+            The deterministic flake detector just ran on `main`. Its results are in
+            two files at the repo root:
+            - `flaky.json` — {"reruns": N, "flaky": ["Class::test", ...]} tests that
+              failed in some of N identical reruns but passed in others.
+            - `flapped_shas.json` — commit SHAs whose CI both passed and failed (a
+              re-run flipped them); supporting evidence only.
+
+            For EACH test id in `flaky.json`'s "flaky" list:
+            1. Search existing issues: `gh issue list --label flaky-test --search "<test id>" --state all`.
+            2. If an open issue already covers it, add a brief comment noting this
+               week's recurrence (how many of N reruns failed) — do NOT open a duplicate.
+            3. If none exists, open one issue titled exactly `[Flaky] <test id>` with
+               label `flaky-test`. Body: the rerun failure ratio, the test's file
+               path (Grep/Read to confirm it), and a one-paragraph hypothesis of the
+               likely cause (timing, ordering, shared state, real clock/random use).
+               Do NOT propose or apply a fix — this is triage only.
+
+            If `flaky.json`'s "flaky" list is empty but `flapped_shas.json` is not,
+            open (or update) a single issue `[Flaky] CI history shows intermittent
+            failures` summarizing the flapped commits so a human can investigate.
+
+            Keep every issue/comment concise. Never edit code, never open a PR.
