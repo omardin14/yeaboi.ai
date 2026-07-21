@@ -1,19 +1,21 @@
-# Feedback remediation — nightly Agent-SDK triage of GitHub issues.
+# Feedback remediation — nightly triage of new GitHub issues.
 #
-# The Step-4 (AI-native) pilot: unlike the other Claude workflows (which use the
-# hosted claude-code-action), this runs a Python Claude Agent SDK script that
-# classifies fresh issues and routes actionable bugs into the existing
-# `claude-implement` pathway (which opens a normal PR through CI + review + human
-# merge). The SDK owns triage/orchestration/rate-limiting only.
+# Sibling to backlog-groomer, but with teeth: where the groomer only *nominates*
+# candidates, this one actually routes actionable bugs into the existing
+# `claude-implement` pathway (which opens a normal fix PR through CI + review +
+# human merge). It is the "Claude kicks off Claude" hand-off — composed through
+# the proven implement workflow rather than duplicating checkout/push logic.
 #
-# Auth: the Agent SDK authenticates with ANTHROPIC_API_KEY (NOT the App's
-# CLAUDE_CODE_OAUTH_TOKEN, which is only for claude-code-action). Add an
-# ANTHROPIC_API_KEY repo secret before enabling this. The Python SDK is
-# self-contained (no Claude Code CLI install needed).
+# Auth: runs on the hosted claude-code-action with the App's
+# CLAUDE_CODE_OAUTH_TOKEN — the SAME subscription-backed token as every other
+# Claude workflow here. (An earlier draft used the Python Claude Agent SDK, which
+# is forbidden from subscription auth and would have forced a metered
+# ANTHROPIC_API_KEY; this rewrite avoids that — no extra billing, no new secret.)
 #
-# Safety: `issues: write` only — cannot touch PRs or merge. Caps fixes per run,
-# idempotent via the `triaged` label, skips bot authors, and the workflow_dispatch
-# path defaults to dry-run. See automation/feedback_remediation/README.md.
+# Safety: `issues: write` only — it structurally cannot touch PRs or merge.
+# Idempotent via the `triaged` label cursor, caps `claude-implement` at 3/run,
+# skips bot authors, and the workflow_dispatch path defaults to dry-run (which
+# also drops all write tools, so a dry run physically cannot change anything).
 
 name: Feedback Remediation
 
@@ -35,33 +37,90 @@ concurrency:
 permissions:
   contents: read
   issues: write # label / comment / maintain the digest issue
+  id-token: write # claude-code-action OIDC
 
 jobs:
   triage:
     name: Triage new feedback issues
     runs-on: ubuntu-latest
+    env:
+      # Scheduled runs act for real; manual runs default to dry-run.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-
-      - uses: astral-sh/setup-uv@v7
-      - run: uv python install 3.11
-
-      - name: Triage
+      - name: Collect fresh issues (exclude bots + already-triaged)
+        id: collect
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          # Scheduled runs act for real; manual runs default to dry-run.
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
-          # Weekly digest on Mondays (day-of-week 1); harmless on other days.
-          RUN_DIGEST: ${{ github.event.schedule == '0 2 * * *' }}
         run: |
-          set -euo pipefail
-          ARGS=""
-          [ "$DRY_RUN" = "true" ] && ARGS="$ARGS --dry-run"
-          # Only build the digest on Mondays to avoid daily churn.
-          if [ "$(date -u +%u)" = "1" ]; then ARGS="$ARGS --digest"; fi
-          echo "running: triage.py$ARGS"
-          uv run automation/feedback_remediation/triage.py $ARGS
+          set -uo pipefail
+          # "Fresh feedback" = open, human-authored, none of the cursor /
+          # bookkeeping labels present. Mirrors the old triage SKIP sets.
+          gh issue list --state open --limit 200 \
+            --json number,title,labels,author,createdAt,body \
+            --jq '[.[]
+              | select(.author.login != "github-actions[bot]")
+              | select(.author.login != "dependabot[bot]")
+              | select(([.labels[].name]
+                  | any(. == "triaged" or . == "groomer-report" or . == "flaky-test"
+                        or . == "ci-sentinel" or . == "ci-red-main")) | not)]' > issues.json
+          COUNT=$(python -c "import json;print(len(json.load(open('issues.json'))))")
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "::notice::$COUNT fresh issue(s) to triage (dry_run=$DRY_RUN)."
+
+      - name: Triage with Claude
+        if: steps.collect.outputs.count != '0'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # In a dry run, hand Claude ONLY read tools — it physically cannot edit,
+          # comment, or create, so "log the plan" is enforced, not just requested.
+          # A real run adds the issue-write verbs.
+          claude_args: >-
+            --model claude-sonnet-5 --max-turns 30 --allowedTools
+            "${{ env.DRY_RUN == 'true'
+              && 'Bash(gh issue list:*),Bash(gh issue view:*),Read'
+              || 'Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh issue create:*),Read' }}"
+          prompt: |
+            You are the feedback-remediation triager. The fresh open issues to
+            triage are in `issues.json` at the repo root (bot-authored and
+            already-`triaged` issues are excluded). The in-TUI feedback form files
+            issues with `[Bug]` / `[Feature]` / `[Improvement]` / `[Other]` title
+            prefixes and `type:*` / `area:*` labels — treat the title prefix as a
+            strong prior. Label vocabulary: type=bug/feature/improvement/other;
+            area=analysis, planning, standup, retro, performance, reporting, usage,
+            settings, general.
+
+            DRY RUN: ${{ env.DRY_RUN }}. If this is `true`, DO NOT change anything —
+            print, for each issue, the labels/comment you WOULD apply and why, then
+            stop. (You have only read tools, so writes will fail anyway.)
+
+            For each issue, on a REAL run:
+            1. Cursor — add the `triaged` label (this is what stops it being
+               re-processed tomorrow). Always do this, whatever the outcome below.
+            2. Normalize — add a missing `type:*` label (infer from the title
+               prefix) and a missing `area:*` label (infer from the body). Never
+               remove existing labels.
+            3. Route by your classification:
+               - bug, actionable, and specific enough to implement -> add
+                 `claude-implement` so the implement workflow opens a fix PR, BUT
+                 apply it to AT MOST 3 issues this run (the most clearly actionable
+                 ones). Any further actionable bugs get `feedback:fix-queued`
+                 instead (they wait for a future run).
+               - feature request -> `feature-candidate` (a human green-lights it).
+               - question / too vague to act on -> post ONE comment asking for the
+                 specific missing detail, then add `feedback:needs-info`.
+               - not actionable feedback / noise -> `feedback:noise`. NEVER close
+                 an issue.
+
+            Be conservative with `claude-implement`: only well-specified,
+            self-contained bugs where the fix is obvious. When unsure between
+            implement and queue, queue it.
+
+            DIGEST: if today is Monday (UTC) — check with `date -u +%u` returning 1
+            — also create-or-update ONE issue titled exactly `Feedback digest`
+            (find it with `gh issue list --search "Feedback digest in:title"
+            --state open`). Body: counts by outcome this run, the issues sent to
+            `claude-implement`, and the `feedback:fix-queued` backlog. On other
+            days, skip the digest. Skip entirely on a dry run.
