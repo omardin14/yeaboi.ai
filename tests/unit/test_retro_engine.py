@@ -147,12 +147,33 @@ class TestCarriedActionItemsForSession:
         assert [c.text for c in carried] == ["ship the docs"]  # blank + non-action dropped
         assert carried[0].status == "pending" and carried[0].origin == "carryover"
 
-    def test_skips_the_current_session(self, tmp_path):
-        # A reopen of the same session must not seed a retro from its own just-closed run.
+    def test_carries_manually_added_web_action_item(self, tmp_path):
+        # A teammate typed an action item straight into the board (origin="web"),
+        # never clicking Generate. Carry-forward is origin-agnostic, so it must still
+        # carry forward next sprint — this pins that against an "AI-only" refactor.
+        db = tmp_path / "sessions.db"
+        report = RetroReport(
+            session_id="prev",
+            date="2026-07-01",
+            cards=(RetroCard(id="m1", grid="action_items", text="update the runbook", author="Sam", origin="web"),),
+        )
+        with RetroStore(db) as store:
+            store.record_run(report)
+        carried = engine.carried_action_items_for_session("cur", db_path=db)
+        assert [c.text for c in carried] == ["update the runbook"]
+        assert carried[0].status == "pending" and carried[0].origin == "carryover"
+
+    def test_reopen_same_session_carries_forward(self, tmp_path):
+        # Closing a retro and reopening it under the SAME session must carry the
+        # just-closed run's action items forward. Regression: the old "skip current
+        # session" guard ate the only prior report whenever retros reused the latest
+        # quick session, so nothing ever carried.
         db = tmp_path / "sessions.db"
         with RetroStore(db) as store:
             store.record_run(_prior_report("same-session"))
-        assert engine.carried_action_items_for_session("same-session", db_path=db) == ()
+        carried = engine.carried_action_items_for_session("same-session", db_path=db)
+        assert [c.text for c in carried] == ["ship the docs"]
+        assert carried[0].status == "pending" and carried[0].origin == "carryover"
 
     def test_project_first_prefers_matching_project(self, tmp_path):
         db = tmp_path / "sessions.db"

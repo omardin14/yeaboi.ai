@@ -140,6 +140,12 @@ class TestThemesAndActionItems:
         older = RetroReport(cards=(_ac("Fix CI"),))
         assert _dedup_action_items([newest, older]) == ("Fix CI",)
 
+    def test_manual_web_action_item_reaches_planning_feed(self):
+        # A human-authored action item (origin="web", never AI-generated) must feed
+        # Planning like any other — _dedup_action_items is origin-agnostic.
+        report = RetroReport(cards=(RetroCard(grid="action_items", text="Update runbook", author="Sam", origin="web"),))
+        assert "Update runbook" in _dedup_action_items([report])
+
     def test_kept_open_carried_item_not_in_grid_is_emitted(self):
         # "Carried Over" recorded only in carried_action_items (team never clicked
         # Generate to re-add it to the grid) must still reach the Planning feed.

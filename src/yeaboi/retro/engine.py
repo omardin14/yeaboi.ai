@@ -41,8 +41,11 @@ def carried_action_items_for_session(
     different session and a same-session lookup would almost always come up empty.
     We reuse ``RetroStore.get_recent_reports(limit, project_name)`` (the same
     cross-session, project-first primitive ``ceremony_history`` uses) and take the most
-    recent report from a *different* session. ``session_id`` is passed only to skip the
-    current session; ``project_name`` biases toward the same project's retros.
+    recent recorded report. This intentionally carries forward across a reopen of the
+    *same* session (close a retro, open it again → last run's actions appear) — at
+    board-open the current run isn't recorded yet, so the newest report is always a
+    genuinely prior retro. ``project_name`` biases toward the same project's retros;
+    ``session_id`` is used only for logging.
 
     Graceful — returns an empty tuple when there's no prior retro or on any read error
     (never raises).
@@ -63,9 +66,15 @@ def carried_action_items_for_session(
         logger.warning("retro: could not load carried action items (session=%s): %s", session_id, exc)
         return ()
 
-    # The current session isn't recorded yet at board-open, but guard against a reopen
-    # so we never seed a retro from its own just-closed run.
-    prior_report = next((r for r in reports if r.session_id != session_id), None)
+    # "The retro before this one" = the most recent recorded report (project-first via
+    # get_recent_reports). At board-open the current run is NOT recorded yet, so the
+    # newest report is always a genuinely prior retro — INCLUDING a reopen of the same
+    # session, which is the common case: close a retro, open it again, and last run's
+    # actions should carry forward. We deliberately do NOT skip same-session reports;
+    # that guard used to eat the only prior report whenever retros reused the latest
+    # quick session (each retro auto-creates a session that stays "latest"), so nothing
+    # ever carried. ``session_id`` is kept for logging/telemetry only.
+    prior_report = reports[0] if reports else None
     if prior_report is None:
         return ()
     # Source = last retro's action_items grid PLUS any items it explicitly kept open in
