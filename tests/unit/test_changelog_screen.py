@@ -66,6 +66,15 @@ class TestBuildChangelogScreen:
     def test_area_tags_rendered(self):
         out = _render(_build_changelog_screen(_entries(), width=100, height=40))
         assert "analysis" in out
+
+    def test_copy_button_and_message(self):
+        out = _render(
+            _build_changelog_screen(
+                _entries(), width=100, height=40, actions=["Copy", "Back"], message="Copied to clipboard"
+            )
+        )
+        assert "Copy" in out
+        assert "Copied to clipboard" in out
         assert "settings" in out
 
     def test_empty_entries_placeholder(self):

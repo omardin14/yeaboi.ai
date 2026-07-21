@@ -99,3 +99,29 @@ def load_changelog() -> list[ChangelogEntry]:
     entries = [entry for entry in (_parse_entry(raw) for raw in raw_entries) if entry is not None]
     logger.debug("changelog loaded: %d entries", len(entries))
     return entries
+
+
+def build_changelog_text(entries: list[ChangelogEntry] | None = None) -> str:
+    """Render the changelog as a copy-pasteable Markdown report.
+
+    Powers the Usage-style "Copy to clipboard" action on the Changelog page (it has
+    no on-disk export). Loads the bundled changelog when ``entries`` is not supplied.
+    """
+    if entries is None:
+        entries = load_changelog()
+    if not entries:
+        return "# yeaboi — Changelog\n\n(no changelog available)\n"
+
+    lines: list[str] = ["# yeaboi — Changelog", ""]
+    for e in entries:
+        header = f"## {e.version}"
+        if e.date:
+            header += f" — {e.date}"
+        lines.append(header)
+        if e.summary:
+            lines.append("")
+            lines.append(e.summary)
+        for h in e.highlights:
+            lines.append(f"- {h.text}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"

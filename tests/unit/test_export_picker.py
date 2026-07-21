@@ -35,28 +35,33 @@ def _clean_env(monkeypatch):
 
 
 class TestAvailableDestinations:
-    def test_files_only_by_default(self):
-        assert available_destinations() == ["files"]
+    def test_files_and_copy_by_default(self):
+        # Files + Copy are always available (no config needed).
+        assert available_destinations() == ["files", "copy"]
 
     def test_notion_when_token_set(self, monkeypatch):
         monkeypatch.setenv("NOTION_TOKEN", "ntn_x")
-        assert available_destinations() == ["files", "notion"]
+        assert available_destinations() == ["files", "copy", "notion"]
 
     def test_confluence_via_own_creds(self, monkeypatch):
         monkeypatch.setenv("CONFLUENCE_BASE_URL", "https://x.atlassian.net")
         monkeypatch.setenv("CONFLUENCE_EMAIL", "a@b.c")
         monkeypatch.setenv("CONFLUENCE_API_TOKEN", "tok")
-        assert available_destinations() == ["files", "confluence"]
+        assert available_destinations() == ["files", "copy", "confluence"]
 
     def test_confluence_via_jira_fallback(self, monkeypatch):
         monkeypatch.setenv("JIRA_BASE_URL", "https://x.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "a@b.c")
         monkeypatch.setenv("JIRA_API_TOKEN", "tok")
-        assert available_destinations() == ["files", "confluence"]
+        assert available_destinations() == ["files", "copy", "confluence"]
 
     def test_partial_confluence_creds_not_offered(self, monkeypatch):
         monkeypatch.setenv("JIRA_BASE_URL", "https://x.atlassian.net")
-        assert available_destinations() == ["files"]
+        assert available_destinations() == ["files", "copy"]
+
+    def test_copy_is_always_present(self, monkeypatch):
+        monkeypatch.setenv("NOTION_TOKEN", "ntn_x")
+        assert "copy" in available_destinations()
 
 
 class TestPickerScreen:
@@ -210,8 +215,8 @@ class TestPickerLoop:
         assert live.frames >= 1
 
     def test_back_returns_none(self):
-        # Files is the only destination → sel 1 is Back.
-        result, _ = _run(["right", "enter"])
+        # Destinations are [Files, Copy] → sel 2 is Back.
+        result, _ = _run(["right", "right", "enter"])
         assert result is None
 
     def test_esc_returns_none(self):
@@ -221,20 +226,21 @@ class TestPickerLoop:
     def test_notion_selectable_with_exports_page(self, monkeypatch):
         monkeypatch.setenv("NOTION_TOKEN", "ntn_x")
         monkeypatch.setenv("NOTION_EXPORT_PARENT_PAGE_ID", "pg1")
-        result, _ = _run(["right", "enter"])
+        # [Files, Copy, Notion] → Notion is sel 2.
+        result, _ = _run(["right", "right", "enter"])
         assert result == "notion"
 
     def test_notion_selectable_with_root_page_only(self, monkeypatch):
         # No dedicated exports page — the root page from setup is enough.
         monkeypatch.setenv("NOTION_TOKEN", "ntn_x")
         monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root1")
-        result, _ = _run(["right", "enter"])
+        result, _ = _run(["right", "right", "enter"])
         assert result == "notion"
 
     def test_notion_without_any_page_warns_and_stays(self, monkeypatch):
         monkeypatch.setenv("NOTION_TOKEN", "ntn_x")  # integrated, but no page at all
         # Enter on Notion → warning; any key clears it; back to Files; Enter → files.
-        result, _ = _run(["right", "enter", "x", "left", "enter"])
+        result, _ = _run(["right", "right", "enter", "x", "left", "left", "enter"])
         assert result == "files"
 
     def test_warning_survives_idle_timeout_ticks(self, monkeypatch):
@@ -247,7 +253,7 @@ class TestPickerLoop:
         ate the warning).
         """
         monkeypatch.setenv("NOTION_TOKEN", "ntn_x")  # integrated, but no page at all
-        result, _ = _run(["right", "enter", "", "", "enter", "left", "enter"])
+        result, _ = _run(["right", "right", "enter", "", "", "enter", "left", "left", "enter"])
         assert result == "files"
 
     def test_idle_ticks_do_not_move_selection(self):
@@ -259,7 +265,7 @@ class TestPickerLoop:
         monkeypatch.setenv("JIRA_BASE_URL", "https://x.atlassian.net")
         monkeypatch.setenv("JIRA_EMAIL", "a@b.c")
         monkeypatch.setenv("JIRA_API_TOKEN", "tok")
-        result, _ = _run(["right", "enter", "x", "esc"])
+        result, _ = _run(["right", "right", "enter", "x", "esc"])
         assert result is None
 
     def test_confluence_selectable_with_space(self, monkeypatch):
@@ -267,15 +273,17 @@ class TestPickerLoop:
         monkeypatch.setenv("JIRA_EMAIL", "a@b.c")
         monkeypatch.setenv("JIRA_API_TOKEN", "tok")
         monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "TEAM")
-        result, _ = _run(["right", "enter"])
+        result, _ = _run(["right", "right", "enter"])
         assert result == "confluence"
 
     def test_extra_options_returned_lowercased(self):
-        result, _ = _run(["right", "enter"], extra_options=["Jira"])
+        # [Files, Copy, Jira] → Jira is sel 2.
+        result, _ = _run(["right", "right", "enter"], extra_options=["Jira"])
         assert result == "jira"
 
     def test_azure_devops_maps_to_azdevops(self):
-        result, _ = _run(["right", "right", "enter"], extra_options=["Jira", "Azure DevOps"])
+        # [Files, Copy, Jira, Azure DevOps] → Azure DevOps is sel 3.
+        result, _ = _run(["right", "right", "right", "enter"], extra_options=["Jira", "Azure DevOps"])
         assert result == "azdevops"
 
     def test_open_setup_configures_and_export_proceeds(self, monkeypatch):
@@ -287,24 +295,24 @@ class TestPickerLoop:
             calls.append(True)
             monkeypatch.setenv("NOTION_ROOT_PAGE_ID", "root1")
 
-        # Enter on Notion → warning with buttons; Enter on "Open Setup" → configured → "notion".
-        result, _ = _run(["right", "enter", "enter"], open_setup=_open_setup)
+        # Enter on Notion (sel 2) → warning with buttons; Enter on "Open Setup" → configured → "notion".
+        result, _ = _run(["right", "right", "enter", "enter"], open_setup=_open_setup)
         assert result == "notion"
         assert calls == [True]
 
     def test_open_setup_still_unconfigured_stays_in_picker(self, monkeypatch):
         monkeypatch.setenv("NOTION_TOKEN", "ntn_x")
         # Open Setup but don't configure → back to the picker; Esc exits.
-        result, _ = _run(["right", "enter", "enter", "esc"], open_setup=lambda: None)
+        result, _ = _run(["right", "right", "enter", "enter", "esc"], open_setup=lambda: None)
         assert result is None
 
     def test_warning_back_button_skips_setup(self, monkeypatch):
         monkeypatch.setenv("NOTION_TOKEN", "ntn_x")
         calls = []
-        # Warning up → right selects Back → Enter dismisses without opening Setup;
-        # left back to Files → Enter exports files.
+        # Warning up (Notion=sel 2) → right selects Back → Enter dismisses without
+        # opening Setup; left,left back to Files → Enter exports files.
         result, _ = _run(
-            ["right", "enter", "right", "enter", "left", "enter"],
+            ["right", "right", "enter", "right", "enter", "left", "left", "enter"],
             open_setup=lambda: calls.append(True),
         )
         assert result == "files"
@@ -317,7 +325,7 @@ class TestPickerLoop:
             monkeypatch.setenv("NOTION_EXPORT_PARENT_PAGE_ID", "pg1")
 
         # Idle "" ticks while the warning is up must not press or move anything.
-        result, _ = _run(["right", "enter", "", "", "enter"], open_setup=_open_setup)
+        result, _ = _run(["right", "right", "enter", "", "", "enter"], open_setup=_open_setup)
         assert result == "notion"
 
     def test_timeout_typeerror_fallback(self):

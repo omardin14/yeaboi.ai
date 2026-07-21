@@ -155,6 +155,16 @@ CAPABILITIES: dict[str, dict] = {
         "cli": Exempt("interactive source picker + intake handoff; a headless roadmap path is a tracked gap"),
         "skill": Exempt("no plugin skill yet — tracked follow-up gap"),
     },
+    "anonymize": {
+        # Post-processing action, not a mode of its own: an "Anonymize" button on every
+        # mode's result screen masks the already-rendered output. The engine + MCP tool
+        # give it real headless reach; the TUI-card/CLI/skill surfaces are deliberate gaps.
+        "engines": {("yeaboi.anonymize.engine", "run_anonymize")},
+        "mcp_tools": {"anonymize_text"},
+        "tui_mode": Exempt("an action button on every mode's result screen, not a _MODE_CARDS entry"),
+        "cli": Exempt("headless callers anonymize via the anonymize_text MCP tool"),
+        "skill": Exempt("post-processing action, not a guided workflow"),
+    },
     "usage": {
         "engines": Exempt("TUI utility page — reads the local token_usage table"),
         "mcp_tools": {"usage_get"},
@@ -189,6 +199,7 @@ PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "perf_one_on_one_complete": ("yeaboi.performance.engine", "complete_one_on_one"),
     "perf_six_month_review": ("yeaboi.performance.engine", "run_six_month_review"),
     "team_analyze": ("yeaboi.analysis.engine", "run_team_analysis"),
+    "anonymize_text": ("yeaboi.anonymize.engine", "run_anonymize"),
 }
 
 # Injection/test seams that are never exposed on any wire surface.

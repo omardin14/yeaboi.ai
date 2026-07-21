@@ -60,10 +60,16 @@ from yeaboi.ui.shared._components import (
 logger = logging.getLogger(__name__)
 
 DEST_FILES = "files"
+DEST_COPY = "copy"
 DEST_NOTION = "notion"
 DEST_CONFLUENCE = "confluence"
 
-_LABELS = {DEST_FILES: "Files", DEST_NOTION: "Notion", DEST_CONFLUENCE: "Confluence"}
+_LABELS = {
+    DEST_FILES: "Files",
+    DEST_COPY: "Copy to clipboard",
+    DEST_NOTION: "Notion",
+    DEST_CONFLUENCE: "Confluence",
+}
 
 # Per-mode (title builder, theme) so the picker inherits the look of the page
 # that opened it — same palette rules as every other screen.
@@ -84,7 +90,9 @@ def available_destinations() -> list[str]:
     Confluence when base URL + email + token all resolve (the getters already
     fall back to the JIRA_* credentials, so a Jira-only setup counts).
     """
-    dests = [DEST_FILES]
+    # Files + Copy are always available (no config); Copy sits second so it's a
+    # prominent, zero-setup way to pull the data out of the terminal.
+    dests = [DEST_FILES, DEST_COPY]
     if get_notion_token():
         dests.append(DEST_NOTION)
     if get_confluence_base_url() and get_confluence_email() and get_confluence_token():
@@ -99,6 +107,8 @@ def _dest_description(key: str, label: str, mode: str) -> str:
 
         base = str(EXPORTS_DIR).replace(str(os.path.expanduser("~")), "~", 1)
         return f"Markdown + HTML → {base}/{mode}"
+    if key == DEST_COPY:
+        return "Copy the Markdown to your clipboard"
     if key == DEST_NOTION:
         # The exports page (raw env — the getter already folds in the root-page
         # fallback) vs the 🤙 yeaboi container, so the hint names the target.

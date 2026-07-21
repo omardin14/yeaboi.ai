@@ -123,6 +123,11 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Re-analyze": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Change Source": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
     "Select": ("rgb(70,100,180)", "rgb(100,140,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Anonymize action (available on every mode's result screen) — a slate/violet
+    # "shield" tone, distinct from the blue Export family; Copy sits beside it.
+    "Anonymize": ("rgb(120,110,170)", "rgb(165,150,220)", "rgb(44,42,54)", "rgb(54,52,64)"),
+    "Copy": ("rgb(120,110,170)", "rgb(165,150,220)", "rgb(44,42,54)", "rgb(54,52,64)"),
+    "Adjust": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
 }
 _BTN_DEFAULT = ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)")
 _BTN_MIN_W = 12

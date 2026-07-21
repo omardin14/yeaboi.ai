@@ -88,6 +88,12 @@ def _plan_export_flow(live, console, key_fn, graph_state: dict, stage: str) -> N
         logger.info("Exported: HTML=%s, MD=%s", html_path, md_path)
         body = f"HTML  {html_path}\nMD    {md_path}"
         subtitle = "Exported (HTML + MD)"
+    elif dest == "copy":
+        from yeaboi.clipboard import copy_markdown_status
+        from yeaboi.repl._io import build_plan_markdown
+
+        subtitle = copy_markdown_status(build_plan_markdown(graph_state))
+        body = "Sprint plan Markdown copied — paste it anywhere."
     else:
         from yeaboi.export_targets import publish_markdown
         from yeaboi.repl._io import build_plan_markdown
@@ -1223,6 +1229,11 @@ def _phase_pipeline(
         else:
             actions = ["Accept", "Edit", "Export"]
 
+        # The full plan (analysis → sprints) exists once the sprint stage renders,
+        # so offer Anonymize there — a masked copy for public sharing.
+        if is_sprint_stage:
+            actions.append("Anonymize")
+
         # Add tracker sync buttons to stages that produce syncable artifacts.
         # When the user chose a preferred tracker at intake (both were configured),
         # only show that tracker's button. Otherwise show all configured trackers.
@@ -1523,6 +1534,33 @@ def _phase_pipeline(
                             warning_text=cap_warning_text if is_sprint_stage else "",
                             scroll_meta=_scroll_meta,
                         )
+                    )
+                elif action == "Anonymize":
+                    logger.info("Review decision: Anonymize for %s", pending)
+                    from yeaboi.repl._io import build_plan_markdown
+                    from yeaboi.ui.mode_select import _anonymize_flow
+                    from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+
+                    _plan_name = getattr(graph_state.get("project_analysis"), "project_name", "") or ""
+
+                    def _plan_anon_document() -> tuple[str, str]:
+                        title = f"Sprint Plan — {_plan_name}" if _plan_name else "Sprint Plan"
+                        return title, build_plan_markdown(graph_state)
+
+                    # The pipeline review reads keys with a blocking _key() (no timeout),
+                    # so drive the flow in blocking mode; its worker-thread progress loop
+                    # animates without polling keys.
+                    _anonymize_flow(
+                        console,
+                        live,
+                        _key,
+                        0.05,
+                        False,
+                        source_mode="planning",
+                        theme=PLANNING_THEME,
+                        title=planning_title(),
+                        get_document=_plan_anon_document,
+                        project_name=_plan_name,
                     )
                 elif action in ("Jira", "Azure DevOps"):
                     _btn_tracker = "jira" if action == "Jira" else "azdevops"

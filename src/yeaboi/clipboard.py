@@ -37,6 +37,56 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 10
 
 
+def copy_text(text: str) -> bool:
+    """Write ``text`` to the OS clipboard. Returns True on success, False otherwise.
+
+    Mirrors the read-side helper-probing here: ``pbcopy`` on macOS, ``wl-copy``
+    (Wayland) or ``xclip`` (X11) on Linux — probed with ``shutil.which`` and run with
+    the same hard timeout. Like the image reader, it never raises into the TUI frame
+    loop; a missing helper or any failure just returns False so the caller can show a
+    "couldn't copy" notice and move on.
+    """
+    if not text:
+        return False
+    if sys.platform == "darwin":
+        candidates: list[list[str]] = [["pbcopy"]]
+    elif sys.platform.startswith("linux"):
+        candidates = [["wl-copy"], ["xclip", "-selection", "clipboard"]]
+    else:
+        logger.warning("clipboard text copy unsupported on platform: %s", sys.platform)
+        return False
+
+    data = text.encode("utf-8")
+    for cmd in candidates:
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            proc = subprocess.run(cmd, input=data, capture_output=True, timeout=_TIMEOUT_SECONDS)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+            logger.warning("clipboard copy helper %s failed: %s", cmd[0], exc)
+            continue
+        if proc.returncode == 0:
+            logger.info("clipboard text copied: %d chars via %s", len(text), cmd[0])
+            return True
+        logger.warning("clipboard copy helper %s exited %d", cmd[0], proc.returncode)
+    logger.info("no clipboard copy helper available")
+    return False
+
+
+def copy_markdown_status(text: str) -> str:
+    """Copy ``text`` to the clipboard and return a user-facing status message.
+
+    Thin wrapper over :func:`copy_text` shared by every "Copy to clipboard"
+    surface (the export picker's copy destination + the Usage/Changelog pages):
+    keeps the success/failure wording in one place. Never raises.
+    """
+    if not (text or "").strip():
+        return "Nothing to copy"
+    if copy_text(text):
+        return "Copied to clipboard"
+    return "Couldn't copy — no clipboard helper available (see logs)"
+
+
 def read_clipboard_image() -> tuple[bytes, str] | None:
     """Return ``(image_bytes, mime_type)`` from the OS clipboard, or ``None``.
 

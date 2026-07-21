@@ -531,6 +531,31 @@ class DeliveryReport:
 
 
 @dataclass(frozen=True)
+class AnonymizedOutput:
+    """A privacy-masked copy of a mode's generated output, ready for public sharing.
+
+    Produced by anonymize/engine.py:run_anonymize() — a post-processing step that
+    takes the already-rendered Markdown any mode's Export button emits and masks the
+    sensitive data (personal/team/project names, internal tool names, the company
+    identity, URLs/emails/IDs) so a real plan/standup/report can be pasted into a
+    README, website, or post. Follows the parse → fallback convention: a deterministic
+    seed pass (known company terms from config) runs first and always, then one LLM
+    call generalizes the masking; an LLM failure yields the seed-masked text plus a
+    warning, never a crash.
+
+    ``replacements`` pairs each original with its neutral placeholder — shown in the
+    TUI review screen so the user can spot false positives/negatives, but never
+    written to the exported/copied document (that would re-expose the originals).
+    """
+
+    anonymized_text: str = ""
+    replacements: tuple[tuple[str, str], ...] = ()  # (original, placeholder) — TUI review only
+    source_mode: str = ""  # which mode produced the input (for titling/logging)
+    warnings: tuple[str, ...] = ()
+    generated_at: str = ""
+
+
+@dataclass(frozen=True)
 class RoadmapProject:
     """One candidate project extracted from the team's quarterly roadmap.
 

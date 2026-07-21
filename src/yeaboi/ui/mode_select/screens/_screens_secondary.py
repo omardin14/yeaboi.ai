@@ -1536,11 +1536,14 @@ def _build_usage_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    actions: list[str] | None = None,
+    message: str = "",
 ) -> Panel:
     """Build the usage dashboard screen using shared TUI components.
 
     Shows API token usage, session history, provider info, and cost estimates.
     Uses USAGE_THEME (amber) with shared buttons, scrollbar, and viewport.
+    ``actions`` defaults to ["Back"]; the Copy button passes ["Copy", "Back"].
     """
     from yeaboi.ui.shared._components import USAGE_THEME, build_reveal_subtitle, usage_title
 
@@ -1549,6 +1552,9 @@ def _build_usage_screen(
     sub = build_reveal_subtitle("API usage and session history", sub_reveal, pad=_PAD)
 
     body_lines: list = []
+    if message:
+        body_lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
 
     def _heading(text: str) -> None:
         body_lines.append(Text(""))
@@ -1670,7 +1676,7 @@ def _build_usage_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(["Back"], action_sel)
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions or ["Back"], action_sel)
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable
@@ -1904,6 +1910,8 @@ def _build_changelog_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    actions: list[str] | None = None,
+    message: str = "",
 ) -> Panel:
     """Build the Changelog page: per-version AI-written notes with area tags.
 
@@ -1923,6 +1931,9 @@ def _build_changelog_screen(
     sub = build_reveal_subtitle("What's new in yeaboi", sub_reveal, pad=PAD)
 
     body_lines: list = []
+    if message:
+        body_lines.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
     wrap_w = max(24, width - len(PAD) - 12)
 
     def _wrapped(text: str, style: str, *, indent: str = "    ") -> None:
@@ -1990,7 +2001,7 @@ def _build_changelog_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(["Back"], action_sel)
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions or ["Back"], action_sel)
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable
@@ -3134,18 +3145,24 @@ def _build_standup_progress_screen(
     height: int = 24,
     elapsed: float = 0.0,
     anim_tick: float = 0.0,
+    theme=None,
+    title=None,
+    label: str = "Generating standup",
 ) -> Panel:
-    """Build the Daily Standup generation progress screen (spinner + phase steps).
+    """Build a worker-thread progress screen (spinner + phase steps).
 
-    Shown while ``run_standup`` runs on a worker thread — the pipeline makes
-    tracker + LLM network calls that can take many seconds, so the user must see
-    live progress instead of a frozen input box. Mirrors the analysis progress
-    screen's layout with STANDUP_THEME colours.
+    Shown while a long pipeline (``run_standup``, ``run_anonymize``, ...) runs on a
+    worker thread — it makes tracker + LLM network calls that can take many seconds,
+    so the user must see live progress instead of a frozen input box. Defaults to the
+    Daily Standup look; ``theme``/``title``/``label`` let any mode reuse the identical
+    screen with its own accent (this is "the consistent loading screen").
     """
     from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
 
-    theme = STANDUP_THEME
-    title = standup_title()
+    if theme is None:
+        theme = STANDUP_THEME
+    if title is None:
+        title = standup_title()
 
     _spinners = ["◐", "◓", "◑", "◒"]
     spinner = _spinners[int(anim_tick * 4) % len(_spinners)]
@@ -3153,7 +3170,7 @@ def _build_standup_progress_screen(
     time_str = f"{mins}:{secs:02d}" if mins > 0 else f"{secs}s"
 
     body: list = [
-        Text(_PAD + f"{spinner}  Generating standup", style=f"bold {theme.accent_bright}", justify="left"),
+        Text(_PAD + f"{spinner}  {label}", style=f"bold {theme.accent_bright}", justify="left"),
         Text(_PAD + f"   Elapsed: {time_str}", style=theme.dim, justify="left"),
         Text(""),
     ]
@@ -3172,6 +3189,110 @@ def _build_standup_progress_screen(
     body.extend(Text("") for _ in range(remaining))
 
     content = Group(Text(""), title, Text(""), *body)
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
+def _build_anonymize_review_screen(
+    anon_data: dict,
+    *,
+    theme,
+    title,
+    scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+) -> Panel:
+    """Build the Anonymize review screen — the masked text + what was replaced.
+
+    A post-processing review shown after ``run_anonymize`` completes, styled with the
+    *source mode's* theme + title so it reads as part of that mode. Follows the shared
+    Panel structure (title → subtitle → scrollable viewport → buttons).
+
+    anon_data keys: anonymized_text (str), replacements (list[(orig, placeholder)]),
+    warnings (list[str]), actions (list[str]), message (str transient status).
+    """
+    message = anon_data.get("message", "")
+    reps = anon_data.get("replacements", []) or []
+    warnings = anon_data.get("warnings", []) or []
+    text = anon_data.get("anonymized_text", "") or ""
+
+    sub_text = f"Anonymized · {len(reps)} item(s) masked — review before sharing"
+    sub = Text(PAD + sub_text, style=theme.accent_bright, justify="left")
+
+    actions = anon_data.get("actions") or ["Adjust", "Export", "Copy", "Back"]
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions, action_sel)
+
+    body_lines: list = []
+    if message:
+        body_lines.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
+    if warnings:
+        body_lines.append(Text(PAD + "⚠ Notices", style=theme.warn, justify="left"))
+        for w in warnings:
+            body_lines.append(Text(PAD + f"  • {w}", style=theme.warn, justify="left"))
+        body_lines.append(Text(""))
+
+    # The masked document — one Text per line so it scrolls cleanly.
+    if text.strip():
+        for line in text.split("\n"):
+            body_lines.append(Text(PAD + line, style=theme.value if line.startswith("#") else "white", justify="left"))
+    else:
+        body_lines.append(Text(PAD + "(nothing to show)", style=theme.muted, justify="left"))
+
+    # A compact "what was masked" summary at the end (originals shown here only —
+    # never written to the exported/copied document).
+    if reps:
+        body_lines.append(Text(""))
+        body_lines.append(Text(PAD + "What was masked (not exported):", style=theme.muted, justify="left"))
+        for original, placeholder in reps[:40]:
+            body_lines.append(Text(PAD + f"  {original}  →  {placeholder}", style=theme.dim, justify="left"))
+        if len(reps) > 40:
+            body_lines.append(Text(PAD + f"  … and {len(reps) - 40} more", style=theme.dim, justify="left"))
+
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    actual_scroll = min(scroll_offset, max_scroll)
+    if scroll_meta is not None:
+        publish_geometry(scroll_meta, max_scroll, viewport_h)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(show_header=False, show_edge=False, box=None, padding=0, pad_edge=False, expand=True)
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
     return Panel(
         content,
         border_style="white",

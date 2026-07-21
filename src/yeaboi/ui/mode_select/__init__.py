@@ -1577,11 +1577,213 @@ def _export_via_picker(
 
     doc = get_document()
     if isinstance(doc, str):
-        return doc
+        return doc  # error / nothing-to-export message — surface as-is (also the copy case)
     title, markdown = doc
+    if dest == "copy":
+        from yeaboi.clipboard import copy_markdown_status
+
+        return copy_markdown_status(markdown)
     from yeaboi.export_targets import publish_markdown
 
     return publish_markdown(dest, title=title, markdown=markdown).message
+
+
+_ANON_PICKER_MODES = {"planning", "analysis", "standup", "retro", "performance", "reporting"}
+
+
+def _anonymize_files_export(result, *, title: str, project_name: str) -> str:
+    """Write the masked copy to disk (Markdown + HTML); return a status message."""
+    from yeaboi.anonymize.export import export_anonymized
+
+    paths = export_anonymized(result, title=title, project_name=project_name)
+    return f"Exported anonymized copy to {paths['markdown'].parent}  (Markdown + HTML)"
+
+
+def _anonymize_flow(
+    console: Console,
+    live,
+    read_key,
+    frame_time,
+    supports_timeout,
+    *,
+    source_mode: str,
+    theme,
+    title,
+    get_document,
+    project_name: str = "",
+) -> str | None:
+    """Anonymize a mode's generated output, review it, then export / copy it.
+
+    A shared post-processing action wired to the **Anonymize** button on every mode's
+    result screen. ``get_document`` is the SAME callable the mode already passes to
+    Export — it returns ``(title, markdown)`` (or a plain error string). The masked
+    text can be re-run with a free-text adjustment ("also mask X" / "don't mask Y"),
+    exported through the normal Files/Notion/Confluence picker, or copied to the
+    clipboard for pasting into a README/post. Returns a status message for the caller
+    to show on the page, or None when nothing happened.
+
+    # See README: "Guardrails" — output masking for public sharing
+    """
+    import threading
+
+    from yeaboi.anonymize.engine import run_anonymize
+    from yeaboi.clipboard import copy_text
+    from yeaboi.ui.mode_select.screens._screens_secondary import (
+        _build_anonymize_review_screen,
+        _build_standup_progress_screen,
+    )
+
+    doc = get_document()
+    if isinstance(doc, str):
+        return doc  # nothing to anonymize / error — surface as-is
+    doc_title, markdown = doc
+
+    logger.info("anonymize: opened for mode=%s (%d chars)", source_mode, len(markdown or ""))
+
+    def _run(instruction: str):
+        """Run run_anonymize on a worker thread behind the consistent progress screen."""
+        progress: list[str] = ["Starting"]
+        result_box: list = [None]
+
+        def _worker() -> None:
+            try:
+                result_box[0] = run_anonymize(
+                    markdown,
+                    instruction=instruction,
+                    project_name=project_name,
+                    source_mode=source_mode,
+                    db_path=_ana_dbp,
+                    on_progress=progress.append,
+                )
+            except Exception as e:  # noqa: BLE001 — never crash the TUI; surface as a warning
+                logger.error("anonymize worker failed: %s", e, exc_info=True)
+                result_box[0] = e
+
+        thread = threading.Thread(target=_worker, name="anonymize", daemon=True)
+        thread.start()
+        start = time.monotonic()
+        while thread.is_alive():
+            elapsed = time.monotonic() - start
+            w, h = console.size
+            live.update(
+                _build_standup_progress_screen(
+                    list(progress),
+                    width=w,
+                    height=max(10, h - 1),
+                    elapsed=elapsed,
+                    anim_tick=elapsed,
+                    theme=theme,
+                    title=title,
+                    label="Anonymizing output",
+                )
+            )
+            time.sleep(1 / 30)
+        thread.join()
+        return result_box[0]
+
+    instruction = ""
+    result = _run(instruction)
+    if isinstance(result, Exception) or result is None:
+        return f"Anonymize failed: {result}" if result else "Anonymize failed (see logs)."
+
+    picker_mode = source_mode if source_mode in _ANON_PICKER_MODES else "planning"
+    last_status: str | None = None
+    scroll = 0
+    scroll_meta: dict = {}
+    sel = 0
+    message = ""
+    actions = ["Adjust", "Export", "Copy", "Back"]
+
+    def _render() -> None:
+        w, h = console.size
+        live.update(
+            _build_anonymize_review_screen(
+                {
+                    "anonymized_text": result.anonymized_text,
+                    "replacements": list(result.replacements),
+                    "warnings": list(result.warnings),
+                    "actions": actions,
+                    "message": message,
+                },
+                theme=theme,
+                title=title,
+                scroll_offset=scroll,
+                scroll_meta=scroll_meta,
+                width=w,
+                height=max(10, h - 1),
+                action_sel=sel,
+            )
+        )
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if k in SCROLL_KEYS:
+            _ns = coalesce_scroll(scroll, k, scroll_meta, read_key)
+            if _ns == scroll:
+                continue
+            scroll = _ns
+        elif k == "left":
+            sel = max(0, sel - 1)
+        elif k == "right":
+            sel = min(len(actions) - 1, sel + 1)
+        elif k in ("enter", " "):
+            act = actions[sel]
+            if act == "Back":
+                break
+            if act == "Adjust":
+                adj = _standup_read_line(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    prompt="Also mask …  ·  don't mask … (it's public/safe)",
+                    step="Anonymize — adjust what's masked",
+                    default="",
+                    theme=theme,
+                    title=title,
+                    box_rows=6,
+                )
+                if adj is not None and adj.strip():
+                    instruction = f"{instruction}\n{adj.strip()}".strip()
+                    logger.info("anonymize: re-running with adjustment (%d chars)", len(adj))
+                    new_result = _run(instruction)
+                    if isinstance(new_result, Exception) or new_result is None:
+                        message = "Adjust failed — keeping the previous version (see logs)."
+                    else:
+                        result = new_result
+                        scroll = 0
+                        message = "Re-masked with your adjustment."
+                _render()
+                continue
+            if act == "Export":
+                msg = _export_via_picker(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    mode=picker_mode,
+                    files_export=lambda: _anonymize_files_export(
+                        result, title=doc_title, project_name=project_name or source_mode
+                    ),
+                    get_document=lambda: (f"{doc_title} (anonymized)", result.anonymized_text),
+                )
+                if msg is not None:
+                    message = msg
+                    last_status = msg
+            elif act == "Copy":
+                if copy_text(result.anonymized_text):
+                    message = "Copied anonymized output to clipboard."
+                    last_status = message
+                else:
+                    message = "Couldn't copy — no clipboard helper available (see logs)."
+        elif k in ("esc", "q"):
+            break
+        _render()
+    logger.info("anonymize: closed for mode=%s", source_mode)
+    return last_status
 
 
 def _team_profile_export_flow(
@@ -1613,6 +1815,13 @@ def _team_profile_export_flow(
         md_path = export_team_profile_md(profile, examples=examples, sprint_names=sprint_names, ceremony=ceremony)
         body = f"HTML  {html_path}\nMD    {md_path}"
         subtitle = "Team profile exported (HTML + MD)"
+    elif dest == "copy":
+        from yeaboi.clipboard import copy_markdown_status
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        md = build_team_profile_markdown(profile, examples=examples, sprint_names=sprint_names, ceremony=ceremony)
+        subtitle = copy_markdown_status(md)
+        body = "Team profile Markdown copied — paste it anywhere."
     else:
         from yeaboi.export_targets import publish_markdown
         from yeaboi.paths import get_analysis_export_dir
@@ -2187,6 +2396,9 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
     )
     scroll = 0
     _scroll_meta: dict = {}
+    actions = ["Copy", "Back"]
+    sel = 0
+    message = ""
     anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
 
     def _render() -> None:
@@ -2201,9 +2413,11 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
                 scroll_meta=_scroll_meta,
                 width=w,
                 height=max(10, h - 1),
-                action_sel=0,
+                action_sel=sel,
                 shimmer_tick=elapsed,
                 sub_reveal=elapsed * _HEADER_SUB_SPEED,
+                actions=actions,
+                message=message,
             )
         )
 
@@ -2215,7 +2429,20 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
             if _ns == scroll:
                 continue
             scroll = _ns
-        elif k in ("enter", " ", "esc", "q"):  # single Back button
+        elif k == "left":
+            sel = max(0, sel - 1)
+        elif k == "right":
+            sel = min(len(actions) - 1, sel + 1)
+        elif k in ("enter", " "):
+            if actions[sel] == "Copy":
+                from yeaboi.changelog import build_changelog_text
+                from yeaboi.clipboard import copy_markdown_status
+
+                logger.info("changelog: Copy pressed")
+                message = copy_markdown_status(build_changelog_text(entries))
+            else:  # Back
+                break
+        elif k in ("esc", "q"):
             break
         _render()
     logger.info("changelog: page closed")
@@ -2533,7 +2760,7 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
     anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
 
     def _actions() -> list[str]:
-        return ["Generate", "Configure", "Back"] if view == "overview" else ["Back", "Export"]
+        return ["Generate", "Anonymize", "Configure", "Back"] if view == "overview" else ["Back", "Export", "Anonymize"]
 
     def _open_section() -> None:
         nonlocal view, scroll, sel, team_expanded
@@ -2647,6 +2874,24 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                 )
                 if msg is not None:  # None = user backed out of the picker
                     data = _collect_standup_data(message=msg)
+                _reset_to_overview()
+            elif act == "Anonymize":  # mask the report for public sharing
+                logger.info("standup: Anonymize pressed (session=%s)", session_id)
+                from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
+
+                msg = _anonymize_flow(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    source_mode="standup",
+                    theme=STANDUP_THEME,
+                    title=standup_title(),
+                    get_document=lambda: _standup_document(session_id, data),
+                    project_name=data.get("session_name", "") or session_id,
+                )
+                data = _collect_standup_data(message=msg if msg is not None else "")
                 _reset_to_overview()
             else:  # Configure — in-TUI themed input (stays inside Live)
                 try:
@@ -2878,7 +3123,11 @@ def _run_team_analysis_results(
     logger.info("Analysis results: showing overview for %s/%s", profile.source, profile.project_key)
 
     while True:
-        actions = ["Open", "Export", "Continue"] if view == "overview" else ["Back", "Export", "Continue"]
+        actions = (
+            ["Open", "Export", "Anonymize", "Continue"]
+            if view == "overview"
+            else ["Back", "Export", "Anonymize", "Continue"]
+        )
 
         w, h = console.size
         live.update(
@@ -2933,6 +3182,28 @@ def _run_team_analysis_results(
                     profile=profile,
                     examples=examples,
                     sprint_names=sprint_names,
+                )
+            elif act == "Anonymize":
+                logger.info("Analysis results: Anonymize pressed (view=%s)", view)
+                from yeaboi.ui.shared._components import ANALYSIS_THEME, analysis_title
+
+                def _analysis_anon_document() -> tuple[str, str]:
+                    from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+                    md = build_team_profile_markdown(profile, examples=examples, sprint_names=sprint_names)
+                    return f"Team Analysis — {profile.project_key}", md
+
+                _anonymize_flow(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    source_mode="analysis",
+                    theme=ANALYSIS_THEME,
+                    title=analysis_title(),
+                    get_document=_analysis_anon_document,
+                    project_name=profile.project_key or "",
                 )
             elif act == "Continue":
                 logger.info("Analysis results: continue to ticket generation")
@@ -3139,7 +3410,7 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
         "detail_title": "",
     }
     roster_actions = ["1:1 Prep", "1:1 Complete", "6mo Review", "Notes", "Export", "Back"]
-    detail_actions = ["Export", "Back"]
+    detail_actions = ["Export", "Anonymize", "Back"]
 
     def _data() -> dict:
         return {
@@ -3322,6 +3593,25 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                     )
                     if msg is not None:
                         state["message"] = msg
+                elif label == "Anonymize" and roster:
+                    engineer = roster[state["selected"]]
+                    logger.info("performance: Anonymize pressed in detail view for engineer=%s", engineer)
+                    from yeaboi.ui.shared._components import PERFORMANCE_THEME, performance_title
+
+                    msg = _anonymize_flow(
+                        console,
+                        live,
+                        read_key,
+                        frame_time,
+                        supports_timeout,
+                        source_mode="performance",
+                        theme=PERFORMANCE_THEME,
+                        title=performance_title(),
+                        get_document=lambda: _performance_document(engineer),
+                        project_name=engineer,
+                    )
+                    if msg is not None:
+                        state["message"] = msg
             elif k in ("esc", "q"):
                 state["view"] = "roster"
                 state["sel"], state["scroll"], state["message"] = 0, 0, ""
@@ -3406,7 +3696,7 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
         "sprint_checked": set(),
     }
     picker_actions = ["Generate Report", "Theme", "Back"]
-    detail_actions = ["Export", "Theme", "Back"]
+    detail_actions = ["Export", "Anonymize", "Theme", "Back"]
     sprint_actions = ["Generate Report", "Back"]
 
     def _actions() -> list[str]:
@@ -3672,6 +3962,27 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
                     state["sel"], state["scroll"], state["message"] = 0, 0, ""
                 elif label == "Export":
                     _export()
+                elif label == "Anonymize":
+                    report = state.get("report")
+                    if report is None:
+                        state["message"] = "Nothing to anonymize yet — generate a report first."
+                    else:
+                        from yeaboi.ui.shared._components import REPORTING_THEME, reporting_title
+
+                        msg = _anonymize_flow(
+                            console,
+                            live,
+                            read_key,
+                            frame_time,
+                            supports_timeout,
+                            source_mode="reporting",
+                            theme=REPORTING_THEME,
+                            title=reporting_title(),
+                            get_document=_export_document,
+                            project_name=report.project_name or "",
+                        )
+                        if msg is not None:
+                            state["message"] = msg
                 elif label == "Theme":
                     _cycle_theme()
             elif k in ("esc", "q"):
@@ -3841,7 +4152,7 @@ def _run_roadmap_page(
         "busy": False,  # True while the analysis worker runs (spinner-only screen)
     }
     source_actions = ["Select", "Back"]
-    results_actions = ["Plan This", "Re-analyze", "Change Source", "Back"]
+    results_actions = ["Plan This", "Re-analyze", "Change Source", "Anonymize", "Back"]
 
     def _actions() -> list[str]:
         return results_actions if state["view"] == "results" else source_actions
@@ -4083,6 +4394,32 @@ def _run_roadmap_page(
                 elif label == "Change Source":
                     state["view"] = "source"
                     state["sel"], state["message"] = 0, ""
+                elif label == "Anonymize":
+                    analysis = state["analysis"]
+                    if analysis is None:
+                        state["message"] = "Analyze this roadmap before anonymizing."
+                    else:
+                        logger.info("roadmap: Anonymize pressed")
+                        from yeaboi.roadmap.export import build_roadmap_markdown
+                        from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+
+                        def _roadmap_anon_document() -> tuple[str, str]:
+                            return "Roadmap", build_roadmap_markdown(analysis)
+
+                        msg = _anonymize_flow(
+                            console,
+                            live,
+                            read_key,
+                            frame_time,
+                            supports_timeout,
+                            source_mode="roadmap",
+                            theme=PLANNING_THEME,
+                            title=planning_title(),
+                            get_document=_roadmap_anon_document,
+                            project_name="roadmap",
+                        )
+                        if msg is not None:
+                            state["message"] = msg
             elif k in ("esc", "q"):
                 logger.info("roadmap page closed from results view")
                 return "done"
@@ -4258,8 +4595,8 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
         return "Share Remotely"
 
     def _actions() -> list[str]:
-        # Buttons: 0 Generate, 1 Share/Stop, 2 Export, 3 Close.
-        return ["Generate Action Items", _share_label(), "Export", "Close"]
+        # Buttons: 0 Generate, 1 Share/Stop, 2 Export, 3 Anonymize, 4 Close.
+        return ["Generate Action Items", _share_label(), "Export", "Anonymize", "Close"]
 
     def _data() -> dict:
         return {
@@ -4273,7 +4610,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
             "actions": _actions(),
         }
 
-    n_buttons = 4  # Generate Action Items, Share Remotely, Export, Close
+    n_buttons = 5  # Generate Action Items, Share Remotely, Export, Anonymize, Close
 
     try:
         _render(_data(), scroll, sel)
@@ -4289,7 +4626,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
             elif k == "right":
                 sel = min(n_buttons - 1, sel + 1)
             elif k in ("enter", " "):
-                if sel == 3:  # Close
+                if sel == 4:  # Close
                     break
                 if sel == 0:  # Generate Action Items (one LLM call, never raises)
                     logger.info("retro: Generate Action Items pressed (session=%s)", session_id)
@@ -4339,6 +4676,31 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                         mode="retro",
                         files_export=_retro_files,
                         get_document=_retro_document,
+                    )
+                    if msg is not None:
+                        message = msg
+                        scroll = 0
+                elif sel == 3:  # Anonymize → mask the board for public sharing
+                    logger.info("retro: Anonymize pressed (session=%s)", session_id)
+                    from yeaboi.retro.export import build_retro_markdown
+                    from yeaboi.ui.shared._components import RETRO_THEME, retro_title
+
+                    def _retro_anon_document() -> tuple[str, str]:
+                        report = board_to_report(board, sprint_name=sprint_name)
+                        name = project_name or session_name
+                        return f"Retro — {name}" if name else "Retro", build_retro_markdown(report)
+
+                    msg = _anonymize_flow(
+                        console,
+                        live,
+                        read_key,
+                        frame_time,
+                        supports_timeout,
+                        source_mode="retro",
+                        theme=RETRO_THEME,
+                        title=retro_title(),
+                        get_document=_retro_anon_document,
+                        project_name=project_name or session_name,
                     )
                     if msg is not None:
                         message = msg
@@ -5497,6 +5859,8 @@ def select_mode(
                 _usage_data = _collect_usage_data()
                 _u_scroll, _u_sel = 0, 0
                 _u_scroll_meta: dict = {}
+                _u_actions = ["Copy", "Back"]
+                _u_message = ""
                 _u_anim_start = time.monotonic()  # shimmer title + typewriter subtitle
                 w, h = console.size
                 live.update(
@@ -5509,6 +5873,8 @@ def select_mode(
                         action_sel=_u_sel,
                         shimmer_tick=0.0,
                         sub_reveal=0.0,
+                        actions=_u_actions,
+                        message=_u_message,
                     )
                 )
                 logger.info("Usage page opened")
@@ -5519,7 +5885,20 @@ def select_mode(
                         if _ns == _u_scroll:
                             continue
                         _u_scroll = _ns
-                    elif k in ("enter", " ", "esc", "q"):
+                    elif k == "left":
+                        _u_sel = max(0, _u_sel - 1)
+                    elif k == "right":
+                        _u_sel = min(len(_u_actions) - 1, _u_sel + 1)
+                    elif k in ("enter", " "):
+                        if _u_actions[_u_sel] == "Copy":
+                            from yeaboi.clipboard import copy_markdown_status
+                            from yeaboi.usage_export import build_usage_text
+
+                            logger.info("Usage: Copy pressed")
+                            _u_message = copy_markdown_status(build_usage_text(_usage_data))
+                        else:  # Back
+                            break
+                    elif k in ("esc", "q"):
                         break
                     w, h = console.size
                     _u_elapsed = time.monotonic() - _u_anim_start
@@ -5533,6 +5912,8 @@ def select_mode(
                             action_sel=_u_sel,
                             shimmer_tick=_u_elapsed,
                             sub_reveal=_u_elapsed * _HEADER_SUB_SPEED,
+                            actions=_u_actions,
+                            message=_u_message,
                         )
                     )
                 logger.info("Usage page closed")
@@ -5879,6 +6260,17 @@ def select_mode(
                                         _supports_timeout,
                                         project.id,
                                         _dest,
+                                    )
+                                elif _dest == "copy":
+                                    from yeaboi.clipboard import copy_markdown_status
+                                    from yeaboi.persistence import load_graph_state
+                                    from yeaboi.repl._io import build_plan_markdown
+
+                                    _gs = load_graph_state(project.id)
+                                    path = (
+                                        copy_markdown_status(build_plan_markdown(_gs))
+                                        if _gs
+                                        else "No saved state for this project"
                                     )
                                 else:  # notion / confluence
                                     from yeaboi.persistence import load_graph_state

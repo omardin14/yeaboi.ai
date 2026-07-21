@@ -46,6 +46,7 @@ EXPECTED_TOOLS = {
     "team_profile_get",
     "team_compare_plan_to_actuals",
     "team_analyze",
+    "anonymize_text",
 }
 
 
@@ -397,6 +398,32 @@ class TestEngineTools:
         assert payload["warnings"] == ["log skipped"]
         assert captured["sprint_count"] == 4
         assert captured["generate_samples"] is True
+
+    def test_anonymize_text(self, tmp_db, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_anonymize(text, **kwargs):
+            captured["text"] = text
+            captured.update(kwargs)
+            from yeaboi.agent.state import AnonymizedOutput
+
+            return AnonymizedOutput(
+                anonymized_text="[COMPANY] shipped the feature",
+                replacements=(("Acme", "[COMPANY]"),),
+                source_mode="reporting",
+                warnings=(),
+            )
+
+        monkeypatch.setattr("yeaboi.anonymize.engine.run_anonymize", fake_anonymize)
+        payload = call_tool(
+            "anonymize_text",
+            {"text": "Acme shipped the feature", "instruction": "mask everything", "source_mode": "reporting"},
+        )
+        assert payload["ok"] is True
+        assert "Acme" not in payload["data"]["anonymized_text"]
+        assert payload["data"]["replacements"] == [["Acme", "[COMPANY]"]]
+        assert captured["text"] == "Acme shipped the feature"
+        assert captured["instruction"] == "mask everything"
 
     def test_team_compare_plan_to_actuals(self, tmp_db, monkeypatch):
         from types import SimpleNamespace
