@@ -180,7 +180,7 @@ class TestStateEndpoint:
         srv, b = running_server
         b.add_card(grid="went_well", text="ci", author="Sam")
         data = json.load(_get(f"http://127.0.0.1:{srv.port}/api/state?token={srv.token}"))
-        assert set(data) == {"revision", "cards", "presence", "typing", "timer", "reaction_events"}
+        assert set(data) == {"revision", "cards", "carried", "presence", "typing", "timer", "reaction_events"}
 
     def test_state_forbidden_without_token(self, running_server):
         srv, _ = running_server

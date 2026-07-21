@@ -258,7 +258,7 @@ class TestStateSnapshot:
         b.toggle_reaction(c.id, "👍", "p1")
         b.heartbeat("p1", name="Sam", avatar="🤠", typing_grid="went_well")
         snap = b.state_snapshot()
-        assert set(snap) == {"revision", "cards", "presence", "typing", "timer", "reaction_events"}
+        assert set(snap) == {"revision", "cards", "carried", "presence", "typing", "timer", "reaction_events"}
         assert snap["cards"][0]["reactions"] == {"👍": 1}
         assert snap["presence"] and snap["typing"][0]["grid"] == "went_well"
 
@@ -312,3 +312,60 @@ class TestEditDeleteMove:
         c = b.add_card(grid="demos", text="x", author="a", pid="p1")
         assert b.move_card(c.id, "bogus", 0) is False
         assert b.move_card("nope", "demos", 0) is False
+
+
+class TestCarriedActionItems:
+    def _seed(self):
+        b = RetroBoard("s")
+        b.seed_carried(
+            [
+                RetroCard(id="k1", grid="action_items", text="ship docs", author="Sam", origin="ai"),
+                RetroCard(id="k2", grid="action_items", text="  ", author="AI"),  # blank dropped
+            ]
+        )
+        return b
+
+    def test_seed_resets_status_and_origin_and_drops_blanks(self):
+        b = self._seed()
+        carried = b.carried_snapshot()
+        assert [c.id for c in carried] == ["k1"]
+        assert carried[0].status == "pending" and carried[0].origin == "carryover"
+        # Preserves text/author from the prior report.
+        assert carried[0].text == "ship docs" and carried[0].author == "Sam"
+
+    def test_set_status_valid_and_bumps_revision(self):
+        b = self._seed()
+        rev = b.revision()
+        assert b.set_carried_status("k1", "done") is True
+        assert b.carried_snapshot()[0].status == "done"
+        assert b.revision() > rev
+
+    def test_set_status_rejects_unknown_status_or_missing_item(self):
+        b = self._seed()
+        assert b.set_carried_status("k1", "bogus") is False
+        assert b.set_carried_status("nope", "done") is False
+        assert b.carried_snapshot()[0].status == "pending"  # unchanged
+
+    def test_state_snapshot_includes_carried(self):
+        b = self._seed()
+        b.set_carried_status("k1", "carried_over")
+        snap = b.state_snapshot()
+        assert snap["carried"][0]["id"] == "k1"
+        assert snap["carried"][0]["status"] == "carried_over"
+
+    def test_board_to_report_carries_them_through(self):
+        b = self._seed()
+        b.set_carried_status("k1", "not_relevant")
+        report = board_to_report(b)
+        assert len(report.carried_action_items) == 1
+        assert report.carried_action_items[0].status == "not_relevant"
+
+    def test_add_carryover_cards_dedupes_against_grid(self):
+        b = RetroBoard("s")
+        b.add_ai_cards(["ship docs"])
+        added = b.add_carryover_cards(["ship docs", "new one"])
+        assert added == 1  # "ship docs" already present → skipped
+        texts = [c.text for c in b.cards_by_grid()["action_items"]]
+        assert texts == ["ship docs", "new one"]
+        carry = [c for c in b.cards_by_grid()["action_items"] if c.origin == "carryover"]
+        assert carry and carry[0].text == "new one"

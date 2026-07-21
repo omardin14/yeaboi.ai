@@ -2,8 +2,10 @@
 
 import json
 
+from yeaboi.agent.state import RetroCard, RetroReport
 from yeaboi.retro import engine
 from yeaboi.retro.board import RetroBoard
+from yeaboi.retro.store import RetroStore
 
 
 class _FakeResp:
@@ -52,6 +54,15 @@ class TestGenerateActionItems:
         msg = engine.generate_action_items(b)
         assert "Add some cards" in msg
         assert b.total() == 0
+
+    def test_empty_board_with_carried_is_a_true_noop(self):
+        # Generate on an empty board must NOT mutate the grid, even with carried items.
+        b = RetroBoard("s")
+        b.seed_carried([RetroCard(id="k1", grid="action_items", text="keep me")])
+        b.set_carried_status("k1", "carried_over")
+        msg = engine.generate_action_items(b)
+        assert "Add some cards" in msg
+        assert b.total() == 0  # nothing re-added to the grid
 
     def test_happy_path_with_llm(self, monkeypatch):
         b = self._seed()
@@ -110,3 +121,130 @@ class TestGenerateActionItems:
         msg = engine.generate_action_items(b)
         assert "failed" in msg.lower()
         assert len(b.cards_by_grid()["action_items"]) == 1
+
+
+def _prior_report(session_id="prev", project_name="", date="2026-07-01"):
+    return RetroReport(
+        session_id=session_id,
+        project_name=project_name,
+        date=date,
+        cards=(
+            RetroCard(id="a1", grid="action_items", text="ship the docs", author="AI", origin="ai"),
+            RetroCard(id="a2", grid="action_items", text="  ", author="AI"),  # blank
+            RetroCard(id="w1", grid="went_well", text="fast deploys", author="Sam"),  # not an action
+        ),
+    )
+
+
+class TestCarriedActionItemsForSession:
+    def test_carries_from_a_different_prior_session(self, tmp_path):
+        # The real-world case: the previous retro ran under a DIFFERENT session, so a
+        # same-session lookup would miss it. Cross-session sourcing must find it.
+        db = tmp_path / "sessions.db"
+        with RetroStore(db) as store:
+            store.record_run(_prior_report("prev-session"))
+        carried = engine.carried_action_items_for_session("brand-new-session", db_path=db)
+        assert [c.text for c in carried] == ["ship the docs"]  # blank + non-action dropped
+        assert carried[0].status == "pending" and carried[0].origin == "carryover"
+
+    def test_skips_the_current_session(self, tmp_path):
+        # A reopen of the same session must not seed a retro from its own just-closed run.
+        db = tmp_path / "sessions.db"
+        with RetroStore(db) as store:
+            store.record_run(_prior_report("same-session"))
+        assert engine.carried_action_items_for_session("same-session", db_path=db) == ()
+
+    def test_project_first_prefers_matching_project(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        with RetroStore(db) as store:
+            # Newer retro is a different project; older one matches "Alpha".
+            store.record_run(_prior_report("s-alpha", project_name="Alpha", date="2026-07-01"))
+            store.record_run(_prior_report("s-beta", project_name="Beta", date="2026-07-09"))
+        carried = engine.carried_action_items_for_session("cur", project_name="Alpha", db_path=db)
+        # Project-first ordering surfaces Alpha's retro even though Beta's is newer.
+        assert carried and all(c.origin == "carryover" for c in carried)
+
+    def test_no_history_returns_empty(self, tmp_path):
+        assert engine.carried_action_items_for_session("nope", db_path=tmp_path / "sessions.db") == ()
+
+    def test_carries_kept_open_items_not_in_grid(self, tmp_path):
+        # A prior retro marked an item "Carried Over" in its review column but never
+        # re-added it to the grid (no Generate click). It must still carry forward.
+        db = tmp_path / "sessions.db"
+        report = RetroReport(
+            session_id="prev",
+            date="2026-07-01",
+            cards=(RetroCard(id="g1", grid="action_items", text="grid item", origin="ai"),),
+            carried_action_items=(
+                RetroCard(id="k1", grid="action_items", text="kept for next sprint", status="carried_over"),
+                RetroCard(id="k2", grid="action_items", text="already done", status="done"),
+            ),
+        )
+        with RetroStore(db) as store:
+            store.record_run(report)
+        texts = [c.text for c in engine.carried_action_items_for_session("cur", db_path=db)]
+        assert "grid item" in texts
+        assert "kept for next sprint" in texts  # kept-open carried item survives
+        assert "already done" not in texts  # resolved item does not
+
+    def test_dedupes_grid_and_kept_open(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        report = RetroReport(
+            session_id="prev",
+            cards=(RetroCard(id="g1", grid="action_items", text="Ship API", origin="ai"),),
+            carried_action_items=(RetroCard(id="k1", grid="action_items", text="ship api", status="carried_over"),),
+        )
+        with RetroStore(db) as store:
+            store.record_run(report)
+        texts = [c.text for c in engine.carried_action_items_for_session("cur", db_path=db)]
+        assert texts == ["Ship API"]  # normalised-dedup keeps the grid wording once
+
+
+class TestCarryForwardInGenerate:
+    def _seed_with_carried(self, statuses):
+        b = RetroBoard("s", "Proj")
+        b.add_card(grid="didnt_go_well", text="flaky tests", author="Rae")
+        cards = [
+            RetroCard(id=f"k{i}", grid="action_items", text=text, origin="carryover", status=status)
+            for i, (text, status) in enumerate(statuses)
+        ]
+        b.seed_carried(cards)
+        # seed_carried resets status to pending; re-apply the intended statuses.
+        for c in cards:
+            b.set_carried_status(c.id, c.status)
+        return b
+
+    def _run(self, b, monkeypatch, captured):
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (True, ""))
+        monkeypatch.setattr("yeaboi.agent.llm.track_usage", lambda resp: None)
+
+        def _fake(**k):
+            def _invoke(self, messages):
+                captured["prompt"] = messages[0].content
+                return _FakeResp('{"action_items": ["fresh action"]}')
+
+            return type("L", (), {"invoke": _invoke})()
+
+        monkeypatch.setattr("yeaboi.agent.llm.get_llm", _fake)
+        return engine.generate_action_items(b)
+
+    def test_carried_over_item_reentered_and_done_excluded(self, monkeypatch):
+        b = self._seed_with_carried(
+            [("keep going", "carried_over"), ("already shipped", "done"), ("skip it", "not_relevant")]
+        )
+        captured: dict = {}
+        self._run(b, monkeypatch, captured)
+        action_texts = [c.text for c in b.cards_by_grid()["action_items"]]
+        # carried_over re-entered as a card; done/not_relevant NOT re-added.
+        assert "keep going" in action_texts
+        assert "already shipped" not in action_texts and "skip it" not in action_texts
+        carry = [c for c in b.cards_by_grid()["action_items"] if c.origin == "carryover"]
+        assert [c.text for c in carry] == ["keep going"]
+
+    def test_still_open_items_reach_prompt(self, monkeypatch):
+        b = self._seed_with_carried([("in progress work", "in_progress"), ("done thing", "done")])
+        captured: dict = {}
+        self._run(b, monkeypatch, captured)
+        # Open item is handed to the LLM as STILL_OPEN context; the resolved one isn't.
+        assert "in progress work" in captured["prompt"]
+        assert "done thing" not in captured["prompt"]

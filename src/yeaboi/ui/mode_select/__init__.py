@@ -4846,10 +4846,18 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
 
     from yeaboi.config import get_retro_server_port
     from yeaboi.retro.board import RetroBoard, board_to_report
+    from yeaboi.retro.engine import carried_action_items_for_session
     from yeaboi.retro.server import RetroServer
     from yeaboi.retro.store import RetroStore
 
     board = RetroBoard(session_id, project_name=project_name, sprint_name=sprint_name)
+    # Seed last sprint's action items for review before the server starts, so the
+    # first browser poll already shows the "Last sprint's actions" column. Best-effort:
+    # carried_action_items_for_session returns () when there's no prior retro.
+    carried = carried_action_items_for_session(session_id, project_name=project_name, db_path=_ana_dbp)
+    if carried:
+        board.seed_carried(list(carried))
+        logger.info("retro: seeded %d carried-over action item(s) (session=%s)", len(carried), session_id)
     server = RetroServer(board, port=get_retro_server_port())
     try:
         server.start()
@@ -4893,9 +4901,9 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                     logger.warning("retro: remote link failed — could not obtain cloudflared binary")
                     remote["status"] = "Remote link failed — could not obtain cloudflared (see logs)."
                     return
-                remote["status"] = "Starting secure Cloudflare tunnel…"
+                remote["status"] = "Starting secure Cloudflare tunnel (verifying it's reachable)…"
                 tunnel = CloudflareTunnel(server.port, binary=binary)
-                public = tunnel.start(timeout=30)
+                public = tunnel.start(timeout=45)
                 if not public:
                     tunnel.stop()
                     logger.warning("retro: remote link failed — tunnel did not start within timeout")
@@ -4966,6 +4974,14 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
                 ]
                 for g, cards in grids.items()
             }
+        carried = board.carried_snapshot()
+        if anon is not None:
+            from dataclasses import replace as _replace
+
+            from yeaboi.anonymize.apply import apply_replacements
+
+            reps = anon.replacements
+            carried = [_replace(c, text=apply_replacements(c.text, reps)) for c in carried]
         return {
             "session_name": session_name,
             "display_code": server.display_code,
@@ -4974,6 +4990,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
             "public_url": remote["url"],
             "message": remote["status"] or message,
             "grids": grids,
+            "carried": carried,
             "actions": _actions(),
             "anon_note": _anon_note(anon),
         }

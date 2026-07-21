@@ -3024,7 +3024,7 @@ def _build_retro_screen(
 
     # See README: "Retro" — TUI page
     """
-    from yeaboi.retro.board import RETRO_GRID_LABELS, RETRO_GRIDS
+    from yeaboi.retro.board import CARRIED_STATUS_LABELS, RETRO_GRID_LABELS, RETRO_GRIDS
     from yeaboi.ui.shared._components import RETRO_THEME, build_reveal_subtitle, retro_title
 
     theme = RETRO_THEME
@@ -3079,6 +3079,20 @@ def _build_retro_screen(
         _row("Host link (private)", host_url, theme.muted)
         _line("For you only — this link skips the code. Don't share it.", theme.muted)
 
+    # ── Last sprint's actions (progress review) ───────────────────
+    # Set from teammates' browsers (the review column); the host view is read-only,
+    # matching the live-board-is-browser model. Hidden when there's no prior retro.
+    carried = retro_data.get("carried") or []
+    if carried:
+        done_n = sum(1 for c in carried if getattr(c, "status", "") in ("done", "not_relevant"))
+        _heading(f"Last sprint's actions  ({done_n}/{len(carried)} resolved)")
+        _line("Teammates set each status in the browser — review before generating new actions.", theme.muted)
+        for c in carried:
+            status = getattr(c, "status", "") or "pending"
+            badge = CARRIED_STATUS_LABELS.get(status, status)
+            _wrapped(c.text, theme.value, indent="    • ")
+            body_lines.append(Text(_PAD + "        " + f"[{badge}]", style=theme.dim, justify="left"))
+
     # ── The four grids ────────────────────────────────────────────
     grids = retro_data.get("grids") or {}
     total_cards = 0
@@ -3088,8 +3102,12 @@ def _build_retro_screen(
         _heading(f"{RETRO_GRID_LABELS[key]}  ({len(cards)})")
         if cards:
             for c in cards:
-                if getattr(c, "origin", "web") == "ai":
+                origin = getattr(c, "origin", "web")
+                if origin == "ai":
                     who = "🤖 AI"
+                    card_style = theme.accent
+                elif origin == "carryover":
+                    who = "↩ carried over"
                     card_style = theme.accent
                 else:
                     who = getattr(c, "author", "") or "anon"

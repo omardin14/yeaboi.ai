@@ -373,6 +373,37 @@ class TestRetroCommand:
         assert _cmd_retro(args, _console()) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["history"][0]["retro_date"] == "2026-07-18"
+        assert payload["carried_action_items"] == []  # none on this report
+
+    def test_carried_summary_in_json_and_text(self, monkeypatch, tmp_path, capsys):
+        import json
+
+        from yeaboi.agent.state import RetroCard, RetroReport
+        from yeaboi.cli import _cmd_retro
+        from yeaboi.retro.store import RetroStore
+
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
+        report = RetroReport(
+            date="2026-07-18",
+            session_id="sid",
+            project_name="P",
+            carried_action_items=(
+                RetroCard(grid="action_items", text="a", status="done"),
+                RetroCard(grid="action_items", text="b", status="carried_over"),
+            ),
+        )
+        with RetroStore(db) as store:
+            store.record_run(report)
+        # JSON surfaces the carried items with statuses.
+        assert _cmd_retro(build_parser().parse_args(["retro", "--format", "json"]), _console()) == 0
+        payload = json.loads(capsys.readouterr().out)
+        statuses = {c["status"] for c in payload["carried_action_items"]}
+        assert statuses == {"done", "carried_over"}
+        # Text output shows a one-line summary.
+        console = _console()
+        assert _cmd_retro(build_parser().parse_args(["retro"]), console) == 0
 
     def test_export_writes_files(self, monkeypatch, tmp_path):
         from yeaboi.agent.state import RetroReport

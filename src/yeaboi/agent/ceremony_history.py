@@ -151,23 +151,48 @@ def _top_themes(reports, grid: str) -> tuple[tuple[str, int], ...]:
 
 
 def _dedup_action_items(reports) -> tuple[str, ...]:
-    """Distinct action-item card texts across reports, newest-report first.
+    """Distinct *open* action-item card texts across reports, newest-report first.
 
     ``reports`` is newest-first; the first occurrence of each normalised text
     wins so the freshest wording is kept. AI-suggested and human cards both count.
+
+    A later retro's ``carried_action_items`` records what happened to each of the
+    previous retro's actions. Items the team marked ``done`` or ``not_relevant`` are
+    resolved, so they're excluded here — Planning/Analysis only see what's still open
+    (mirrors the Performance 1:1 open-actions loop). Pending / in-progress /
+    carried-over items remain listed.
     """
+    _resolved_statuses = ("done", "not_relevant")
+    _open_statuses = ("pending", "in_progress", "carried_over")
+    # Texts explicitly resolved in any retro's carry-forward review.
+    resolved: set[str] = set()
+    for report in reports:
+        for card in getattr(report, "carried_action_items", ()):
+            if getattr(card, "status", "") in _resolved_statuses:
+                key = _normalise(card.text)
+                if key:
+                    resolved.add(key)
+
     seen: set[str] = set()
     out: list[str] = []
+
+    def _emit(text: str) -> None:
+        key = _normalise(text)
+        if not key or key in seen or key in resolved:
+            return
+        seen.add(key)
+        out.append(text.strip())
+
     for report in reports:
+        # Grid action items (AI-suggested + human).
         for card in report.cards:
-            if card.grid != "action_items":
-                continue
-            text = card.text.strip()
-            key = _normalise(text)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            out.append(text)
+            if card.grid == "action_items":
+                _emit(card.text)
+        # Items the team explicitly kept open in the review column but may never have
+        # re-added to the grid (e.g. "Carried Over" without clicking Generate) — still open.
+        for card in getattr(report, "carried_action_items", ()):
+            if getattr(card, "status", "") in _open_statuses:
+                _emit(card.text)
     return tuple(out)
 
 

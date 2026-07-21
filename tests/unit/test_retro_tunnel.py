@@ -3,6 +3,9 @@
 import hashlib
 import platform
 import stat
+import time
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -49,7 +52,6 @@ class TestDownloadIntegrity:
     def test_tampered_payload_never_lands_on_disk(self, tmp_path, monkeypatch):
         dest = tmp_path / "cloudflared"
         monkeypatch.setattr(tunnel, "_asset_name", lambda *a: ("cloudflared-linux-amd64", False))
-        import urllib.request
 
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResp(b"malicious"))
         with pytest.raises(OSError, match="checksum mismatch"):
@@ -62,7 +64,6 @@ class TestDownloadIntegrity:
         data = b"valid-binary"
         monkeypatch.setattr(tunnel, "_asset_name", lambda *a: ("asset-ok", False))
         monkeypatch.setitem(tunnel._ASSET_SHA256, "asset-ok", hashlib.sha256(data).hexdigest())
-        import urllib.request
 
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResp(data))
         out = tunnel._download_cloudflared(dest)
@@ -148,7 +149,9 @@ def _fake_cloudflared(tmp_path, *, emit_url: bool) -> "object":
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="fake sh script is POSIX-only")
 class TestCloudflareTunnel:
-    def test_start_returns_url_then_stops(self, tmp_path):
+    def test_start_returns_url_then_stops(self, tmp_path, monkeypatch):
+        # Skip the real DNS-liveness poll (the fake URL never resolves).
+        monkeypatch.setattr(tunnel.CloudflareTunnel, "_wait_dns_live", lambda self, host, *, deadline: True)
         binary = _fake_cloudflared(tmp_path, emit_url=True)
         t = tunnel.CloudflareTunnel(5173, binary=binary)
         url = t.start(timeout=10)
@@ -166,3 +169,60 @@ class TestCloudflareTunnel:
         monkeypatch.setattr(tunnel, "ensure_cloudflared", lambda: None)
         t = tunnel.CloudflareTunnel(5173)
         assert t.start(timeout=2) is None
+
+    def test_stderr_is_captured_and_surfaced_on_failure(self, tmp_path, caplog):
+        # cloudflared's own output must be logged + kept, so a failure is diagnosable
+        # (previously every non-URL line was silently discarded).
+        script = tmp_path / "cloudflared"
+        script.write_text("#!/bin/sh\necho 'ERR failed to connect to edge: QUIC blocked' >&2\nexit 1\n")
+        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        t = tunnel.CloudflareTunnel(5173, binary=script)
+        with caplog.at_level("DEBUG", logger="yeaboi.retro.tunnel"):
+            assert t.start(timeout=5) is None
+        assert any("QUIC blocked" in line for line in t._log_tail)
+        # And it's surfaced at warning level (visible without DEBUG).
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("QUIC blocked" in m for m in warnings)
+
+    def test_stderr_logged_on_success(self, tmp_path, caplog, monkeypatch):
+        monkeypatch.setattr(tunnel.CloudflareTunnel, "_wait_dns_live", lambda self, host, *, deadline: True)
+        binary = _fake_cloudflared(tmp_path, emit_url=True)
+        t = tunnel.CloudflareTunnel(5173, binary=binary)
+        with caplog.at_level("DEBUG", logger="yeaboi.retro.tunnel"):
+            url = t.start(timeout=10)
+        t.stop()
+        assert url
+        assert any("cloudflared:" in r.getMessage() for r in caplog.records)
+
+
+class TestDnsLiveGate:
+    """The DoH DNS-liveness gate that stops us handing out a not-yet-live tunnel URL."""
+
+    def _doh(self, payload: dict):
+        import json
+
+        return lambda *a, **k: _FakeResp(json.dumps(payload).encode())
+
+    def test_live_when_doh_has_answer(self, monkeypatch):
+        t = tunnel.CloudflareTunnel(5173)
+        monkeypatch.setattr(urllib.request, "urlopen", self._doh({"Status": 0, "Answer": [{"data": "104.16.0.1"}]}))
+        assert t._wait_dns_live("x-y-z.trycloudflare.com", deadline=time.monotonic() + 5) is True
+
+    def test_not_live_on_nxdomain_times_out_and_warns(self, monkeypatch, caplog):
+        t = tunnel.CloudflareTunnel(5173)
+        # NXDOMAIN → Status 3, no Answer → never "live".
+        monkeypatch.setattr(urllib.request, "urlopen", self._doh({"Status": 3}))
+        with caplog.at_level("WARNING", logger="yeaboi.retro.tunnel"):
+            # Already-passed deadline → no polling loop, straight to the timeout path.
+            assert t._wait_dns_live("nope.trycloudflare.com", deadline=time.monotonic()) is False
+        assert any("not resolvable via public DNS" in r.getMessage() for r in caplog.records)
+
+    def test_doh_errors_are_swallowed(self, monkeypatch):
+        t = tunnel.CloudflareTunnel(5173)
+
+        def _raise(*a, **k):
+            raise urllib.error.URLError("doh down")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _raise)
+        # A DoH outage must not raise — just returns False after the deadline.
+        assert t._wait_dns_live("x.trycloudflare.com", deadline=time.monotonic()) is False
