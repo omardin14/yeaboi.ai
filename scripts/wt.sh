@@ -23,6 +23,14 @@ NAME="${1:?usage: wt.sh <name> [open|headless|rm]}"
 ACTION="${2:-create}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Self-heal: a stray `core.bare=true` (left by an interrupted "clean checkout of
+# main" from a parallel session) makes every work-tree git command fail with
+# "this operation must be run in a work tree". This repo is never legitimately
+# bare, so force it off. `git config` writes the config file directly and works
+# even while the flag is set, so this must run BEFORE any rev-parse below.
+git -C "$SCRIPT_DIR" config core.bare false 2>/dev/null || true
+
 ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 # Always operate against the MAIN checkout, even when invoked from inside a
 # worktree (the main worktree is the first `git worktree list` entry).
