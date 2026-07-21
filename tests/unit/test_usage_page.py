@@ -149,6 +149,26 @@ class TestLocalPerformanceSection:
         console.print(panel)
         assert "Local Model Performance" not in console.file.getvalue()
 
+    def test_screen_renders_copy_button_and_message(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from yeaboi.ui.mode_select.screens._screens_secondary import _build_usage_screen
+
+        panel = _build_usage_screen(
+            {"provider": "anthropic", "local_performance": {}},
+            width=90,
+            height=40,
+            actions=["Copy", "Back"],
+            message="Copied to clipboard",
+        )
+        console = Console(file=StringIO(), width=100, height=40)
+        console.print(panel)
+        out = console.file.getvalue()
+        assert "Copy" in out
+        assert "Copied to clipboard" in out
+
 
 class TestUsageDataCloud:
     def test_anthropic_without_key_not_configured(self, monkeypatch, tmp_path):

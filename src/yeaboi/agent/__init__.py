@@ -18,6 +18,7 @@ from yeaboi.agent.nodes import (
     task_decomposer,
 )
 from yeaboi.agent.state import (
+    AnonymizedOutput,
     DeliveredItem,
     DeliveryReport,
     Discipline,
@@ -40,6 +41,7 @@ from yeaboi.agent.state import (
 from yeaboi.prompts.intake import AnswerSource
 
 __all__ = [
+    "AnonymizedOutput",
     "AnswerSource",
     "DeliveredItem",
     "DeliveryReport",

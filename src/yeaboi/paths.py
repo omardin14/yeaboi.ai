@@ -22,7 +22,9 @@ Directory structure:
     │   │   └── {project_key}/
     │   ├── standup/              # Daily Standup exports (HTML + MD)
     │   │   └── {project_key}/
-    │   └── retro/                # Retro exports (HTML + MD)
+    │   ├── retro/                # Retro exports (HTML + MD)
+    │   │   └── {project_key}/
+    │   └── anonymize/            # Privacy-masked, shareable copies (HTML + MD)
     │       └── {project_key}/
     ├── logs/
     │   ├── tui/                  # Main TUI log (yeaboi.log + rotations)
@@ -96,6 +98,7 @@ RETRO_EXPORTS_DIR = EXPORTS_DIR / "retro"
 PERFORMANCE_EXPORTS_DIR = EXPORTS_DIR / "performance"
 REPORTING_EXPORTS_DIR = EXPORTS_DIR / "reporting"
 ROADMAP_EXPORTS_DIR = EXPORTS_DIR / "roadmap"
+ANONYMIZE_EXPORTS_DIR = EXPORTS_DIR / "anonymize"  # privacy-masked, shareable copies of any mode's output
 
 # ---------------------------------------------------------------------------
 # Logs
@@ -231,6 +234,17 @@ def get_reporting_export_dir(project_key: str) -> Path:
 def get_roadmap_export_dir(roadmap_key: str) -> Path:
     """Return the Roadmap export directory for a roadmap, creating it if needed."""
     d = ROADMAP_EXPORTS_DIR / (roadmap_key.lower() or "roadmap")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_anonymize_export_dir(project_key: str) -> Path:
+    """Return the Anonymize export directory for a project, creating it if needed.
+
+    Holds the privacy-masked copies of a mode's output (the shareable versions), kept
+    separate from the un-masked exports so the two can't be confused.
+    """
+    d = ANONYMIZE_EXPORTS_DIR / (project_key.lower() or "output")
     d.mkdir(parents=True, exist_ok=True)
     return d
 

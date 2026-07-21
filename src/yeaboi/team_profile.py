@@ -460,9 +460,12 @@ def _dict_to_writing_patterns(d: dict) -> WritingPatterns:
     )
 
 
-def _json_to_profile(json_str: str) -> TeamProfile:
-    """Reconstruct a TeamProfile from a JSON string."""
-    d = json.loads(json_str)
+def _dict_to_profile(d: dict) -> TeamProfile:
+    """Reconstruct a TeamProfile from a plain dict (JSON-parsed or ``asdict`` output).
+
+    Shared by ``_json_to_profile`` (store load) and the anonymize in-place masker
+    (``anonymize.apply.mask_artifact``), which round-trips the profile through ``asdict``.
+    """
     return TeamProfile(
         team_id=d["team_id"],
         source=d["source"],
@@ -486,6 +489,11 @@ def _json_to_profile(json_str: str) -> TeamProfile:
         updated_at=d.get("updated_at", ""),
         team_name=d.get("team_name", ""),
     )
+
+
+def _json_to_profile(json_str: str) -> TeamProfile:
+    """Reconstruct a TeamProfile from a JSON string."""
+    return _dict_to_profile(json.loads(json_str))
 
 
 # ---------------------------------------------------------------------------

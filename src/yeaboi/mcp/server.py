@@ -51,6 +51,7 @@ def create_app():
     from mcp.server.fastmcp import FastMCP
 
     from yeaboi.mcp import (
+        tools_anonymize,
         tools_performance,
         tools_planning,
         tools_reporting,
@@ -69,6 +70,7 @@ def create_app():
         tools_performance,
         tools_retro,
         tools_team,
+        tools_anonymize,
     )
     for module in modules:
         module.register(app)

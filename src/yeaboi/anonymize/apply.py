@@ -1,0 +1,134 @@
+"""Apply an anonymize replacement map to a mode's *native* data — in place.
+
+The anonymize engine (``engine.run_anonymize``) returns an ``AnonymizedOutput`` whose
+``replacements`` field is the ``(original -> placeholder)`` set it masked. The TUI used
+to throw away every mode's card UI and show that engine output as a raw-Markdown review
+screen; instead we now re-render each mode's *own* screen with only the sensitive words
+swapped. This module is the seam: it takes that replacement map and applies it to the
+two shapes a result screen renders from —
+
+  * a frozen artifact (StandupReport / RetroReport / RoadmapAnalysis / TeamProfile) —
+    ``mask_artifact`` walks ``asdict(artifact)``, masks every string leaf, and rebuilds
+    the dataclass via the mode's existing ``_dict_to_*`` reconstructor; the native
+    screen builder is fed the masked artifact and renders exactly as before.
+  * a pre-rendered ``list[str]`` (performance / reporting ``detail_lines``, planning
+    ``content_lines``) — ``mask_lines`` maps the masker over each line.
+
+Everything is pure/deterministic and LLM-free (the LLM already ran in the engine), so it
+lives here as headless, unit-tested logic rather than inside the TUI.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from dataclasses import asdict
+
+Replacements = Sequence[tuple[str, str]]
+
+
+# ---------------------------------------------------------------------------
+# Core text masker (generalises engine._apply_seed_mask)
+# ---------------------------------------------------------------------------
+
+
+def apply_replacements(text: str, replacements: Replacements) -> str:
+    """Literal-replace each ``original`` with its ``placeholder`` in ``text``.
+
+    Mirrors the engine's seed masker (``engine._apply_seed_mask``): case-insensitive
+    with word-ish boundaries (``(?<!\\w)…(?!\\w)`` — also fires around the dots/hyphens
+    in hostnames and issue keys where ``\\b`` would not), and **longest original first**
+    so ``"Acme Payments"`` is masked before the substring ``"Acme"``. Safe on any string
+    — used for on-screen artifact fields, plaintext lines, and the exported Markdown, so
+    what you see and what you export are masked identically.
+    """
+    if not text or not replacements:
+        return text
+    for original, placeholder in sorted(replacements, key=lambda p: len(p[0]), reverse=True):
+        if not original:
+            continue
+        pattern = re.compile(rf"(?<!\w){re.escape(original)}(?!\w)", re.IGNORECASE)
+        text = pattern.subn(placeholder, text)[0]
+    return text
+
+
+def mask_lines(lines: Sequence[str], replacements: Replacements) -> list[str]:
+    """Mask every line of a pre-rendered ``detail_lines`` / ``content_lines`` list."""
+    if not replacements:
+        return list(lines)
+    return [apply_replacements(line, replacements) for line in lines]
+
+
+def mask_obj(value, replacements: Replacements):
+    """Deep-mask an arbitrary JSON-like structure (dict / list / str leaves).
+
+    For side data a screen renders alongside its artifact — e.g. the analysis screen's
+    ``examples`` dict of sample stories — where masking every string leaf keeps the
+    on-screen samples consistent with the masked artifact. Dict *keys* and non-strings
+    are left untouched.
+    """
+    if not replacements:
+        return value
+    return _deep_mask(value, replacements)
+
+
+# ---------------------------------------------------------------------------
+# Frozen-artifact masker
+# ---------------------------------------------------------------------------
+
+
+def _deep_mask(value, replacements: Replacements):
+    """Recursively mask every string leaf of an ``asdict`` tree, preserving shape.
+
+    ``asdict`` yields dict / list / str / number / None (enums pass through as-is), so we
+    only recurse those containers and mask ``str`` leaves; everything else is returned
+    unchanged. The per-mode reconstructor rebuilds the tuples-of-dataclasses afterwards.
+    """
+    if isinstance(value, str):
+        return apply_replacements(value, replacements)
+    if isinstance(value, dict):
+        return {k: _deep_mask(v, replacements) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_deep_mask(v, replacements) for v in value)
+    return value
+
+
+def _reconstructor_for(cls):
+    """Return the ``dict -> dataclass`` rebuilder for a known result artifact, or None.
+
+    Looked up by class *name* with lazy imports so this module doesn't pull the standup /
+    retro / roadmap / team_profile stores at import time (avoids import cycles).
+    """
+    name = cls.__name__
+    if name == "StandupReport":
+        from yeaboi.standup.store import _dict_to_standup_report
+
+        return _dict_to_standup_report
+    if name == "RetroReport":
+        from yeaboi.retro.store import _dict_to_retro_report
+
+        return _dict_to_retro_report
+    if name == "RoadmapAnalysis":
+        from yeaboi.roadmap.store import _dict_to_analysis
+
+        return _dict_to_analysis
+    if name == "TeamProfile":
+        from yeaboi.team_profile import _dict_to_profile
+
+        return _dict_to_profile
+    return None
+
+
+def mask_artifact(artifact, replacements: Replacements):
+    """Return a copy of ``artifact`` with every string field masked.
+
+    ``asdict`` → deep-mask string leaves → the mode's own reconstructor. Unknown artifact
+    types (no registered reconstructor) are returned unmasked rather than raising, so a
+    new mode never crashes the anonymize path before it's wired in.
+    """
+    if not replacements:
+        return artifact
+    reconstruct = _reconstructor_for(type(artifact))
+    if reconstruct is None:
+        return artifact
+    return reconstruct(_deep_mask(asdict(artifact), replacements))

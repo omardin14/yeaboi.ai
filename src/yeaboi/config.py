@@ -268,6 +268,18 @@ def get_confluence_space_key() -> str | None:
     return os.getenv("CONFLUENCE_SPACE_KEY") or None
 
 
+def get_anonymize_mask_terms() -> tuple[str, ...]:
+    """Return extra company-specific terms to always mask in Anonymize mode.
+
+    Read from ANONYMIZE_MASK_TERMS as a comma-separated list (e.g. "YouLend,YL,Acme").
+    These seed the deterministic pre-mask pass in anonymize/engine.py so the obvious
+    company identifiers are redacted even when the LLM is unavailable. Blank/whitespace
+    entries are dropped; returns () when unset.
+    """
+    raw = os.getenv("ANONYMIZE_MASK_TERMS", "")
+    return tuple(term.strip() for term in raw.split(",") if term.strip())
+
+
 def get_notion_token() -> str | None:
     """Return the Notion integration token, or None if not set.
 

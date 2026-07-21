@@ -282,6 +282,7 @@ def _build_team_analysis_screen(
     selected_card: int = 0,
     actions: list[str] | None = None,
     shimmer_tick: float | None = None,
+    anon_note: str = "",
 ) -> Panel:
     """Build the team analysis results screen (overview + section cards).
 
@@ -326,6 +327,8 @@ def _build_team_analysis_screen(
     title = analysis_title(shimmer_tick)
 
     btn_top, btn_mid, btn_bot = build_action_buttons(_actions, export_sel)
+    if anon_note:  # anonymized: the crumb line carries the "N masked — review" indicator
+        crumb_text = anon_note
     crumb = Text(_PAD + crumb_text, style="rgb(120,120,140)", justify="left")
     body_h = calc_viewport(height, header_h=11, action_h=4)
 
@@ -1536,11 +1539,14 @@ def _build_usage_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    actions: list[str] | None = None,
+    message: str = "",
 ) -> Panel:
     """Build the usage dashboard screen using shared TUI components.
 
     Shows API token usage, session history, provider info, and cost estimates.
     Uses USAGE_THEME (amber) with shared buttons, scrollbar, and viewport.
+    ``actions`` defaults to ["Back"]; the Copy button passes ["Copy", "Back"].
     """
     from yeaboi.ui.shared._components import USAGE_THEME, build_reveal_subtitle, usage_title
 
@@ -1549,6 +1555,9 @@ def _build_usage_screen(
     sub = build_reveal_subtitle("API usage and session history", sub_reveal, pad=_PAD)
 
     body_lines: list = []
+    if message:
+        body_lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
 
     def _heading(text: str) -> None:
         body_lines.append(Text(""))
@@ -1670,7 +1679,7 @@ def _build_usage_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(["Back"], action_sel)
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions or ["Back"], action_sel)
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable
@@ -1726,6 +1735,7 @@ def _build_standup_screen(
     view: str = "overview",
     selected_card: int = 0,
     actions: list[str] | None = None,
+    anon_note: str = "",
 ) -> Panel:
     """Build the Daily Standup screen (compact dashboard + expandable section cards).
 
@@ -1763,6 +1773,8 @@ def _build_standup_screen(
             sub_text = base
     else:
         sub_text = f"Overview › {standup_card_title(view, standup_data)}"
+    if anon_note:  # anonymized: the subtitle becomes the "N masked — review" indicator
+        sub_text = anon_note
     sub = build_reveal_subtitle(sub_text, sub_reveal, pad=_PAD)
     sub.no_wrap = True  # the header row budget counts the subtitle as one row
     sub.overflow = "ellipsis"
@@ -1904,6 +1916,8 @@ def _build_changelog_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    actions: list[str] | None = None,
+    message: str = "",
 ) -> Panel:
     """Build the Changelog page: per-version AI-written notes with area tags.
 
@@ -1923,6 +1937,9 @@ def _build_changelog_screen(
     sub = build_reveal_subtitle("What's new in yeaboi", sub_reveal, pad=PAD)
 
     body_lines: list = []
+    if message:
+        body_lines.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
     wrap_w = max(24, width - len(PAD) - 12)
 
     def _wrapped(text: str, style: str, *, indent: str = "    ") -> None:
@@ -1990,7 +2007,7 @@ def _build_changelog_screen(
     for _ in range(max(0, viewport_h - len(visible))):
         padded_lines.append(Text(""))
 
-    btn_top, btn_mid, btn_bot = build_action_buttons(["Back"], action_sel)
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions or ["Back"], action_sel)
 
     if _sb_text is not None:
         from rich.table import Table as _SbTable
@@ -2291,6 +2308,7 @@ def _build_performance_screen(
     shimmer_tick: float = 0.0,
     desc_reveal: float = 0.0,
     sub_reveal: float | None = None,
+    anon_note: str = "",
 ) -> Panel:
     """Build the Performance dashboard screen using shared TUI components.
 
@@ -2321,6 +2339,8 @@ def _build_performance_screen(
         sub_text = performance_data.get("detail_title", "") or "Performance"
     else:
         sub_text = f"Team performance — {session_name}" if session_name else "Team performance"
+    if anon_note:  # anonymized detail view: the subtitle carries the "N masked" indicator
+        sub_text = anon_note
     sub = build_reveal_subtitle(sub_text, sub_reveal, pad=PAD)
 
     message = performance_data.get("message", "")
@@ -2470,6 +2490,7 @@ def _build_reporting_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    anon_note: str = "",
 ) -> Panel:
     """Build the Reporting screen using shared TUI components.
 
@@ -2506,6 +2527,8 @@ def _build_reporting_screen(
         sub_text = f"Select sprints for {reporting_data.get('quarter_label', 'the quarter')}"
     else:
         sub_text = f"Report delivered work — {session_name}" if session_name else "Report delivered work"
+    if anon_note:  # anonymized detail view: the subtitle carries the "N masked" indicator
+        sub_text = anon_note
     sub = build_reveal_subtitle(sub_text, sub_reveal, pad=PAD)
 
     actions = reporting_data.get("actions") or ["Generate Report", "Theme", "Back"]
@@ -2706,6 +2729,7 @@ def _build_roadmap_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    anon_note: str = "",
 ) -> Panel:
     """Build the Roadmap intake screen using shared TUI components.
 
@@ -2748,6 +2772,8 @@ def _build_roadmap_screen(
         sub_text = sub_text or "Roadmap analysis"
     else:
         sub_text = "Where does your quarterly roadmap live?"
+    if anon_note and not busy:  # anonymized results: the subtitle carries the "N masked" indicator
+        sub_text = anon_note
     sub = build_reveal_subtitle(sub_text, sub_reveal, pad=PAD)
 
     # ── Busy overlay — while the analysis worker runs, show only the spinner so
@@ -2980,6 +3006,7 @@ def _build_retro_screen(
     action_sel: int = 0,
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
+    anon_note: str = "",
 ) -> Panel:
     """Build the Retro board screen using shared TUI components.
 
@@ -3004,6 +3031,8 @@ def _build_retro_screen(
     title = retro_title(shimmer_tick)
     session_name = retro_data.get("session_name", "")
     sub_text = f"Sprint retro for {session_name}" if session_name else "Sprint retro"
+    if anon_note:  # anonymized: the subtitle carries the "N masked — review" indicator
+        sub_text = anon_note
     sub = build_reveal_subtitle(sub_text, sub_reveal, pad=_PAD)
 
     body_lines: list = []
@@ -3134,18 +3163,24 @@ def _build_standup_progress_screen(
     height: int = 24,
     elapsed: float = 0.0,
     anim_tick: float = 0.0,
+    theme=None,
+    title=None,
+    label: str = "Generating standup",
 ) -> Panel:
-    """Build the Daily Standup generation progress screen (spinner + phase steps).
+    """Build a worker-thread progress screen (spinner + phase steps).
 
-    Shown while ``run_standup`` runs on a worker thread — the pipeline makes
-    tracker + LLM network calls that can take many seconds, so the user must see
-    live progress instead of a frozen input box. Mirrors the analysis progress
-    screen's layout with STANDUP_THEME colours.
+    Shown while a long pipeline (``run_standup``, ``run_anonymize``, ...) runs on a
+    worker thread — it makes tracker + LLM network calls that can take many seconds,
+    so the user must see live progress instead of a frozen input box. Defaults to the
+    Daily Standup look; ``theme``/``title``/``label`` let any mode reuse the identical
+    screen with its own accent (this is "the consistent loading screen").
     """
     from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
 
-    theme = STANDUP_THEME
-    title = standup_title()
+    if theme is None:
+        theme = STANDUP_THEME
+    if title is None:
+        title = standup_title()
 
     _spinners = ["◐", "◓", "◑", "◒"]
     spinner = _spinners[int(anim_tick * 4) % len(_spinners)]
@@ -3153,7 +3188,7 @@ def _build_standup_progress_screen(
     time_str = f"{mins}:{secs:02d}" if mins > 0 else f"{secs}s"
 
     body: list = [
-        Text(_PAD + f"{spinner}  Generating standup", style=f"bold {theme.accent_bright}", justify="left"),
+        Text(_PAD + f"{spinner}  {label}", style=f"bold {theme.accent_bright}", justify="left"),
         Text(_PAD + f"   Elapsed: {time_str}", style=theme.dim, justify="left"),
         Text(""),
     ]

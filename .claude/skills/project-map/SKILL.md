@@ -89,6 +89,11 @@ src/yeaboi/
     export.py           — RoadmapAnalysis → Markdown + HTML (paths.get_roadmap_export_dir)
   analysis/             — Team-analysis engine (headless pipeline behind the TUI Analysis mode)
     engine.py           — run_team_analysis(): fetch history → _run_parallel_analysis → save profile → insights/samples
+  anonymize/            — Anonymize action (mask any mode's output for public sharing; post-processing, not a mode)
+    engine.py           — run_anonymize(text): deterministic config-seeded mask → one invoke_json LLM pass → parse → seed-only fallback; never raises. Returns the (original→placeholder) replacement map.
+    apply.py            — in-place masker: apply_replacements(text) / mask_lines(list[str]) / mask_artifact(frozen via asdict→_dict_to_*) / mask_obj — re-render each mode's OWN screen masked, not a separate view
+    export.py           — AnonymizedOutput → Markdown + HTML (paths.get_anonymize_export_dir; embeds a small MD→HTML renderer)
+  usage_export.py       — build_usage_text(): serialize the Usage dashboard dict to pasteable plaintext (Copy-to-clipboard)
   mcp/                  — MCP stdio server (yeaboi-mcp entry point, optional [mcp] extra)
     server.py           — create_app() + main(): FastMCP app, guarded mcp import, logs to logs/mcp/
     runtime.py          — {ok, llm_mode, warnings, data} envelope + run_engine()/run_readonly() dispatch
@@ -183,7 +188,7 @@ Validation rules in `main()`:
 The `src/yeaboi/mcp/` package exposes yeaboi to AI coding agents (Claude Code, Cursor, Codex CLI, VS Code…) as a **stdio MCP server** — entry point `yeaboi-mcp`, optional extra `mcp = ["mcp>=1.9,<2"]` (the `<2` pin is load-bearing; SDK v2 is a breaking pre-release). See README section "MCP Server" for the user-facing docs.
 
 **Design:**
-- **25 tools across 7 `tools_*.py` modules**, registered by `server.create_app()`. Tool bodies lazy-import engines (repo convention); `mcp` itself is imported only inside `create_app()`/`main()` so `import yeaboi.mcp.server` always succeeds without the extra. Exception: `tools_*.py` import `Context` at module level — FastMCP evaluates PEP 563 stringified hints against module globals.
+- **26 tools across 8 `tools_*.py` modules**, registered by `server.create_app()` (incl. `tools_anonymize.py`'s `anonymize_text`). Tool bodies lazy-import engines (repo convention); `mcp` itself is imported only inside `create_app()`/`main()` so `import yeaboi.mcp.server` always succeeds without the extra. Exception: `tools_*.py` import `Context` at module level — FastMCP evaluates PEP 563 stringified hints against module globals.
 - **Envelope** (`runtime.py`): every tool returns `{ok, llm_mode, warnings, data}`; exceptions become structured `{ok: false, error, hint}` payloads (auth-looking messages get an actionable hint). A tool call never crashes the server. `run_engine()` is the single dispatch point: worker thread (`anyio.to_thread`) + process-wide `threading.Lock` (engines aren't concurrency-safe).
 - **LLM chain** (`sampling.py`): `resolve_llm_mode()` picks `sampling` (client advertises the capability) → `provider` (`is_llm_configured()`) → `fallback` (deterministic artifacts + warning). Sampling injects `SamplingChatModel` via `llm_override()` in `agent/llm.py` (a ContextVar that short-circuits `get_llm()`; propagates into anyio worker threads). The model's sync `_generate` bridges to the loop with `anyio.from_thread.run(...)` — only ever call it from a `run_engine` worker thread. `YEABOI_MCP_LLM=provider` forces mode 2; `YEABOI_MCP_MAX_TOKENS` caps sampling responses (default 8192).
 - **Planning** runs through `agent/headless.py:run_planning_pipeline()` — a UI-free replica of run_repl's export-only auto-drive (confirm → continue → accept, capacity auto-accepted, `_predict_next_node` == "agent" → done). `repl/_ui.py` re-exports `_predict_next_node` from there.
@@ -211,6 +216,7 @@ The `src/yeaboi/mcp/` package exposes yeaboi to AI coding agents (Claude Code, C
 - `YEABOI_HOME` — optional, relocates the whole data tree (exports, logs, sessions DB, scrum-docs…; default `~/.yeaboi`). Resolved once at import time in `paths.py` (`_resolve_root()`); `.env` itself always stays at `~/.yeaboi/.env` (the bootstrap file that holds this var). Editable in the TUI via Settings → Data Dir, which offers to move the existing tree (`paths.move_data_tree`) and notes a restart is needed to fully apply.
 - `NOTION_EXPORT_PARENT_PAGE_ID` — optional, a dedicated Notion page the Export buttons publish under; **blank groups exports under an auto-created "yeaboi" page (🤙 icon) inside `NOTION_ROOT_PAGE_ID`**. With neither set, Notion export shows a warning pointing at Setup (the Notion API can't create top-level pages).
 - `CONFLUENCE_EXPORT_PARENT_PAGE_ID` — optional page Confluence exports nest under; blank groups them under an auto-created "🤙 yeaboi" page at the root of `CONFLUENCE_SPACE_KEY` (no space key → warning pointing at Setup).
+- `ANONYMIZE_MASK_TERMS` — optional, comma-separated company-specific terms the Anonymize action always masks (e.g. `"YouLend,YL"`); seeds the deterministic pre-mask pass so they're redacted even when no LLM is available
 - `STANDUP_USER_NAME` — optional, your display name for your own standup update (default: "Me")
 - `STANDUP_GITHUB_REPO` — optional, GitHub repo (owner/repo) scanned for Daily Standup code activity
 - `SLACK_WEBHOOK_URL` — optional, Slack incoming-webhook URL for Daily Standup delivery

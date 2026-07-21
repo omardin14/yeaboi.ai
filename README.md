@@ -2344,6 +2344,7 @@ src/yeaboi/
 | `NOTION_TOKEN` | No | Notion integration token (its own auth; enables Notion doc tools) |
 | `NOTION_ROOT_PAGE_ID` | No | Default parent for created Notion pages; enables the Notion standup source; Notion exports fall back here |
 | `NOTION_EXPORT_PARENT_PAGE_ID` | No | Optional dedicated page the Export buttons publish under (blank = grouped under an auto-created 🤙 yeaboi page in `NOTION_ROOT_PAGE_ID`) |
+| `ANONYMIZE_MASK_TERMS` | No | Comma-separated company terms the Anonymize action always masks (e.g. `YouLend,YL`); redacted even without an AI provider |
 | `YEABOI_HOME` | No | Data home for everything yeaboi writes — exports, logs, sessions DB (default: `~/.yeaboi`; `.env` always stays at `~/.yeaboi/.env`; editable in Settings → Data Dir) |
 | `LANGSMITH_TRACING` | No | Enable LangSmith tracing (`true`) |
 | `LANGSMITH_API_KEY` | No | LangSmith API key |
