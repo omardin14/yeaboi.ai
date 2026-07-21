@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.25.0",
+      "date": "2026-07-21",
+      "summary": "The token setup wizard now shows you exactly where to create each credential and what access to grant it. GitHub PAT, Azure DevOps PAT, and Jira/Notion/Confluence token fields display a clickable creation URL as an OSC-8 terminal hyperlink and show the required scopes underneath — the same scopes that power all your integrations. The Settings page's credential dashboard now shows these links and scopes too, so you can review them any time and quickly re-create or upgrade a token without searching the documentation.",
+      "highlights": [
+        {"text": "Setup wizard shows clickable token creation URLs and required scopes under each credential field", "areas": ["settings"]},
+        {"text": "Settings dashboard displays token creation links and scopes for every configured credential", "areas": ["settings"]},
+        {"text": "Scopes accurately reflect what each integration actually uses — GitHub repo access, Azure work-item creation, Jira ticket reads, etc.", "areas": ["settings"]}
+      ]
+    },
+    {
       "version": "2.24.0",
       "date": "2026-07-21",
       "summary": "You can now share real yeaboi output publicly without leaking anything private. Every mode's result screen — planning, analysis, standups, retros, performance, reporting, and roadmaps — has a new Anonymize button: press it and the sensitive words (people's names, team and project names, your company name, internal tools, and links) get masked right there in the same cards and tables — the layout never changes, only the words do, so it still reads as a realistic example. It uses AI for the smart cases and always masks the obvious company terms it already knows about, even offline. Refine it in plain language with Adjust (\"also hide this\", \"leave that — it's public\"), flip back to the real names with Revert, then copy the clean version to your clipboard or export it to Files, Notion, or Confluence. Great for READMEs, your website, and posts.",
