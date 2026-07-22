@@ -11,7 +11,8 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
 
 2. **Warn, then analyse.** `team_analyze` pages the tracker and makes several
    LLM calls — it takes minutes. Tell the user before calling it. Options:
-   `source` ('jira'/'azdevops', auto-detected when blank), `sprint_count`
+   `source` ('jira'/'azdevops'/'both', auto-detects a single tracker when blank —
+   use 'both' to analyse Jira **and** Azure DevOps in one run), `sprint_count`
    (default 8 closed sprints), `include_insights` (start/stop/keep/try
    coaching), `include_ai_usage` (scan the team's commits/PRs for AI-tool
    markers — on by default), `include_doc_quality` (read recent
@@ -39,6 +40,13 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
    NOT a detection (prose carries no reliable AI marker — never assert a page "was
    written by AI"); **explicit AI markers** are a lower bound. Coach on clearer
    writing and effective AI use, not on policing.
+
+   **With `source: 'both'`** the result is combined:
+   `{source:'both', results:{jira:{...}, azdevops:{...}}, comparison:[[label, jira, azdevops], ...]}`.
+   Present the two trackers **clearly separated** ("From Jira" / "From Azure DevOps") — never blend
+   their numbers (velocity/point scales aren't comparable across trackers) — and lead with the
+   `comparison` side-by-side table. If only one tracker is configured, 'both' degrades to that
+   single run and says so in `warnings`.
 
 4. **Close the loop.** The saved profile automatically calibrates future
    `plan_generate` runs. For "how did the last plan actually go?", call

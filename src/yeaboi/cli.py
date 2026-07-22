@@ -564,7 +564,12 @@ def build_parser() -> argparse.ArgumentParser:
     retro_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     analyze_p = subparsers.add_parser("analyze", help="Analyse team board history into a calibration profile")
-    analyze_p.add_argument("--source", choices=["jira", "azdevops"], default="", help="Tracker (default: auto)")
+    analyze_p.add_argument(
+        "--source",
+        choices=["jira", "azdevops", "both"],
+        default="",
+        help="Tracker: jira, azdevops, or both (default: auto-detect a single tracker)",
+    )
     analyze_p.add_argument("--project", default="", metavar="KEY", help="Project key (default: configured)")
     analyze_p.add_argument("--sprints", type=int, default=8, help="Closed sprints to analyse (default 8)")
     analyze_p.add_argument("--samples", action="store_true", help="Also generate sample tickets (extra LLM calls)")
@@ -1270,6 +1275,8 @@ def _cmd_retro(args: argparse.Namespace, console: "Console") -> int:
 
 
 def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
+    from rich.table import Table
+
     from yeaboi.analysis import run_team_analysis
 
     console.print("[bold cyan]Analysing team history...[/bold cyan]")
@@ -1287,6 +1294,30 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
     if args.format == "json":
         print(_json_dump(result))
         return _strict_exit(args.strict, result["warnings"])
+    # 'both' returns two separate single-source results plus a comparison table —
+    # print each under a "From Jira"/"From Azure DevOps" banner (mirrors the
+    # reporting-mode idiom) so it's clear which numbers came from which tracker.
+    if result.get("source") == "both":
+        _source_names = {"jira": "From Jira", "azdevops": "From Azure DevOps"}
+        for src, sub in result["results"].items():
+            console.rule(f"[bold cyan]{_source_names.get(src, src)}[/bold cyan]")
+            _print_profile_summary(console, sub)
+        comparison = result.get("comparison") or []
+        if comparison:
+            table = Table(title="Side-by-side", show_header=True)
+            table.add_column("Metric", style="bold")
+            table.add_column("Jira")
+            table.add_column("Azure DevOps")
+            for label, jira_val, azdo_val in comparison:
+                table.add_row(label, jira_val, azdo_val)
+            console.print(table)
+        return _strict_exit(args.strict, result["warnings"])
+    _print_profile_summary(console, result)
+    return _strict_exit(args.strict, result["warnings"])
+
+
+def _print_profile_summary(console: "Console", result: dict) -> None:
+    """Print the one-tracker analysis summary (saved profile + top coaching insights)."""
     profile = result["profile"]
     console.print(f"[green]Team profile saved for {profile.source}/{profile.project_key}[/green]")
     console.print(
@@ -1297,7 +1328,6 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
     for category in ("start", "stop", "keep", "try"):
         for item in insights.get(category, [])[:2]:
             console.print(f"  [bold]{category.upper()}[/bold]: {item.get('title', '')}")
-    return _strict_exit(args.strict, result["warnings"])
 
 
 def _run_learn(console: "Console") -> None:

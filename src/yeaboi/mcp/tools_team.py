@@ -45,8 +45,8 @@ def _team_analyze(
     include_doc_quality: bool,
     progress=None,
 ):
-    if source not in ("", "jira", "azdevops"):
-        raise ValueError(f"source must be 'jira' or 'azdevops' (blank auto-detects) — got {source!r}")
+    if source not in ("", "jira", "azdevops", "both"):
+        raise ValueError(f"source must be 'jira', 'azdevops', or 'both' (blank auto-detects) — got {source!r}")
     from yeaboi.analysis import run_team_analysis
 
     return run_team_analysis(
@@ -105,7 +105,11 @@ def register(app) -> None:
         velocity, story-point calibration, writing style, DoD signals, plus coaching insights
         and headline stats. The profile is saved and feeds future planning. HEAVY: several LLM
         calls plus tracker API paging — takes minutes; warn the user before running.
-        source: 'jira' or 'azdevops' (blank auto-detects); generate_samples additionally drafts
+        source: 'jira', 'azdevops', or 'both' (blank auto-detects a single tracker). With 'both'
+        the analysis runs once per configured tracker and returns a combined result
+        {source:'both', results:{jira:..., azdevops:...}, comparison:[[label,jira,azdevops],...]} —
+        the two profiles are kept clearly separate, never blended (project_key is ignored and
+        auto-resolved per source). generate_samples additionally drafts
         sample tickets in the team's style (more LLM calls). include_ai_usage also scans the
         team's commits/PRs for AI-tool markers (Co-Authored-By: Claude, Copilot, Cursor, …) and
         reports a detectable AI-adoption footprint — a LOWER BOUND (inline IDE assist leaves no

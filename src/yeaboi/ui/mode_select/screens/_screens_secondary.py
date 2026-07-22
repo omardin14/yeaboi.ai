@@ -283,6 +283,9 @@ def _build_team_analysis_screen(
     actions: list[str] | None = None,
     shimmer_tick: float | None = None,
     anon_note: str = "",
+    source_toggle: list[str] | None = None,
+    active_source: str = "",
+    comparison: list | None = None,
 ) -> Panel:
     """Build the team analysis results screen (overview + section cards).
 
@@ -290,6 +293,11 @@ def _build_team_analysis_screen(
     selectable section-card list) or a ``_TA_CARDS`` key (a focused section
     detail view with its AI "What this means" narrative and jargon glossary).
     Section rendering lives in ``_analysis_sections.py``.
+
+    In 'both' mode ``source_toggle`` (ordered tracker keys) renders a
+    ``[ Jira ] Azure DevOps`` switch line under the header and ``comparison``
+    (side-by-side headline rows) is shown atop the overview — the two trackers'
+    figures stay clearly separate, never blended.
     """
     from yeaboi.tools.team_learning import compute_headline_stats
 
@@ -305,8 +313,24 @@ def _build_team_analysis_screen(
     header_str = f"Team Analysis  ·  {src}/{board_label}  ·  {sprints} sprints  ·  {stories} stories"
     sub = Text(_PAD + header_str, style="bold white", justify="left")
 
+    # 'Both'-mode source toggle line: highlight the active tracker.
+    toggle_line: Text | None = None
+    if source_toggle and len(source_toggle) > 1:
+        _labels = {"jira": "Jira", "azdevops": "Azure DevOps"}
+        toggle_line = Text(_PAD, justify="left")
+        for i, s in enumerate(source_toggle):
+            if i > 0:
+                toggle_line.append("   ")
+            lbl = _labels.get(s, s)
+            if s == active_source:
+                toggle_line.append(f"[ {lbl} ]", style="bold #22c55e")
+            else:
+                toggle_line.append(f"  {lbl}  ", style="dim")
+        toggle_line.append("    (Tab: switch source)", style="rgb(90,90,110)")
+
     stats = compute_headline_stats(profile, examples)
     ctx = _TaCtx(width, examples, sprint_names=sprint_names, stats=stats)
+    ctx.comparison = comparison
 
     if view == "overview":
         crumb_text = "Overview  ·  ↑/↓ choose a section, Enter to open"
@@ -330,7 +354,8 @@ def _build_team_analysis_screen(
     if anon_note:  # anonymized: the crumb line carries the "N masked — review" indicator
         crumb_text = anon_note
     crumb = Text(_PAD + crumb_text, style="rgb(120,120,140)", justify="left")
-    body_h = calc_viewport(height, header_h=11, action_h=4)
+    # The 'both'-mode toggle line adds one header row; shrink the viewport to match.
+    body_h = calc_viewport(height, header_h=12 if toggle_line is not None else 11, action_h=4)
 
     max_scroll = max(0, ctx.rendered_lines - body_h)
     if view == "overview" and ctx.overview_first_card_row is not None:
@@ -376,12 +401,12 @@ def _build_team_analysis_screen(
     else:
         viewport_renderable = _body_group
 
+    _header_items = [Text(""), title, Text(""), sub]
+    if toggle_line is not None:
+        _header_items.append(toggle_line)
+    _header_items.append(crumb)
     content = Group(
-        Text(""),
-        title,
-        Text(""),
-        sub,
-        crumb,
+        *_header_items,
         Text(""),
         viewport_renderable,
         Text(""),

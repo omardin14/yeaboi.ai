@@ -451,6 +451,40 @@ class TestAnalyzeCommand:
         assert captured["sprint_count"] == 4
         assert captured["include_insights"] is False
 
+    def test_source_both_parses(self):
+        args = build_parser().parse_args(["analyze", "--source", "both"])
+        assert args.source == "both"
+
+    def test_both_output_shows_banners_and_comparison(self, monkeypatch):
+        import io
+
+        from yeaboi.team_profile import TeamProfile
+
+        def _single(src, key):
+            return {
+                "profile": TeamProfile(team_id=f"{src}:{key}", source=src, project_key=key),
+                "insights": {"start": [], "stop": [], "keep": [], "try": []},
+                "warnings": [],
+            }
+
+        def fake_analysis(**kwargs):
+            return {
+                "source": "both",
+                "results": {"jira": _single("jira", "P"), "azdevops": _single("azdevops", "Web")},
+                "comparison": [("Avg velocity", "23", "15"), ("Completion rate", "82%", "74%")],
+                "warnings": [],
+            }
+
+        monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
+        args = build_parser().parse_args(["analyze", "--source", "both"])
+        buf = io.StringIO()
+        assert _cmd_analyze(args, _console(buf)) == 0
+        out = buf.getvalue()
+        assert "From Jira" in out
+        assert "From Azure DevOps" in out
+        # Both trackers' figures shown side by side, never blended.
+        assert "23" in out and "15" in out
+
 
 class TestDispatch:
     def test_unhandled_error_returns_1(self, monkeypatch, capsys):

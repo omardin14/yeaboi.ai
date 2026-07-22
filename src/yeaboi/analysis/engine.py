@@ -26,6 +26,10 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Friendly tracker labels for 'both'-mode output (mirrors reporting/engine.py's
+# _source_names). Note analysis uses "azdevops" (not reporting's "azuredevops").
+_SOURCE_NAMES = {"jira": "Jira", "azdevops": "Azure DevOps"}
+
 
 def _resolve_source(source: str) -> str:
     from yeaboi.tools.team_learning import _detect_source
@@ -78,6 +82,50 @@ def _generate_samples(profile, examples: dict, warnings: list[str]) -> dict | No
         return None
 
 
+def _available_sources() -> list[str]:
+    """Which trackers are configured (creds present). Ordered jira-first — the
+    same precedence as ``_detect_source`` — so 'both' output is deterministic."""
+    available: list[str] = []
+    try:
+        from yeaboi.config import get_jira_base_url, get_jira_token
+
+        if get_jira_base_url() and get_jira_token():
+            available.append("jira")
+    except Exception:
+        pass
+    try:
+        from yeaboi.config import get_azure_devops_org_url, get_azure_devops_token
+
+        if get_azure_devops_org_url() and get_azure_devops_token():
+            available.append("azdevops")
+    except Exception:
+        pass
+    return available
+
+
+# Headline rows shown in the 'both' side-by-side comparison. Each entry is
+# (label, formatter) where formatter renders one profile's value; values are
+# never blended across trackers — they sit in separate columns.
+_COMPARISON_ROWS: tuple[tuple[str, callable], ...] = (
+    ("Sprints analysed", lambda p: str(p.sample_sprints)),
+    ("Stories analysed", lambda p: str(p.sample_stories)),
+    ("Avg velocity", lambda p: f"{p.velocity_avg:.0f} ± {p.velocity_stddev:.0f}"),
+    ("Completion rate", lambda p: f"{p.sprint_completion_rate:.0f}%"),
+    ("Estimation accuracy", lambda p: f"{p.estimation_accuracy_pct:.0f}%"),
+)
+
+
+def _build_comparison(results: dict) -> list[tuple[str, str, str]]:
+    """Side-by-side headline rows: (label, jira_value, azdevops_value). Kept
+    deliberately separate (not aggregated) so each number names its tracker."""
+    jira = results.get("jira", {}).get("profile")
+    azdo = results.get("azdevops", {}).get("profile")
+    rows: list[tuple[str, str, str]] = []
+    for label, fmt in _COMPARISON_ROWS:
+        rows.append((label, fmt(jira) if jira else "—", fmt(azdo) if azdo else "—"))
+    return rows
+
+
 def run_team_analysis(
     source: str = "",
     project_key: str = "",
@@ -93,14 +141,24 @@ def run_team_analysis(
 ) -> dict:
     """Analyse the team's board history into a TeamProfile and persist it.
 
-    Pipeline: resolve source/project (auto-detected from config when blank) →
-    fetch ``sprint_count`` closed sprints → ``_run_parallel_analysis`` (velocity,
-    calibration, writing style, DoD — 4 workers, LLM-enriched with deterministic
-    fallbacks) → save via ``TeamProfileStore`` → write the analysis log →
-    optional coaching insights and sample tickets.
+    When ``source == 'both'`` this runs the single-source pipeline once per
+    configured tracker (Jira then Azure DevOps) and returns a **combined** dict:
+    ``{"source": "both", "results": {"jira": <single>, "azdevops": <single>},
+    "comparison": [(label, jira_val, azdo_val), ...], "warnings": [...]}`` — the
+    two profiles are kept clearly separate (never blended), since velocity/point
+    scales are not comparable across trackers. If only one tracker is configured,
+    'both' degrades to that single-source run (with a warning); ``project_key`` is
+    ignored in 'both' mode (ambiguous for two boards) and auto-resolved per source.
+
+    Otherwise the pipeline is: resolve source/project (auto-detected from config
+    when blank) → fetch ``sprint_count`` closed sprints → ``_run_parallel_analysis``
+    (velocity, calibration, writing style, DoD — 4 workers, LLM-enriched with
+    deterministic fallbacks) → save via ``TeamProfileStore`` → write the analysis
+    log → optional coaching insights and sample tickets.
 
     Args:
-        source: 'jira' or 'azdevops'; blank auto-detects from configured creds.
+        source: 'jira', 'azdevops', or 'both'; blank auto-detects a single
+            tracker from configured creds.
         project_key: tracker project; blank falls back to the configured one.
         team_name: AzDO team name attached to the profile (blank = configured).
         sprint_count: closed sprints to analyse (TUI uses 8).
@@ -124,6 +182,81 @@ def run_team_analysis(
     log_path, warnings. Raises ValueError when no tracker is configured or the
     board has no closed sprints; tracker API errors propagate.
     """
+    if source == "both":
+        available = _available_sources()
+        if not available:
+            _resolve_source("")  # raises the canonical "no tracker configured" ValueError
+        common = dict(
+            sprint_count=sprint_count,
+            generate_samples=generate_samples,
+            include_insights=include_insights,
+            include_ai_usage=include_ai_usage,
+            include_doc_quality=include_doc_quality,
+            progress=progress,
+            db_path=db_path,
+        )
+        # Only one tracker configured → 'both' gracefully degrades to that single
+        # run (with a warning) so the surfaces render it exactly as a normal run.
+        if len(available) == 1:
+            only = available[0]
+            logger.info("'both' requested but only %s configured — analysing %s only", only, only)
+            single = _run_single_source(only, "", "", **common)
+            single["warnings"].append(
+                f"Only {_SOURCE_NAMES[only]} is configured — analysed {_SOURCE_NAMES[only]} only."
+            )
+            return single
+        logger.info("Team analysis starting for both trackers: %s", ", ".join(available))
+        results: dict[str, dict] = {}
+        both_warnings: list[str] = []
+        for src in available:
+            try:
+                # project_key/team_name are intentionally auto-resolved per source
+                # here — an explicit project is ambiguous across two boards.
+                results[src] = _run_single_source(src, "", "", **common)
+                both_warnings.extend(results[src]["warnings"])
+            except Exception as exc:  # a per-tracker failure degrades to a warning, not a crash
+                logger.warning("Team analysis failed for %s: %s", src, exc)
+                both_warnings.append(f"{_SOURCE_NAMES[src]} analysis failed: {exc}")
+        if not results:
+            raise ValueError("Both trackers failed to analyse — see warnings for the per-tracker errors.")
+        logger.info("Team analysis completed for both trackers: %s", ", ".join(results))
+        return {
+            "source": "both",
+            "results": results,
+            "comparison": _build_comparison(results),
+            "warnings": both_warnings,
+        }
+    return _run_single_source(
+        source,
+        project_key,
+        team_name,
+        sprint_count=sprint_count,
+        generate_samples=generate_samples,
+        include_insights=include_insights,
+        include_ai_usage=include_ai_usage,
+        include_doc_quality=include_doc_quality,
+        progress=progress,
+        db_path=db_path,
+    )
+
+
+def _run_single_source(
+    source: str = "",
+    project_key: str = "",
+    team_name: str = "",
+    sprint_count: int = 8,
+    generate_samples: bool = False,
+    include_insights: bool = True,
+    include_ai_usage: bool = True,
+    include_doc_quality: bool = True,
+    *,
+    progress: list | None = None,
+    db_path=None,
+) -> dict:
+    """Analyse a single tracker's board history into a TeamProfile and persist it.
+
+    The one-tracker pipeline behind ``run_team_analysis`` (which handles source
+    resolution, the 'both' fan-out, and degraded-run warnings)."""
     from yeaboi.paths import get_db_path
     from yeaboi.team_profile import TeamProfileStore
     from yeaboi.tools.team_learning import (

@@ -566,6 +566,25 @@ class TestInputValidation:
         assert payload["ok"] is False
         assert "jira" in payload["error"]["message"]
 
+    def test_team_analyze_both_source(self, tmp_db, provider_mode, monkeypatch):
+        def fake_analysis(**kwargs):
+            return {
+                "source": "both",
+                "results": {
+                    "jira": {"profile": {"velocity_avg": 23.0}},
+                    "azdevops": {"profile": {"velocity_avg": 15.0}},
+                },
+                "comparison": [["Avg velocity", "23", "15"]],
+                "warnings": [],
+            }
+
+        monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
+        payload = call_tool("team_analyze", {"source": "both"})
+        assert payload["ok"] is True
+        assert payload["data"]["source"] == "both"
+        assert set(payload["data"]["results"]) == {"jira", "azdevops"}
+        assert payload["data"]["comparison"] == [["Avg velocity", "23", "15"]]
+
     def test_perf_prep_rejects_unknown_engineer(self, tmp_db, provider_mode, monkeypatch):
         from types import SimpleNamespace
 

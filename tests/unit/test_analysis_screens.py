@@ -883,6 +883,102 @@ class TestBuildTeamAnalysisScreenExtended:
             assert "Back" in output, f"Back button cropped at scroll={scroll}"
             assert "Continue" in output, f"Continue button cropped at scroll={scroll}"
 
+    def test_both_mode_toggle_and_comparison(self, profile):
+        """'Both' mode renders the source toggle line and side-by-side comparison."""
+        comparison = [("Avg velocity", "23", "15"), ("Completion rate", "82%", "74%")]
+        panel = _build_team_analysis_screen(
+            profile,
+            view="overview",
+            width=100,
+            height=40,
+            source_toggle=["jira", "azdevops"],
+            active_source="azdevops",
+            comparison=comparison,
+        )
+        out = _render(panel, width=100)
+        assert "Tab: switch source" in out
+        assert "Jira vs Azure DevOps" in out  # comparison heading
+        assert "23" in out and "15" in out  # per-tracker figures side by side
+
+    def test_no_toggle_without_source_toggle(self, profile):
+        """Single-source render shows no toggle affordance."""
+        out = _render(_build_team_analysis_screen(profile, width=100, height=40), width=100)
+        assert "Tab: switch source" not in out
+
+
+class TestRunTeamAnalysisResultsBoth:
+    """Drive _run_team_analysis_results in 'both' mode (source toggle + active_box).
+
+    Covers the runner-loop branch the screen-builder tests can't reach: the
+    Tab-cycled source switch, and the active_box mirror-back contract the two
+    call sites rely on for the downstream insights/ticket steps.
+    """
+
+    class _FakeLive:
+        def update(self, renderable):
+            self.last = renderable
+
+    @staticmethod
+    def _console():
+        from types import SimpleNamespace
+
+        return SimpleNamespace(size=(100, 40))
+
+    @staticmethod
+    def _reader(keys):
+        it = iter(keys)
+
+        def read_key(timeout=None):
+            return next(it)
+
+        return read_key
+
+    @staticmethod
+    def _both():
+        from yeaboi.team_profile import TeamProfile
+
+        jira = TeamProfile(team_id="jira:P", source="jira", project_key="P", team_name="")
+        azdo = TeamProfile(team_id="azdevops:Web", source="azdevops", project_key="Web", team_name="Web Team")
+        return {
+            "jira": {"profile": jira, "examples": {}, "sprint_names": ["S1"]},
+            "azdevops": {"profile": azdo, "examples": {}, "sprint_names": ["I1"]},
+        }
+
+    def _run(self, keys, active_box):
+        from yeaboi.ui.mode_select import _run_team_analysis_results
+
+        both = self._both()
+        return _run_team_analysis_results(
+            self._FakeLive(),
+            self._console(),
+            self._reader(keys),
+            0.01,
+            True,
+            both["jira"]["profile"],
+            {},
+            sprint_names=["S1"],
+            both_results=both,
+            comparison=[("Avg velocity", "23", "15")],
+            active_box=active_box,
+        )
+
+    def test_tab_switches_active_source(self):
+        active_box: list = [None]
+        # Frame 1 = jira; Tab → azdevops; Esc on overview exits.
+        assert self._run(["tab", "esc"], active_box) == "back"
+        profile, _examples, sprint_names, team_name = active_box[0]
+        assert profile.source == "azdevops"
+        assert team_name == "Web Team"
+        assert sprint_names == ["I1"]
+
+    def test_no_team_name_bleed_when_toggling_back(self):
+        active_box: list = [None]
+        # jira → azdevops (team "Web Team") → back to jira: must NOT keep "Web Team".
+        assert self._run(["tab", "tab", "esc"], active_box) == "back"
+        profile, _examples, _sprint_names, team_name = active_box[0]
+        assert profile.source == "jira"
+        assert team_name == ""  # regression guard: no cross-tracker team-name bleed
+
 
 # ---------------------------------------------------------------------------
 # Confirmation screen: _build_generate_confirm_screen

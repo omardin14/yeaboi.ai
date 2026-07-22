@@ -73,6 +73,9 @@ class _TaCtx:
         self.ex = examples or {}
         self.sprint_names = sprint_names
         self.stats = stats or {}
+        # Set by the screen builder in 'both' mode: side-by-side headline rows
+        # (label, jira_value, azdevops_value) rendered atop the overview.
+        self.comparison: list[tuple[str, str, str]] | None = None
         self.lines: list = []
         self.item_heights: list[int] = []
         self.rendered_lines = 0
@@ -2042,9 +2045,32 @@ def _ta_card_teaser(ctx: _TaCtx, profile, key: str) -> str:
     return ""
 
 
+def _ta_source_comparison(ctx: _TaCtx) -> None:
+    """'Both'-mode header: Jira vs Azure DevOps headline stats side by side.
+
+    Deliberately a plain side-by-side table — the two trackers' numbers are NOT
+    aggregated (velocity/point scales aren't comparable across trackers); this
+    just makes it easy to see each source's figure next to the other's."""
+    rows = ctx.comparison or []
+    if not rows:
+        return
+    ctx.heading("Jira vs Azure DevOps")
+    table = RichTable(show_header=True, box=None, pad_edge=False, padding=(0, 2, 0, 0))
+    table.add_column("Metric", style=c_muted)
+    table.add_column("Jira", style=c_value)
+    table.add_column("Azure DevOps", style=c_value)
+    for label, jira_val, azdo_val in rows:
+        table.add_row(label, jira_val, azdo_val)
+    ctx.add_table(table)
+
+
 def _ta_overview(ctx: _TaCtx, profile, selected_card: int) -> None:
     """Overview page: headline stats, AI executive summary, section card list."""
     stats = ctx.stats
+
+    # 'Both'-mode: lead with the per-tracker side-by-side comparison.
+    if ctx.comparison:
+        _ta_source_comparison(ctx)
 
     ctx.heading("At a Glance")
     if stats.get("team_size"):

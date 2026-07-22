@@ -45,7 +45,9 @@ def wired(monkeypatch, db, tmp_path):
         captured["parallel"] = (source, project, len(sprint_data))
         captured["include_ai_usage"] = include_ai_usage
         captured["include_doc_quality"] = include_doc_quality
-        return _profile(source=source, project_key=project), {"sprint_details": []}
+        # Distinct team_id per source (the DB primary key), mirroring the real
+        # analysis so a 'both' run persists two rows rather than colliding.
+        return _profile(team_id=f"{source}:{project}", source=source, project_key=project), {"sprint_details": []}
 
     monkeypatch.setattr("yeaboi.tools.team_learning._run_parallel_analysis", fake_parallel)
     monkeypatch.setattr(
@@ -129,6 +131,63 @@ class TestRunTeamAnalysis:
         result = run_team_analysis(source="jira", project_key="PROJ", generate_samples=True, db_path=db)
         assert result["samples"] is None
         assert any("Sample-ticket" in w for w in result["warnings"])
+
+
+def _configure(monkeypatch, *, jira=True, azdevops=True):
+    """Toggle which trackers _available_sources() sees as configured."""
+    monkeypatch.setattr("yeaboi.config.get_jira_base_url", lambda: "https://x.atlassian.net" if jira else None)
+    monkeypatch.setattr("yeaboi.config.get_jira_token", lambda: "tok" if jira else None)
+    monkeypatch.setattr(
+        "yeaboi.config.get_azure_devops_org_url", lambda: "https://dev.azure.com/x" if azdevops else None
+    )
+    monkeypatch.setattr("yeaboi.config.get_azure_devops_token", lambda: "pat" if azdevops else None)
+
+
+class TestRunTeamAnalysisBoth:
+    def test_both_runs_each_tracker_separately(self, wired, db, monkeypatch):
+        _configure(monkeypatch, jira=True, azdevops=True)
+        result = run_team_analysis(source="both", db_path=db)
+        assert result["source"] == "both"
+        assert set(result["results"]) == {"jira", "azdevops"}
+        # Each keeps its own source-stamped profile — never blended.
+        assert result["results"]["jira"]["profile"].source == "jira"
+        assert result["results"]["azdevops"]["profile"].source == "azdevops"
+        assert result["comparison"]  # side-by-side headline rows
+        labels = [row[0] for row in result["comparison"]]
+        assert "Avg velocity" in labels
+        # Both profiles persisted as separate rows.
+        with TeamProfileStore(db) as store:
+            assert len(store.list_profiles()) == 2
+
+    def test_both_only_one_configured_degrades_to_single(self, wired, db, monkeypatch):
+        _configure(monkeypatch, jira=True, azdevops=False)
+        result = run_team_analysis(source="both", db_path=db)
+        # Degrades to a normal single-source result the surfaces render as-is.
+        assert result["source"] == "jira"
+        assert "results" not in result
+        assert any("Only Jira" in w for w in result["warnings"])
+
+    def test_both_neither_configured_raises(self, wired, db, monkeypatch):
+        _configure(monkeypatch, jira=False, azdevops=False)
+        monkeypatch.setattr("yeaboi.tools.team_learning._detect_source", lambda: "")
+        with pytest.raises(ValueError, match="No tracker configured"):
+            run_team_analysis(source="both", db_path=db)
+
+    def test_both_one_source_fails_degrades_with_warning(self, wired, db, monkeypatch):
+        _configure(monkeypatch, jira=True, azdevops=True)
+        # Azure DevOps has no closed sprints → that single run raises; Jira still returns.
+        monkeypatch.setattr("yeaboi.tools.team_learning._fetch_azdevops_history", lambda project, count: [])
+        result = run_team_analysis(source="both", db_path=db)
+        assert result["source"] == "both"
+        assert set(result["results"]) == {"jira"}
+        assert any("Azure DevOps analysis failed" in w for w in result["warnings"])
+
+    def test_both_all_fail_raises(self, wired, db, monkeypatch):
+        _configure(monkeypatch, jira=True, azdevops=True)
+        monkeypatch.setattr("yeaboi.tools.team_learning._fetch_jira_history", lambda project, count: [])
+        monkeypatch.setattr("yeaboi.tools.team_learning._fetch_azdevops_history", lambda project, count: [])
+        with pytest.raises(ValueError, match="Both trackers failed"):
+            run_team_analysis(source="both", db_path=db)
 
 
 class TestCliRunLearn:

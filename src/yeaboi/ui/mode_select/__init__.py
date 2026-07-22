@@ -3121,6 +3121,9 @@ def _run_team_analysis_results(
     *,
     sprint_names: list[str] | None = None,
     team_name: str = "",
+    both_results: dict | None = None,
+    comparison: list | None = None,
+    active_box: list | None = None,
 ) -> str:
     """Event loop for the team-analysis results screen (overview + section cards).
 
@@ -3130,8 +3133,18 @@ def _run_team_analysis_results(
     overview. Export writes HTML + MD from any view. Returns ``"continue"``
     when the user chose Continue (ticket generation) and ``"back"`` on Esc from
     the overview — the callers own what happens next.
+
+    'Both' mode: when ``both_results`` (source→single-source result) is given, a
+    ``Tab``-cycled source toggle switches which tracker's profile is shown and
+    the ``comparison`` rows head the overview. The currently-selected source's
+    (profile, examples, sprint_names, team_name) is mirrored into ``active_box``
+    so the caller's downstream steps act on the tracker the user last viewed.
     """
     from yeaboi.ui.mode_select.screens._analysis_sections import _TA_CARD_ORDER
+
+    both_order = list(both_results.keys()) if both_results else []
+    src_idx = 0
+    base_team_name = team_name  # caller-passed fallback; never let one tracker's team bleed into another
 
     view = "overview"
     card_idx = 0
@@ -3151,6 +3164,20 @@ def _run_team_analysis_results(
         return f"Team Analysis — {profile.project_key}", md
 
     while True:
+        # 'Both' mode: rebind the active tracker each frame from the toggle
+        # selection, and mirror it back so callers act on the shown source.
+        if both_results:
+            active_source = both_order[src_idx]
+            _cur = both_results[active_source]
+            profile = _cur["profile"]
+            examples = _cur["examples"]
+            sprint_names = _cur["sprint_names"]
+            # Fall back to the caller's value, NOT the mutated local, so the
+            # previous tracker's team name can't leak onto this one's screen.
+            team_name = getattr(profile, "team_name", "") or base_team_name
+            if active_box is not None:
+                active_box[0] = (profile, examples, sprint_names, team_name)
+
         actions = (
             ["Open", "Export", "Anonymize", "Continue"]
             if view == "overview"
@@ -3187,10 +3214,23 @@ def _run_team_analysis_results(
                 actions=actions,
                 shimmer_tick=time.monotonic() - anim0,
                 anon_note=_anon_note(anon),
+                source_toggle=both_order or None,
+                active_source=(both_order[src_idx] if both_results else ""),
+                comparison=comparison if view == "overview" else None,
             )
         )
 
         kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if both_results and kk == "tab":
+            # Switch tracker: reset the view/scroll and drop any mask (the
+            # replacements were computed for the other profile).
+            src_idx = (src_idx + 1) % len(both_order)
+            view = "overview"
+            scroll = 0
+            sel = 0
+            card_idx = 0
+            anon = None
+            continue
         if view == "overview" and kk in SCROLL_KEYS:
             # On the overview, Up/Down moves the card selection (the screen
             # auto-scrolls the selected row into view).
@@ -5760,7 +5800,7 @@ def select_mode(
                                     from rich.console import Group
                                     from rich.text import Text
 
-                                    _ana_popup_sel = 0  # 0=Jira, 1=AzDO
+                                    _ana_popup_sel = 0  # 0=Jira, 1=Azure DevOps, 2=Both
                                     _ana_popup_open = True
                                     _ana_popup_tick = 0.0
                                     while _ana_popup_open:
@@ -5792,7 +5832,7 @@ def select_mode(
 
                                         # Buttons with green highlight
                                         _btn_line = Text(justify="center")
-                                        for bi, bl in enumerate(["Jira", "Azure DevOps"]):
+                                        for bi, bl in enumerate(["Jira", "Azure DevOps", "Both"]):
                                             if bi > 0:
                                                 _btn_line.append("     ")
                                             if bi == _ana_popup_sel:
@@ -5846,13 +5886,13 @@ def select_mode(
                                         )
                                         pk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
                                         if pk == "left":
-                                            _ana_popup_sel = 0
+                                            _ana_popup_sel = max(0, _ana_popup_sel - 1)
                                         elif pk == "right":
-                                            _ana_popup_sel = 1
+                                            _ana_popup_sel = min(2, _ana_popup_sel + 1)
                                         elif pk == "enter":
-                                            _team_popup_result = (
-                                                "analyse_jira" if _ana_popup_sel == 0 else "analyse_azdevops"
-                                            )
+                                            _team_popup_result = ["analyse_jira", "analyse_azdevops", "analyse_both"][
+                                                _ana_popup_sel
+                                            ]
                                             _ana_popup_open = False
                                         elif pk in ("esc", "q"):
                                             _ana_popup_open = False
@@ -5937,13 +5977,17 @@ def select_mode(
                             _ta_source = "jira"
                         elif _team_popup_result == "analyse_azdevops":
                             _ta_source = "azdevops"
+                        elif _team_popup_result == "analyse_both":
+                            _ta_source = "both"
                         else:
                             _ta_source = "jira" if _jira_ok else "azdevops"
 
                         _ta_project_key = ""
                         _ta_team_name = ""
                         try:
-                            if _ta_source == "jira":
+                            if _ta_source == "both":
+                                pass  # project/team auto-resolved per source in the engine
+                            elif _ta_source == "jira":
                                 from yeaboi.config import get_jira_project_key
 
                                 _ta_project_key = get_jira_project_key() or ""
@@ -5962,6 +6006,7 @@ def select_mode(
                         _ta_profile_box: list = [None]
                         _ta_examples_box: list = [None]
                         _ta_sprint_names_box: list = [[]]
+                        _ta_result_box: list = [None]  # full engine dict (carries 'both' results)
                         _ta_error_box: list[str] = [""]
                         _ta_done = threading.Event()
 
@@ -5977,9 +6022,13 @@ def select_mode(
                                     progress=_ta_progress,
                                     db_path=_ana_dbp,
                                 )
-                                _ta_profile_box[0] = _res["profile"]
-                                _ta_examples_box[0] = _res["examples"]
-                                _ta_sprint_names_box[0] = _res["sprint_names"]
+                                _ta_result_box[0] = _res
+                                # 'both' has no top-level profile — seed the boxes
+                                # with the first tracker (the initially-shown source).
+                                _first = next(iter(_res["results"].values())) if _res.get("source") == "both" else _res
+                                _ta_profile_box[0] = _first["profile"]
+                                _ta_examples_box[0] = _first["examples"]
+                                _ta_sprint_names_box[0] = _first["sprint_names"]
                             except ValueError as exc:
                                 _ta_error_box[0] = str(exc)
                             except Exception as exc:
@@ -6039,11 +6088,17 @@ def select_mode(
                             # Persist + analysis log already handled inside
                             # run_team_analysis (one code path with CLI/MCP).
 
-                            # Show results (overview + section cards)
+                            # Show results (overview + section cards). In 'both'
+                            # mode the loop toggles between the two trackers and
+                            # reports the selected one back via _ta_active_box.
                             _ta_examples = _ta_examples_box[0] or {}
                             _ta_sprint_names = _ta_sprint_names_box[0]
                             _ta_sub = f"{_ta_profile.source}/{_ta_profile.project_key}" if _ta_profile else ""
+                            _ta_full = _ta_result_box[0] or {}
+                            _ta_both = _ta_full.get("results") if _ta_full.get("source") == "both" else None
+                            _ta_comparison = _ta_full.get("comparison") if _ta_both else None
                             while True:
+                                _ta_active_box: list = [None]
                                 _res = _run_team_analysis_results(
                                     live,
                                     console,
@@ -6054,7 +6109,15 @@ def select_mode(
                                     _ta_examples,
                                     sprint_names=_ta_sprint_names,
                                     team_name=_ta_team_name,
+                                    both_results=_ta_both,
+                                    comparison=_ta_comparison,
+                                    active_box=_ta_active_box,
                                 )
+                                # In 'both' mode the downstream insights/ticket
+                                # steps operate on the tracker the user last viewed.
+                                if _ta_active_box[0] is not None:
+                                    _ta_profile, _ta_examples, _ta_sprint_names, _ta_team_name = _ta_active_box[0]
+                                    _ta_sub = f"{_ta_profile.source}/{_ta_profile.project_key}"
                                 if _res != "continue":
                                     break
 
@@ -6546,20 +6609,20 @@ def select_mode(
                     # When one board configured:   [Yes, Analyse] [Skip] (2 buttons)
                     if team_popup_open:
                         _both_boards = _jira_ok and _azdevops_ok
-                        _popup_btn_count = 3 if _both_boards else 2
+                        _popup_btn_count = 4 if _both_boards else 2
                         if key == "left":
                             team_popup_sel = max(0, team_popup_sel - 1)
                         elif key == "right":
                             team_popup_sel = min(_popup_btn_count - 1, team_popup_sel + 1)
                         elif key == "enter":
                             if _both_boards:
-                                # 0=Jira, 1=AzDO, 2=Skip
-                                if team_popup_sel == 0:
-                                    _team_popup_result = "analyse_jira"
-                                elif team_popup_sel == 1:
-                                    _team_popup_result = "analyse_azdevops"
-                                else:
-                                    _team_popup_result = "skip"
+                                # 0=Jira, 1=AzDO, 2=Both, 3=Skip
+                                _team_popup_result = [
+                                    "analyse_jira",
+                                    "analyse_azdevops",
+                                    "analyse_both",
+                                    "skip",
+                                ][team_popup_sel]
                             else:
                                 # 0=Yes, 1=Skip
                                 _team_popup_result = "analyse" if team_popup_sel == 0 else "skip"
@@ -7143,12 +7206,16 @@ def select_mode(
                         _ta_source = "jira"
                     elif _team_popup_result == "analyse_azdevops":
                         _ta_source = "azdevops"
+                    elif _team_popup_result == "analyse_both":
+                        _ta_source = "both"
                     else:
                         _ta_source = "jira" if _jira_ok else "azdevops"
                     _ta_project_key = ""
                     _ta_team_name = ""
                     try:
-                        if _ta_source == "jira":
+                        if _ta_source == "both":
+                            pass  # project/team auto-resolved per source in the engine
+                        elif _ta_source == "jira":
                             from yeaboi.config import get_jira_project_key
 
                             _ta_project_key = get_jira_project_key() or ""
@@ -7167,6 +7234,7 @@ def select_mode(
                     _ta_profile_box: list = [None]
                     _ta_examples_box: list = [None]
                     _ta_sprint_names_box: list = [[]]
+                    _ta_result_box: list = [None]  # full engine dict (carries 'both' results)
                     _ta_error_box: list[str] = [""]
                     _ta_done = threading.Event()
 
@@ -7182,9 +7250,11 @@ def select_mode(
                                 progress=_ta_progress,
                                 db_path=_ana_dbp,
                             )
-                            _ta_profile_box[0] = _res["profile"]
-                            _ta_examples_box[0] = _res["examples"]
-                            _ta_sprint_names_box[0] = _res["sprint_names"]
+                            _ta_result_box[0] = _res
+                            _first = next(iter(_res["results"].values())) if _res.get("source") == "both" else _res
+                            _ta_profile_box[0] = _first["profile"]
+                            _ta_examples_box[0] = _first["examples"]
+                            _ta_sprint_names_box[0] = _first["sprint_names"]
                         except ValueError as exc:
                             _ta_error_box[0] = str(exc)
                         except Exception as exc:
@@ -7246,7 +7316,11 @@ def select_mode(
                         # insights and Esc both fall through to intake below.
                         _ta_examples = _ta_examples_box[0] or {}
                         _ta_sprint_names = _ta_sprint_names_box[0]
+                        _ta_full = _ta_result_box[0] or {}
+                        _ta_both = _ta_full.get("results") if _ta_full.get("source") == "both" else None
+                        _ta_comparison = _ta_full.get("comparison") if _ta_both else None
                         while True:
+                            _ta_active_box: list = [None]
                             _ta_res = _run_team_analysis_results(
                                 live,
                                 console,
@@ -7257,7 +7331,12 @@ def select_mode(
                                 _ta_examples,
                                 sprint_names=_ta_sprint_names,
                                 team_name=_ta_team_name,
+                                both_results=_ta_both,
+                                comparison=_ta_comparison,
+                                active_box=_ta_active_box,
                             )
+                            if _ta_active_box[0] is not None:
+                                _ta_profile, _ta_examples, _ta_sprint_names, _ta_team_name = _ta_active_box[0]
                             if _ta_res != "continue":
                                 break
                             if (

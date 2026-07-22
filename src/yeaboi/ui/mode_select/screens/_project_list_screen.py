@@ -651,7 +651,7 @@ def _build_project_list_screen(
 
         _both = jira_enabled and azdevops_enabled
         if _both:
-            btns = [" Jira ", " Azure DevOps ", " Skip "]
+            btns = [" Jira ", " Azure DevOps ", " Both ", " Skip "]
         else:
             btns = [" Yes, Analyse ", " Skip "]
 
