@@ -99,6 +99,23 @@ class TestChangelogText:
 # ---------------------------------------------------------------------------
 
 
+class TestTipsText:
+    def test_copy_path_copies_all_tips(self, monkeypatch):
+        import yeaboi.clipboard as clip
+        from yeaboi.ui.shared._tips import build_tips_text, get_tips
+
+        monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+        get_tips.cache_clear()
+        copied: dict = {}
+        monkeypatch.setattr(clip, "copy_text", lambda t: copied.setdefault("text", t) or True)
+
+        # Mirrors the All Tips page "Copy all" action.
+        msg = clip.copy_markdown_status(build_tips_text())
+        assert msg == "Copied to clipboard"
+        assert "# yeaboi — Tips" in copied["text"]
+        get_tips.cache_clear()
+
+
 class TestExportViaPickerCopy:
     def test_copy_dispatch_copies_document_markdown(self, monkeypatch):
         import yeaboi.clipboard as clip

@@ -40,7 +40,7 @@ Panel(height=height, padding=(1,2))
 
 1. **DRY** — Never inline button rendering, scrollbar math, or viewport calculations. Always use shared functions.
 2. **Themes** — Never hardcode colour values (`"rgb(100,180,100)"`). Use `theme.accent`, `theme.muted`, etc. from the appropriate Theme constant.
-3. **New pages** — Adding a new mode/page requires: a Theme constant, a `*_title()` function, a colour entry in `COLOR_RGB`, and an entry in `_MODE_CARDS` (if it's a main menu item).
+3. **New pages** — Adding a new mode/page requires: a Theme constant, a `*_title()` function, a colour entry in `COLOR_RGB`, an entry in `_MODE_CARDS` (if it's a main menu item), and a `FeatureTip` in `ui/shared/_tips.py` keyed by the capability (with `mode_key` = the card key so the welcome-screen `g` key jumps in; `is_new=True` for a release or two). `TestTips` enforces this.
 4. **Consistency** — All pages use the same Panel structure (title → subtitle → viewport → buttons). No exceptions.
 5. **Scrollbar** — Content that can overflow MUST use `build_scrollbar()`. Use `always_show=True` for pages where the track should always be visible.
 6. **Buttons** — Register new button labels in `_BTN_COLORS` dict in `_components.py` with accent/grey colour tuples.

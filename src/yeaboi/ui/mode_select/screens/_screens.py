@@ -235,38 +235,70 @@ _TIP_DOT_ON = (226, 186, 96)  # warm accent for the active dot
 _TIP_KEY = (210, 210, 220)  # the "t" keycap glyph
 
 
-def _build_tip_rows(shimmer_tick: float) -> list[Text]:
+def _build_tip_rows(shimmer_tick: float, *, tip_offset: int = 0) -> list[Text]:
     """Build the bottom tip block: a rotating, cross-fading tip + a control row.
 
     Returns two centred rows so the mode list above stays vertically stable
-    whether tips are on or off. When off, both rows are blank. The tip fades in
-    and out via ``tip_brightness`` (see README: "Architecture" — shared UI layer).
+    whether tips are on or off. The tip fades in and out via ``tip_brightness``
+    (see README: "Architecture" — shared UI layer).
+
+    ``tip_offset`` is the manual browse shift (bumped by the [ / ] keys); it moves
+    through the list while auto-rotation keeps running (see :func:`resolve_index`).
+    A ``NEW`` badge is prefixed for freshly-shipped features, and the current
+    tip's mode (when it maps to a home card) gets a ``g open`` jump affordance.
+
+    When tips are hidden, both rows aren't blank: the second keeps a quiet
+    ``t show tips`` hint so the feature is always discoverable/recoverable.
     """
     from yeaboi.config import is_tips_enabled
     from yeaboi.ui.shared._animations import lerp_color
-    from yeaboi.ui.shared._tips import current_tip, tip_brightness, tip_count
+    from yeaboi.ui.shared._tips import resolve_index, tip_at, tip_brightness
 
     if not is_tips_enabled():
-        return [Text(""), Text("")]
+        # Persistent, quiet affordance so a user who pressed `t` can turn tips
+        # back on — otherwise hidden tips are undiscoverable.
+        show_hint = Text(justify="center")
+        show_hint.append("t", style=f"bold rgb({_TIP_KEY[0]},{_TIP_KEY[1]},{_TIP_KEY[2]})")
+        show_hint.append(
+            " show tips", style=f"rgb({_TIP_DOT_DIM[0] + 45},{_TIP_DOT_DIM[1] + 45},{_TIP_DOT_DIM[2] + 45})"
+        )
+        return [Text(""), show_hint]
 
-    idx, tip_text = current_tip(shimmer_tick)
+    idx = resolve_index(shimmer_tick, tip_offset)
+    tip = tip_at(idx)
     b = tip_brightness(shimmer_tick)
 
-    # Row 1 — the tip, faded from background toward full body colour.
-    tip_line = Text(tip_text, style=lerp_color(b, _TIP_BG, _TIP_BODY), justify="center")
+    body_style = lerp_color(b, _TIP_BG, _TIP_BODY)
 
-    # Row 2 — position dots (active one accented) + a quiet keycap control hint.
+    # Row 1 — an optional NEW badge, then the tip, faded toward full body colour.
+    tip_line = Text(justify="center")
+    if tip.is_new:
+        tip_line.append(" NEW ", style=f"bold {lerp_color(b, _TIP_BG, _TIP_DOT_ON)}")
+        tip_line.append("  ")
+    tip_line.append(tip.text, style=body_style)
+
+    # Row 2 — quiet keycap control hints. No position indicator: an ambient,
+    # auto-rotating tip doesn't need one, and it kept the row cluttered. Each
+    # hint pairs the literal key with its action word (e.g. "[ prev"), matching
+    # across the row so the real keys are unmistakable.
     dot_dim = lerp_color(b, _TIP_BG, _TIP_DOT_DIM)
-    dot_on = lerp_color(b, _TIP_BG, _TIP_DOT_ON)
+    key_style = f"bold {lerp_color(b, _TIP_BG, _TIP_KEY)}"
+
+    def _hint(key: str, label: str, *, gap: str = "      ") -> None:
+        if control.plain:
+            control.append(gap)
+        control.append(key, style=key_style)
+        control.append(f" {label}", style=dot_dim)
+
     control = Text(justify="center")
-    for i in range(tip_count()):
-        if i:
-            control.append(" ")
-        control.append("●" if i == idx else "○", style=dot_on if i == idx else dot_dim)
-    control.append("     ")
-    control.append("press ", style=dot_dim)
-    control.append("t", style=f"bold {lerp_color(b, _TIP_BG, _TIP_KEY)}")
-    control.append(" to hide", style=dot_dim)
+    # Browse the tips manually with the [ and ] keys (rotation keeps running).
+    _hint("[", "prev", gap="")
+    _hint("]", "next", gap="    ")
+    # Jump-into-feature — only when this tip maps to a selectable mode card. Key
+    # is `g` (Enter is already bound to the *selected* card, not this tip).
+    if tip.mode_key is not None:
+        _hint("g", "open")
+    _hint("t", "hide")
 
     return [tip_line, control]
 
@@ -303,6 +335,9 @@ def _build_version_row(width: int) -> Text:
     row.append("  ·  ", style=dim)
     row.append("f", style=key_style)
     row.append(" feedback", style=dim)
+    row.append("  ·  ", style=dim)
+    row.append("a", style=key_style)
+    row.append(" all tips", style=dim)
     return row
 
 
@@ -317,6 +352,7 @@ def _build_mode_screen(
     fade_style: str = "",
     fade_indices: list[int] | None = None,
     selected_style: str = "",
+    tip_offset: int = 0,
 ) -> Panel:
     """Build the full-screen mode selection layout."""
     show = visible if visible is not None else list(range(len(_MODE_CARDS)))
@@ -355,7 +391,7 @@ def _build_mode_screen(
     # off the render loop's shimmer_tick, cross-fading between one another, and can
     # be switched off entirely. Rendered as two quiet rows: the tip itself, then
     # position dots + a keycap control hint.
-    tip_rows = _build_tip_rows(shimmer_tick)
+    tip_rows = _build_tip_rows(shimmer_tick, tip_offset=tip_offset)
 
     # Bottom-left version hint (+ upgrade advisory when a newer release exists),
     # opposite the music bar on the border below it.

@@ -2,9 +2,16 @@
 
 from rich.panel import Panel
 
-from yeaboi.ui.mode_select.screens._screens import _build_mode_screen
+from yeaboi.ui.mode_select.screens._screens import _build_mode_screen, _build_tip_rows
+from yeaboi.ui.mode_select.screens._screens_secondary import _build_all_tips_screen
 from yeaboi.ui.session.screens._screens_input import _image_hint, _voice_hint
+from yeaboi.ui.shared import _tips
 from yeaboi.voice import voice_install_command
+
+
+def _tip_rows_text(**kwargs) -> str:
+    """Rendered plain text of both tip rows joined, for substring assertions."""
+    return "\n".join(t.plain for t in _build_tip_rows(**kwargs))
 
 
 def test_voice_hint_empty_when_tips_disabled(monkeypatch):
@@ -93,3 +100,115 @@ def test_mode_screen_renders_at_various_ticks(monkeypatch):
     for tick in (0.0, 6.5, 42.0):
         result = _build_mode_screen(0, width=80, height=24, shimmer_tick=tick)
         assert isinstance(result, Panel)
+
+
+def test_tip_rows_show_recovery_hint_when_disabled(monkeypatch):
+    # Hidden tips must stay discoverable: the first row is blank (layout stays
+    # stable) but the second keeps a quiet "t show tips" affordance.
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: False)
+    rows = _build_tip_rows(0.0)
+    assert rows[0].plain == ""
+    assert "show tips" in rows[1].plain
+
+
+def test_tip_rows_show_labeled_keys(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    text = _tip_rows_text(shimmer_tick=0.0)
+    assert "prev" in text and "next" in text  # browse keys, labeled
+    assert "hide" in text
+
+
+def test_tip_rows_have_no_position_indicator(monkeypatch):
+    # No per-tip dots and no "n/total" counter — an auto-rotating tip needs no
+    # position indicator, and both grew clutter as tips were added.
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    total = _tips.tip_count()
+    text = _tip_rows_text(shimmer_tick=0.0, tip_offset=2)
+    assert "●" not in text and "○" not in text  # no dots
+    assert f"/{total}" not in text  # no counter
+    _tips.get_tips.cache_clear()
+
+
+def test_tip_rows_open_hint_only_for_carded_tip(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    tips = _tips.get_tips()
+    carded = next(i for i, t in enumerate(tips) if t.mode_key is not None)
+    ambient = next(i for i, t in enumerate(tips) if t.mode_key is None)
+    assert "open" in _tip_rows_text(shimmer_tick=0.0, tip_offset=carded)
+    assert "open" not in _tip_rows_text(shimmer_tick=0.0, tip_offset=ambient)
+    _tips.get_tips.cache_clear()
+
+
+def test_tip_rows_new_badge_when_flagged(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    tips = _tips.get_tips()
+    new_idx = next(i for i, t in enumerate(tips) if t.is_new)
+    plain_idx = next(i for i, t in enumerate(tips) if not t.is_new)
+    assert "NEW" in _tip_rows_text(shimmer_tick=0.0, tip_offset=new_idx)
+    assert "NEW" not in _tip_rows_text(shimmer_tick=0.0, tip_offset=plain_idx)
+    _tips.get_tips.cache_clear()
+
+
+def test_tip_offset_shifts_the_shown_tip(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    tips = _tips.get_tips()
+    # At tick 0 the auto index is 0, so a browse offset selects tips[offset] —
+    # and because it's an offset (not a pin) auto-rotation keeps advancing.
+    assert tips[0].text in _tip_rows_text(shimmer_tick=0.0, tip_offset=0)
+    assert tips[2].text in _tip_rows_text(shimmer_tick=0.0, tip_offset=2)
+    _tips.get_tips.cache_clear()
+
+
+# --- All Tips gallery page (opened with `a`) ---------------------------------
+
+
+def _all_tips_rendered(**kwargs) -> str:
+    import io
+
+    from rich.console import Console
+
+    buf = io.StringIO()
+    Console(file=buf, width=100, height=30).print(_build_all_tips_screen(**kwargs))
+    return buf.getvalue()
+
+
+def test_all_tips_screen_renders_panel(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    result = _build_all_tips_screen(shimmer_tick=0.0, sub_reveal=99, actions=["Copy all", "Back"])
+    assert isinstance(result, Panel)
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_shows_a_tip_and_new_badge(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    out = _all_tips_rendered(shimmer_tick=0.0, sub_reveal=99)
+    assert "NEW" in out
+    assert "opens" in out  # a carded tip's "→ opens <Mode>" note
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_shows_status_message(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    out = _all_tips_rendered(shimmer_tick=0.0, sub_reveal=99, message="Copied to clipboard")
+    assert "Copied to clipboard" in out
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_scrolls(monkeypatch):
+    # A large scroll offset is clamped and still renders a Panel (no crash).
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    result = _build_all_tips_screen(scroll_offset=999, shimmer_tick=1.0, sub_reveal=99)
+    assert isinstance(result, Panel)
+    _tips.get_tips.cache_clear()
