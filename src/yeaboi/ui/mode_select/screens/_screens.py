@@ -268,19 +268,20 @@ def _build_tip_rows(shimmer_tick: float, *, tip_override: int | None = None) -> 
         tip_line.append("  ")
     tip_line.append(tip.text, style=body_style)
 
-    # Row 2 — position dots (active one accented) + quiet keycap control hints.
+    # Row 2 — a compact position counter + quiet keycap control hints.
     dot_dim = lerp_color(b, _TIP_BG, _TIP_DOT_DIM)
     dot_on = lerp_color(b, _TIP_BG, _TIP_DOT_ON)
     key_style = f"bold {lerp_color(b, _TIP_BG, _TIP_KEY)}"
     control = Text(justify="center")
-    for i in range(tip_count()):
-        if i:
-            control.append(" ")
-        control.append("●" if i == idx else "○", style=dot_on if i == idx else dot_dim)
+    # A "4/17" counter instead of one dot per tip — the row stays a fixed width
+    # no matter how many tips accumulate as features are added.
+    control.append(f"{idx + 1}/{tip_count()}", style=dot_on)
     control.append("     ")
-    # Browse affordance — show the literal keys ([ ]) so the row teaches them,
-    # matching the "t hide" keycap convention below.
-    control.append("[ ]", style=key_style)
+    # Browse affordance — the literal [ and ] keys, rendered "[/]" so they read
+    # as two keycaps (not an empty box), matching the "t hide" convention below.
+    control.append("[", style=key_style)
+    control.append("/", style=dot_dim)
+    control.append("]", style=key_style)
     control.append(" browse", style=dot_dim)
     # Jump-into-feature — only when this tip maps to a selectable mode card. Key
     # is `g` (Enter is already bound to the *selected* card, not this tip).
