@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.28.0",
+      "date": "2026-07-22",
+      "summary": "The welcome screen tips just got a lot more useful. Instead of generic CLI hints, each tip now spotlights a real feature — Analysis, Standups, Retros, and more — with a gold NEW badge marking freshly-shipped ones. Press [ or ] to browse through tips at your own pace (pausing auto-rotation), press g to jump straight into the mode the current tip describes, or press t to hide tips entirely. Every tip is keyed to a capability and automatically stays in sync — a new mode can't merge without a tip, enforced by the same surface-parity check that guards the TUI and CLI.",
+      "highlights": [
+        {"text": "Feature-focused tips replace generic CLI hints, one per capability like Analysis and Standups", "areas": ["general"]},
+        {"text": "Browse tips manually with [ / ]; NEW badge highlights freshly-shipped features", "areas": ["general"]},
+        {"text": "Press g to jump into the mode a tip describes, reusing the existing activation path", "areas": ["general"]},
+        {"text": "Tips stay automatically in sync via surface-parity enforcement — new modes require a tip", "areas": ["general"]}
+      ]
+    },
+    {
       "version": "2.27.0",
       "date": "2026-07-22",
       "summary": "Team analysis now includes two new sub-analyses that deepen your understanding of how your team works. AI adoption scanning finds markers of Claude, Copilot, Cursor, aider, Devin, Codeium, and other AI tools in your recent commits and pull requests across GitHub, Azure DevOps, and your local git clone — showing you the AI footprint as a lower bound with source-aware reporting and real evidence links. Documentation quality analysis scores the clarity and AI-likelihood of your team's Notion and Confluence pages, again with cited examples and improvement suggestions. Both ride on the existing team profile machinery, gracefully skip when nothing is configured, and frame their findings honestly as footprints and heuristics rather than definitive counts.",
