@@ -2279,15 +2279,19 @@ def _run_ai_usage_component(
     all_stories: list[dict],
     members: list[str] | None,
     progress: list[str],
+    sub_sources: list[str] | None = None,
 ) -> tuple[object | None, dict | None]:
-    """Run the AI-adoption ('code') sub-analysis. Returns ``(signal, blob)`` or
-    ``(None, None)`` on failure. Best-effort — never raises. Extracted so both the
-    delivery pipeline and the delivery-off ``run_components_only`` path can call it."""
+    """Run the AI-adoption ('code') sub-analysis over ``sub_sources`` (github/azdo;
+    None = all). Returns ``(signal, blob)`` or ``(None, None)`` on failure. Best-effort
+    — never raises. The engine runs this ONCE globally; it's also reused inline by the
+    delivery pipeline for back-compat."""
     progress.append("Scanning AI-tool footprint…")
     try:
         from yeaboi.analysis.ai_usage import generate_ai_adoption_insights, run_ai_adoption
 
-        signal, ai_examples = run_ai_adoption(source, project_key, delivery_stories, all_stories, members=members)
+        signal, ai_examples = run_ai_adoption(
+            source, project_key, delivery_stories, all_stories, members=members, sub_sources=sub_sources
+        )
         # Only spend an LLM call on coaching when something was actually scanned;
         # an empty footprint (no repos/creds) coaches deterministically.
         if signal.scanned_commits + signal.scanned_prs > 0:
@@ -2302,14 +2306,16 @@ def _run_doc_quality_component(
     source: str,
     project_key: str,
     progress: list[str],
+    sub_sources: list[str] | None = None,
 ) -> tuple[object | None, dict | None]:
-    """Run the documentation-quality ('docs') sub-analysis. Returns ``(signal, blob)``
-    or ``(None, None)`` on failure. Best-effort — never raises."""
+    """Run the documentation-quality ('docs') sub-analysis over ``sub_sources``
+    (confluence/notion; None = all). Returns ``(signal, blob)`` or ``(None, None)`` on
+    failure. Best-effort — never raises."""
     progress.append("Assessing documentation clarity…")
     try:
         from yeaboi.analysis.doc_quality import generate_doc_quality_insights, run_doc_quality
 
-        dq_signal, dq_examples = run_doc_quality(source, project_key)
+        dq_signal, dq_examples = run_doc_quality(source, project_key, sub_sources=sub_sources)
         # Only spend an LLM call on coaching when pages were actually read.
         if dq_signal.pages_scanned > 0:
             dq_examples["insights"] = generate_doc_quality_insights(dq_signal, dq_examples)
@@ -2317,39 +2323,6 @@ def _run_doc_quality_component(
     except Exception:  # pragma: no cover - defensive; run_doc_quality already guards
         logger.exception("Doc-quality analysis failed; continuing without it")
         return None, None
-
-
-def run_components_only(
-    source: str,
-    project_key: str,
-    run_code: bool,
-    run_docs: bool,
-    members: list[str] | None,
-    progress: list[str] | None = None,
-) -> dict:
-    """Run just the code/docs sub-analyses — no sprint fetch, no delivery profile.
-
-    Backs the delivery-off analysis path (e.g. "Jira: docs only"). Returns an
-    ``examples`` dict carrying only the requested blobs, plus a ``"_signals"`` entry
-    holding the raw ``AiAdoptionSignal``/``DocQualitySignal`` so a profile-less
-    results screen can still render the code/docs cards. Never raises.
-    """
-    if progress is None:
-        progress = []
-    examples: dict = {}
-    signals: dict = {}
-    if run_code:
-        signal, ai_examples = _run_ai_usage_component(source, project_key, [], [], members, progress)
-        if ai_examples is not None:
-            examples["ai_adoption"] = ai_examples
-            signals["ai_adoption"] = signal
-    if run_docs:
-        dq_signal, dq_examples = _run_doc_quality_component(source, project_key, progress)
-        if dq_examples is not None:
-            examples["doc_quality"] = dq_examples
-            signals["doc_quality"] = dq_signal
-    examples["_signals"] = signals
-    return examples
 
 
 def _run_parallel_analysis(
@@ -2849,9 +2822,12 @@ def _run_parallel_analysis(
         sum(len(v) for v in examples.values() if isinstance(v, list)),
     )
 
-    # AI-adoption footprint + documentation quality — two best-effort network
-    # sub-analyses (the 'code' and 'docs' components). Extracted into helpers so the
-    # delivery-off path (``run_components_only``) can reuse them without a profile.
+    # AI-adoption footprint + documentation quality. The analysis engine runs these
+    # as decoupled GLOBAL scans and always passes include_ai_usage/include_doc_quality
+    # as False here, so this inline path is exercised only by direct callers of
+    # _run_parallel_analysis (e.g. tests) that rely on the True defaults. The extracted
+    # _run_ai_usage_component/_run_doc_quality_component helpers are shared with the
+    # engine's global scans.
     if include_ai_usage:
         signal, ai_examples = _run_ai_usage_component(
             source, project_key, delivery_stories, all_stories, members, progress

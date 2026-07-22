@@ -591,21 +591,30 @@ class TestInputValidation:
 
         def fake_analysis(**kwargs):
             captured.update(kwargs)
-            return {"source": "jira", "profile": None, "components": ["docs"], "warnings": []}
+            return {"delivery": {}, "code": None, "docs": None, "warnings": []}
 
         monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
         payload = call_tool(
             "team_analyze",
-            {"components": {"jira": ["docs"], "azdevops": ["code"]}, "members": {"jira": ["Alice"]}},
+            {
+                "components": {"delivery": ["jira"], "code": ["github"], "docs": ["notion"]},
+                "members": {"jira": ["Alice"]},
+            },
         )
         assert payload["ok"] is True
-        assert captured["components"] == {"jira": ["docs"], "azdevops": ["code"]}
+        assert captured["components"] == {"delivery": ["jira"], "code": ["github"], "docs": ["notion"]}
         assert captured["members"] == {"jira": ["Alice"]}
 
-    def test_team_analyze_rejects_bad_component(self, tmp_db, provider_mode):
-        payload = call_tool("team_analyze", {"components": {"jira": ["velocity"]}})
+    def test_team_analyze_rejects_bad_component_key(self, tmp_db, provider_mode):
+        payload = call_tool("team_analyze", {"components": {"velocity": ["jira"]}})
         assert payload["ok"] is False
         assert "delivery" in payload["error"]["message"]
+
+    def test_team_analyze_rejects_bad_sub_source(self, tmp_db, provider_mode):
+        # 'jira' is a delivery tracker, not a code host → rejected under code.
+        payload = call_tool("team_analyze", {"components": {"code": ["jira"]}})
+        assert payload["ok"] is False
+        assert "sub-sources" in payload["error"]["message"]
 
     def test_team_roster(self, tmp_db, provider_mode, monkeypatch):
         monkeypatch.setattr("yeaboi.analysis.get_team_roster", lambda source, project_key: ["Alice", "Bob"])

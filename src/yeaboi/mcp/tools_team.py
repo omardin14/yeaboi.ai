@@ -49,13 +49,14 @@ def _team_analyze(
 ):
     if source not in ("", "jira", "azdevops", "both"):
         raise ValueError(f"source must be 'jira', 'azdevops', or 'both' (blank auto-detects) — got {source!r}")
+    allowed = {"delivery": ("jira", "azdevops"), "code": ("github", "azdo"), "docs": ("confluence", "notion")}
     if components:
-        for src, comps in components.items():
-            if src not in ("jira", "azdevops"):
-                raise ValueError(f"components keys must be 'jira'/'azdevops' — got {src!r}")
-            bad = [c for c in comps if c not in ("delivery", "code", "docs")]
+        for comp, subs in components.items():
+            if comp not in allowed:
+                raise ValueError(f"components keys must be 'delivery'/'code'/'docs' — got {comp!r}")
+            bad = [s for s in (subs or []) if s not in allowed[comp]]
             if bad:
-                raise ValueError(f"components must be a subset of delivery/code/docs — got {bad!r}")
+                raise ValueError(f"{comp} sub-sources must be a subset of {allowed[comp]} — got {bad!r}")
     from yeaboi.analysis import run_team_analysis
 
     return run_team_analysis(
@@ -136,13 +137,14 @@ def register(app) -> None:
         the team's recent Notion/Confluence pages and reports a documentation clarity score plus a
         stylometric AI-likelihood ESTIMATE (not a detection); set False to skip those doc-platform
         network calls.
-        components selects which analysis parts run PER SOURCE, e.g.
-        {"jira": ["docs"], "azdevops": ["code"]} — each value a subset of
-        delivery/code/docs. Omitting 'delivery' for a source skips its velocity profile
-        (that source returns profile=null, code/docs only, and is not saved). A source
-        missing from components falls back to the include_* booleans.
-        members re-scopes velocity/contributors/code to a subset of people per source,
-        e.g. {"jira": ["Alice", "Bob"]} (blank = whole team); discover names with team_roster."""
+        components selects which parts run, each over its OWN sub-sources:
+        {"delivery": ["jira","azdevops"], "code": ["github","azdo"], "docs": ["confluence","notion"]}.
+        Delivery runs one velocity profile PER selected tracker; code and docs are each ONE global
+        scan over their selected hosts. An absent/empty component is skipped; None falls back to the
+        include_* booleans. Result: {delivery:{tracker:{profile,...}}, code:{signal,examples}|null,
+        docs:{signal,examples}|null, comparison, warnings}.
+        members re-scopes each delivery tracker's velocity/contributors (and code authors) to a
+        subset, e.g. {"jira": ["Alice","Bob"]} (blank = whole team); discover names with team_roster."""
         import asyncio
 
         try:

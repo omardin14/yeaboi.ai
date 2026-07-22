@@ -288,6 +288,8 @@ def _build_team_analysis_screen(
     comparison: list | None = None,
     source: str = "",
     project_key: str = "",
+    code_signal=None,
+    doc_signal=None,
 ) -> Panel:
     """Build the team analysis results screen (overview + section cards).
 
@@ -345,14 +347,22 @@ def _build_team_analysis_screen(
                 toggle_line.append(f"  {lbl}  ", style="dim")
         toggle_line.append("    (Tab: switch source)", style="rgb(90,90,110)")
 
+    from yeaboi.ui.mode_select.screens._analysis_sections import visible_card_order
+
     stats = compute_headline_stats(profile, examples) if profile is not None else {}
     ctx = _TaCtx(width, examples, sprint_names=sprint_names, stats=stats)
     ctx.comparison = comparison
-    # Carry the code/docs signals for a delivery-off run so those two cards render
-    # without a profile to hang them off.
-    _signals = (examples or {}).get("_signals", {}) if isinstance(examples, dict) else {}
-    ctx.ai_sig = _signals.get("ai_adoption")
-    ctx.doc_sig = _signals.get("doc_quality")
+    # Code/Docs are GLOBAL scans passed in from the top-level result — feed them so
+    # the two cards render regardless of the active delivery tracker. When viewing a
+    # stored profile (no top-level signals) they come off the profile itself, where
+    # the global scan was persisted.
+    ctx.ai_sig = code_signal
+    ctx.doc_sig = doc_signal
+    _prof_ai = getattr(profile, "ai_adoption", None)
+    _prof_doc = getattr(profile, "doc_quality", None)
+    has_code = code_signal is not None or bool(_prof_ai and (_prof_ai.scanned_commits + _prof_ai.scanned_prs) > 0)
+    has_docs = doc_signal is not None or bool(_prof_doc and _prof_doc.pages_scanned > 0)
+    ctx.visible_order = visible_card_order(profile, has_code, has_docs)
 
     if view == "overview":
         crumb_text = "Overview  ·  ↑/↓ choose a section, Enter to open"
@@ -447,18 +457,30 @@ def _build_team_analysis_screen(
     )
 
 
-# Component picker — order + friendly labels shared by the screen and the loop.
+# Component picker — order + friendly labels. Each component runs over its OWN
+# sub-sources (a ragged grid: different columns per row). ``_COMPONENT_LABELS`` keeps
+# the "Name — description" form for back-compat; the picker splits it on the em dash.
 _COMPONENT_KEYS: tuple[str, ...] = ("delivery", "code", "docs")
-_COMPONENT_LABELS: dict[str, str] = {
-    "delivery": "Delivery — velocity, calibration, contributors",
-    "code": "Code — remote AI-usage scan (GitHub / Azure Repos)",
-    "docs": "Docs — Confluence / Notion clarity + AI-likelihood",
+_COMPONENT_NAMES: dict[str, str] = {"delivery": "Delivery", "code": "Code", "docs": "Docs"}
+_COMPONENT_DESCS: dict[str, str] = {
+    "delivery": "velocity, calibration, contributors",
+    "code": "remote AI-usage scan",
+    "docs": "clarity + AI-likelihood",
 }
-_SOURCE_TITLES: dict[str, str] = {"jira": "Jira", "azdevops": "Azure DevOps"}
+_COMPONENT_LABELS: dict[str, str] = {k: f"{_COMPONENT_NAMES[k]} — {_COMPONENT_DESCS[k]}" for k in _COMPONENT_KEYS}
+_SUBSOURCE_TITLES: dict[str, str] = {
+    "jira": "Jira",
+    "azdevops": "Azure DevOps",
+    "github": "GitHub",
+    "azdo": "Azure Repos",
+    "confluence": "Confluence",
+    "notion": "Notion",
+}
 
 
 def _build_component_select_screen(
-    sources: list[str],
+    grid: dict[str, list[str]],
+    rows_order: list[str],
     checked: dict[str, set[int]],
     row_idx: int,
     col_idx: int,
@@ -467,63 +489,84 @@ def _build_component_select_screen(
     height: int = 24,
     message: str = "",
 ) -> Panel:
-    """Per-source component multi-select (checkbox grid).
+    """Ragged component × sub-source multi-select.
 
-    ``sources`` is ["jira"], ["azdevops"] or both; ``checked`` maps each source to
-    the set of selected component indices (into ``_COMPONENT_KEYS``). Rows are the
-    three components; columns are the sources. ``row_idx``/``col_idx`` locate the
-    focused cell. Modelled on the reporting sprint-select checkbox list."""
+    ``grid`` maps each component to its CONFIGURED sub-sources (delivery ←
+    jira/azdevops, code ← github/azdo, docs ← confluence/notion). ``rows_order`` is
+    the components with at least one sub-source. ``checked`` maps component → set of
+    selected sub-source indices. ``row_idx``/``col_idx`` locate the focused cell."""
     from yeaboi.ui.shared._components import analysis_title
 
     theme = ANALYSIS_THEME
     title = analysis_title()
-    sub = Text(_PAD + "Choose what to analyse for each source", style="bold white", justify="left")
+    sub = Text(_PAD + "Choose what to analyse — each part scans its own sources", style="bold white", justify="left")
     crumb = Text(
-        _PAD + "↑/↓ component · ←/→ source · Space toggle · Enter run · Esc cancel",
+        _PAD + "↑/↓ · ←/→ · Space toggle · Enter run · Esc cancel",
         style="rgb(120,120,140)",
         justify="left",
     )
 
-    rows: list = []
+    rule_w = min(max(20, width - len(_PAD) - 4), 40)
+    cell_w = 20  # fixed column width so the second source lines up across rows
+
+    lines: list = []
     if message:
-        rows.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
-        rows.append(Text(""))
+        lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        lines.append(Text(""))
 
-    # Column header (source names), only meaningful with >1 source.
-    if len(sources) > 1:
-        head = Text(_PAD + "  " + " " * 4, justify="left")
-        for si, s in enumerate(sources):
-            lbl = _SOURCE_TITLES.get(s, s)
-            head.append(f"{lbl:<16s}", style="bold white" if si == col_idx else theme.muted)
-        rows.append(head)
-        rows.append(Text(""))
+    per_component: list[tuple[str, int]] = []
+    total_selected = 0
+    for ci, ckey in enumerate(rows_order):
+        subs = grid.get(ckey, [])
+        focused_row = ci == row_idx
+        # Header: NAME · description (name brighter when this row is focused).
+        header = Text(_PAD + "  ", justify="left")
+        header.append(
+            _COMPONENT_NAMES.get(ckey, ckey).upper(),
+            style=f"bold {theme.accent_bright if focused_row else theme.accent}",
+        )
+        header.append(f"  ·  {_COMPONENT_DESCS.get(ckey, '')}", style=theme.dim)
+        lines.append(header)
+        lines.append(Text(_PAD + "  " + "─" * rule_w, style=theme.sep))
 
-    for ci, ckey in enumerate(_COMPONENT_KEYS):
-        row = Text(_PAD + "  ", justify="left")
-        row.append(_COMPONENT_LABELS[ckey], style=theme.value if ci == row_idx else theme.desc)
-        rows.append(row)
-        # Checkbox line under each component label, one box per source.
-        boxline = Text(_PAD + "    ", justify="left")
-        for si, s in enumerate(sources):
-            is_focused = ci == row_idx and si == col_idx
-            is_checked = ci in checked.get(s, set())
-            box = "■" if is_checked else "□"
-            cur = "▸ " if is_focused else "  "
-            boxline.append(cur, style=theme.accent_bright if is_focused else theme.dim)
-            box_lbl = f"{box} {_SOURCE_TITLES.get(s, s)}" if len(sources) > 1 else box
-            boxline.append(f"{box_lbl:<16s}", style=theme.accent if is_checked else theme.dim)
-        rows.append(boxline)
-    rows.append(Text(""))
-    # Per-source selection count / at-least-one hint.
-    for s in sources:
-        n = len(checked.get(s, set()))
-        note = Text(_PAD + "  ", justify="left")
-        style = theme.muted if n else theme.accent_bright
-        note.append(f"{_SOURCE_TITLES.get(s, s)}: {n} selected" + ("" if n else "  — pick at least one"), style=style)
-        rows.append(note)
+        n_checked = 0
+        boxline = Text(_PAD + "  ", justify="left")
+        for si, s in enumerate(subs):
+            is_focused = focused_row and si == col_idx
+            is_checked = si in checked.get(ckey, set())
+            if is_checked:
+                n_checked += 1
+                total_selected += 1
+            dot = "●" if is_checked else "○"
+            name = _SUBSOURCE_TITLES.get(s, s)
+            if is_focused:
+                boxline.append("‹ ", style=theme.accent_bright)
+                boxline.append(dot, style=theme.accent_bright)
+                boxline.append(f" {name} ", style="bold white")
+                boxline.append("›", style=theme.accent_bright)
+                vis = 2 + 1 + 1 + len(name) + 1 + 1  # "‹ " + dot + " name " + "›"
+            else:
+                boxline.append("  ")
+                boxline.append(dot, style=theme.accent_bright if is_checked else theme.dim)
+                boxline.append(f" {name}", style=theme.accent if is_checked else theme.dim)
+                vis = 2 + 1 + 1 + len(name)
+            boxline.append(" " * max(2, cell_w - vis))
+        lines.append(boxline)
+        lines.append(Text(""))
+        per_component.append((_COMPONENT_NAMES.get(ckey, ckey), n_checked))
+
+    # Status footer: total + per-component counts (or the at-least-one guard).
+    footer = Text(_PAD + "  ", justify="left")
+    if total_selected:
+        footer.append(f"{total_selected} sources", style=theme.accent_bright)
+        footer.append("  ·  " + "  ·  ".join(f"{nm} {n}" for nm, n in per_component), style=theme.muted)
+        footer.append("     Enter ⏎", style=theme.dim)
+    else:
+        footer.append("Select at least one source to analyse", style=theme.accent_bright)
+    lines.append(footer)
 
     viewport_h = calc_viewport(height, header_h=11, action_h=2)
-    padded = list(rows[:viewport_h])
+    padded = list(lines[:viewport_h])
     for _ in range(max(0, viewport_h - len(padded))):
         padded.append(Text(""))
 
@@ -563,12 +606,17 @@ def _build_member_select_screen(
     for idx, name in enumerate(roster):
         is_cursor = idx == cursor
         is_checked = idx in checked
-        box = "■" if is_checked else "□"
-        cur = "▸ " if is_cursor else "  "
+        dot = "●" if is_checked else "○"
         row = Text(_PAD + "  ", justify="left")
-        row.append(cur, style=theme.accent_bright if is_cursor else theme.dim)
-        row.append(box + " ", style=theme.accent if is_checked else theme.dim)
-        row.append(name, style="bold white" if is_cursor else (theme.value if is_checked else theme.desc))
+        if is_cursor:
+            row.append("‹ ", style=theme.accent_bright)
+            row.append(dot, style=theme.accent_bright if is_checked else theme.dim)
+            row.append(f" {name} ", style="bold white")
+            row.append("›", style=theme.accent_bright)
+        else:
+            row.append("  ")
+            row.append(dot, style=theme.accent_bright if is_checked else theme.dim)
+            row.append(f" {name}", style=theme.accent if is_checked else theme.desc)
         rows.append(row)
     if not roster:
         rows.append(Text(_PAD + "  No members found — the analysis will cover the whole team.", style=theme.muted))

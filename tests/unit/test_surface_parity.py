@@ -274,9 +274,9 @@ CLI_ONLY_DESTS: dict[str, set[str]] = {
     "perf prep": {"strict"},
     "perf complete": {"strict"},
     "perf review": {"strict"},
-    # jira_components/azdevops_components are assembled into the engine's per-source
-    # `components` dict (a single --components is ambiguous under --source both).
-    "analyze": {"format", "strict", "jira_components", "azdevops_components"},
+    # delivery/code/docs are assembled into the engine's `components` dict (component
+    # → sub-source map); each flag names a component's sub-sources, not an engine param.
+    "analyze": {"format", "strict", "delivery", "code", "docs"},
 }
 
 # Engine params deliberately without a CLI flag. Reasoned; staleness-checked.
@@ -284,7 +284,7 @@ CLI_HIDDEN: dict[str, dict[str, str]] = {
     "analyze": {
         "progress": "live shared-list progress feed for the TUI frame loop — the CLI prints a banner instead",
         "team_name": "AzDO team label; auto-resolved from the configured AZURE_DEVOPS_TEAM",
-        "components": "assembled from per-source --jira-components/--azdevops-components flags",
+        "components": "assembled from per-component --delivery/--code/--docs sub-source flags",
     },
 }
 

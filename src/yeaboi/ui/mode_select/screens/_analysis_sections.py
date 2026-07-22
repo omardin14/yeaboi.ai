@@ -76,11 +76,14 @@ class _TaCtx:
         # Set by the screen builder in 'both' mode: side-by-side headline rows
         # (label, jira_value, azdevops_value) rendered atop the overview.
         self.comparison: list[tuple[str, str, str]] | None = None
-        # Delivery-off runs have no TeamProfile to carry the AI-adoption/doc-quality
-        # signals, so the screen builder sets them here from examples["_signals"] and
-        # the two surviving cards read ctx.ai_sig/.doc_sig when profile is None.
+        # Code/Docs are global scans (not per delivery tracker); the screen builder
+        # sets these from the top-level result so the two cards render regardless of
+        # the active tracker's own (empty) profile signals.
         self.ai_sig = None
         self.doc_sig = None
+        # Composed card order (delivery cards for the active tracker + global cards),
+        # set by the screen builder and shared with the results-loop navigation.
+        self.visible_order: tuple[str, ...] = _TA_CARD_ORDER
         self.lines: list = []
         self.item_heights: list[int] = []
         self.rendered_lines = 0
@@ -1982,24 +1985,30 @@ _TA_CARDS: dict[str, dict] = {
 _TA_CARD_ORDER: tuple[str, ...] = tuple(_TA_CARDS)
 
 
-def visible_card_order(profile, examples: dict | None) -> tuple[str, ...]:
-    """Which section cards to show for this result.
+# Delivery cards (everything except the two global cards + the insights coach).
+_DELIVERY_CARD_ORDER: tuple[str, ...] = tuple(k for k in _TA_CARDS if k not in ("ai-adoption", "documentation"))
 
-    A normal (delivery-on) analysis shows every card in ``_TA_CARD_ORDER``. A
-    delivery-off run (``profile is None`` — e.g. docs-only or code-only) has no
-    velocity/contributor data, so only the code/docs cards that actually ran are
-    shown. The overview and the results-loop card navigation share this order so the
-    selection index and the rendered card list can never drift apart.
+
+def visible_card_order(profile, has_code: bool, has_docs: bool) -> tuple[str, ...]:
+    """Which section cards to show, composing per-tracker delivery cards with the
+    global code/docs cards.
+
+    Delivery cards (velocity/contributors/… + insights) appear iff there's a delivery
+    ``profile`` for the active tracker; ``ai-adoption`` iff the global Code scan ran;
+    ``documentation`` iff the global Docs scan ran. The two global cards do NOT depend
+    on the active tracker, so they stay put when the delivery toggle switches. The
+    overview and the results-loop navigation share this so the selection index and the
+    rendered card list can never drift apart.
     """
-    if profile is not None:
-        return _TA_CARD_ORDER
-    ex = examples or {}
-    sigs = ex.get("_signals", {}) if isinstance(ex, dict) else {}
     order: list[str] = []
-    if sigs.get("ai_adoption") is not None or ex.get("ai_adoption"):
+    if profile is not None:
+        order.extend(k for k in _DELIVERY_CARD_ORDER if k != "insights")
+    if has_code:
         order.append("ai-adoption")
-    if sigs.get("doc_quality") is not None or ex.get("doc_quality"):
+    if has_docs:
         order.append("documentation")
+    if profile is not None:
+        order.append("insights")
     return tuple(order) or ("ai-adoption",)  # never empty — always render something
 
 
@@ -2100,64 +2109,47 @@ def _ta_overview(ctx: _TaCtx, profile, selected_card: int) -> None:
     if ctx.comparison:
         _ta_source_comparison(ctx)
 
-    # Delivery-off run (no TeamProfile) — skip the velocity headline + AI summary
-    # (there are none) and lead straight into the code/docs cards.
-    if profile is None:
-        ctx.heading("Components")
-        t = Text(PAD + "  ", justify="left")
-        t.append(
-            "This analysis ran the code/documentation components only — no sprint or velocity profile.",
-            style=c_dim,
-        )
-        ctx.add(t)
-        ctx.heading("Sections")
-        ctx.overview_first_card_row = ctx.rendered_lines
-        order = visible_card_order(profile, ctx.ex)
-        for i, key in enumerate(order):
-            card = _TA_CARDS[key]
-            selected = i == selected_card
-            row = Text(PAD + "  ", justify="left")
-            row.append("▸ " if selected else "  ", style=c_accent if selected else c_dim)
-            row.append(f"{card['title']:<20s}", style=f"bold {c_accent}" if selected else c_value)
-            teaser = _ta_card_teaser(ctx, profile, key)
-            if teaser:
-                row.append(f"  {teaser}", style=c_muted if selected else c_dim)
-            ctx.add(row)
-        return
+    # Delivery headline + AI summary only when a delivery profile is present for the
+    # active tracker; a code/docs-only view leads straight into its cards.
+    if profile is not None:
+        ctx.heading("At a Glance")
+        if stats.get("team_size"):
+            ctx.kv("Team size", f"{stats['team_size']} contributors")
+        if stats.get("velocity"):
+            ctx.kv("Velocity", f"{stats['velocity']:g} ± {stats.get('stddev', 0):g} pts/sprint")
+        rate = stats.get("completion_rate", 0)
+        if rate:
+            rate_sty = c_good if rate >= 80 else (c_warn if rate >= 60 else c_bad)
+            ctx.kv("Completion", ctx.pct_dots(rate), rate_sty)
+        acc = stats.get("delivery_accuracy", 0)
+        if acc:
+            acc_sty = c_good if acc >= 85 else (c_warn if acc >= 70 else c_bad)
+            ctx.kv("Delivery accuracy", f"{acc}% of committed scope delivered", acc_sty)
+        if stats.get("estimation_accuracy"):
+            ctx.kv("Estimation accuracy", f"{stats['estimation_accuracy']:.0f}% of estimates hold")
 
-    ctx.heading("At a Glance")
-    if stats.get("team_size"):
-        ctx.kv("Team size", f"{stats['team_size']} contributors")
-    if stats.get("velocity"):
-        ctx.kv("Velocity", f"{stats['velocity']:g} ± {stats.get('stddev', 0):g} pts/sprint")
-    rate = stats.get("completion_rate", 0)
-    if rate:
-        rate_sty = c_good if rate >= 80 else (c_warn if rate >= 60 else c_bad)
-        ctx.kv("Completion", ctx.pct_dots(rate), rate_sty)
-    acc = stats.get("delivery_accuracy", 0)
-    if acc:
-        acc_sty = c_good if acc >= 85 else (c_warn if acc >= 70 else c_bad)
-        ctx.kv("Delivery accuracy", f"{acc}% of committed scope delivered", acc_sty)
-    if stats.get("estimation_accuracy"):
-        ctx.kv("Estimation accuracy", f"{stats['estimation_accuracy']:.0f}% of estimates hold")
-
-    # AI executive summary (generated at analysis time; absent on old profiles)
-    narrative = ctx.ex.get("narrative", {})
-    summary = narrative.get("executive_summary", "") if isinstance(narrative, dict) else ""
-    ctx.heading("Summary")
-    if summary:
-        for wrapped in _ta_wrap(str(summary), max(40, ctx.width - len(PAD) - 10)):
+        # AI executive summary (generated at analysis time; absent on old profiles)
+        narrative = ctx.ex.get("narrative", {})
+        summary = narrative.get("executive_summary", "") if isinstance(narrative, dict) else ""
+        ctx.heading("Summary")
+        if summary:
+            for wrapped in _ta_wrap(str(summary), max(40, ctx.width - len(PAD) - 10)):
+                t = Text(PAD + "  ", justify="left")
+                t.append(wrapped, style=c_ai_text)
+                ctx.add(t)
+        else:
             t = Text(PAD + "  ", justify="left")
-            t.append(wrapped, style=c_ai_text)
+            t.append("No AI summary saved for this analysis — run a new analysis to generate one.", style=c_dim)
             ctx.add(t)
     else:
+        ctx.heading("Components")
         t = Text(PAD + "  ", justify="left")
-        t.append("No AI summary saved for this analysis — run a new analysis to generate one.", style=c_dim)
+        t.append("This view has no delivery/velocity profile — code and/or docs only.", style=c_dim)
         ctx.add(t)
 
     ctx.heading("Sections")
     ctx.overview_first_card_row = ctx.rendered_lines
-    for i, key in enumerate(_TA_CARD_ORDER):
+    for i, key in enumerate(ctx.visible_order):
         card = _TA_CARDS[key]
         selected = i == selected_card
         row = Text(PAD + "  ", justify="left")

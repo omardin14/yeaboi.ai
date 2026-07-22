@@ -248,6 +248,25 @@ class TestCollectAiActivity:
         assert items and items[0]["source"] == "github"
         assert repos == ["GitHub (remote): o/r"]
 
+    def test_sub_sources_restricts_to_azdo_only(self, monkeypatch):
+        # GitHub is configured but not requested → skipped; only Azure Repos scanned.
+        monkeypatch.setattr("yeaboi.config.get_standup_github_repo", lambda: "o/r")
+        monkeypatch.setattr("yeaboi.config.get_github_token", lambda: "tok")
+        monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "Proj")
+        monkeypatch.setattr("yeaboi.config.get_azure_devops_token", lambda: "pat")
+
+        def _boom(*a, **k):
+            raise AssertionError("GitHub must not be scanned when sub_sources=['azdo']")
+
+        monkeypatch.setattr("yeaboi.tools.github.github_recent_commits", _boom)
+        monkeypatch.setattr(
+            "yeaboi.tools.azure_devops.azdevops_recent_commits",
+            lambda proj, days=1: [{"kind": "commit", "author": "A", "title": "x", "body": ""}],
+        )
+        monkeypatch.setattr("yeaboi.tools.azure_devops.azdevops_recent_prs", lambda proj, days=1: [])
+        items, sources, _, repos = collect_ai_activity("jira", "PROJ", sub_sources=["azdo"])
+        assert sources == ["azdo"]
+
     def test_source_error_recorded_not_raised(self, monkeypatch):
         monkeypatch.setattr("yeaboi.config.get_standup_github_repo", lambda: "o/r")
         monkeypatch.setattr("yeaboi.config.get_github_token", lambda: "tok")
@@ -268,7 +287,7 @@ class TestRunAiAdoption:
     def test_aggregates_collected_items(self, monkeypatch):
         monkeypatch.setattr(
             "yeaboi.analysis.ai_usage.collect_ai_activity",
-            lambda source, project: (
+            lambda source, project, sub_sources=None: (
                 [
                     {
                         "kind": "commit",
@@ -298,7 +317,7 @@ class TestRunAiAdoption:
         assert blob["samples"][0]["url"].endswith("/commit/a1b2c3d4")
 
     def test_collect_failure_returns_empty_signal(self, monkeypatch):
-        def boom(source, project):
+        def boom(source, project, sub_sources=None):
             raise RuntimeError("network down")
 
         monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", boom)
@@ -324,7 +343,9 @@ class TestRunAiAdoption:
         )
 
     def test_member_filter_rescopes_to_selected_author(self, monkeypatch):
-        monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p: self._two_author_items())
+        monkeypatch.setattr(
+            "yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p, sub_sources=None: self._two_author_items()
+        )
         sig, _ = run_ai_adoption("jira", "P", [], [], members=["Alice"])
         # Only Alice's commit is counted.
         assert sig.scanned_commits == 1
@@ -346,12 +367,14 @@ class TestRunAiAdoption:
             [],
             [],
         )
-        monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p: items)
+        monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p, sub_sources=None: items)
         sig, _ = run_ai_adoption("jira", "P", [], [], members=["alice"])
         assert sig.scanned_commits == 1  # matched via email local-part
 
     def test_member_filter_no_match_keeps_whole_team(self, monkeypatch):
-        monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p: self._two_author_items())
+        monkeypatch.setattr(
+            "yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p, sub_sources=None: self._two_author_items()
+        )
         sig, blob = run_ai_adoption("jira", "P", [], [], members=["Nobody"])
         # Falls back to the whole-team scan rather than reporting a false 0%.
         assert sig.scanned_commits == 2

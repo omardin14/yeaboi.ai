@@ -586,29 +586,38 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Skip the documentation scan (Notion/Confluence clarity + AI-likelihood)",
     )
+    # Each component runs over its OWN sub-sources (not the tracker): delivery ←
+    # jira/azdevops boards, code ← github/azdo repos, docs ← confluence/notion.
     analyze_p.add_argument(
-        "--jira-components",
+        "--delivery",
         nargs="+",
-        choices=["delivery", "code", "docs"],
+        choices=["jira", "azdevops"],
         default=None,
-        metavar="COMP",
-        help="Components to run for Jira (default: all). e.g. --jira-components docs. "
-        "Omitting 'delivery' skips velocity/calibration for that source.",
+        metavar="TRACKER",
+        help="Delivery (velocity/calibration) trackers to analyse. e.g. --delivery jira",
     )
     analyze_p.add_argument(
-        "--azdevops-components",
+        "--code",
         nargs="+",
-        choices=["delivery", "code", "docs"],
+        choices=["github", "azdo"],
         default=None,
-        metavar="COMP",
-        help="Components to run for Azure DevOps (default: all). e.g. --azdevops-components code.",
+        metavar="HOST",
+        help="Code hosts for the AI-usage scan. e.g. --code github azdo",
+    )
+    analyze_p.add_argument(
+        "--docs",
+        nargs="+",
+        choices=["confluence", "notion"],
+        default=None,
+        metavar="PLATFORM",
+        help="Doc platforms for the clarity/AI-likelihood read. e.g. --docs confluence",
     )
     analyze_p.add_argument(
         "--members",
         nargs="+",
         default=None,
         metavar="NAME",
-        help="Re-scope velocity/contributors/code to these members (default: whole team)",
+        help="Re-scope delivery velocity/contributors + code authors to these members (default: whole team)",
     )
     analyze_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     analyze_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
@@ -1303,20 +1312,24 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
 
     from yeaboi.analysis import run_team_analysis
 
-    # Per-source component selection. A single --components flag is ambiguous under
-    # --source both, so components are expressed per source; --members applies to
-    # whichever source(s) run (the engine reads the resolved source's entry).
+    # Each component runs over its own sub-sources; --members applies to whichever
+    # delivery tracker(s) run (the engine reads the per-tracker entry) and to code authors.
     components: dict[str, list[str]] = {}
-    if args.jira_components:
-        components["jira"] = args.jira_components
-    if args.azdevops_components:
-        components["azdevops"] = args.azdevops_components
-    if args.source in ("jira", "azdevops"):
-        other = "azdevops" if args.source == "jira" else "jira"
-        if components.get(other):
-            console.print(f"[red]--{other}-components can't be used with --source {args.source}[/red]")
-            return 2
+    if args.delivery:
+        components["delivery"] = args.delivery
+    if args.code:
+        components["code"] = args.code
+    if args.docs:
+        components["docs"] = args.docs
     members = {"jira": args.members, "azdevops": args.members} if args.members else None
+
+    # An explicit components map is authoritative for delivery, so --source only takes
+    # effect when delivery is left to the default. Warn rather than silently ignore it.
+    if components and "delivery" not in components and args.source:
+        print(
+            f"⚠ --source {args.source} ignored: no --delivery selected (code/docs are global scans)",
+            file=sys.stderr,
+        )
 
     console.print("[bold cyan]Analysing team history...[/bold cyan]")
     result = run_team_analysis(
@@ -1335,57 +1348,59 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
     if args.format == "json":
         print(_json_dump(result))
         return _strict_exit(args.strict, result["warnings"])
-    # 'both' returns two separate single-source results plus a comparison table —
-    # print each under a "From Jira"/"From Azure DevOps" banner (mirrors the
-    # reporting-mode idiom) so it's clear which numbers came from which tracker.
-    if result.get("source") == "both":
-        _source_names = {"jira": "From Jira", "azdevops": "From Azure DevOps"}
-        for src, sub in result["results"].items():
-            console.rule(f"[bold cyan]{_source_names.get(src, src)}[/bold cyan]")
-            _print_profile_summary(console, sub)
-        comparison = result.get("comparison") or []
-        if comparison:
-            table = Table(title="Side-by-side", show_header=True)
-            table.add_column("Metric", style="bold")
-            table.add_column("Jira")
-            table.add_column("Azure DevOps")
-            for label, jira_val, azdo_val in comparison:
-                table.add_row(label, jira_val, azdo_val)
-            console.print(table)
-        return _strict_exit(args.strict, result["warnings"])
-    _print_profile_summary(console, result)
+    # Delivery — one section per tracker, under a "From Jira"/"From Azure DevOps"
+    # banner so it's clear which velocity numbers came from which tracker.
+    _source_names = {"jira": "From Jira", "azdevops": "From Azure DevOps"}
+    for tracker, sub in result.get("delivery", {}).items():
+        console.rule(f"[bold cyan]{_source_names.get(tracker, tracker)}[/bold cyan]")
+        _print_profile_summary(console, sub)
+    comparison = result.get("comparison") or []
+    if comparison:
+        table = Table(title="Delivery — side by side", show_header=True)
+        table.add_column("Metric", style="bold")
+        table.add_column("Jira")
+        table.add_column("Azure DevOps")
+        for label, jira_val, azdo_val in comparison:
+            table.add_row(label, jira_val, azdo_val)
+        console.print(table)
+    # Code + Docs — single global scans, printed once.
+    if result.get("code"):
+        _print_code_summary(console, result["code"])
+    if result.get("docs"):
+        _print_docs_summary(console, result["docs"])
     return _strict_exit(args.strict, result["warnings"])
 
 
-def _print_profile_summary(console: "Console", result: dict) -> None:
-    """Print the one-tracker analysis summary (saved profile + top coaching insights)."""
-    profile = result["profile"]
-    if profile is None:
-        # Delivery-off run (e.g. docs only / code only) — there is no velocity
-        # profile, so summarise the components that did run.
-        comps = result.get("components") or []
-        src = result.get("source", "")
-        key = result.get("project_key", "")
-        console.print(f"[green]Analysis complete for {src}/{key}[/green]  ([bold]{', '.join(comps) or 'none'}[/bold])")
-        ex = result.get("examples") or {}
-        ai = (ex.get("ai_adoption") or {}).get("summary") or {}
-        if ai:
-            console.print(f"  AI footprint: [bold]{ai.get('footprint_pct', 0):.0f}%[/bold] (lower bound)")
-        dq = (ex.get("doc_quality") or {}).get("summary") or {}
-        if dq:
-            console.print(
-                f"  Docs: [bold]{dq.get('avg_clarity', 0):.0f}/100[/bold] clarity · {dq.get('pages_scanned', 0)} pages"
-            )
-        return
+def _print_profile_summary(console: "Console", sub: dict) -> None:
+    """Print one delivery tracker's summary (saved profile + top coaching insights)."""
+    profile = sub["profile"]
     console.print(f"[green]Team profile saved for {profile.source}/{profile.project_key}[/green]")
     console.print(
         f"  Analysed [bold]{profile.sample_sprints}[/bold] sprints, [bold]{profile.sample_stories}[/bold] stories"
     )
     console.print(f"  Avg velocity: [bold]{profile.velocity_avg:.0f} ± {profile.velocity_stddev:.0f}[/bold] pts/sprint")
-    insights = result["insights"] or {}
+    insights = sub.get("insights") or {}
     for category in ("start", "stop", "keep", "try"):
         for item in insights.get(category, [])[:2]:
             console.print(f"  [bold]{category.upper()}[/bold]: {item.get('title', '')}")
+
+
+def _print_code_summary(console: "Console", code: dict) -> None:
+    """Print the global Code (AI-adoption) scan summary."""
+    sig = code.get("signal")
+    console.rule("[bold cyan]Code — AI adoption[/bold cyan]")
+    fp = getattr(sig, "footprint_pct", 0.0)
+    scanned = getattr(sig, "scanned_commits", 0) + getattr(sig, "scanned_prs", 0)
+    console.print(f"  AI footprint: [bold]{fp:.0f}%[/bold] of {scanned} commits/PRs (lower bound)")
+
+
+def _print_docs_summary(console: "Console", docs: dict) -> None:
+    """Print the global Docs (clarity) scan summary."""
+    sig = docs.get("signal")
+    console.rule("[bold cyan]Docs — clarity[/bold cyan]")
+    console.print(
+        f"  Clarity: [bold]{getattr(sig, 'avg_clarity', 0):.0f}/100[/bold] · {getattr(sig, 'pages_scanned', 0)} pages"
+    )
 
 
 def _run_learn(console: "Console") -> None:
@@ -1406,9 +1421,15 @@ def _run_learn(console: "Console") -> None:
         console.print(f"[red]Error: {e}[/red]")
         return
 
-    profile = result["profile"]
     for warning in result["warnings"]:
         console.print(f"[yellow]⚠ {warning}[/yellow]")
+
+    # --learn auto-detects a single tracker → one delivery profile.
+    delivery = result.get("delivery") or {}
+    if not delivery:
+        console.print("[yellow]No delivery profile produced (no tracker configured).[/yellow]")
+        return
+    profile = next(iter(delivery.values()))["profile"]
 
     console.print(f"[green]Team profile saved for {profile.source}/{profile.project_key}[/green]")
     console.print(

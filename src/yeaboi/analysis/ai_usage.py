@@ -202,7 +202,9 @@ def aggregate_ai_markers(items: list[dict]) -> AiAdoptionSignal:
 # ---------------------------------------------------------------------------
 
 
-def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list[str], list[str], list[str]]:
+def collect_ai_activity(
+    source: str, project_key: str, sub_sources: list[str] | None = None
+) -> tuple[list[dict], list[str], list[str], list[str]]:
     """Fan out over GitHub + Azure DevOps (remote only) for recent commits/PRs with bodies.
 
     Returns ``(items, sources_scanned, coverage_notes, repos_scanned)``. Every source
@@ -210,7 +212,8 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
     failing source contributes zero and is added to ``coverage_notes`` so absent
     coverage is visible rather than silent. ``repos_scanned`` holds friendly
     "what was actually scanned" labels (remote slug / project). Only remote sources
-    are scanned — local-clone scanning was removed. Never raises.
+    are scanned — local-clone scanning was removed. ``sub_sources`` restricts which
+    hosts to scan (subset of ``{"github", "azdo"}``; None = both). Never raises.
     """
     from yeaboi.config import (
         get_azure_devops_project,
@@ -218,6 +221,9 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
         get_github_token,
         get_standup_github_repo,
     )
+
+    def _want(tag: str) -> bool:
+        return sub_sources is None or tag in sub_sources
 
     items: list[dict] = []
     sources_scanned: list[str] = []
@@ -245,7 +251,7 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
 
     # GitHub — needs STANDUP_GITHUB_REPO (owner/repo) + a token.
     github_repo = get_standup_github_repo()
-    if github_repo and get_github_token():
+    if _want("github") and github_repo and get_github_token():
 
         def _github() -> list[dict]:
             from yeaboi.tools.github import github_recent_commits, github_recent_prs
@@ -260,7 +266,7 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
 
     # Azure DevOps — scan the resolved project's repos when AzDO is configured.
     azdo_project = project_key if source == "azdevops" else (get_azure_devops_project() or "")
-    if azdo_project and get_azure_devops_token():
+    if _want("azdo") and azdo_project and get_azure_devops_token():
 
         def _azdo() -> list[dict]:
             from yeaboi.tools.azure_devops import azdevops_recent_commits, azdevops_recent_prs
@@ -307,6 +313,7 @@ def run_ai_adoption(
     delivery_stories: list[dict],
     all_stories: list[dict],
     members: list[str] | None = None,
+    sub_sources: list[str] | None = None,
 ) -> tuple[AiAdoptionSignal, dict]:
     """Orchestrate the AI-adoption scan: discover sources → collect → aggregate.
 
@@ -324,7 +331,7 @@ def run_ai_adoption(
     """
     logger.info("run_ai_adoption: source=%s project=%s members=%s", source, project_key, members or "all")
     try:
-        items, sources_scanned, coverage, repos_scanned = collect_ai_activity(source, project_key)
+        items, sources_scanned, coverage, repos_scanned = collect_ai_activity(source, project_key, sub_sources)
         if members:
             filtered, matched = _filter_items_by_members(items, members)
             if filtered:

@@ -430,19 +430,22 @@ class TestRetroCommand:
         assert _cmd_retro(args, _console()) == 2
 
 
-class TestAnalyzeCommand:
-    def test_passthrough_and_summary(self, monkeypatch, capsys):
-        from yeaboi.team_profile import TeamProfile
+def _delivery_sub(src, key):
+    from yeaboi.team_profile import TeamProfile
 
+    return {
+        "profile": TeamProfile(team_id=f"{src}:{key}", source=src, project_key=key, velocity_avg=23.0),
+        "insights": {"start": [{"title": "Pairing"}], "stop": [], "keep": [], "try": []},
+    }
+
+
+class TestAnalyzeCommand:
+    def test_passthrough_and_summary(self, monkeypatch):
         captured: dict = {}
 
         def fake_analysis(**kwargs):
             captured.update(kwargs)
-            return {
-                "profile": TeamProfile(team_id="jira:P", source="jira", project_key="P"),
-                "insights": {"start": [{"title": "Pairing"}], "stop": [], "keep": [], "try": []},
-                "warnings": [],
-            }
+            return {"delivery": {"jira": _delivery_sub("jira", "P")}, "code": None, "docs": None, "warnings": []}
 
         monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
         args = build_parser().parse_args(["analyze", "--source", "jira", "--sprints", "4", "--no-insights"])
@@ -451,27 +454,15 @@ class TestAnalyzeCommand:
         assert captured["sprint_count"] == 4
         assert captured["include_insights"] is False
 
-    def test_source_both_parses(self):
-        args = build_parser().parse_args(["analyze", "--source", "both"])
-        assert args.source == "both"
-
-    def test_both_output_shows_banners_and_comparison(self, monkeypatch):
+    def test_delivery_banners_and_comparison(self, monkeypatch):
         import io
-
-        from yeaboi.team_profile import TeamProfile
-
-        def _single(src, key):
-            return {
-                "profile": TeamProfile(team_id=f"{src}:{key}", source=src, project_key=key),
-                "insights": {"start": [], "stop": [], "keep": [], "try": []},
-                "warnings": [],
-            }
 
         def fake_analysis(**kwargs):
             return {
-                "source": "both",
-                "results": {"jira": _single("jira", "P"), "azdevops": _single("azdevops", "Web")},
-                "comparison": [("Avg velocity", "23", "15"), ("Completion rate", "82%", "74%")],
+                "delivery": {"jira": _delivery_sub("jira", "P"), "azdevops": _delivery_sub("azdevops", "Web")},
+                "code": None,
+                "docs": None,
+                "comparison": [("Avg velocity", "23", "15")],
                 "warnings": [],
             }
 
@@ -480,77 +471,65 @@ class TestAnalyzeCommand:
         buf = io.StringIO()
         assert _cmd_analyze(args, _console(buf)) == 0
         out = buf.getvalue()
-        assert "From Jira" in out
-        assert "From Azure DevOps" in out
-        # Both trackers' figures shown side by side, never blended.
-        assert "23" in out and "15" in out
+        assert "From Jira" in out and "From Azure DevOps" in out
+        assert "23" in out and "15" in out  # side by side, never blended
 
-    def test_per_source_components_and_members(self, monkeypatch):
-        from yeaboi.team_profile import TeamProfile
-
+    def test_per_component_flags_and_members(self, monkeypatch):
         captured: dict = {}
 
         def fake_analysis(**kwargs):
             captured.update(kwargs)
-            return {
-                "profile": TeamProfile(team_id="jira:P", source="jira", project_key="P"),
-                "insights": {},
-                "warnings": [],
-            }
+            return {"delivery": {"jira": _delivery_sub("jira", "P")}, "code": None, "docs": None, "warnings": []}
 
         monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
         args = build_parser().parse_args(
             [
                 "analyze",
-                "--source",
-                "both",
-                "--jira-components",
-                "docs",
-                "--azdevops-components",
-                "code",
-                "delivery",
+                "--delivery",
+                "jira",
+                "--code",
+                "github",
+                "azdo",
+                "--docs",
+                "confluence",
                 "--members",
                 "Alice",
                 "Bob",
             ]
         )
         assert _cmd_analyze(args, _console()) == 0
-        assert captured["components"] == {"jira": ["docs"], "azdevops": ["code", "delivery"]}
+        assert captured["components"] == {"delivery": ["jira"], "code": ["github", "azdo"], "docs": ["confluence"]}
         assert captured["members"] == {"jira": ["Alice", "Bob"], "azdevops": ["Alice", "Bob"]}
 
-    def test_wrong_source_component_flag_errors(self, monkeypatch):
-        called = False
-
+    def test_source_ignored_without_delivery_warns(self, monkeypatch, capsys):
         def fake_analysis(**kwargs):
-            nonlocal called
-            called = True
-            return {"profile": None, "warnings": []}
+            return {"delivery": {}, "code": {"signal": None}, "docs": None, "warnings": []}
 
         monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
-        args = build_parser().parse_args(["analyze", "--source", "jira", "--azdevops-components", "code"])
-        assert _cmd_analyze(args, _console()) == 2
-        assert called is False  # never reaches the engine
+        args = build_parser().parse_args(["analyze", "--source", "jira", "--code", "github"])
+        _cmd_analyze(args, _console())
+        assert "--source jira ignored" in capsys.readouterr().err
 
-    def test_delivery_off_result_prints_without_profile(self, monkeypatch):
+    def test_global_code_and_docs_printed(self, monkeypatch):
         import io
+
+        from yeaboi.team_profile import AiAdoptionSignal, DocQualitySignal
 
         def fake_analysis(**kwargs):
             return {
-                "source": "jira",
-                "project_key": "P",
-                "components": ["docs"],
-                "profile": None,
-                "examples": {"doc_quality": {"summary": {"avg_clarity": 72, "pages_scanned": 5}}},
+                "delivery": {},
+                "code": {"signal": AiAdoptionSignal(scanned_commits=40, ai_commits=18, footprint_pct=45.0)},
+                "docs": {"signal": DocQualitySignal(pages_scanned=6, avg_clarity=72.0)},
                 "warnings": [],
             }
 
         monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
-        args = build_parser().parse_args(["analyze", "--source", "jira", "--jira-components", "docs"])
+        args = build_parser().parse_args(["analyze", "--code", "github", "--docs", "confluence"])
         buf = io.StringIO()
         assert _cmd_analyze(args, _console(buf)) == 0
         out = buf.getvalue()
-        assert "docs" in out
-        assert "72/100" in out  # doc clarity summarised in place of a velocity profile
+        assert "45%" in out  # global code footprint
+        assert "72/100" in out  # global docs clarity
 
 
 class TestDispatch:

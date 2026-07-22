@@ -942,8 +942,14 @@ class TestRunTeamAnalysisResultsBoth:
         jira = TeamProfile(team_id="jira:P", source="jira", project_key="P", team_name="")
         azdo = TeamProfile(team_id="azdevops:Web", source="azdevops", project_key="Web", team_name="Web Team")
         return {
-            "jira": {"profile": jira, "examples": {}, "sprint_names": ["S1"]},
-            "azdevops": {"profile": azdo, "examples": {}, "sprint_names": ["I1"]},
+            "jira": {"profile": jira, "examples": {}, "sprint_names": ["S1"], "source": "jira", "project_key": "P"},
+            "azdevops": {
+                "profile": azdo,
+                "examples": {},
+                "sprint_names": ["I1"],
+                "source": "azdevops",
+                "project_key": "Web",
+            },
         }
 
     def _run(self, keys, active_box):
@@ -959,7 +965,7 @@ class TestRunTeamAnalysisResultsBoth:
             both["jira"]["profile"],
             {},
             sprint_names=["S1"],
-            both_results=both,
+            delivery=both,
             comparison=[("Avg velocity", "23", "15")],
             active_box=active_box,
         )
@@ -981,77 +987,63 @@ class TestRunTeamAnalysisResultsBoth:
         assert profile.source == "jira"
         assert team_name == ""  # regression guard: no cross-tracker team-name bleed
 
-    def test_delivery_off_tab_renders_without_crash(self):
-        # Jira ran full delivery; Azure DevOps ran docs-only (profile is None).
-        from yeaboi.team_profile import DocQualitySignal, TeamProfile
+    def test_global_docs_card_shows_on_every_tab(self):
+        # Jira + Azure DevOps delivery, plus ONE global docs scan shown on both tabs.
+        from yeaboi.team_profile import DocQualitySignal
 
-        jira = TeamProfile(team_id="jira:P", source="jira", project_key="P")
-        dq = DocQualitySignal(pages_scanned=6, avg_clarity=71.0)
-        both = {
-            "jira": {"profile": jira, "examples": {}, "sprint_names": ["S1"], "source": "jira", "project_key": "P"},
-            "azdevops": {
-                "profile": None,
-                "examples": {"doc_quality": {"summary": {}}, "_signals": {"doc_quality": dq}},
-                "sprint_names": [],
-                "source": "azdevops",
-                "project_key": "Web",
-            },
-        }
+        both = self._both()
+        docs = {"signal": DocQualitySignal(pages_scanned=6, avg_clarity=71.0), "examples": {"summary": {}}}
         from yeaboi.ui.mode_select import _run_team_analysis_results
 
         active_box: list = [None]
-        # Tab to the docs-only tracker, then Esc — must not raise on the None profile.
         res = _run_team_analysis_results(
             self._FakeLive(),
             self._console(),
             self._reader(["tab", "esc"]),
             0.01,
             True,
-            jira,
+            both["jira"]["profile"],
             {},
             sprint_names=["S1"],
-            both_results=both,
-            comparison=[("Avg velocity", "23", "—")],
+            delivery=both,
+            docs=docs,
             active_box=active_box,
         )
         assert res == "back"
-        # The active (docs-only) tracker mirrors back a None profile.
-        assert active_box[0][0] is None
+        # Toggling tracker keeps a real (per-tracker) delivery profile in active_box.
+        assert active_box[0][0].source == "azdevops"
 
 
 class TestDeliveryOffScreen:
-    """_build_team_analysis_screen with profile=None (a docs-only / code-only run)."""
+    """_build_team_analysis_screen with profile=None (a code/docs-only run) — the
+    global signals are passed via code_signal/doc_signal."""
 
     @staticmethod
-    def _delivery_off_examples():
+    def _code_signal():
         from yeaboi.team_profile import AiAdoptionSignal
 
-        sig = AiAdoptionSignal(
+        return AiAdoptionSignal(
             scanned_commits=40,
             ai_commits=18,
             footprint_pct=45.0,
             per_tool=(("claude", 18),),
             sources_scanned=("github",),
         )
-        return {
-            "ai_adoption": {"summary": {"footprint_pct": 45.0}, "coverage": [], "samples": []},
-            "_signals": {"ai_adoption": sig},
-        }
 
     def test_renders_without_profile(self):
         panel = _build_team_analysis_screen(
             None,
             width=100,
             height=40,
-            examples=self._delivery_off_examples(),
+            examples={"ai_adoption": {"summary": {}, "coverage": [], "samples": []}},
             source="jira",
             project_key="PROJ",
+            code_signal=self._code_signal(),
         )
         assert isinstance(panel, Panel)
         out = _render(panel, width=100)
-        # Header names the source + "code scan only"; no sprint/velocity headline.
         assert "jira/PROJ" in out
-        assert "only" in out
+        assert "only" in out  # header says "... only" (no delivery profile)
         assert "sprints" not in out
 
     def test_shows_code_card_from_signal(self):
@@ -1059,46 +1051,79 @@ class TestDeliveryOffScreen:
             None,
             width=100,
             height=40,
-            examples=self._delivery_off_examples(),
+            examples={"ai_adoption": {"summary": {}, "coverage": [], "samples": []}},
             view="ai-adoption",
             source="jira",
             project_key="PROJ",
+            code_signal=self._code_signal(),
         )
         out = _render(panel, width=100)
         assert "AI Adoption" in out
-        assert "45%" in out  # footprint rendered from ctx.ai_sig, not a profile
+        assert "45%" in out  # footprint rendered from the global code_signal
 
-    def test_visible_card_order_delivery_off(self):
+    def test_visible_card_order_code_only(self):
         from yeaboi.ui.mode_select.screens._analysis_sections import visible_card_order
 
-        order = visible_card_order(None, self._delivery_off_examples())
-        assert order == ("ai-adoption",)  # only the code card has data
+        assert visible_card_order(None, has_code=True, has_docs=False) == ("ai-adoption",)
+        assert visible_card_order(None, has_code=False, has_docs=True) == ("documentation",)
+
+    def test_visible_card_order_delivery_plus_globals(self):
+        from yeaboi.team_profile import TeamProfile
+        from yeaboi.ui.mode_select.screens._analysis_sections import visible_card_order
+
+        order = visible_card_order(TeamProfile(team_id="t", source="jira", project_key="P"), True, True)
+        # Delivery cards, then the two global cards, then insights last.
+        assert order[0] == "velocity"
+        assert "ai-adoption" in order and "documentation" in order
+        assert order[-1] == "insights"
 
 
 class TestComponentSelectScreen:
-    """Per-source component picker screen + loop."""
+    """Ragged component × sub-source picker screen + loop."""
 
-    def test_single_source_render(self):
-        checked = {"jira": {0, 2}}
-        out = _render(_build_component_select_screen(["jira"], checked, 0, 0, width=100, height=30), width=100)
-        assert "Delivery" in out and "Code" in out and "Docs" in out
-        assert "2 selected" in out
-        assert "■" in out and "□" in out
+    _GRID = {"delivery": ["jira", "azdevops"], "code": ["github", "azdo"], "docs": ["confluence", "notion"]}
 
-    def test_both_source_two_columns(self):
-        checked = {"jira": {2}, "azdevops": {1}}
+    def test_ragged_render(self):
+        checked = {"delivery": {0}, "code": {0, 1}, "docs": {0}}
         out = _render(
-            _build_component_select_screen(["jira", "azdevops"], checked, 1, 1, width=110, height=30), width=110
+            _build_component_select_screen(
+                self._GRID, ["delivery", "code", "docs"], checked, 0, 0, width=110, height=30
+            ),
+            width=110,
         )
-        assert "Jira" in out and "Azure DevOps" in out
+        assert "DELIVERY" in out and "CODE" in out and "DOCS" in out
+        # Each component shows its OWN sub-sources.
+        assert "Jira" in out and "GitHub" in out and "Confluence" in out
+        # ●/○ dots distinguish checked vs unchecked; footer shows per-component counts.
+        assert "●" in out and "○" in out
+        assert "Delivery 1" in out and "sources" in out
 
-    def test_empty_source_shows_hint(self):
-        checked = {"jira": set()}
-        out = _render(_build_component_select_screen(["jira"], checked, 0, 0, width=100, height=30), width=100)
-        assert "pick at least one" in out
+    def test_focused_source_is_bracketed(self):
+        checked = {"delivery": {0, 1}, "code": {0, 1}, "docs": {0, 1}}
+        out = _render(
+            _build_component_select_screen(
+                self._GRID, ["delivery", "code", "docs"], checked, 1, 1, width=110, height=30
+            ),
+            width=110,
+        )
+        assert "‹" in out and "›" in out  # focused cell (code / azdo) wrapped in brackets
+
+    def test_no_selection_shows_hint(self):
+        checked = {"delivery": set(), "code": set(), "docs": set()}
+        out = _render(
+            _build_component_select_screen(
+                self._GRID, ["delivery", "code", "docs"], checked, 0, 0, width=100, height=30
+            ),
+            width=100,
+        )
+        assert "at least one" in out
 
     def test_returns_panel_narrow(self):
-        assert isinstance(_build_component_select_screen(["jira"], {"jira": {0}}, 0, 0, width=40, height=20), Panel)
+        checked = {"delivery": {0}}
+        assert isinstance(
+            _build_component_select_screen({"delivery": ["jira"]}, ["delivery"], checked, 0, 0, width=40, height=20),
+            Panel,
+        )
 
 
 class TestMemberSelectScreen:
@@ -1136,32 +1161,60 @@ class TestComponentAndMemberLoops:
 
         return read_key
 
-    def _components(self, keys, sources):
+    _GRID = {"delivery": ["jira", "azdevops"], "code": ["github", "azdo"], "docs": ["confluence"]}
+
+    def _components(self, keys, grid=None):
         from yeaboi.ui.mode_select import _run_component_select
 
-        return _run_component_select(self._FakeLive(), self._console(), self._reader(keys), 0.01, True, sources)
+        return _run_component_select(
+            self._FakeLive(), self._console(), self._reader(keys), 0.01, True, grid or self._GRID
+        )
 
     def _members(self, keys, roster):
         from yeaboi.ui.mode_select import _run_member_select
 
         return _run_member_select(self._FakeLive(), self._console(), self._reader(keys), 0.01, True, roster)
 
-    def test_all_checked_returns_none(self):
-        # Default is everything checked; Enter immediately → None (= full analysis).
-        assert self._components(["enter"], ["jira"]) is None
+    def test_all_checked_returns_full_map(self):
+        # Everything checked by default → Enter returns the full component→sub-source map.
+        assert self._components(["enter"]) == {
+            "delivery": ["jira", "azdevops"],
+            "code": ["github", "azdo"],
+            "docs": ["confluence"],
+        }
 
-    def test_deselecting_yields_explicit_list(self):
-        # Toggle off "delivery" (row 0) → {jira: [code, docs]}.
-        assert self._components([" ", "enter"], ["jira"]) == {"jira": ["code", "docs"]}
+    def test_deselecting_a_subsource(self):
+        # Toggle off delivery[0]=jira → delivery keeps only azdevops.
+        result = self._components([" ", "enter"])
+        assert result["delivery"] == ["azdevops"]
+        assert result["code"] == ["github", "azdo"]
 
-    def test_cannot_confirm_empty_source(self):
-        # Toggle off all three (down between toggles), then a final toggle-on so Enter succeeds.
-        keys = [" ", "down", " ", "down", " ", "enter", " ", "enter"]
-        # After 3 toggles all off → Enter blocked; toggle row2 on → Enter returns.
-        assert self._components(keys, ["jira"]) == {"jira": ["docs"]}
+    def test_deselecting_a_whole_component(self):
+        # Focus the docs row, toggle off its only checked box → docs dropped entirely.
+        # rows: delivery(2 cols), code(2), docs(1). Down twice to docs, Space off.
+        result = self._components(["down", "down", " ", "enter"])
+        assert "docs" not in result
+
+    def test_cannot_confirm_nothing(self):
+        # Uncheck every box across all rows, Enter is blocked, then re-check one.
+        keys = [
+            " ",
+            "right",
+            " ",  # delivery: off both
+            "down",
+            " ",
+            "right",
+            " ",  # code: off both
+            "down",
+            " ",  # docs: off
+            "enter",  # blocked (nothing selected)
+            " ",  # docs back on
+            "enter",
+        ]
+        assert self._components(keys) == {"docs": ["confluence"]}
 
     def test_cancel(self):
-        assert self._components(["esc"], ["jira"]) == "cancel"
+        assert self._components(["esc"]) == "cancel"
 
     def test_member_select_returns_names(self):
         assert self._members(["down", " ", "enter"], ["Alice", "Bob"]) == ["Bob"]
@@ -1378,6 +1431,8 @@ class TestAnalysisOverview:
     """The overview view: headline stats, AI executive summary, card list."""
 
     def _render_view(self, examples=None, selected_card=0, width=100, height=40):
+        from yeaboi.team_profile import AiAdoptionSignal, DocQualitySignal
+
         panel = _build_team_analysis_screen(
             _make_overview_profile(),
             examples=examples,
@@ -1385,6 +1440,9 @@ class TestAnalysisOverview:
             selected_card=selected_card,
             width=width,
             height=height,
+            # Global code/docs scans present → the two standalone cards render.
+            code_signal=AiAdoptionSignal(scanned_commits=20, ai_commits=8, footprint_pct=40.0),
+            doc_signal=DocQualitySignal(pages_scanned=5, avg_clarity=70.0),
         )
         assert isinstance(panel, Panel)
         return _render(panel, width=width)

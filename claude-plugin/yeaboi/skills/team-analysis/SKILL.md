@@ -20,19 +20,20 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
    `generate_samples` (sample tickets in the team's
    style — extra LLM calls, only when asked).
 
-   **Per-source components + member subset.** `components` picks which parts run
-   *per source*, e.g. `{"jira": ["docs"], "azdevops": ["code"]}` — each value a
-   subset of `delivery` (velocity/calibration/contributors), `code` (remote
-   AI-usage scan), `docs` (Confluence/Notion clarity). Omitting `delivery` for a
-   source returns a **code/docs-only** result for it (`profile: null`, not saved) —
-   use this for "just Confluence for Jira" / "just code for Azure DevOps". A source
-   left out of `components` falls back to the `include_*` booleans. `members` scopes
-   velocity/contributors/code to a subset per source, e.g.
-   `{"jira": ["Alice", "Bob"]}` (blank = whole team); discover names with
-   `team_roster` first. Note: with a member subset, **velocity, calibration and
-   estimation accuracy** reflect only those people, but **sprint completion rate
-   stays board-level** (a sprint-level figure that can't be attributed per person) —
-   the caveat is surfaced in `warnings`.
+   **Decoupled components + member subset.** The analysis is three independent
+   components, each over its OWN sub-sources — `components` is keyed by component,
+   NOT by tracker:
+   `{"delivery": ["jira","azdevops"], "code": ["github","azdo"], "docs": ["confluence","notion"]}`.
+   **Delivery** (velocity/calibration/contributors) runs one profile PER selected
+   tracker. **Code** (remote AI-usage) and **Docs** (Confluence/Notion clarity) are
+   each a SINGLE global scan over their selected hosts — not per tracker. An
+   absent/empty component is skipped (e.g. `{"docs": ["confluence"]}` = Confluence
+   only, no velocity); `None` falls back to the `include_*` booleans. `members`
+   scopes each delivery tracker's velocity/contributors (and code authors), e.g.
+   `{"jira": ["Alice"]}` (blank = whole team); discover names with `team_roster`
+   first. With a member subset, **velocity/calibration/estimation** reflect only
+   those people, but **sprint completion rate stays board-level** — surfaced in
+   `warnings`.
 
    Code scanning is **remote only** (GitHub + Azure Repos); there is no local-clone
    scan.
@@ -58,17 +59,15 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
    written by AI"); **explicit AI markers** are a lower bound. Coach on clearer
    writing and effective AI use, not on policing.
 
-   **With `source: 'both'`** the result is combined:
-   `{source:'both', results:{jira:{...}, azdevops:{...}}, comparison:[[label, jira, azdevops], ...]}`.
-   Present the two trackers **clearly separated** ("From Jira" / "From Azure DevOps") — never blend
-   their numbers (velocity/point scales aren't comparable across trackers) — and lead with the
-   `comparison` side-by-side table. If only one tracker is configured, 'both' degrades to that
-   single run and says so in `warnings`. In 'both' mode `components`/`members` are keyed per
-   source, so each tracker can run a different set (e.g. Jira docs, Azure DevOps code).
-
-   **A delivery-off result has `profile: null`** — there is no velocity/calibration; present the
-   `examples.ai_adoption` / `examples.doc_quality` findings for that source instead, and don't
-   offer it as planning calibration.
+   **Result shape:**
+   `{delivery:{jira:{profile,...}, azdevops:{...}}, code:{signal,examples}|null, docs:{signal,examples}|null,
+   comparison:[[label, jira, azdevops], ...], warnings}`. **Delivery** carries one entry per
+   analysed tracker — present them **clearly separated** ("From Jira" / "From Azure DevOps"), never
+   blend their velocity (scales aren't comparable), and lead with the `comparison` table when two
+   trackers ran. **Code** and **Docs** are single global findings — present each ONCE, not per
+   tracker (the same signal is also attached to each saved delivery profile so the stored-profile
+   view keeps showing it). A code/docs-only run has `delivery: {}` (no velocity/calibration) —
+   present the `code`/`docs` findings and don't offer it as planning calibration.
 
 4. **Close the loop.** The saved profile automatically calibrates future
    `plan_generate` runs. For "how did the last plan actually go?", call
