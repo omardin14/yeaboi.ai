@@ -50,6 +50,11 @@ class TestVersionRow:
         out = _render(_screens._build_version_row(80))
         assert "f feedback" in out
 
+    def test_shows_all_tips_hint(self, _patch_status):
+        _patch_status()
+        out = _render(_screens._build_version_row(80))
+        assert "a all tips" in out
+
     def test_no_upgrade_segment_when_current(self, _patch_status):
         _patch_status()
         out = _render(_screens._build_version_row(80))

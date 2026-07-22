@@ -2296,6 +2296,114 @@ def _build_changelog_screen(
     )
 
 
+def _build_all_tips_screen(
+    *,
+    scroll_offset: int = 0,
+    scroll_meta: dict | None = None,
+    width: int = 80,
+    height: int = 24,
+    action_sel: int = 0,
+    shimmer_tick: float | None = None,
+    sub_reveal: float | None = None,
+    actions: list[str] | None = None,
+    message: str = "",
+) -> Panel:
+    """Build the All Tips gallery page: every discoverability tip in one scroll.
+
+    Same scrollable Panel skeleton as :func:`_build_changelog_screen`. Content is
+    the live ``get_tips()`` list, so it always reflects the current tips. Each tip
+    is one bullet; freshly-shipped features get a gold ``NEW`` badge and tips that
+    map to a home card note the mode they open. The ``Copy all`` action copies the
+    whole list to the clipboard (see the run loop in mode_select/__init__.py).
+    """
+    import textwrap
+
+    from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _TIP_DOT_ON
+    from yeaboi.ui.shared._components import CHANGELOG_THEME, build_reveal_subtitle, tips_title
+    from yeaboi.ui.shared._tips import get_tips
+
+    theme = CHANGELOG_THEME
+    title = tips_title(shimmer_tick, width=width)
+    sub = build_reveal_subtitle("Everything yeaboi can do", sub_reveal, pad=PAD)
+    titles = {card["key"]: card["title"] for card in _MODE_CARDS}
+    gold = f"rgb({_TIP_DOT_ON[0]},{_TIP_DOT_ON[1]},{_TIP_DOT_ON[2]})"
+
+    body_lines: list = []
+    if message:
+        body_lines.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        body_lines.append(Text(""))
+    wrap_w = max(24, width - len(PAD) - 12)
+
+    for tip in get_tips():
+        chunks = textwrap.wrap(tip.text, width=max(24, wrap_w - 3)) or [""]
+        for i, chunk in enumerate(chunks):
+            prefix = "  •  " if i == 0 else "     "
+            line = Text(PAD + prefix + chunk, style=theme.value, justify="left")
+            if i == len(chunks) - 1:  # append badges to the tip's last line
+                if tip.is_new:
+                    line.append("  ")
+                    line.append("NEW", style=f"bold {gold}")
+                if tip.mode_key and tip.mode_key in titles:
+                    line.append("  → opens ", style=theme.muted)
+                    line.append(titles[tip.mode_key], style=theme.desc)
+            body_lines.append(line)
+
+    # ── Layout using shared components (identical to the changelog page) ──
+    viewport_h = calc_viewport(height, header_h=10, action_h=4)
+    total_lines = len(body_lines)
+    max_scroll = max(0, total_lines - viewport_h)
+    actual_scroll = min(scroll_offset, max_scroll)
+    publish_geometry(scroll_meta, max_scroll, viewport_h)
+    visible = body_lines[actual_scroll : actual_scroll + viewport_h]
+
+    _sb_text = build_scrollbar(viewport_h, total_lines, actual_scroll, max_scroll, always_show=True)
+    padded_lines: list = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded_lines.append(Text(""))
+
+    btn_top, btn_mid, btn_bot = build_action_buttons(actions or ["Back"], action_sel)
+
+    if _sb_text is not None:
+        from rich.table import Table as _SbTable
+
+        _vp_table = _SbTable(
+            show_header=False,
+            show_edge=False,
+            box=None,
+            padding=0,
+            pad_edge=False,
+            expand=True,
+        )
+        _vp_table.add_column(ratio=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        viewport_renderable = _vp_table
+    else:
+        viewport_renderable = Group(*padded_lines)
+
+    content = Group(
+        Text(""),
+        title,
+        Text(""),
+        sub,
+        Text(""),
+        viewport_renderable,
+        Text(""),
+        btn_top,
+        btn_mid,
+        btn_bot,
+    )
+
+    return Panel(
+        content,
+        border_style="white",
+        box=rich.box.ROUNDED,
+        expand=True,
+        height=height,
+        padding=(1, 2),
+    )
+
+
 def _build_feedback_screen(
     view: str,
     *,

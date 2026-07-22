@@ -7,6 +7,8 @@ description: Internal blueprints of the standalone modes — Daily Standup, Retr
 
 All four modes follow one blueprint: a self-contained package (`engine` + `store` + `render`/`export`), frozen-dataclass artifacts in `agent/state.py` (all fields defaulted), a SQLite schema bumped in `sessions.py`, a TUI page via the shared component system, and standalone pipelines (NOT LangGraph nodes) that follow the node **parse → fallback → format** convention with one `get_llm()`/`track_usage()` call.
 
+Adding a mode also means adding its **discoverability tip**: a `FeatureTip` in `src/yeaboi/ui/shared/_tips.py` (`_FEATURE_TIPS`) keyed by the capability name, with a `mode_key` when it owns a `_MODE_CARDS` card (so the welcome-screen `g` key jumps into it) and `is_new=True` for a release or two. `TestTips` in `tests/unit/test_surface_parity.py` fails until the tip exists (or a `TIP_EXEMPT` entry with a reason is recorded).
+
 ## Daily Standup Mode
 
 The `src/yeaboi/standup/` package implements a daily scrum that detects team activity, scores sprint progress, and delivers a summary — runnable from the TUI or headlessly on an OS schedule.

@@ -430,6 +430,61 @@ class TestTuiModes:
 
 
 # ---------------------------------------------------------------------------
+# 3b. Discoverability tips — every capability surfaces a rotating tip on the
+#     welcome screen, so tips stay current as features land. Model: the same
+#     two-way set-equality as the mode-card check above.
+# ---------------------------------------------------------------------------
+
+# Capabilities that deliberately have no welcome-screen tip. Empty today — every
+# capability is worth surfacing. Add a `key: "reason (>10 chars)"` entry to opt a
+# capability out (TestTips enforces the reason length, like Exempt).
+TIP_EXEMPT: dict[str, str] = {}
+
+_TIP_HOW_TO = (
+    "Fix: add a FeatureTip for this capability in src/yeaboi/ui/shared/_tips.py "
+    "(_FEATURE_TIPS), or record a TIP_EXEMPT entry in tests/unit/test_surface_parity.py."
+)
+
+
+class TestTips:
+    def test_every_capability_has_a_tip(self):
+        from yeaboi.ui.shared._tips import _FEATURE_TIPS
+
+        actual = {t.key for t in _FEATURE_TIPS}
+        registered = set(CAPABILITIES) - set(TIP_EXEMPT)
+        assert actual == registered, (
+            f"welcome-screen feature tips vs CAPABILITIES differ.\n"
+            f"  capabilities with no tip: {sorted(registered - actual)}\n"
+            f"  tips for an unknown/exempt capability: {sorted(actual - registered)}\n{_TIP_HOW_TO}"
+        )
+
+    def test_tip_exempt_reasons_are_meaningful(self):
+        for cap, reason in TIP_EXEMPT.items():
+            assert cap in CAPABILITIES, f"TIP_EXEMPT names unknown capability {cap!r}"
+            assert len(reason) > 10, f"TIP_EXEMPT[{cap!r}] needs a real reason, got {reason!r}"
+
+    def test_carded_capabilities_have_jump_targets(self):
+        # Every capability that owns a mode card must have a tip whose mode_key
+        # points at that exact card, so the jump-into-feature key can't rot.
+        from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS
+        from yeaboi.ui.shared._tips import _FEATURE_TIPS
+
+        card_keys = {card["key"] for card in _MODE_CARDS}
+        by_key = {t.key: t for t in _FEATURE_TIPS}
+        for cap, tui_mode in _non_exempt("tui_mode").items():
+            tip = by_key.get(cap)
+            assert tip is not None and tip.mode_key == tui_mode, (
+                f"capability {cap!r} has mode card {tui_mode!r} but its tip's mode_key is "
+                f"{getattr(tip, 'mode_key', None)!r} — jump-into-feature would miss.\n{_TIP_HOW_TO}"
+            )
+        # No tip may point at a non-existent card.
+        for tip in _FEATURE_TIPS:
+            assert tip.mode_key is None or tip.mode_key in card_keys, (
+                f"tip {tip.key!r} jumps to unknown card {tip.mode_key!r}\n{_TIP_HOW_TO}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # 4. CLI flags — presence check (argparse can't tell us which new flag is
 #    "a capability", so discovery in the reverse direction rides on the
 #    engine/TUI/MCP checks) + the --mode ⊆ _MODE_CARDS drift guard.
