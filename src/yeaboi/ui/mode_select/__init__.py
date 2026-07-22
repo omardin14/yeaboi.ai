@@ -5183,10 +5183,10 @@ def select_mode(
     w, h = console.size
     start_time = time.monotonic()
     select_time = start_time
-    # Manual tip browsing ([ / ] keys). None = auto-rotate off the render tick; an
-    # int pins that tip and pauses rotation. Reset when the user moves the mode
-    # selection so tips resume rotating.
-    tip_override: int | None = None
+    # Manual tip browsing ([ / ] keys). A rotation shift added to the auto index:
+    # browsing moves through the list while auto-rotation keeps running, so tips
+    # never get stuck on one card (see resolve_index in ui/shared/_tips.py).
+    tip_offset = 0
 
     import inspect
 
@@ -5261,7 +5261,6 @@ def select_mode(
                     if _delta:
                         selected = (selected + _delta) % n
                         select_time = time.monotonic()
-                        tip_override = None  # moving the selection resumes auto-rotation
                     else:
                         continue  # net-zero burst — nothing moved, skip the repaint
                 elif key == "enter":
@@ -5292,18 +5291,15 @@ def select_mode(
 
                     set_tips_enabled(not is_tips_enabled())
                 elif key in ("[", "]"):
-                    # Browse tips manually: pin the current tip, then step. Pins
-                    # rotation until the user moves the mode selection again.
-                    from yeaboi.ui.shared._tips import resolve_index, tip_count
-
-                    _cur = resolve_index(time.monotonic() - start_time, tip_override)
-                    tip_override = (_cur + (1 if key == "]" else -1)) % tip_count()
+                    # Browse tips manually by nudging the rotation shift. Auto-
+                    # rotation keeps running from the new position (never stuck).
+                    tip_offset += 1 if key == "]" else -1
                 elif key == "g":
                     # Jump into the feature the current tip describes (if it maps
                     # to a selectable home card). Reuses the enter/activate path.
                     from yeaboi.ui.shared._tips import resolve_index, tip_at
 
-                    _tip = tip_at(resolve_index(time.monotonic() - start_time, tip_override))
+                    _tip = tip_at(resolve_index(time.monotonic() - start_time, tip_offset))
                     if _tip.mode_key is not None:
                         _j = next((i for i, m in enumerate(_MODE_CARDS) if m["key"] == _tip.mode_key), None)
                         if _j is not None and _MODE_CARDS[_j]["available"]:
@@ -5338,7 +5334,7 @@ def select_mode(
                         height=h,
                         shimmer_tick=tick,
                         desc_reveal=reveal,
-                        tip_override=tip_override,
+                        tip_offset=tip_offset,
                     )
                 )
 

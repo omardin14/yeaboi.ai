@@ -112,15 +112,18 @@ def test_rotate_seconds_override(monkeypatch):
     _clear_cache()
 
 
-def test_resolve_index_uses_manual_override(monkeypatch):
+def test_resolve_index_applies_browse_offset(monkeypatch):
     _clear_cache()
     monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
-    # A manual override pins the index regardless of tick, and wraps modulo.
+    n = tip_count()
+    # The offset shifts the auto index; auto-rotation still advances with tick.
+    assert resolve_index(0.0, 0) == 0
     assert resolve_index(0.0, 3) == 3
-    assert resolve_index(999.0, 3) == 3
-    assert resolve_index(0.0, tip_count()) == 0  # wraps
-    # None falls back to the auto (tick-driven) index.
-    assert resolve_index(0.0, None) == 0
+    assert resolve_index(0.0, n) == 0  # wraps modulo
+    assert resolve_index(0.0, -1) == n - 1  # negative wraps too
+    # Offset is additive on top of the tick-driven index, so rotation continues:
+    # at one full window the auto index is 1, plus offset 2 → 3.
+    assert resolve_index(TIP_ROTATE_SECONDS + 0.1, 2) == 3
     _clear_cache()
 
 

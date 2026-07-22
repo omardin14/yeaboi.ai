@@ -101,10 +101,13 @@ def test_mode_screen_renders_at_various_ticks(monkeypatch):
         assert isinstance(result, Panel)
 
 
-def test_tip_rows_blank_when_disabled(monkeypatch):
+def test_tip_rows_show_recovery_hint_when_disabled(monkeypatch):
+    # Hidden tips must stay discoverable: the first row is blank (layout stays
+    # stable) but the second keeps a quiet "t show tips" affordance.
     monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: False)
     rows = _build_tip_rows(0.0)
-    assert [t.plain for t in rows] == ["", ""]
+    assert rows[0].plain == ""
+    assert "show tips" in rows[1].plain
 
 
 def test_tip_rows_show_labeled_keys(monkeypatch):
@@ -121,7 +124,7 @@ def test_tip_rows_have_no_position_indicator(monkeypatch):
     monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     _tips.get_tips.cache_clear()
     total = _tips.tip_count()
-    text = _tip_rows_text(shimmer_tick=0.0, tip_override=2)
+    text = _tip_rows_text(shimmer_tick=0.0, tip_offset=2)
     assert "●" not in text and "○" not in text  # no dots
     assert f"/{total}" not in text  # no counter
     _tips.get_tips.cache_clear()
@@ -134,8 +137,8 @@ def test_tip_rows_open_hint_only_for_carded_tip(monkeypatch):
     tips = _tips.get_tips()
     carded = next(i for i, t in enumerate(tips) if t.mode_key is not None)
     ambient = next(i for i, t in enumerate(tips) if t.mode_key is None)
-    assert "open" in _tip_rows_text(shimmer_tick=0.0, tip_override=carded)
-    assert "open" not in _tip_rows_text(shimmer_tick=0.0, tip_override=ambient)
+    assert "open" in _tip_rows_text(shimmer_tick=0.0, tip_offset=carded)
+    assert "open" not in _tip_rows_text(shimmer_tick=0.0, tip_offset=ambient)
     _tips.get_tips.cache_clear()
 
 
@@ -146,17 +149,18 @@ def test_tip_rows_new_badge_when_flagged(monkeypatch):
     tips = _tips.get_tips()
     new_idx = next(i for i, t in enumerate(tips) if t.is_new)
     plain_idx = next(i for i, t in enumerate(tips) if not t.is_new)
-    assert "NEW" in _tip_rows_text(shimmer_tick=0.0, tip_override=new_idx)
-    assert "NEW" not in _tip_rows_text(shimmer_tick=0.0, tip_override=plain_idx)
+    assert "NEW" in _tip_rows_text(shimmer_tick=0.0, tip_offset=new_idx)
+    assert "NEW" not in _tip_rows_text(shimmer_tick=0.0, tip_offset=plain_idx)
     _tips.get_tips.cache_clear()
 
 
-def test_tip_override_pins_the_tip(monkeypatch):
+def test_tip_offset_shifts_the_shown_tip(monkeypatch):
     monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
     monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     _tips.get_tips.cache_clear()
     tips = _tips.get_tips()
-    # A large tick would auto-rotate away from index 2, but the override pins it.
-    text = _tip_rows_text(shimmer_tick=999.0, tip_override=2)
-    assert tips[2].text in text
+    # At tick 0 the auto index is 0, so a browse offset selects tips[offset] —
+    # and because it's an offset (not a pin) auto-rotation keeps advancing.
+    assert tips[0].text in _tip_rows_text(shimmer_tick=0.0, tip_offset=0)
+    assert tips[2].text in _tip_rows_text(shimmer_tick=0.0, tip_offset=2)
     _tips.get_tips.cache_clear()

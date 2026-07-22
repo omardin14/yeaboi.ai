@@ -168,19 +168,20 @@ def tip_at(index: int) -> FeatureTip:
     return tips[index % len(tips)]
 
 
-def resolve_index(tick: float, override: int | None = None, rotate_seconds: float = TIP_ROTATE_SECONDS) -> int:
-    """Return the tip index to show: the manual ``override`` if browsing, else auto.
+def resolve_index(tick: float, offset: int = 0, rotate_seconds: float = TIP_ROTATE_SECONDS) -> int:
+    """Return the tip index to show at ``tick`` seconds, shifted by ``offset``.
 
-    The home loop owns the ``override`` integer (set while the user pages through
-    tips with ‹/›); when ``None`` the index advances automatically off ``tick``.
+    Auto-rotation advances the index every ``rotate_seconds`` off ``tick``. The
+    home loop adds a manual ``offset`` (bumped by the [ / ] browse keys): it just
+    relabels which tip occupies each rotation window, so browsing moves through
+    the list *and auto-rotation keeps running* from the new position — no pause,
+    no pinned index that could get stuck.
     """
     tips = get_tips()
     if not tips:  # pragma: no cover - defensive; the list is always populated
         return 0
-    if override is not None:
-        return override % len(tips)
     period = rotate_seconds if rotate_seconds > 0 else TIP_ROTATE_SECONDS
-    return int(max(0.0, tick) / period) % len(tips)
+    return (int(max(0.0, tick) / period) + offset) % len(tips)
 
 
 def current_tip(tick: float, rotate_seconds: float = TIP_ROTATE_SECONDS) -> tuple[int, FeatureTip]:
@@ -190,7 +191,7 @@ def current_tip(tick: float, rotate_seconds: float = TIP_ROTATE_SECONDS) -> tupl
     loop. The tip advances every ``rotate_seconds``; the index wraps around the
     tip list so rotation is continuous.
     """
-    idx = resolve_index(tick, None, rotate_seconds)
+    idx = resolve_index(tick, 0, rotate_seconds)
     return idx, tip_at(idx)
 
 
