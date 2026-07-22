@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.27.0",
+      "date": "2026-07-22",
+      "summary": "Team analysis now includes two new sub-analyses that deepen your understanding of how your team works. AI adoption scanning finds markers of Claude, Copilot, Cursor, aider, Devin, Codeium, and other AI tools in your recent commits and pull requests across GitHub, Azure DevOps, and your local git clone — showing you the AI footprint as a lower bound with source-aware reporting and real evidence links. Documentation quality analysis scores the clarity and AI-likelihood of your team's Notion and Confluence pages, again with cited examples and improvement suggestions. Both ride on the existing team profile machinery, gracefully skip when nothing is configured, and frame their findings honestly as footprints and heuristics rather than definitive counts.",
+      "highlights": [
+        {"text": "New AI adoption sub-analysis: detect Claude, Copilot, Cursor, aider, Devin, Codeium markers in commits and PRs", "areas": ["analysis"]},
+        {"text": "AI adoption scans GitHub, Azure DevOps, and local git clones with source-aware breakdowns and evidence links", "areas": ["analysis"]},
+        {"text": "New documentation quality sub-analysis: score Notion/Confluence page clarity and estimated AI likelihood", "areas": ["analysis"]},
+        {"text": "Both analyses include evidence-linked coaching citing specific commits, PRs, and pages with real links", "areas": ["analysis"]}
+      ]
+    },
+    {
       "version": "2.26.0",
       "date": "2026-07-21",
       "summary": "Retro now carries action items forward from the previous retro to this one, showing them in a dedicated \"Last sprint's actions\" review column on the browser board and TUI host view. Your team sets a status for each carried item — Done, Pending, In Progress, Carried Over, or Not Relevant — and these statuses persist in the report. Items marked as Carried Over re-enter the current sprint's action grid and keep the team focused on the context that still matters; Done and Not Relevant items drop out. Carry-forward works whether an item was AI-generated or typed in by hand, and now also survives closing and reopening a retro under the same session. The \"Share Remotely\" button also hardened: it now waits until the Cloudflare tunnel hostname is externally resolvable before advertising the URL, so opening the link doesn't hit an NXDOMAIN that resolvers will cache for 30 minutes.",
