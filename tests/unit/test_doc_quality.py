@@ -271,6 +271,29 @@ class TestCollectDocPages:
         assert pages == []
         assert any("confluence: error" in c for c in coverage)
 
+    def test_sub_sources_restricts_to_notion_only(self, monkeypatch):
+        # Confluence is configured but not requested → skipped; only Notion read.
+        monkeypatch.setattr("yeaboi.config.get_confluence_token", lambda: "tok")
+        monkeypatch.setattr("yeaboi.config.get_confluence_base_url", lambda: "https://x/wiki")
+        monkeypatch.setattr("yeaboi.config.get_notion_token", lambda: "ntok")
+
+        def _boom(*a, **k):
+            raise AssertionError("Confluence must not be read when sub_sources=['notion']")
+
+        monkeypatch.setattr("yeaboi.tools.confluence.confluence_recent_pages", _boom)
+        monkeypatch.setattr(
+            "yeaboi.tools.notion.notion_recent_pages",
+            lambda days=1: [{"key": "p1", "title": "Doc", "author": "A", "url": "u", "timestamp": "t"}],
+        )
+        monkeypatch.setattr(
+            "yeaboi.tools.notion.notion_read_page_text",
+            lambda page_id, max_chars=0: {"title": "Doc", "text": _CLEAR_TEXT, "truncated": False, "error": ""},
+        )
+        pages, platforms, coverage = collect_doc_pages("jira", "PROJ", sub_sources=["notion"])
+        assert platforms == ["notion"]
+        # Confluence isn't even reported as a gap — it wasn't requested.
+        assert not any("confluence" in c for c in coverage)
+
     def test_empty_text_pages_dropped(self, monkeypatch):
         monkeypatch.setattr("yeaboi.config.get_confluence_token", lambda: None)
         monkeypatch.setattr("yeaboi.config.get_confluence_base_url", lambda: None)
@@ -292,7 +315,7 @@ class TestRunDocQuality:
     def test_aggregates_collected_pages(self, monkeypatch):
         monkeypatch.setattr(
             "yeaboi.analysis.doc_quality.collect_doc_pages",
-            lambda source, project: (
+            lambda source, project, sub_sources=None: (
                 [
                     {"platform": "confluence", "title": "Clear", "text": _CLEAR_TEXT},
                     {"platform": "notion", "title": "AI", "text": _AI_TELL_TEXT},

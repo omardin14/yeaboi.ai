@@ -3171,6 +3171,130 @@ def _performance_export(engineer: str) -> str:
         return f"Export failed: {e}"
 
 
+def _run_component_select(live, console: Console, read_key, frame_time: float, supports_timeout: bool, grid: dict):
+    """Blocking ragged component × sub-source picker.
+
+    ``grid`` maps each component ('delivery'/'code'/'docs') to its CONFIGURED
+    sub-sources. Returns a ``{component: [selected sub-sources]}`` dict (only
+    components with a selection; ready to pass straight to ``run_team_analysis`` as
+    ``components=``) or the string ``"cancel"`` on Esc. Everything is checked by
+    default; at least one source overall must stay selected."""
+    from yeaboi.ui.mode_select.screens._screens_secondary import (
+        _COMPONENT_KEYS,
+        _build_component_select_screen,
+    )
+
+    rows = [c for c in _COMPONENT_KEYS if grid.get(c)]
+    if not rows:  # nothing configured at all
+        return "cancel"
+    checked: dict[str, set[int]] = {c: set(range(len(grid[c]))) for c in rows}
+    row_idx = 0
+    col_idx = 0
+    message = ""
+
+    def _ncols(r: int) -> int:
+        return len(grid[rows[r]])
+
+    while True:
+        col_idx = min(col_idx, _ncols(row_idx) - 1)
+        w, h = console.size
+        live.update(
+            _build_component_select_screen(grid, rows, checked, row_idx, col_idx, width=w, height=h, message=message)
+        )
+        kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if kk in ("up", "scroll_up"):
+            row_idx = (row_idx - 1) % len(rows)
+        elif kk in ("down", "scroll_down"):
+            row_idx = (row_idx + 1) % len(rows)
+        elif kk == "left":
+            col_idx = (col_idx - 1) % _ncols(row_idx)
+        elif kk == "right":
+            col_idx = (col_idx + 1) % _ncols(row_idx)
+        elif kk == " ":
+            checked[rows[row_idx]].symmetric_difference_update({col_idx})
+            message = ""
+        elif kk == "enter":
+            result = {c: [grid[c][i] for i in sorted(checked[c])] for c in rows if checked[c]}
+            if not result:
+                message = "Select at least one source to analyse."
+                continue
+            return result
+        elif kk in ("esc", "q"):
+            return "cancel"
+
+
+def _run_member_select(live, console: Console, read_key, frame_time: float, supports_timeout: bool, roster: list):
+    """Blocking roster picker. Returns the selected names (empty selection → ``None``
+    = whole team) or the string ``"cancel"`` on Esc."""
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_member_select_screen
+
+    checked: set[int] = set()
+    cursor = 0
+    while True:
+        w, h = console.size
+        live.update(_build_member_select_screen(roster, checked, cursor, width=w, height=h))
+        kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if kk in ("up", "scroll_up"):
+            cursor = (cursor - 1) % len(roster) if roster else 0
+        elif kk in ("down", "scroll_down"):
+            cursor = (cursor + 1) % len(roster) if roster else 0
+        elif kk == " " and roster:
+            checked.symmetric_difference_update({cursor})
+        elif kk == "enter":
+            return sorted(roster[i] for i in checked) or None
+        elif kk in ("esc", "q"):
+            return "cancel"
+
+
+def _prefetch_roster(live, console: Console, sources: list, project_key: str, db_path) -> list:
+    """Discover the union of assignee names across ``sources`` (network only, no LLM),
+    showing a progress screen while the lookup runs. Returns a sorted name list ([] on
+    any failure — the caller can then skip member selection)."""
+    import threading
+
+    from yeaboi.analysis import get_team_roster
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_analysis_progress_screen
+
+    names_box: list = [None]
+
+    def _work():
+        found: set[str] = set()
+        for s in sources:
+            try:
+                found.update(get_team_roster(s, project_key if len(sources) == 1 else "", db_path=db_path))
+            except Exception as exc:  # best-effort — a failed roster just means "no subset offered"
+                logger.warning("Roster prefetch failed for %s: %s", s, exc)
+        names_box[0] = sorted(found)
+
+    done = threading.Event()
+
+    def _runner():
+        try:
+            _work()
+        finally:
+            done.set()
+
+    started = time.monotonic()
+    threading.Thread(target=_runner, daemon=True).start()
+    tick = 0.0
+    while not done.is_set():
+        tick += _FRAME_TIME
+        w, h = console.size
+        live.update(
+            _build_analysis_progress_screen(
+                ["Discovering team members…"],
+                width=w,
+                height=h,
+                elapsed=time.monotonic() - started,
+                anim_tick=tick,
+                source=sources[0] if sources else "",
+                mode="analysis",
+            )
+        )
+        time.sleep(_FRAME_TIME)
+    return names_box[0] or []
+
+
 def _run_team_analysis_results(
     live,
     console: Console,
@@ -3182,6 +3306,13 @@ def _run_team_analysis_results(
     *,
     sprint_names: list[str] | None = None,
     team_name: str = "",
+    delivery: dict | None = None,
+    code: dict | None = None,
+    docs: dict | None = None,
+    comparison: list | None = None,
+    active_box: list | None = None,
+    source: str = "",
+    project_key: str = "",
 ) -> str:
     """Event loop for the team-analysis results screen (overview + section cards).
 
@@ -3191,8 +3322,24 @@ def _run_team_analysis_results(
     overview. Export writes HTML + MD from any view. Returns ``"continue"``
     when the user chose Continue (ticket generation) and ``"back"`` on Esc from
     the overview — the callers own what happens next.
+
+    Decoupled components: ``delivery`` (tracker → per-tracker sub-dict) drives a
+    ``Tab``-cycled delivery toggle — each tracker keeps its own velocity/contributor
+    cards. ``code``/``docs`` are the GLOBAL scans (``{signal, examples}``) shown as
+    standalone cards that don't move when the delivery toggle switches. The active
+    delivery tracker's (profile, examples, sprint_names, team_name) is mirrored into
+    ``active_box`` for the caller's downstream ticket-gen step.
     """
-    from yeaboi.ui.mode_select.screens._analysis_sections import _TA_CARD_ORDER
+    from yeaboi.ui.mode_select.screens._analysis_sections import visible_card_order
+
+    delivery_order = list(delivery.keys()) if delivery else []
+    code_signal = code.get("signal") if code else None
+    doc_signal = docs.get("signal") if docs else None
+    src_idx = 0
+    base_team_name = team_name  # caller-passed fallback; never let one tracker's team bleed into another
+    # Fallback source/project for a delivery-off single-source run (profile is None).
+    base_source = source or getattr(profile, "source", "")
+    base_project = project_key or getattr(profile, "project_key", "")
 
     view = "overview"
     card_idx = 0
@@ -3203,7 +3350,11 @@ def _run_team_analysis_results(
     # Anonymize state: None = real profile; an AnonymizedOutput = mask it in place.
     anon = None
     anon_instruction = ""
-    logger.info("Analysis results: showing overview for %s/%s", profile.source, profile.project_key)
+    logger.info(
+        "Analysis results: showing overview for %s/%s",
+        getattr(profile, "source", "") or base_source,
+        getattr(profile, "project_key", "") or base_project,
+    )
 
     def _anon_doc() -> tuple[str, str]:
         from yeaboi.team_profile_exporter import build_team_profile_markdown
@@ -3212,14 +3363,43 @@ def _run_team_analysis_results(
         return f"Team Analysis — {profile.project_key}", md
 
     while True:
-        actions = (
-            ["Open", "Export", "Anonymize", "Continue"]
-            if view == "overview"
-            else ["Back", "Export", "Anonymize", "Continue"]
-        )
-        if anon is not None:  # swap Anonymize → Adjust + Revert while masked
+        # 'Both' mode: rebind the active tracker each frame from the toggle
+        # selection, and mirror it back so callers act on the shown source.
+        cur_source = base_source
+        cur_project = base_project
+        if delivery_order:
+            active_source = delivery_order[src_idx]
+            _cur = delivery[active_source]
+            profile = _cur["profile"]
+            examples = _cur["examples"]
+            sprint_names = _cur["sprint_names"]
+            cur_source = _cur.get("source", "") or active_source
+            cur_project = _cur.get("project_key", "")
+            # Fall back to the caller's value, NOT the mutated local, so the
+            # previous tracker's team name can't leak onto this one's screen.
+            team_name = getattr(profile, "team_name", "") or base_team_name
+            if active_box is not None:
+                active_box[0] = (profile, examples, sprint_names, team_name)
+
+        # A code/docs-only view (no delivery profile) has no velocity profile to
+        # export, anonymize or drive ticket generation from — offer only navigation.
+        if profile is None:
+            actions = ["Open"] if view == "overview" else ["Back"]
+        else:
+            actions = (
+                ["Open", "Export", "Anonymize", "Continue"]
+                if view == "overview"
+                else ["Back", "Export", "Anonymize", "Continue"]
+            )
+        if anon is not None and "Anonymize" in actions:  # swap Anonymize → Adjust + Revert while masked
             i = actions.index("Anonymize")
             actions[i : i + 1] = ["Adjust", "Revert"]
+
+        _pa = getattr(profile, "ai_adoption", None)
+        _pd = getattr(profile, "doc_quality", None)
+        _has_code = code_signal is not None or bool(_pa and (_pa.scanned_commits + _pa.scanned_prs) > 0)
+        _has_docs = doc_signal is not None or bool(_pd and _pd.pages_scanned > 0)
+        order = visible_card_order(profile, _has_code, _has_docs)
 
         # When anonymized, render from a masked copy of the profile (and its sample
         # ``examples``) so the SAME cards/tables re-render with only the words swapped.
@@ -3248,15 +3428,32 @@ def _run_team_analysis_results(
                 actions=actions,
                 shimmer_tick=time.monotonic() - anim0,
                 anon_note=_anon_note(anon),
+                source_toggle=delivery_order or None,
+                active_source=(delivery_order[src_idx] if delivery_order else ""),
+                comparison=comparison if view == "overview" else None,
+                source=cur_source,
+                project_key=cur_project,
+                code_signal=code_signal,
+                doc_signal=doc_signal,
             )
         )
 
         kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if delivery_order and len(delivery_order) > 1 and kk == "tab":
+            # Switch delivery tracker: reset the view/scroll and drop any mask (the
+            # replacements were computed for the other profile).
+            src_idx = (src_idx + 1) % len(delivery_order)
+            view = "overview"
+            scroll = 0
+            sel = 0
+            card_idx = 0
+            anon = None
+            continue
         if view == "overview" and kk in SCROLL_KEYS:
             # On the overview, Up/Down moves the card selection (the screen
             # auto-scrolls the selected row into view).
             card_idx += 1 if kk in ("down", "scroll_down", "pagedown") else -1
-            card_idx %= len(_TA_CARD_ORDER)
+            card_idx %= len(order)
         elif kk in SCROLL_KEYS:
             scroll = coalesce_scroll(scroll, kk, scroll_meta, read_key)
         elif kk == "left":
@@ -3266,7 +3463,7 @@ def _run_team_analysis_results(
         elif kk in ("enter", " "):
             act = actions[sel]
             if act == "Open":
-                view = _TA_CARD_ORDER[card_idx]
+                view = order[card_idx % len(order)]
                 scroll = 0
                 sel = 0
                 logger.info("Analysis results: opened section %s", view)
@@ -5844,114 +6041,10 @@ def select_mode(
                                 _ana_exp_fade = 1.0
                                 continue
                             elif _is_analysis_btn:
-                                # New analysis — if both boards, show picker popup
-                                if _jira_ok and _azdevops_ok:
-                                    from rich.console import Group
-                                    from rich.text import Text
-
-                                    _ana_popup_sel = 0  # 0=Jira, 1=AzDO
-                                    _ana_popup_open = True
-                                    _ana_popup_tick = 0.0
-                                    while _ana_popup_open:
-                                        _ana_popup_tick += _FRAME_TIME
-                                        w, h = console.size
-                                        import rich.box as _rbox
-                                        from rich.padding import Padding  # noqa: F811
-                                        from rich.panel import Panel as _PickPanel
-
-                                        from yeaboi.ui.shared._components import analysis_title as _at
-
-                                        _ana_title = _at()
-
-                                        # Styled board picker with green accent
-                                        _accent = "#22c55e"
-                                        _pick_inner_w = min(w - 10, 50)
-                                        _pick_msg = "Which board to analyse?"
-                                        _pick_pad = max(0, (_pick_inner_w - len(_pick_msg)) // 2)
-
-                                        _pick_body: list = [Text("")]
-                                        _pick_body.append(
-                                            Text(
-                                                " " * _pick_pad + _pick_msg,
-                                                style="bold white",
-                                                justify="left",
-                                            )
-                                        )
-                                        _pick_body.append(Text(""))
-
-                                        # Buttons with green highlight
-                                        _btn_line = Text(justify="center")
-                                        for bi, bl in enumerate(["Jira", "Azure DevOps"]):
-                                            if bi > 0:
-                                                _btn_line.append("     ")
-                                            if bi == _ana_popup_sel:
-                                                _btn_line.append(
-                                                    f" [ {bl} ] ",
-                                                    style=f"bold {_accent}",
-                                                )
-                                            else:
-                                                _btn_line.append(
-                                                    f"   {bl}   ",
-                                                    style="dim",
-                                                )
-                                        _pick_body.append(_btn_line)
-                                        _pick_body.append(Text(""))
-
-                                        _hint = Text(
-                                            "← → select  ·  Enter confirm  ·  Esc cancel",
-                                            style="rgb(60,60,80)",
-                                            justify="center",
-                                        )
-                                        _pick_body.append(_hint)
-
-                                        # Center the popup vertically
-                                        _popup_h = 7
-                                        _top_pad = max(0, (h - 8 - _popup_h) // 2)
-                                        _bot_pad = max(0, h - 8 - _popup_h - _top_pad)
-
-                                        live.update(
-                                            _PickPanel(
-                                                Group(
-                                                    _ana_title,
-                                                    *[Text("") for _ in range(_top_pad)],
-                                                    Padding(
-                                                        _PickPanel(
-                                                            Group(*_pick_body),
-                                                            border_style=_accent,
-                                                            box=_rbox.ROUNDED,
-                                                            width=_pick_inner_w + 4,
-                                                            padding=(0, 2),
-                                                        ),
-                                                        (0, 0, 0, max(0, (w - _pick_inner_w - 8) // 2)),
-                                                    ),
-                                                    *[Text("") for _ in range(_bot_pad)],
-                                                ),
-                                                border_style="white",
-                                                box=_rbox.ROUNDED,
-                                                expand=True,
-                                                height=h,
-                                                padding=(1, 2),
-                                            )
-                                        )
-                                        pk = read_key(timeout=_FRAME_TIME) if _supports_timeout else read_key()
-                                        if pk == "left":
-                                            _ana_popup_sel = 0
-                                        elif pk == "right":
-                                            _ana_popup_sel = 1
-                                        elif pk == "enter":
-                                            _team_popup_result = (
-                                                "analyse_jira" if _ana_popup_sel == 0 else "analyse_azdevops"
-                                            )
-                                            _ana_popup_open = False
-                                        elif pk in ("esc", "q"):
-                                            _ana_popup_open = False
-                                    if _team_popup_result.startswith("analyse"):
-                                        break
-                                    continue  # user pressed Esc on picker
-                                elif _jira_ok:
-                                    _team_popup_result = "analyse"
-                                else:
-                                    _team_popup_result = "analyse_azdevops"
+                                # New analysis — the source popup is gone; the unified
+                                # component grid (shown in the analysis-run block below)
+                                # picks delivery trackers itself, so go straight to it.
+                                _team_popup_result = "analyse"
                                 break
                         elif key in ("esc", "q"):
                             _restart_mode_select = True
@@ -6021,36 +6114,49 @@ def select_mode(
                         import threading
 
                         from yeaboi.analysis import run_team_analysis
+                        from yeaboi.analysis.engine import (
+                            _available_code_sources,
+                            _available_doc_sources,
+                            _available_sources,
+                        )
 
-                        if _team_popup_result == "analyse_jira":
-                            _ta_source = "jira"
-                        elif _team_popup_result == "analyse_azdevops":
-                            _ta_source = "azdevops"
-                        else:
-                            _ta_source = "jira" if _jira_ok else "azdevops"
+                        # Unified component grid: each component picks its OWN configured
+                        # sub-sources (delivery \u2190 jira/azdevops, code \u2190 github/azdo, docs
+                        # \u2190 confluence/notion). Esc returns to the analysis screen.
+                        _ta_grid = {
+                            "delivery": _available_sources(),
+                            "code": _available_code_sources(),
+                            "docs": _available_doc_sources(),
+                        }
+                        _ta_components = _run_component_select(
+                            live, console, read_key, _FRAME_TIME, _supports_timeout, _ta_grid
+                        )
+                        if _ta_components == "cancel":
+                            _team_popup_result = ""
+                            continue
 
-                        _ta_project_key = ""
-                        _ta_team_name = ""
-                        try:
-                            if _ta_source == "jira":
-                                from yeaboi.config import get_jira_project_key
-
-                                _ta_project_key = get_jira_project_key() or ""
-                            else:
-                                from yeaboi.config import (
-                                    get_azure_devops_project,
-                                    get_azure_devops_team,
+                        # Member subset \u2014 only meaningful for delivery (velocity) or code
+                        # (authors). Prefetch the roster over the selected delivery trackers.
+                        _ta_dlv = _ta_components.get("delivery") or []
+                        _ta_members_map = None
+                        if _ta_dlv or _ta_components.get("code"):
+                            _roster = _prefetch_roster(live, console, _ta_dlv or _available_sources(), "", _ana_dbp)
+                            if _roster:
+                                _sel = _run_member_select(
+                                    live, console, read_key, _FRAME_TIME, _supports_timeout, _roster
                                 )
-
-                                _ta_project_key = get_azure_devops_project() or ""
-                                _ta_team_name = get_azure_devops_team() or ""
-                        except Exception:
-                            pass
+                                if _sel == "cancel":
+                                    _team_popup_result = ""
+                                    continue
+                                if _sel:
+                                    _ta_members_map = {t: _sel for t in (_ta_dlv or _available_sources())}
+                        _ta_disp_source = _ta_dlv[0] if _ta_dlv else "analysis"
 
                         _ta_progress: list[str] = ["Fetching sprint history\u2026"]
                         _ta_profile_box: list = [None]
                         _ta_examples_box: list = [None]
                         _ta_sprint_names_box: list = [[]]
+                        _ta_result_box: list = [None]  # full engine dict (carries 'both' results)
                         _ta_error_box: list[str] = [""]
                         _ta_done = threading.Event()
 
@@ -6059,16 +6165,21 @@ def select_mode(
                                 # One code path with CLI/MCP: the engine fetches,
                                 # analyses, saves the profile, and writes the log.
                                 _res = run_team_analysis(
-                                    source=_ta_source,
-                                    project_key=_ta_project_key,
-                                    team_name=_ta_team_name,
                                     include_insights=False,
+                                    components=_ta_components,
+                                    members=_ta_members_map,
                                     progress=_ta_progress,
                                     db_path=_ana_dbp,
                                 )
-                                _ta_profile_box[0] = _res["profile"]
-                                _ta_examples_box[0] = _res["examples"]
-                                _ta_sprint_names_box[0] = _res["sprint_names"]
+                                _ta_result_box[0] = _res
+                                # Seed the boxes with the first delivery tracker (the
+                                # initially-shown source); code/docs-only runs have no
+                                # delivery profile, so seed None.
+                                _dlv = _res.get("delivery") or {}
+                                _first = next(iter(_dlv.values())) if _dlv else {}
+                                _ta_profile_box[0] = _first.get("profile")
+                                _ta_examples_box[0] = _first.get("examples") or {}
+                                _ta_sprint_names_box[0] = _first.get("sprint_names") or []
                             except ValueError as exc:
                                 _ta_error_box[0] = str(exc)
                             except Exception as exc:
@@ -6083,11 +6194,7 @@ def select_mode(
                             target=_run_team_analysis_mode,
                             daemon=True,
                         )
-                        logger.info(
-                            "Analysis: starting %s analysis for %s",
-                            _ta_source,
-                            _ta_project_key,
-                        )
+                        logger.info("Analysis: starting analysis (components=%s)", _ta_components)
                         _ta_thread.start()
 
                         from yeaboi.ui.mode_select.screens._screens_secondary import (
@@ -6105,7 +6212,7 @@ def select_mode(
                                     height=h,
                                     elapsed=time.monotonic() - _ta_thread_start,
                                     anim_tick=_ta_anim_tick,
-                                    source=_ta_source,
+                                    source=_ta_disp_source,
                                     mode="analysis",
                                 )
                             )
@@ -6124,15 +6231,23 @@ def select_mode(
                             )
                         elif _ta_error_box[0]:
                             logger.error("Analysis failed: %s", _ta_error_box[0])
-                        if _ta_profile:
+                        # Show results whenever the engine returned anything (a delivery-off
+                        # run has no top-level profile but still has code/docs cards).
+                        if _ta_result_box[0] and not _ta_error_box[0]:
                             # Persist + analysis log already handled inside
                             # run_team_analysis (one code path with CLI/MCP).
 
-                            # Show results (overview + section cards)
+                            # Show results (overview + section cards). In 'both'
+                            # mode the loop toggles between the two trackers and
+                            # reports the selected one back via _ta_active_box.
                             _ta_examples = _ta_examples_box[0] or {}
                             _ta_sprint_names = _ta_sprint_names_box[0]
-                            _ta_sub = f"{_ta_profile.source}/{_ta_profile.project_key}" if _ta_profile else ""
+                            _ta_team_name = ""
+                            _ta_src = getattr(_ta_profile, "source", "") or _ta_disp_source
+                            _ta_sub = f"{_ta_src}/{getattr(_ta_profile, 'project_key', '')}"
+                            _ta_full = _ta_result_box[0] or {}
                             while True:
+                                _ta_active_box: list = [None]
                                 _res = _run_team_analysis_results(
                                     live,
                                     console,
@@ -6143,7 +6258,19 @@ def select_mode(
                                     _ta_examples,
                                     sprint_names=_ta_sprint_names,
                                     team_name=_ta_team_name,
+                                    delivery=_ta_full.get("delivery"),
+                                    code=_ta_full.get("code"),
+                                    docs=_ta_full.get("docs"),
+                                    comparison=_ta_full.get("comparison"),
+                                    active_box=_ta_active_box,
+                                    source=_ta_disp_source,
                                 )
+                                # Downstream insights/ticket steps operate on the
+                                # delivery tracker the user last viewed.
+                                if _ta_active_box[0] is not None:
+                                    _ta_profile, _ta_examples, _ta_sprint_names, _ta_team_name = _ta_active_box[0]
+                                    _ta_src = getattr(_ta_profile, "source", "") or _ta_disp_source
+                                    _ta_sub = f"{_ta_src}/{getattr(_ta_profile, 'project_key', '')}"
                                 if _res != "continue":
                                     break
 
@@ -6635,20 +6762,20 @@ def select_mode(
                     # When one board configured:   [Yes, Analyse] [Skip] (2 buttons)
                     if team_popup_open:
                         _both_boards = _jira_ok and _azdevops_ok
-                        _popup_btn_count = 3 if _both_boards else 2
+                        _popup_btn_count = 4 if _both_boards else 2
                         if key == "left":
                             team_popup_sel = max(0, team_popup_sel - 1)
                         elif key == "right":
                             team_popup_sel = min(_popup_btn_count - 1, team_popup_sel + 1)
                         elif key == "enter":
                             if _both_boards:
-                                # 0=Jira, 1=AzDO, 2=Skip
-                                if team_popup_sel == 0:
-                                    _team_popup_result = "analyse_jira"
-                                elif team_popup_sel == 1:
-                                    _team_popup_result = "analyse_azdevops"
-                                else:
-                                    _team_popup_result = "skip"
+                                # 0=Jira, 1=AzDO, 2=Both, 3=Skip
+                                _team_popup_result = [
+                                    "analyse_jira",
+                                    "analyse_azdevops",
+                                    "analyse_both",
+                                    "skip",
+                                ][team_popup_sel]
                             else:
                                 # 0=Yes, 1=Skip
                                 _team_popup_result = "analyse" if team_popup_sel == 0 else "skip"
@@ -7232,12 +7359,16 @@ def select_mode(
                         _ta_source = "jira"
                     elif _team_popup_result == "analyse_azdevops":
                         _ta_source = "azdevops"
+                    elif _team_popup_result == "analyse_both":
+                        _ta_source = "both"
                     else:
                         _ta_source = "jira" if _jira_ok else "azdevops"
                     _ta_project_key = ""
                     _ta_team_name = ""
                     try:
-                        if _ta_source == "jira":
+                        if _ta_source == "both":
+                            pass  # project/team auto-resolved per source in the engine
+                        elif _ta_source == "jira":
                             from yeaboi.config import get_jira_project_key
 
                             _ta_project_key = get_jira_project_key() or ""
@@ -7256,6 +7387,7 @@ def select_mode(
                     _ta_profile_box: list = [None]
                     _ta_examples_box: list = [None]
                     _ta_sprint_names_box: list = [[]]
+                    _ta_result_box: list = [None]  # full engine dict (carries 'both' results)
                     _ta_error_box: list[str] = [""]
                     _ta_done = threading.Event()
 
@@ -7271,9 +7403,12 @@ def select_mode(
                                 progress=_ta_progress,
                                 db_path=_ana_dbp,
                             )
-                            _ta_profile_box[0] = _res["profile"]
-                            _ta_examples_box[0] = _res["examples"]
-                            _ta_sprint_names_box[0] = _res["sprint_names"]
+                            _ta_result_box[0] = _res
+                            _dlv = _res.get("delivery") or {}
+                            _first = next(iter(_dlv.values())) if _dlv else {}
+                            _ta_profile_box[0] = _first.get("profile")
+                            _ta_examples_box[0] = _first.get("examples") or {}
+                            _ta_sprint_names_box[0] = _first.get("sprint_names") or []
                         except ValueError as exc:
                             _ta_error_box[0] = str(exc)
                         except Exception as exc:
@@ -7335,7 +7470,9 @@ def select_mode(
                         # insights and Esc both fall through to intake below.
                         _ta_examples = _ta_examples_box[0] or {}
                         _ta_sprint_names = _ta_sprint_names_box[0]
+                        _ta_full = _ta_result_box[0] or {}
                         while True:
+                            _ta_active_box: list = [None]
                             _ta_res = _run_team_analysis_results(
                                 live,
                                 console,
@@ -7346,7 +7483,16 @@ def select_mode(
                                 _ta_examples,
                                 sprint_names=_ta_sprint_names,
                                 team_name=_ta_team_name,
+                                delivery=_ta_full.get("delivery"),
+                                code=_ta_full.get("code"),
+                                docs=_ta_full.get("docs"),
+                                comparison=_ta_full.get("comparison"),
+                                active_box=_ta_active_box,
+                                source=_ta_source,
+                                project_key=_ta_project_key,
                             )
+                            if _ta_active_box[0] is not None:
+                                _ta_profile, _ta_examples, _ta_sprint_names, _ta_team_name = _ta_active_box[0]
                             if _ta_res != "continue":
                                 break
                             if (

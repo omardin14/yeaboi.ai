@@ -11,13 +11,32 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
 
 2. **Warn, then analyse.** `team_analyze` pages the tracker and makes several
    LLM calls — it takes minutes. Tell the user before calling it. Options:
-   `source` ('jira'/'azdevops', auto-detected when blank), `sprint_count`
+   `source` ('jira'/'azdevops'/'both', auto-detects a single tracker when blank —
+   use 'both' to analyse Jira **and** Azure DevOps in one run), `sprint_count`
    (default 8 closed sprints), `include_insights` (start/stop/keep/try
    coaching), `include_ai_usage` (scan the team's commits/PRs for AI-tool
    markers — on by default), `include_doc_quality` (read recent
    Notion/Confluence pages for clarity + AI-usage — on by default),
    `generate_samples` (sample tickets in the team's
    style — extra LLM calls, only when asked).
+
+   **Decoupled components + member subset.** The analysis is three independent
+   components, each over its OWN sub-sources — `components` is keyed by component,
+   NOT by tracker:
+   `{"delivery": ["jira","azdevops"], "code": ["github","azdo"], "docs": ["confluence","notion"]}`.
+   **Delivery** (velocity/calibration/contributors) runs one profile PER selected
+   tracker. **Code** (remote AI-usage) and **Docs** (Confluence/Notion clarity) are
+   each a SINGLE global scan over their selected hosts — not per tracker. An
+   absent/empty component is skipped (e.g. `{"docs": ["confluence"]}` = Confluence
+   only, no velocity); `None` falls back to the `include_*` booleans. `members`
+   scopes each delivery tracker's velocity/contributors (and code authors), e.g.
+   `{"jira": ["Alice"]}` (blank = whole team); discover names with `team_roster`
+   first. With a member subset, **velocity/calibration/estimation** reflect only
+   those people, but **sprint completion rate stays board-level** — surfaced in
+   `warnings`.
+
+   Code scanning is **remote only** (GitHub + Azure Repos); there is no local-clone
+   scan.
 
 3. **Present it in layers.** Lead with the headline stats (velocity ± stddev,
    estimation accuracy, sprint completion), then the coaching `insights` as
@@ -39,6 +58,16 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
    NOT a detection (prose carries no reliable AI marker — never assert a page "was
    written by AI"); **explicit AI markers** are a lower bound. Coach on clearer
    writing and effective AI use, not on policing.
+
+   **Result shape:**
+   `{delivery:{jira:{profile,...}, azdevops:{...}}, code:{signal,examples}|null, docs:{signal,examples}|null,
+   comparison:[[label, jira, azdevops], ...], warnings}`. **Delivery** carries one entry per
+   analysed tracker — present them **clearly separated** ("From Jira" / "From Azure DevOps"), never
+   blend their velocity (scales aren't comparable), and lead with the `comparison` table when two
+   trackers ran. **Code** and **Docs** are single global findings — present each ONCE, not per
+   tracker (the same signal is also attached to each saved delivery profile so the stored-profile
+   view keeps showing it). A code/docs-only run has `delivery: {}` (no velocity/calibration) —
+   present the `code`/`docs` findings and don't offer it as planning calibration.
 
 4. **Close the loop.** The saved profile automatically calibrates future
    `plan_generate` runs. For "how did the last plan actually go?", call

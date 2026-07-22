@@ -335,7 +335,9 @@ def _read_bodies(recent: list[dict], reader) -> list[dict]:
     return out
 
 
-def collect_doc_pages(source: str, project_key: str) -> tuple[list[dict], list[str], list[str]]:
+def collect_doc_pages(
+    source: str, project_key: str, sub_sources: list[str] | None = None
+) -> tuple[list[dict], list[str], list[str]]:
     """Fan out over Confluence + Notion for recently-changed pages with their body text.
 
     Returns ``(pages, platforms_scanned, coverage_notes)``. Every platform is
@@ -343,9 +345,13 @@ def collect_doc_pages(source: str, project_key: str) -> tuple[list[dict], list[s
     failing platform contributes zero and is added to ``coverage_notes`` so absent
     coverage is visible rather than silent. Never raises. ``source``/``project_key``
     are accepted for signature parity with the other sub-analyses; doc platforms are
-    resolved purely from their own config.
+    resolved purely from their own config. ``sub_sources`` restricts which platforms
+    to read (subset of ``{"confluence", "notion"}``; None = both).
     """
     from yeaboi.config import get_confluence_base_url, get_confluence_token, get_notion_token
+
+    def _want(tag: str) -> bool:
+        return sub_sources is None or tag in sub_sources
 
     pages: list[dict] = []
     platforms_scanned: list[str] = []
@@ -372,15 +378,15 @@ def collect_doc_pages(source: str, project_key: str) -> tuple[list[dict], list[s
         logger.info("Doc-quality source %s contributed %d page(s)", name, len(raw))
 
     # Confluence — reuses the Jira Atlassian creds unless CONFLUENCE_* is set.
-    if get_confluence_token() and get_confluence_base_url():
+    if _want("confluence") and get_confluence_token() and get_confluence_base_url():
         _run("confluence", "confluence", _fetch_confluence_pages)
-    else:
+    elif _want("confluence"):
         coverage.append("confluence: CONFLUENCE_API_TOKEN / base URL not set")
 
     # Notion — standalone integration token.
-    if get_notion_token():
+    if _want("notion") and get_notion_token():
         _run("notion", "notion", _fetch_notion_pages)
-    else:
+    elif _want("notion"):
         coverage.append("notion: NOTION_TOKEN not set")
 
     return pages, platforms_scanned, coverage
@@ -406,7 +412,9 @@ def _collect_samples(pages: list[dict], limit: int = 12) -> list[dict]:
     return out
 
 
-def run_doc_quality(source: str, project_key: str) -> tuple[DocQualitySignal, dict]:
+def run_doc_quality(
+    source: str, project_key: str, sub_sources: list[str] | None = None
+) -> tuple[DocQualitySignal, dict]:
     """Orchestrate the doc-quality scan: collect recent pages → score → aggregate.
 
     Returns ``(signal, examples_blob)``. ``examples_blob`` carries the aggregated
@@ -416,7 +424,7 @@ def run_doc_quality(source: str, project_key: str) -> tuple[DocQualitySignal, di
     """
     logger.info("run_doc_quality: source=%s project=%s", source, project_key)
     try:
-        pages, platforms_scanned, coverage = collect_doc_pages(source, project_key)
+        pages, platforms_scanned, coverage = collect_doc_pages(source, project_key, sub_sources)
         signal = aggregate_doc_quality(pages)
 
         samples = _collect_samples(pages)

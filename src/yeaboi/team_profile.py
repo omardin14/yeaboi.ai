@@ -190,9 +190,9 @@ class AiAdoptionSignal:
     per_tool: tuple[tuple[str, int], ...] = ()  # (("claude", 12), ("copilot", 3), ...)
     per_author: tuple[tuple[str, int], ...] = ()  # (author, ai-marked-item count), desc
     per_activity: tuple[tuple[str, int], ...] = ()  # (("code", n), ("pr", n), ("docs", n))
-    per_source: tuple[tuple[str, int], ...] = ()  # (("local_git", n), ("github", n), ("azdo", n)) AI-marked
-    repos_scanned: tuple[str, ...] = ()  # friendly "what was scanned" labels (path/slug/project)
-    sources_scanned: tuple[str, ...] = ()  # ("github", "local_git", "azdo")
+    per_source: tuple[tuple[str, int], ...] = ()  # (("github", n), ("azdo", n)) AI-marked (remote only)
+    repos_scanned: tuple[str, ...] = ()  # friendly "what was scanned" labels (remote slug/project)
+    sources_scanned: tuple[str, ...] = ()  # ("github", "azdo") — remote only
     is_lower_bound: bool = True  # always True — honesty flag, see class docstring
 
 

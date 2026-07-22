@@ -73,6 +73,17 @@ class _TaCtx:
         self.ex = examples or {}
         self.sprint_names = sprint_names
         self.stats = stats or {}
+        # Set by the screen builder in 'both' mode: side-by-side headline rows
+        # (label, jira_value, azdevops_value) rendered atop the overview.
+        self.comparison: list[tuple[str, str, str]] | None = None
+        # Code/Docs are global scans (not per delivery tracker); the screen builder
+        # sets these from the top-level result so the two cards render regardless of
+        # the active tracker's own (empty) profile signals.
+        self.ai_sig = None
+        self.doc_sig = None
+        # Composed card order (delivery cards for the active tracker + global cards),
+        # set by the screen builder and shared with the results-loop navigation.
+        self.visible_order: tuple[str, ...] = _TA_CARD_ORDER
         self.lines: list = []
         self.item_heights: list[int] = []
         self.rendered_lines = 0
@@ -1659,7 +1670,9 @@ def _ta_ai_adoption(ctx: _TaCtx, profile) -> None:
     profiles (no scan) show the same "run a new analysis" empty state as the other cards.
     """
     _add, _ex = ctx.add, ctx.ex
-    sig = getattr(profile, "ai_adoption", None)
+    # Prefer the profile's signal; fall back to ctx.ai_sig for a delivery-off run
+    # (no profile) where the signal is carried on the context instead.
+    sig = getattr(profile, "ai_adoption", None) or ctx.ai_sig
     blob = _ex.get("ai_adoption", {})
     scanned = (getattr(sig, "scanned_commits", 0) + getattr(sig, "scanned_prs", 0)) if sig else 0
 
@@ -1700,7 +1713,7 @@ def _ta_ai_adoption(ctx: _TaCtx, profile) -> None:
         ctx.kv("PRs scanned", f"{sig.ai_prs} of {sig.scanned_prs} show an AI marker")
     if sig.sources_scanned:
         ctx.kv("Sources", ", ".join(_source_label(s) for s in sig.sources_scanned))
-    # Which repo/path was actually scanned (local clone vs remote), so the source is unambiguous.
+    # Which remote repo/project was actually scanned, so the source is unambiguous.
     for repo in getattr(sig, "repos_scanned", ()):
         ctx.kv("Scanned", repo)
 
@@ -1711,7 +1724,7 @@ def _ta_ai_adoption(ctx: _TaCtx, profile) -> None:
             label = "unlabelled AI" if tool == "other_ai" else tool
             ctx.kv(label, f"{cnt} item(s)")
 
-    # By source (local clone vs remote) — where the AI-marked work was found
+    # By source (which remote) — where the AI-marked work was found
     if getattr(sig, "per_source", ()):
         ctx.heading("By source")
         for src, cnt in sig.per_source:
@@ -1798,7 +1811,7 @@ def _ta_doc_quality(ctx: _TaCtx, profile) -> None:
     "run a new analysis" empty state as the other cards.
     """
     _add, _ex = ctx.add, ctx.ex
-    sig = getattr(profile, "doc_quality", None)
+    sig = getattr(profile, "doc_quality", None) or ctx.doc_sig
     blob = _ex.get("doc_quality", {})
     pages = getattr(sig, "pages_scanned", 0) if sig else 0
 
@@ -1972,6 +1985,33 @@ _TA_CARDS: dict[str, dict] = {
 _TA_CARD_ORDER: tuple[str, ...] = tuple(_TA_CARDS)
 
 
+# Delivery cards (everything except the two global cards + the insights coach).
+_DELIVERY_CARD_ORDER: tuple[str, ...] = tuple(k for k in _TA_CARDS if k not in ("ai-adoption", "documentation"))
+
+
+def visible_card_order(profile, has_code: bool, has_docs: bool) -> tuple[str, ...]:
+    """Which section cards to show, composing per-tracker delivery cards with the
+    global code/docs cards.
+
+    Delivery cards (velocity/contributors/… + insights) appear iff there's a delivery
+    ``profile`` for the active tracker; ``ai-adoption`` iff the global Code scan ran;
+    ``documentation`` iff the global Docs scan ran. The two global cards do NOT depend
+    on the active tracker, so they stay put when the delivery toggle switches. The
+    overview and the results-loop navigation share this so the selection index and the
+    rendered card list can never drift apart.
+    """
+    order: list[str] = []
+    if profile is not None:
+        order.extend(k for k in _DELIVERY_CARD_ORDER if k != "insights")
+    if has_code:
+        order.append("ai-adoption")
+    if has_docs:
+        order.append("documentation")
+    if profile is not None:
+        order.append("insights")
+    return tuple(order) or ("ai-adoption",)  # never empty — always render something
+
+
 def _ta_card_teaser(ctx: _TaCtx, profile, key: str) -> str:
     """One-line stat teaser shown next to a card title on the overview."""
     stats = ctx.stats
@@ -2019,13 +2059,13 @@ def _ta_card_teaser(ctx: _TaCtx, profile, key: str) -> str:
         n = len(compute_recommendations(profile, ex))
         return f"⚠ {n} flagged" if n else "none flagged"
     if key == "ai-adoption":
-        sig = getattr(profile, "ai_adoption", None)
+        sig = getattr(profile, "ai_adoption", None) or ctx.ai_sig
         scanned = (getattr(sig, "scanned_commits", 0) + getattr(sig, "scanned_prs", 0)) if sig else 0
         if scanned:
             return f"{sig.footprint_pct:.0f}% AI footprint"
         return "not scanned"
     if key == "documentation":
-        sig = getattr(profile, "doc_quality", None)
+        sig = getattr(profile, "doc_quality", None) or ctx.doc_sig
         pages = getattr(sig, "pages_scanned", 0) if sig else 0
         if pages:
             return f"{sig.avg_clarity:.0f}/100 clarity · {pages} pages"
@@ -2042,43 +2082,74 @@ def _ta_card_teaser(ctx: _TaCtx, profile, key: str) -> str:
     return ""
 
 
+def _ta_source_comparison(ctx: _TaCtx) -> None:
+    """'Both'-mode header: Jira vs Azure DevOps headline stats side by side.
+
+    Deliberately a plain side-by-side table — the two trackers' numbers are NOT
+    aggregated (velocity/point scales aren't comparable across trackers); this
+    just makes it easy to see each source's figure next to the other's."""
+    rows = ctx.comparison or []
+    if not rows:
+        return
+    ctx.heading("Jira vs Azure DevOps")
+    table = RichTable(show_header=True, box=None, pad_edge=False, padding=(0, 2, 0, 0))
+    table.add_column("Metric", style=c_muted)
+    table.add_column("Jira", style=c_value)
+    table.add_column("Azure DevOps", style=c_value)
+    for label, jira_val, azdo_val in rows:
+        table.add_row(label, jira_val, azdo_val)
+    ctx.add_table(table)
+
+
 def _ta_overview(ctx: _TaCtx, profile, selected_card: int) -> None:
     """Overview page: headline stats, AI executive summary, section card list."""
     stats = ctx.stats
 
-    ctx.heading("At a Glance")
-    if stats.get("team_size"):
-        ctx.kv("Team size", f"{stats['team_size']} contributors")
-    if stats.get("velocity"):
-        ctx.kv("Velocity", f"{stats['velocity']:g} ± {stats.get('stddev', 0):g} pts/sprint")
-    rate = stats.get("completion_rate", 0)
-    if rate:
-        rate_sty = c_good if rate >= 80 else (c_warn if rate >= 60 else c_bad)
-        ctx.kv("Completion", ctx.pct_dots(rate), rate_sty)
-    acc = stats.get("delivery_accuracy", 0)
-    if acc:
-        acc_sty = c_good if acc >= 85 else (c_warn if acc >= 70 else c_bad)
-        ctx.kv("Delivery accuracy", f"{acc}% of committed scope delivered", acc_sty)
-    if stats.get("estimation_accuracy"):
-        ctx.kv("Estimation accuracy", f"{stats['estimation_accuracy']:.0f}% of estimates hold")
+    # 'Both'-mode: lead with the per-tracker side-by-side comparison.
+    if ctx.comparison:
+        _ta_source_comparison(ctx)
 
-    # AI executive summary (generated at analysis time; absent on old profiles)
-    narrative = ctx.ex.get("narrative", {})
-    summary = narrative.get("executive_summary", "") if isinstance(narrative, dict) else ""
-    ctx.heading("Summary")
-    if summary:
-        for wrapped in _ta_wrap(str(summary), max(40, ctx.width - len(PAD) - 10)):
+    # Delivery headline + AI summary only when a delivery profile is present for the
+    # active tracker; a code/docs-only view leads straight into its cards.
+    if profile is not None:
+        ctx.heading("At a Glance")
+        if stats.get("team_size"):
+            ctx.kv("Team size", f"{stats['team_size']} contributors")
+        if stats.get("velocity"):
+            ctx.kv("Velocity", f"{stats['velocity']:g} ± {stats.get('stddev', 0):g} pts/sprint")
+        rate = stats.get("completion_rate", 0)
+        if rate:
+            rate_sty = c_good if rate >= 80 else (c_warn if rate >= 60 else c_bad)
+            ctx.kv("Completion", ctx.pct_dots(rate), rate_sty)
+        acc = stats.get("delivery_accuracy", 0)
+        if acc:
+            acc_sty = c_good if acc >= 85 else (c_warn if acc >= 70 else c_bad)
+            ctx.kv("Delivery accuracy", f"{acc}% of committed scope delivered", acc_sty)
+        if stats.get("estimation_accuracy"):
+            ctx.kv("Estimation accuracy", f"{stats['estimation_accuracy']:.0f}% of estimates hold")
+
+        # AI executive summary (generated at analysis time; absent on old profiles)
+        narrative = ctx.ex.get("narrative", {})
+        summary = narrative.get("executive_summary", "") if isinstance(narrative, dict) else ""
+        ctx.heading("Summary")
+        if summary:
+            for wrapped in _ta_wrap(str(summary), max(40, ctx.width - len(PAD) - 10)):
+                t = Text(PAD + "  ", justify="left")
+                t.append(wrapped, style=c_ai_text)
+                ctx.add(t)
+        else:
             t = Text(PAD + "  ", justify="left")
-            t.append(wrapped, style=c_ai_text)
+            t.append("No AI summary saved for this analysis — run a new analysis to generate one.", style=c_dim)
             ctx.add(t)
     else:
+        ctx.heading("Components")
         t = Text(PAD + "  ", justify="left")
-        t.append("No AI summary saved for this analysis — run a new analysis to generate one.", style=c_dim)
+        t.append("This view has no delivery/velocity profile — code and/or docs only.", style=c_dim)
         ctx.add(t)
 
     ctx.heading("Sections")
     ctx.overview_first_card_row = ctx.rendered_lines
-    for i, key in enumerate(_TA_CARD_ORDER):
+    for i, key in enumerate(ctx.visible_order):
         card = _TA_CARDS[key]
         selected = i == selected_card
         row = Text(PAD + "  ", justify="left")

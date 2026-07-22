@@ -43,10 +43,20 @@ def _team_analyze(
     include_insights: bool,
     include_ai_usage: bool,
     include_doc_quality: bool,
+    components=None,
+    members=None,
     progress=None,
 ):
-    if source not in ("", "jira", "azdevops"):
-        raise ValueError(f"source must be 'jira' or 'azdevops' (blank auto-detects) — got {source!r}")
+    if source not in ("", "jira", "azdevops", "both"):
+        raise ValueError(f"source must be 'jira', 'azdevops', or 'both' (blank auto-detects) — got {source!r}")
+    allowed = {"delivery": ("jira", "azdevops"), "code": ("github", "azdo"), "docs": ("confluence", "notion")}
+    if components:
+        for comp, subs in components.items():
+            if comp not in allowed:
+                raise ValueError(f"components keys must be 'delivery'/'code'/'docs' — got {comp!r}")
+            bad = [s for s in (subs or []) if s not in allowed[comp]]
+            if bad:
+                raise ValueError(f"{comp} sub-sources must be a subset of {allowed[comp]} — got {bad!r}")
     from yeaboi.analysis import run_team_analysis
 
     return run_team_analysis(
@@ -57,8 +67,16 @@ def _team_analyze(
         include_insights=include_insights,
         include_ai_usage=include_ai_usage,
         include_doc_quality=include_doc_quality,
+        components=components,
+        members=members,
         progress=progress,
     )
+
+
+def _team_roster(source: str, project_key: str) -> dict:
+    from yeaboi.analysis import get_team_roster
+
+    return {"source": source, "project_key": project_key, "members": get_team_roster(source, project_key)}
 
 
 def _team_profile_get() -> dict:
@@ -100,19 +118,33 @@ def register(app) -> None:
         include_insights: bool = True,
         include_ai_usage: bool = True,
         include_doc_quality: bool = True,
+        components: dict[str, list[str]] | None = None,
+        members: dict[str, list[str]] | None = None,
     ) -> dict:
         """Analyse the team's tracker history (closed sprints) into a calibration profile:
         velocity, story-point calibration, writing style, DoD signals, plus coaching insights
         and headline stats. The profile is saved and feeds future planning. HEAVY: several LLM
         calls plus tracker API paging — takes minutes; warn the user before running.
-        source: 'jira' or 'azdevops' (blank auto-detects); generate_samples additionally drafts
+        source: 'jira', 'azdevops', or 'both' (blank auto-detects a single tracker). With 'both'
+        the analysis runs once per configured tracker and returns a combined result
+        {source:'both', results:{jira:..., azdevops:...}, comparison:[[label,jira,azdevops],...]} —
+        the two profiles are kept clearly separate, never blended (project_key is ignored and
+        auto-resolved per source). generate_samples additionally drafts
         sample tickets in the team's style (more LLM calls). include_ai_usage also scans the
         team's commits/PRs for AI-tool markers (Co-Authored-By: Claude, Copilot, Cursor, …) and
         reports a detectable AI-adoption footprint — a LOWER BOUND (inline IDE assist leaves no
         trace); set False to skip those GitHub/AzDO network calls. include_doc_quality also reads
         the team's recent Notion/Confluence pages and reports a documentation clarity score plus a
         stylometric AI-likelihood ESTIMATE (not a detection); set False to skip those doc-platform
-        network calls."""
+        network calls.
+        components selects which parts run, each over its OWN sub-sources:
+        {"delivery": ["jira","azdevops"], "code": ["github","azdo"], "docs": ["confluence","notion"]}.
+        Delivery runs one velocity profile PER selected tracker; code and docs are each ONE global
+        scan over their selected hosts. An absent/empty component is skipped; None falls back to the
+        include_* booleans. Result: {delivery:{tracker:{profile,...}}, code:{signal,examples}|null,
+        docs:{signal,examples}|null, comparison, warnings}.
+        members re-scopes each delivery tracker's velocity/contributors (and code authors) to a
+        subset, e.g. {"jira": ["Alice","Bob"]} (blank = whole team); discover names with team_roster."""
         import asyncio
 
         try:
@@ -129,8 +161,17 @@ def register(app) -> None:
             include_insights,
             include_ai_usage,
             include_doc_quality,
+            components,
+            members,
             progress,
         )
+
+    @app.tool()
+    async def team_roster(source: str = "", project_key: str = "") -> dict:
+        """List candidate team member names for a tracker (assignees on recent closed
+        sprints) — a cheap, no-LLM lookup for building team_analyze's members= filter.
+        source: 'jira' or 'azdevops' (blank auto-detects a single tracker)."""
+        return await run_readonly(_team_roster, source, project_key)
 
     @app.tool()
     async def team_profile_get() -> dict:

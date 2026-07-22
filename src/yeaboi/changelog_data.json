@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.29.0",
+      "date": "2026-07-22",
+      "summary": "Team analysis got a major rework. It can now run across Jira and Azure DevOps together, and — more importantly — each part of the analysis scans its OWN sources: Delivery (velocity, calibration, contributors) reads your Jira/Azure DevOps boards, Code scans GitHub and Azure Repos, and Docs reads Confluence and Notion. A single grid lets you pick exactly what to analyse — e.g. just Confluence docs, or just one code host — and scope the run to a subset of team members. Delivery is analysed per tracker (never blended, with a side-by-side comparison), while code and docs run once as global scans. Local code scanning was dropped in favour of remote-only.",
+      "highlights": [
+        {"text": "Analyse Jira and Azure DevOps together — Delivery runs per tracker with a side-by-side comparison, never blended", "areas": ["analysis"]},
+        {"text": "Decoupled components: Delivery ← boards, Code ← GitHub/Azure Repos, Docs ← Confluence/Notion — each scans its own sources", "areas": ["analysis"]},
+        {"text": "Pick exactly what to analyse in one grid, and scope the run to a subset of team members", "areas": ["analysis"]},
+        {"text": "Code and docs now scan once globally (no more per-tracker double-scan); local code scanning removed (remote-only)", "areas": ["analysis"]}
+      ]
+    },
+    {
       "version": "2.28.0",
       "date": "2026-07-22",
       "summary": "The welcome screen tips just got a lot more useful. Instead of generic CLI hints, each tip now spotlights a real feature — Analysis, Standups, Retros, and more — with a gold NEW badge marking freshly-shipped ones. Press [ or ] to browse through tips at your own pace (pausing auto-rotation), press g to jump straight into the mode the current tip describes, or press t to hide tips entirely. Every tip is keyed to a capability and automatically stays in sync — a new mode can't merge without a tip, enforced by the same surface-parity check that guards the TUI and CLI.",

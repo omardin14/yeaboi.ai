@@ -6,7 +6,7 @@
 
 What this does
 --------------
-Fans out over the team's code sources (GitHub, local git clone, Azure DevOps),
+Fans out over the team's **remote** code sources (GitHub, Azure DevOps),
 pulls recent commits + PRs *with their message bodies / descriptions*, and scans
 that text for markers left by AI coding tools — ``Co-Authored-By: Claude``,
 "Generated with Claude Code", Copilot's co-author line, Cursor / aider / Devin /
@@ -31,9 +31,7 @@ wraps the whole thing so the analysis pipeline can call it unguarded.
 from __future__ import annotations
 
 import logging
-import os
 import re
-from pathlib import Path
 
 from yeaboi.team_profile import AiAdoptionSignal
 
@@ -90,17 +88,18 @@ _AI_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = (
 # A commit whose subject looks documentation-shaped is bucketed as "docs", not "code".
 _DOCS_TITLE = re.compile(r"\breadme\b|\bdocs?/|\.md\b|\bdocumentation\b|\bchangelog\b", re.IGNORECASE)
 
-# Human-readable source labels — the raw tags ("local_git") don't tell the user whether
-# they scanned their local clone or the remote repo. Single source of truth for renderers.
+# Human-readable source labels — the raw tags ("github"/"azdo") name the remote
+# each scan hit. Single source of truth for renderers. Only remote sources are
+# scanned (local-clone scanning was removed — it was environment-dependent and
+# meaningless for a hosted team).
 _SOURCE_LABELS: dict[str, str] = {
-    "local_git": "Local clone",
     "github": "GitHub (remote)",
     "azdo": "Azure DevOps (remote)",
 }
 
 
 def _source_label(tag: str) -> str:
-    """Friendly label for a source tag ('local_git' → 'Local clone'); passthrough otherwise."""
+    """Friendly label for a source tag ('github' → 'GitHub (remote)'); passthrough otherwise."""
     return _SOURCE_LABELS.get(tag, tag)
 
 
@@ -203,30 +202,18 @@ def aggregate_ai_markers(items: list[dict]) -> AiAdoptionSignal:
 # ---------------------------------------------------------------------------
 
 
-def _discover_local_repo() -> str:
-    """Return a local git working-copy path to scan, or "".
-
-    Uses the current working directory when it is a git repo — the natural case
-    for ``yeaboi analyze`` run from inside the team's checkout. Best-effort only.
-    """
-    try:
-        cwd = Path(os.getcwd())
-        if (cwd / ".git").exists():
-            return str(cwd)
-    except Exception:  # pragma: no cover - defensive
-        return ""
-    return ""
-
-
-def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list[str], list[str], list[str]]:
-    """Fan out over GitHub + local git + Azure DevOps for recent commits/PRs with bodies.
+def collect_ai_activity(
+    source: str, project_key: str, sub_sources: list[str] | None = None
+) -> tuple[list[dict], list[str], list[str], list[str]]:
+    """Fan out over GitHub + Azure DevOps (remote only) for recent commits/PRs with bodies.
 
     Returns ``(items, sources_scanned, coverage_notes, repos_scanned)``. Every source
     is best-effort and lazily imported (optional SDKs); a missing credential/SDK or a
     failing source contributes zero and is added to ``coverage_notes`` so absent
     coverage is visible rather than silent. ``repos_scanned`` holds friendly
-    "what was actually scanned" labels (local path / remote slug / project) so the
-    report can distinguish the local clone from the remote repo. Never raises.
+    "what was actually scanned" labels (remote slug / project). Only remote sources
+    are scanned — local-clone scanning was removed. ``sub_sources`` restricts which
+    hosts to scan (subset of ``{"github", "azdo"}``; None = both). Never raises.
     """
     from yeaboi.config import (
         get_azure_devops_project,
@@ -234,6 +221,9 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
         get_github_token,
         get_standup_github_repo,
     )
+
+    def _want(tag: str) -> bool:
+        return sub_sources is None or tag in sub_sources
 
     items: list[dict] = []
     sources_scanned: list[str] = []
@@ -261,7 +251,7 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
 
     # GitHub — needs STANDUP_GITHUB_REPO (owner/repo) + a token.
     github_repo = get_standup_github_repo()
-    if github_repo and get_github_token():
+    if _want("github") and github_repo and get_github_token():
 
         def _github() -> list[dict]:
             from yeaboi.tools.github import github_recent_commits, github_recent_prs
@@ -274,24 +264,9 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
     else:
         coverage.append("github: STANDUP_GITHUB_REPO / GITHUB_TOKEN not set")
 
-    # Local git — scan the current checkout when it is a repo.
-    local_path = _discover_local_repo()
-    if local_path:
-
-        def _local() -> list[dict]:
-            from yeaboi.tools.local_git import local_git_recent_commits
-
-            return local_git_recent_commits(local_path, days=_SCAN_DAYS)
-
-        _run("local_git", "local_git", _local)
-        if "local_git" in sources_scanned:
-            repos_scanned.append(f"Local clone: {local_path}")
-    else:
-        coverage.append("local_git: current directory is not a git repo")
-
     # Azure DevOps — scan the resolved project's repos when AzDO is configured.
     azdo_project = project_key if source == "azdevops" else (get_azure_devops_project() or "")
-    if azdo_project and get_azure_devops_token():
+    if _want("azdo") and azdo_project and get_azure_devops_token():
 
         def _azdo() -> list[dict]:
             from yeaboi.tools.azure_devops import azdevops_recent_commits, azdevops_recent_prs
@@ -309,11 +284,36 @@ def collect_ai_activity(source: str, project_key: str) -> tuple[list[dict], list
     return items, sources_scanned, coverage, repos_scanned
 
 
+def _filter_items_by_members(items: list[dict], members: list[str]) -> tuple[list[dict], int]:
+    """Keep only commit/PR items authored by one of ``members``.
+
+    Matches a member name (case-insensitive) against the item's ``author`` OR the
+    local-part of its ``author_email`` — the tracker's assignee display name and the
+    git commit-author name are different identity spaces and often disagree, so we
+    check both. Returns ``(filtered_items, distinct_authors_matched)``.
+    """
+    norm = {m.strip().lower() for m in members if m and m.strip()}
+    if not norm:
+        return items, 0
+    kept: list[dict] = []
+    matched_authors: set[str] = set()
+    for it in items:
+        author = (it.get("author", "") or "").strip().lower()
+        email = (it.get("author_email", "") or "").strip().lower()
+        local = email.split("@", 1)[0] if email else ""
+        if (author and author in norm) or (local and local in norm):
+            kept.append(it)
+            matched_authors.add(author or local)
+    return kept, len(matched_authors)
+
+
 def run_ai_adoption(
     source: str,
     project_key: str,
     delivery_stories: list[dict],
     all_stories: list[dict],
+    members: list[str] | None = None,
+    sub_sources: list[str] | None = None,
 ) -> tuple[AiAdoptionSignal, dict]:
     """Orchestrate the AI-adoption scan: discover sources → collect → aggregate.
 
@@ -323,10 +323,25 @@ def run_ai_adoption(
     never an exception (the pipeline calls this unguarded). ``delivery_stories`` /
     ``all_stories`` are accepted for future ticket-derived repo discovery and to
     keep the signature stable; scanning currently uses configured code sources.
+
+    When ``members`` is given, the scan is re-scoped to commits/PRs authored by
+    those people (matched by name or email local-part). If the filter matches
+    nothing, the whole-team scan is kept and a coverage note is added — reporting a
+    false 0% footprint would be worse than an unscoped number.
     """
-    logger.info("run_ai_adoption: source=%s project=%s", source, project_key)
+    logger.info("run_ai_adoption: source=%s project=%s members=%s", source, project_key, members or "all")
     try:
-        items, sources_scanned, coverage, repos_scanned = collect_ai_activity(source, project_key)
+        items, sources_scanned, coverage, repos_scanned = collect_ai_activity(source, project_key, sub_sources)
+        if members:
+            filtered, matched = _filter_items_by_members(items, members)
+            if filtered:
+                logger.info(
+                    "AI-usage member filter: %d/%d items from %d matched author(s)", len(filtered), len(items), matched
+                )
+                items = filtered
+            else:
+                logger.warning("AI-usage member filter matched no commit authors — keeping whole-team scan")
+                coverage.append("member filter matched no commit authors — showing whole-team footprint")
         signal = aggregate_ai_markers(items)
 
         # Repo/source provenance onto the signal for honest, source-aware rendering.
