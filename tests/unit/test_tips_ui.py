@@ -107,23 +107,23 @@ def test_tip_rows_blank_when_disabled(monkeypatch):
     assert [t.plain for t in rows] == ["", ""]
 
 
-def test_tip_rows_show_browse_and_hide_hints(monkeypatch):
+def test_tip_rows_show_labeled_keys(monkeypatch):
     monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
     text = _tip_rows_text(shimmer_tick=0.0)
-    assert "browse" in text
+    assert "prev" in text and "next" in text  # browse keys, labeled
     assert "hide" in text
 
 
-def test_tip_rows_show_compact_counter_not_dots(monkeypatch):
-    # The position indicator is a fixed-width "n/total" counter, not one dot per
-    # tip (which grew unboundedly as tips were added).
+def test_tip_rows_have_no_position_indicator(monkeypatch):
+    # No per-tip dots and no "n/total" counter — an auto-rotating tip needs no
+    # position indicator, and both grew clutter as tips were added.
     monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
     monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     _tips.get_tips.cache_clear()
     total = _tips.tip_count()
     text = _tip_rows_text(shimmer_tick=0.0, tip_override=2)
-    assert f"3/{total}" in text  # override=2 → 1-based "3"
-    assert "●" not in text and "○" not in text  # no per-tip dots
+    assert "●" not in text and "○" not in text  # no dots
+    assert f"/{total}" not in text  # no counter
     _tips.get_tips.cache_clear()
 
 

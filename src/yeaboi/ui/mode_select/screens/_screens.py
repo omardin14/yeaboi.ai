@@ -249,7 +249,7 @@ def _build_tip_rows(shimmer_tick: float, *, tip_override: int | None = None) -> 
     """
     from yeaboi.config import is_tips_enabled
     from yeaboi.ui.shared._animations import lerp_color
-    from yeaboi.ui.shared._tips import resolve_index, tip_at, tip_brightness, tip_count
+    from yeaboi.ui.shared._tips import resolve_index, tip_at, tip_brightness
 
     if not is_tips_enabled():
         return [Text(""), Text("")]
@@ -268,30 +268,28 @@ def _build_tip_rows(shimmer_tick: float, *, tip_override: int | None = None) -> 
         tip_line.append("  ")
     tip_line.append(tip.text, style=body_style)
 
-    # Row 2 — a compact position counter + quiet keycap control hints.
+    # Row 2 — quiet keycap control hints. No position indicator: an ambient,
+    # auto-rotating tip doesn't need one, and it kept the row cluttered. Each
+    # hint pairs the literal key with its action word (e.g. "[ prev"), matching
+    # across the row so the real keys are unmistakable.
     dot_dim = lerp_color(b, _TIP_BG, _TIP_DOT_DIM)
-    dot_on = lerp_color(b, _TIP_BG, _TIP_DOT_ON)
     key_style = f"bold {lerp_color(b, _TIP_BG, _TIP_KEY)}"
+
+    def _hint(key: str, label: str, *, gap: str = "      ") -> None:
+        if control.plain:
+            control.append(gap)
+        control.append(key, style=key_style)
+        control.append(f" {label}", style=dot_dim)
+
     control = Text(justify="center")
-    # A "4/17" counter instead of one dot per tip — the row stays a fixed width
-    # no matter how many tips accumulate as features are added.
-    control.append(f"{idx + 1}/{tip_count()}", style=dot_on)
-    control.append("     ")
-    # Browse affordance — the literal [ and ] keys, rendered "[/]" so they read
-    # as two keycaps (not an empty box), matching the "t hide" convention below.
-    control.append("[", style=key_style)
-    control.append("/", style=dot_dim)
-    control.append("]", style=key_style)
-    control.append(" browse", style=dot_dim)
+    # Browse the tips manually with the [ and ] keys (pauses auto-rotation).
+    _hint("[", "prev", gap="")
+    _hint("]", "next", gap="    ")
     # Jump-into-feature — only when this tip maps to a selectable mode card. Key
     # is `g` (Enter is already bound to the *selected* card, not this tip).
     if tip.mode_key is not None:
-        control.append("   ")
-        control.append("g", style=key_style)
-        control.append(" open", style=dot_dim)
-    control.append("   ")
-    control.append("t", style=key_style)
-    control.append(" hide", style=dot_dim)
+        _hint("g", "open")
+    _hint("t", "hide")
 
     return [tip_line, control]
 
