@@ -2,9 +2,15 @@
 
 from rich.panel import Panel
 
-from yeaboi.ui.mode_select.screens._screens import _build_mode_screen
+from yeaboi.ui.mode_select.screens._screens import _build_mode_screen, _build_tip_rows
 from yeaboi.ui.session.screens._screens_input import _image_hint, _voice_hint
+from yeaboi.ui.shared import _tips
 from yeaboi.voice import voice_install_command
+
+
+def _tip_rows_text(**kwargs) -> str:
+    """Rendered plain text of both tip rows joined, for substring assertions."""
+    return "\n".join(t.plain for t in _build_tip_rows(**kwargs))
 
 
 def test_voice_hint_empty_when_tips_disabled(monkeypatch):
@@ -93,3 +99,51 @@ def test_mode_screen_renders_at_various_ticks(monkeypatch):
     for tick in (0.0, 6.5, 42.0):
         result = _build_mode_screen(0, width=80, height=24, shimmer_tick=tick)
         assert isinstance(result, Panel)
+
+
+def test_tip_rows_blank_when_disabled(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: False)
+    rows = _build_tip_rows(0.0)
+    assert [t.plain for t in rows] == ["", ""]
+
+
+def test_tip_rows_show_browse_and_hide_hints(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    text = _tip_rows_text(shimmer_tick=0.0)
+    assert "browse" in text
+    assert "hide" in text
+
+
+def test_tip_rows_open_hint_only_for_carded_tip(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    tips = _tips.get_tips()
+    carded = next(i for i, t in enumerate(tips) if t.mode_key is not None)
+    ambient = next(i for i, t in enumerate(tips) if t.mode_key is None)
+    assert "open" in _tip_rows_text(shimmer_tick=0.0, tip_override=carded)
+    assert "open" not in _tip_rows_text(shimmer_tick=0.0, tip_override=ambient)
+    _tips.get_tips.cache_clear()
+
+
+def test_tip_rows_new_badge_when_flagged(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    tips = _tips.get_tips()
+    new_idx = next(i for i, t in enumerate(tips) if t.is_new)
+    plain_idx = next(i for i, t in enumerate(tips) if not t.is_new)
+    assert "NEW" in _tip_rows_text(shimmer_tick=0.0, tip_override=new_idx)
+    assert "NEW" not in _tip_rows_text(shimmer_tick=0.0, tip_override=plain_idx)
+    _tips.get_tips.cache_clear()
+
+
+def test_tip_override_pins_the_tip(monkeypatch):
+    monkeypatch.setattr("yeaboi.config.is_tips_enabled", lambda: True)
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    tips = _tips.get_tips()
+    # A large tick would auto-rotate away from index 2, but the override pins it.
+    text = _tip_rows_text(shimmer_tick=999.0, tip_override=2)
+    assert tips[2].text in text
+    _tips.get_tips.cache_clear()
