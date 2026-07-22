@@ -226,19 +226,18 @@ class TestCollectAiActivity:
         monkeypatch.setattr("yeaboi.config.get_github_token", lambda: None)
         monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "")
         monkeypatch.setattr("yeaboi.config.get_azure_devops_token", lambda: None)
-        monkeypatch.setattr("yeaboi.analysis.ai_usage._discover_local_repo", lambda: "")
         items, sources, coverage, repos = collect_ai_activity("jira", "PROJ")
         assert items == [] and sources == [] and repos == []
         assert any("github" in c for c in coverage)
-        assert any("local_git" in c for c in coverage)
         assert any("azdo" in c for c in coverage)
+        # Local scanning was removed — never reported as a source or a coverage gap.
+        assert not any("local" in c for c in coverage)
 
     def test_github_items_tagged(self, monkeypatch):
         monkeypatch.setattr("yeaboi.config.get_standup_github_repo", lambda: "o/r")
         monkeypatch.setattr("yeaboi.config.get_github_token", lambda: "tok")
         monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "")
         monkeypatch.setattr("yeaboi.config.get_azure_devops_token", lambda: None)
-        monkeypatch.setattr("yeaboi.analysis.ai_usage._discover_local_repo", lambda: "")
         monkeypatch.setattr(
             "yeaboi.tools.github.github_recent_commits",
             lambda repo, days=1: [{"kind": "commit", "author": "A", "title": "x", "body": ""}],
@@ -254,7 +253,6 @@ class TestCollectAiActivity:
         monkeypatch.setattr("yeaboi.config.get_github_token", lambda: "tok")
         monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "")
         monkeypatch.setattr("yeaboi.config.get_azure_devops_token", lambda: None)
-        monkeypatch.setattr("yeaboi.analysis.ai_usage._discover_local_repo", lambda: "")
 
         def boom(repo, days=1):
             raise RuntimeError("boom")
@@ -307,6 +305,57 @@ class TestRunAiAdoption:
         sig, blob = run_ai_adoption("jira", "P", [], [])
         assert sig == AiAdoptionSignal()
         assert "coverage" in blob
+
+    def _two_author_items(self):
+        return (
+            [
+                {
+                    "kind": "commit",
+                    "author": "Alice",
+                    "title": "x",
+                    "body": "Co-Authored-By: Claude",
+                    "source": "github",
+                },
+                {"kind": "commit", "author": "Bob", "title": "y", "body": "Co-Authored-By: Claude", "source": "github"},
+            ],
+            ["github"],
+            [],
+            ["GitHub (remote): o/r"],
+        )
+
+    def test_member_filter_rescopes_to_selected_author(self, monkeypatch):
+        monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p: self._two_author_items())
+        sig, _ = run_ai_adoption("jira", "P", [], [], members=["Alice"])
+        # Only Alice's commit is counted.
+        assert sig.scanned_commits == 1
+        assert dict(sig.per_author) == {"Alice": 1}
+
+    def test_member_filter_email_localpart_match(self, monkeypatch):
+        items = (
+            [
+                {
+                    "kind": "commit",
+                    "author": "asmith",
+                    "author_email": "alice@x.com",
+                    "title": "x",
+                    "body": "",
+                    "source": "github",
+                }
+            ],
+            ["github"],
+            [],
+            [],
+        )
+        monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p: items)
+        sig, _ = run_ai_adoption("jira", "P", [], [], members=["alice"])
+        assert sig.scanned_commits == 1  # matched via email local-part
+
+    def test_member_filter_no_match_keeps_whole_team(self, monkeypatch):
+        monkeypatch.setattr("yeaboi.analysis.ai_usage.collect_ai_activity", lambda s, p: self._two_author_items())
+        sig, blob = run_ai_adoption("jira", "P", [], [], members=["Nobody"])
+        # Falls back to the whole-team scan rather than reporting a false 0%.
+        assert sig.scanned_commits == 2
+        assert any("member filter" in c for c in blob["coverage"])
 
 
 # ── Serialization round-trip ───────────────────────────────────────────────
@@ -464,9 +513,9 @@ class TestAiAdoptionCard:
             per_tool=(("claude", 131), ("other_ai", 2)),
             per_author=(("Dinho", 53),),
             per_activity=(("code", 127), ("docs", 6)),
-            per_source=(("local_git", 133),),
-            repos_scanned=("Local clone: /Users/dinho/repo",),
-            sources_scanned=("local_git",),
+            per_source=(("azdo", 133),),
+            repos_scanned=("Azure DevOps (remote): TeamProject",),
+            sources_scanned=("azdo",),
         )
         profile = TeamProfile(team_id="t", source="jira", project_key="P", ai_adoption=sig)
         examples = {
@@ -477,7 +526,7 @@ class TestAiAdoptionCard:
                         "tool": "claude",
                         "activity": "code",
                         "title": "Fix login",
-                        "source": "local_git",
+                        "source": "azdo",
                         "key": "a1b2c3d4",
                         "url": "https://github.com/o/r/commit/a1b2c3d4",
                     }
@@ -500,8 +549,8 @@ class TestAiAdoptionCard:
         ctx = self._ctx(examples)
         _ta_ai_adoption(ctx, profile)
         out = _render_lines(ctx)
-        assert "Local clone" in out  # friendly source label (not raw "local_git")
-        assert "/Users/dinho/repo" in out  # Scanned line names the path
+        assert "Azure DevOps (remote)" in out  # friendly source label (not raw "azdo")
+        assert "TeamProject" in out  # Scanned line names the remote project
         assert "By source" in out
         assert "Not scanned" in out and "STANDUP_GITHUB_REPO" in out  # coverage shown even when populated
         assert "Examples" in out and "Fix login" in out  # real example rendered

@@ -2200,29 +2200,20 @@ def _get_contributor_names(examples: dict | None) -> list[str]:
 
 
 def _calculate_velocity_for_members(member_names: list[str], examples: dict | None) -> float:
-    """Calculate combined velocity from selected team members' per_sprint values."""
+    """Calculate combined velocity from selected team members' per_sprint values.
+
+    Delegates to the shared ``team_learning.selected_member_velocity`` (analysis mode
+    uses the same helper when a run is re-scoped to a member subset) so there is one
+    source of truth for the calculation.
+    """
     if not examples or not member_names:
         return 0.0
     contrib = examples.get("contributor_stats", [])
     if not isinstance(contrib, list):
         return 0.0
-    total = 0.0
-    matched = 0
-    for c in contrib:
-        name = c.get("name", "")
-        per_sprint = c.get("per_sprint", 0.0)
-        if name and per_sprint > 0:
-            # Match by exact name or case-insensitive
-            if any(name.lower() == m.lower() for m in member_names):
-                total += per_sprint
-                matched += 1
-    logger.info(
-        "Velocity from %d/%d selected members: %.1f pts/sprint",
-        matched,
-        len(member_names),
-        total,
-    )
-    return total
+    from yeaboi.tools.team_learning import selected_member_velocity
+
+    return selected_member_velocity(contrib, member_names)
 
 
 def _extract_confluence_page_ids(text: str) -> list[str]:

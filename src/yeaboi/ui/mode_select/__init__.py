@@ -3110,6 +3110,122 @@ def _performance_export(engineer: str) -> str:
         return f"Export failed: {e}"
 
 
+def _run_component_select(live, console: Console, read_key, frame_time: float, supports_timeout: bool, sources: list):
+    """Blocking per-source component picker. Returns a ``{src: [components]}`` dict,
+    ``None`` when every component is left checked (= today's full analysis), or the
+    string ``"cancel"`` on Esc. Each source must keep at least one component."""
+    from yeaboi.ui.mode_select.screens._screens_secondary import (
+        _COMPONENT_KEYS,
+        _build_component_select_screen,
+    )
+
+    checked: dict[str, set[int]] = {s: set(range(len(_COMPONENT_KEYS))) for s in sources}
+    row_idx = 0
+    col_idx = 0
+    message = ""
+    while True:
+        w, h = console.size
+        live.update(
+            _build_component_select_screen(sources, checked, row_idx, col_idx, width=w, height=h, message=message)
+        )
+        kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if kk in ("up", "scroll_up"):
+            row_idx = (row_idx - 1) % len(_COMPONENT_KEYS)
+        elif kk in ("down", "scroll_down"):
+            row_idx = (row_idx + 1) % len(_COMPONENT_KEYS)
+        elif kk == "left":
+            col_idx = (col_idx - 1) % len(sources)
+        elif kk == "right":
+            col_idx = (col_idx + 1) % len(sources)
+        elif kk == " ":
+            s = sources[col_idx]
+            checked[s].symmetric_difference_update({row_idx})
+            message = ""
+        elif kk == "enter":
+            empty = [s for s in sources if not checked[s]]
+            if empty:
+                message = "Pick at least one component for every source."
+                continue
+            all_full = all(len(checked[s]) == len(_COMPONENT_KEYS) for s in sources)
+            if all_full:
+                return None
+            return {s: [_COMPONENT_KEYS[i] for i in sorted(checked[s])] for s in sources}
+        elif kk in ("esc", "q"):
+            return "cancel"
+
+
+def _run_member_select(live, console: Console, read_key, frame_time: float, supports_timeout: bool, roster: list):
+    """Blocking roster picker. Returns the selected names (empty selection → ``None``
+    = whole team) or the string ``"cancel"`` on Esc."""
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_member_select_screen
+
+    checked: set[int] = set()
+    cursor = 0
+    while True:
+        w, h = console.size
+        live.update(_build_member_select_screen(roster, checked, cursor, width=w, height=h))
+        kk = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if kk in ("up", "scroll_up"):
+            cursor = (cursor - 1) % len(roster) if roster else 0
+        elif kk in ("down", "scroll_down"):
+            cursor = (cursor + 1) % len(roster) if roster else 0
+        elif kk == " " and roster:
+            checked.symmetric_difference_update({cursor})
+        elif kk == "enter":
+            return sorted(roster[i] for i in checked) or None
+        elif kk in ("esc", "q"):
+            return "cancel"
+
+
+def _prefetch_roster(live, console: Console, sources: list, project_key: str, db_path) -> list:
+    """Discover the union of assignee names across ``sources`` (network only, no LLM),
+    showing a progress screen while the lookup runs. Returns a sorted name list ([] on
+    any failure — the caller can then skip member selection)."""
+    import threading
+
+    from yeaboi.analysis import get_team_roster
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_analysis_progress_screen
+
+    names_box: list = [None]
+
+    def _work():
+        found: set[str] = set()
+        for s in sources:
+            try:
+                found.update(get_team_roster(s, project_key if len(sources) == 1 else "", db_path=db_path))
+            except Exception as exc:  # best-effort — a failed roster just means "no subset offered"
+                logger.warning("Roster prefetch failed for %s: %s", s, exc)
+        names_box[0] = sorted(found)
+
+    done = threading.Event()
+
+    def _runner():
+        try:
+            _work()
+        finally:
+            done.set()
+
+    started = time.monotonic()
+    threading.Thread(target=_runner, daemon=True).start()
+    tick = 0.0
+    while not done.is_set():
+        tick += _FRAME_TIME
+        w, h = console.size
+        live.update(
+            _build_analysis_progress_screen(
+                ["Discovering team members…"],
+                width=w,
+                height=h,
+                elapsed=time.monotonic() - started,
+                anim_tick=tick,
+                source=sources[0] if sources else "",
+                mode="analysis",
+            )
+        )
+        time.sleep(_FRAME_TIME)
+    return names_box[0] or []
+
+
 def _run_team_analysis_results(
     live,
     console: Console,
@@ -3124,6 +3240,8 @@ def _run_team_analysis_results(
     both_results: dict | None = None,
     comparison: list | None = None,
     active_box: list | None = None,
+    source: str = "",
+    project_key: str = "",
 ) -> str:
     """Event loop for the team-analysis results screen (overview + section cards).
 
@@ -3140,11 +3258,14 @@ def _run_team_analysis_results(
     (profile, examples, sprint_names, team_name) is mirrored into ``active_box``
     so the caller's downstream steps act on the tracker the user last viewed.
     """
-    from yeaboi.ui.mode_select.screens._analysis_sections import _TA_CARD_ORDER
+    from yeaboi.ui.mode_select.screens._analysis_sections import visible_card_order
 
     both_order = list(both_results.keys()) if both_results else []
     src_idx = 0
     base_team_name = team_name  # caller-passed fallback; never let one tracker's team bleed into another
+    # Fallback source/project for a delivery-off single-source run (profile is None).
+    base_source = source or getattr(profile, "source", "")
+    base_project = project_key or getattr(profile, "project_key", "")
 
     view = "overview"
     card_idx = 0
@@ -3155,7 +3276,11 @@ def _run_team_analysis_results(
     # Anonymize state: None = real profile; an AnonymizedOutput = mask it in place.
     anon = None
     anon_instruction = ""
-    logger.info("Analysis results: showing overview for %s/%s", profile.source, profile.project_key)
+    logger.info(
+        "Analysis results: showing overview for %s/%s",
+        getattr(profile, "source", "") or base_source,
+        getattr(profile, "project_key", "") or base_project,
+    )
 
     def _anon_doc() -> tuple[str, str]:
         from yeaboi.team_profile_exporter import build_team_profile_markdown
@@ -3166,26 +3291,37 @@ def _run_team_analysis_results(
     while True:
         # 'Both' mode: rebind the active tracker each frame from the toggle
         # selection, and mirror it back so callers act on the shown source.
+        cur_source = base_source
+        cur_project = base_project
         if both_results:
             active_source = both_order[src_idx]
             _cur = both_results[active_source]
             profile = _cur["profile"]
             examples = _cur["examples"]
             sprint_names = _cur["sprint_names"]
+            cur_source = _cur.get("source", "") or active_source
+            cur_project = _cur.get("project_key", "")
             # Fall back to the caller's value, NOT the mutated local, so the
             # previous tracker's team name can't leak onto this one's screen.
             team_name = getattr(profile, "team_name", "") or base_team_name
             if active_box is not None:
                 active_box[0] = (profile, examples, sprint_names, team_name)
 
-        actions = (
-            ["Open", "Export", "Anonymize", "Continue"]
-            if view == "overview"
-            else ["Back", "Export", "Anonymize", "Continue"]
-        )
-        if anon is not None:  # swap Anonymize → Adjust + Revert while masked
+        # A delivery-off tracker (profile is None) has no velocity profile to export,
+        # anonymize or drive ticket generation from — offer only navigation.
+        if profile is None:
+            actions = ["Open"] if view == "overview" else ["Back"]
+        else:
+            actions = (
+                ["Open", "Export", "Anonymize", "Continue"]
+                if view == "overview"
+                else ["Back", "Export", "Anonymize", "Continue"]
+            )
+        if anon is not None and "Anonymize" in actions:  # swap Anonymize → Adjust + Revert while masked
             i = actions.index("Anonymize")
             actions[i : i + 1] = ["Adjust", "Revert"]
+
+        order = visible_card_order(profile, examples)
 
         # When anonymized, render from a masked copy of the profile (and its sample
         # ``examples``) so the SAME cards/tables re-render with only the words swapped.
@@ -3217,6 +3353,8 @@ def _run_team_analysis_results(
                 source_toggle=both_order or None,
                 active_source=(both_order[src_idx] if both_results else ""),
                 comparison=comparison if view == "overview" else None,
+                source=cur_source,
+                project_key=cur_project,
             )
         )
 
@@ -3235,7 +3373,7 @@ def _run_team_analysis_results(
             # On the overview, Up/Down moves the card selection (the screen
             # auto-scrolls the selected row into view).
             card_idx += 1 if kk in ("down", "scroll_down", "pagedown") else -1
-            card_idx %= len(_TA_CARD_ORDER)
+            card_idx %= len(order)
         elif kk in SCROLL_KEYS:
             scroll = coalesce_scroll(scroll, kk, scroll_meta, read_key)
         elif kk == "left":
@@ -3245,7 +3383,7 @@ def _run_team_analysis_results(
         elif kk in ("enter", " "):
             act = actions[sel]
             if act == "Open":
-                view = _TA_CARD_ORDER[card_idx]
+                view = order[card_idx % len(order)]
                 scroll = 0
                 sel = 0
                 logger.info("Analysis results: opened section %s", view)
@@ -6002,6 +6140,32 @@ def select_mode(
                         except Exception:
                             pass
 
+                        # Per-source component selection, then (if delivery/code is in
+                        # play) a roster-scoped member subset. Esc on either returns to
+                        # the analysis screen.
+                        _ta_sources = ["jira", "azdevops"] if _ta_source == "both" else [_ta_source]
+                        _ta_components = _run_component_select(
+                            live, console, read_key, _FRAME_TIME, _supports_timeout, _ta_sources
+                        )
+                        if _ta_components == "cancel":
+                            _team_popup_result = ""
+                            continue
+                        _ta_members_map = None
+                        _needs_members = _ta_components is None or any(
+                            ("delivery" in v or "code" in v) for v in _ta_components.values()
+                        )
+                        if _needs_members:
+                            _roster = _prefetch_roster(live, console, _ta_sources, _ta_project_key, _ana_dbp)
+                            if _roster:
+                                _sel = _run_member_select(
+                                    live, console, read_key, _FRAME_TIME, _supports_timeout, _roster
+                                )
+                                if _sel == "cancel":
+                                    _team_popup_result = ""
+                                    continue
+                                if _sel:
+                                    _ta_members_map = {s: _sel for s in _ta_sources}
+
                         _ta_progress: list[str] = ["Fetching sprint history\u2026"]
                         _ta_profile_box: list = [None]
                         _ta_examples_box: list = [None]
@@ -6019,6 +6183,8 @@ def select_mode(
                                     project_key=_ta_project_key,
                                     team_name=_ta_team_name,
                                     include_insights=False,
+                                    components=_ta_components,
+                                    members=_ta_members_map,
                                     progress=_ta_progress,
                                     db_path=_ana_dbp,
                                 )
@@ -6084,7 +6250,9 @@ def select_mode(
                             )
                         elif _ta_error_box[0]:
                             logger.error("Analysis failed: %s", _ta_error_box[0])
-                        if _ta_profile:
+                        # Show results whenever the engine returned anything (a delivery-off
+                        # run has no top-level profile but still has code/docs cards).
+                        if _ta_result_box[0] and not _ta_error_box[0]:
                             # Persist + analysis log already handled inside
                             # run_team_analysis (one code path with CLI/MCP).
 
@@ -6093,7 +6261,7 @@ def select_mode(
                             # reports the selected one back via _ta_active_box.
                             _ta_examples = _ta_examples_box[0] or {}
                             _ta_sprint_names = _ta_sprint_names_box[0]
-                            _ta_sub = f"{_ta_profile.source}/{_ta_profile.project_key}" if _ta_profile else ""
+                            _ta_sub = f"{getattr(_ta_profile, 'source', '') or _ta_source}/{_ta_project_key}"
                             _ta_full = _ta_result_box[0] or {}
                             _ta_both = _ta_full.get("results") if _ta_full.get("source") == "both" else None
                             _ta_comparison = _ta_full.get("comparison") if _ta_both else None
@@ -6112,12 +6280,14 @@ def select_mode(
                                     both_results=_ta_both,
                                     comparison=_ta_comparison,
                                     active_box=_ta_active_box,
+                                    source=_ta_source,
+                                    project_key=_ta_project_key,
                                 )
                                 # In 'both' mode the downstream insights/ticket
                                 # steps operate on the tracker the user last viewed.
                                 if _ta_active_box[0] is not None:
                                     _ta_profile, _ta_examples, _ta_sprint_names, _ta_team_name = _ta_active_box[0]
-                                    _ta_sub = f"{_ta_profile.source}/{_ta_profile.project_key}"
+                                    _ta_sub = f"{getattr(_ta_profile, 'source', '') or _ta_source}/{_ta_project_key}"
                                 if _res != "continue":
                                     break
 

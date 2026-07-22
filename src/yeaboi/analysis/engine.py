@@ -30,6 +30,37 @@ logger = logging.getLogger(__name__)
 # _source_names). Note analysis uses "azdevops" (not reporting's "azuredevops").
 _SOURCE_NAMES = {"jira": "Jira", "azdevops": "Azure DevOps"}
 
+# The three analysis components, selectable per source. "delivery" is the sprint/
+# ticket pipeline that produces the TeamProfile; "code" is the remote AI-usage scan;
+# "docs" is the Notion/Confluence doc-quality read. Each is independent — a source may
+# run any non-empty subset (e.g. docs-only, no velocity).
+_COMPONENTS = ("delivery", "code", "docs")
+
+
+def _resolve_components(
+    src: str,
+    components: dict[str, list[str]] | None,
+    include_ai_usage: bool,
+    include_doc_quality: bool,
+) -> list[str]:
+    """Resolve which components run for ``src``.
+
+    An explicit non-empty ``components[src]`` wins (filtered to the known component
+    names). Otherwise fall back to the legacy booleans — ``delivery`` always, plus
+    ``code``/``docs`` per ``include_ai_usage``/``include_doc_quality`` — which
+    reproduces today's behaviour exactly when no per-source selection is given.
+    """
+    if components and components.get(src):
+        picked = [c for c in components[src] if c in _COMPONENTS]
+        if picked:
+            return picked
+    out = ["delivery"]
+    if include_ai_usage:
+        out.append("code")
+    if include_doc_quality:
+        out.append("docs")
+    return out
+
 
 def _resolve_source(source: str) -> str:
     from yeaboi.tools.team_learning import _detect_source
@@ -126,6 +157,36 @@ def _build_comparison(results: dict) -> list[tuple[str, str, str]]:
     return rows
 
 
+def get_team_roster(source: str = "", project_key: str = "", sprint_count: int = 8, db_path=None) -> list[str]:
+    """Discover the team roster (assignee names) for a tracker — cheap, no LLM.
+
+    Fetches ``sprint_count`` closed sprints (network only, via the same ``_fetch_*``
+    helpers the full run uses) and returns the sorted, unique assignee display names.
+    The expensive ``_run_parallel_analysis`` LLM step is skipped — this exists so the
+    UI can present a member multi-select before committing to a full analysis.
+
+    Raises the same ``ValueError`` as ``run_team_analysis`` when no tracker is
+    configured; returns ``[]`` for a board with no closed sprints (the caller can then
+    offer an unscoped run). ``db_path`` is accepted for signature parity (unused here).
+    """
+    from yeaboi.tools.team_learning import _fetch_azdevops_history, _fetch_jira_history
+
+    resolved_source = _resolve_source(source)
+    resolved_project, _ = _resolve_project(resolved_source, project_key, "")
+    fetch = _fetch_jira_history if resolved_source == "jira" else _fetch_azdevops_history
+    sprint_data = fetch(resolved_project, sprint_count)
+    roster = sorted(
+        {
+            (s.get("assignee", "") or "").strip()
+            for sd in sprint_data
+            for s in sd.get("stories", [])
+            if (s.get("assignee", "") or "").strip()
+        }
+    )
+    logger.info("Roster for %s/%s: %d member(s)", resolved_source, resolved_project, len(roster))
+    return roster
+
+
 def run_team_analysis(
     source: str = "",
     project_key: str = "",
@@ -135,6 +196,8 @@ def run_team_analysis(
     include_insights: bool = True,
     include_ai_usage: bool = True,
     include_doc_quality: bool = True,
+    components: dict[str, list[str]] | None = None,
+    members: dict[str, list[str]] | None = None,
     *,
     progress: list | None = None,
     db_path=None,
@@ -173,6 +236,16 @@ def run_team_analysis(
             and attach a documentation clarity score + stylometric AI-likelihood
             estimate + coaching. Best-effort doc-platform network calls; set
             False to skip them.
+        components: per-source component selection, e.g.
+            ``{"jira": ["docs"], "azdevops": ["code"]}`` — each value a subset of
+            ``{"delivery", "code", "docs"}``. A source missing/empty here falls back
+            to the ``include_ai_usage``/``include_doc_quality`` booleans (today's
+            behaviour). When ``delivery`` is absent for a source, that source returns
+            a code/docs-only result with ``profile=None`` (no velocity, not persisted).
+        members: per-source subset of assignee names, e.g.
+            ``{"jira": ["Alice", "Bob"]}`` — re-scopes velocity/contributors/code to
+            those people. Blank/missing = whole team. Discover names via
+            ``get_team_roster``.
         progress: optional shared list the analysis workers append status
             strings to (the TUI reads it from its frame loop).
         db_path: sessions DB override (tests). Defaults to paths.get_db_path().
@@ -186,21 +259,24 @@ def run_team_analysis(
         available = _available_sources()
         if not available:
             _resolve_source("")  # raises the canonical "no tracker configured" ValueError
-        common = dict(
-            sprint_count=sprint_count,
-            generate_samples=generate_samples,
-            include_insights=include_insights,
-            include_ai_usage=include_ai_usage,
-            include_doc_quality=include_doc_quality,
-            progress=progress,
-            db_path=db_path,
-        )
+
+        def _common_for(src: str) -> dict:
+            return dict(
+                sprint_count=sprint_count,
+                generate_samples=generate_samples,
+                include_insights=include_insights,
+                components=_resolve_components(src, components, include_ai_usage, include_doc_quality),
+                members=(members or {}).get(src),
+                progress=progress,
+                db_path=db_path,
+            )
+
         # Only one tracker configured → 'both' gracefully degrades to that single
         # run (with a warning) so the surfaces render it exactly as a normal run.
         if len(available) == 1:
             only = available[0]
             logger.info("'both' requested but only %s configured — analysing %s only", only, only)
-            single = _run_single_source(only, "", "", **common)
+            single = _run_single_source(only, "", "", **_common_for(only))
             single["warnings"].append(
                 f"Only {_SOURCE_NAMES[only]} is configured — analysed {_SOURCE_NAMES[only]} only."
             )
@@ -212,7 +288,7 @@ def run_team_analysis(
             try:
                 # project_key/team_name are intentionally auto-resolved per source
                 # here — an explicit project is ambiguous across two boards.
-                results[src] = _run_single_source(src, "", "", **common)
+                results[src] = _run_single_source(src, "", "", **_common_for(src))
                 both_warnings.extend(results[src]["warnings"])
             except Exception as exc:  # a per-tracker failure degrades to a warning, not a crash
                 logger.warning("Team analysis failed for %s: %s", src, exc)
@@ -226,15 +302,18 @@ def run_team_analysis(
             "comparison": _build_comparison(results),
             "warnings": both_warnings,
         }
+
+    # Single source — resolve it first so per-source components/members can be read.
+    resolved = _resolve_source(source)
     return _run_single_source(
-        source,
+        resolved,
         project_key,
         team_name,
         sprint_count=sprint_count,
         generate_samples=generate_samples,
         include_insights=include_insights,
-        include_ai_usage=include_ai_usage,
-        include_doc_quality=include_doc_quality,
+        components=_resolve_components(resolved, components, include_ai_usage, include_doc_quality),
+        members=(members or {}).get(resolved),
         progress=progress,
         db_path=db_path,
     )
@@ -247,8 +326,8 @@ def _run_single_source(
     sprint_count: int = 8,
     generate_samples: bool = False,
     include_insights: bool = True,
-    include_ai_usage: bool = True,
-    include_doc_quality: bool = True,
+    components: list[str] | None = None,
+    members: list[str] | None = None,
     *,
     progress: list | None = None,
     db_path=None,
@@ -256,23 +335,61 @@ def _run_single_source(
     """Analyse a single tracker's board history into a TeamProfile and persist it.
 
     The one-tracker pipeline behind ``run_team_analysis`` (which handles source
-    resolution, the 'both' fan-out, and degraded-run warnings)."""
-    from yeaboi.paths import get_db_path
-    from yeaboi.team_profile import TeamProfileStore
-    from yeaboi.tools.team_learning import (
-        _fetch_azdevops_history,
-        _fetch_jira_history,
-        _run_parallel_analysis,
-        compute_headline_stats,
-    )
+    resolution, per-source component/member selection, the 'both' fan-out, and
+    degraded-run warnings). ``components`` is a resolved list (a subset of
+    ``delivery``/``code``/``docs``); when ``delivery`` is absent no board is fetched,
+    ``profile`` is ``None``, and the result is not persisted."""
+    from yeaboi.tools.team_learning import compute_headline_stats
 
     started = time.monotonic()
     warnings: list[str] = []
     resolved_source = _resolve_source(source)
     resolved_project, resolved_team = _resolve_project(resolved_source, project_key, team_name)
+    comps = list(components) if components else list(_COMPONENTS)
+    run_delivery = "delivery" in comps
+    run_code = "code" in comps
+    run_docs = "docs" in comps
     logger.info(
-        "Team analysis starting: source=%s project=%s sprints=%d", resolved_source, resolved_project, sprint_count
+        "Team analysis starting: source=%s project=%s sprints=%d components=%s members=%s",
+        resolved_source,
+        resolved_project,
+        sprint_count,
+        comps,
+        members or "all",
     )
+
+    # Delivery off — run just the code/docs components, no board fetch, no profile.
+    if not run_delivery:
+        from yeaboi.tools.team_learning import run_components_only
+
+        examples = run_components_only(
+            resolved_source,
+            resolved_project or "unknown",
+            run_code,
+            run_docs,
+            members,
+            progress if progress is not None else [],
+        )
+        duration = time.monotonic() - started
+        logger.info("Team analysis (components-only) completed in %.1fs: components=%s", duration, comps)
+        return {
+            "source": resolved_source,
+            "project_key": resolved_project,
+            "components": comps,
+            "sprint_names": [],
+            "duration_secs": round(duration, 1),
+            "profile": None,
+            "examples": examples,
+            "headline_stats": None,
+            "insights": None,
+            "samples": None,
+            "log_path": "",
+            "warnings": warnings,
+        }
+
+    from yeaboi.paths import get_db_path
+    from yeaboi.team_profile import TeamProfileStore
+    from yeaboi.tools.team_learning import _fetch_azdevops_history, _fetch_jira_history, _run_parallel_analysis
 
     if resolved_source == "jira":
         sprint_data = _fetch_jira_history(resolved_project, sprint_count)
@@ -287,8 +404,10 @@ def _run_single_source(
         resolved_project or "unknown",
         sprint_data,
         progress if progress is not None else [],
-        include_ai_usage=include_ai_usage,
-        include_doc_quality=include_doc_quality,
+        include_ai_usage=run_code,
+        include_doc_quality=run_docs,
+        members=members,
+        warnings=warnings,
     )
     if resolved_team and not profile.team_name:
         from dataclasses import replace
@@ -328,6 +447,7 @@ def _run_single_source(
     return {
         "source": resolved_source,
         "project_key": resolved_project,
+        "components": comps,
         "sprint_names": sprint_names,
         "duration_secs": round(duration, 1),
         "profile": profile,

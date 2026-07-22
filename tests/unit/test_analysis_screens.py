@@ -26,8 +26,10 @@ from rich.text import Text
 from yeaboi.ui.mode_select.screens._screens_secondary import (
     _build_analysis_progress_screen,
     _build_analysis_review_screen,
+    _build_component_select_screen,
     _build_generate_confirm_screen,
     _build_instructions_review_screen,
+    _build_member_select_screen,
     _build_sample_epic_screen,
     _build_sample_sprint_screen,
     _build_sample_stories_screen,
@@ -978,6 +980,214 @@ class TestRunTeamAnalysisResultsBoth:
         profile, _examples, _sprint_names, team_name = active_box[0]
         assert profile.source == "jira"
         assert team_name == ""  # regression guard: no cross-tracker team-name bleed
+
+    def test_delivery_off_tab_renders_without_crash(self):
+        # Jira ran full delivery; Azure DevOps ran docs-only (profile is None).
+        from yeaboi.team_profile import DocQualitySignal, TeamProfile
+
+        jira = TeamProfile(team_id="jira:P", source="jira", project_key="P")
+        dq = DocQualitySignal(pages_scanned=6, avg_clarity=71.0)
+        both = {
+            "jira": {"profile": jira, "examples": {}, "sprint_names": ["S1"], "source": "jira", "project_key": "P"},
+            "azdevops": {
+                "profile": None,
+                "examples": {"doc_quality": {"summary": {}}, "_signals": {"doc_quality": dq}},
+                "sprint_names": [],
+                "source": "azdevops",
+                "project_key": "Web",
+            },
+        }
+        from yeaboi.ui.mode_select import _run_team_analysis_results
+
+        active_box: list = [None]
+        # Tab to the docs-only tracker, then Esc — must not raise on the None profile.
+        res = _run_team_analysis_results(
+            self._FakeLive(),
+            self._console(),
+            self._reader(["tab", "esc"]),
+            0.01,
+            True,
+            jira,
+            {},
+            sprint_names=["S1"],
+            both_results=both,
+            comparison=[("Avg velocity", "23", "—")],
+            active_box=active_box,
+        )
+        assert res == "back"
+        # The active (docs-only) tracker mirrors back a None profile.
+        assert active_box[0][0] is None
+
+
+class TestDeliveryOffScreen:
+    """_build_team_analysis_screen with profile=None (a docs-only / code-only run)."""
+
+    @staticmethod
+    def _delivery_off_examples():
+        from yeaboi.team_profile import AiAdoptionSignal
+
+        sig = AiAdoptionSignal(
+            scanned_commits=40,
+            ai_commits=18,
+            footprint_pct=45.0,
+            per_tool=(("claude", 18),),
+            sources_scanned=("github",),
+        )
+        return {
+            "ai_adoption": {"summary": {"footprint_pct": 45.0}, "coverage": [], "samples": []},
+            "_signals": {"ai_adoption": sig},
+        }
+
+    def test_renders_without_profile(self):
+        panel = _build_team_analysis_screen(
+            None,
+            width=100,
+            height=40,
+            examples=self._delivery_off_examples(),
+            source="jira",
+            project_key="PROJ",
+        )
+        assert isinstance(panel, Panel)
+        out = _render(panel, width=100)
+        # Header names the source + "code scan only"; no sprint/velocity headline.
+        assert "jira/PROJ" in out
+        assert "only" in out
+        assert "sprints" not in out
+
+    def test_shows_code_card_from_signal(self):
+        panel = _build_team_analysis_screen(
+            None,
+            width=100,
+            height=40,
+            examples=self._delivery_off_examples(),
+            view="ai-adoption",
+            source="jira",
+            project_key="PROJ",
+        )
+        out = _render(panel, width=100)
+        assert "AI Adoption" in out
+        assert "45%" in out  # footprint rendered from ctx.ai_sig, not a profile
+
+    def test_visible_card_order_delivery_off(self):
+        from yeaboi.ui.mode_select.screens._analysis_sections import visible_card_order
+
+        order = visible_card_order(None, self._delivery_off_examples())
+        assert order == ("ai-adoption",)  # only the code card has data
+
+
+class TestComponentSelectScreen:
+    """Per-source component picker screen + loop."""
+
+    def test_single_source_render(self):
+        checked = {"jira": {0, 2}}
+        out = _render(_build_component_select_screen(["jira"], checked, 0, 0, width=100, height=30), width=100)
+        assert "Delivery" in out and "Code" in out and "Docs" in out
+        assert "2 selected" in out
+        assert "■" in out and "□" in out
+
+    def test_both_source_two_columns(self):
+        checked = {"jira": {2}, "azdevops": {1}}
+        out = _render(
+            _build_component_select_screen(["jira", "azdevops"], checked, 1, 1, width=110, height=30), width=110
+        )
+        assert "Jira" in out and "Azure DevOps" in out
+
+    def test_empty_source_shows_hint(self):
+        checked = {"jira": set()}
+        out = _render(_build_component_select_screen(["jira"], checked, 0, 0, width=100, height=30), width=100)
+        assert "pick at least one" in out
+
+    def test_returns_panel_narrow(self):
+        assert isinstance(_build_component_select_screen(["jira"], {"jira": {0}}, 0, 0, width=40, height=20), Panel)
+
+
+class TestMemberSelectScreen:
+    def test_roster_render(self):
+        out = _render(_build_member_select_screen(["Alice", "Bob"], {0}, 0, width=100, height=30), width=100)
+        assert "Alice" in out and "Bob" in out
+        assert "1 selected" in out
+
+    def test_empty_selection_shows_whole_team(self):
+        out = _render(_build_member_select_screen(["Alice"], set(), 0, width=100, height=30), width=100)
+        assert "whole team" in out
+
+    def test_empty_roster(self):
+        out = _render(_build_member_select_screen([], set(), 0, width=100, height=30), width=100)
+        assert "No members found" in out
+
+
+class TestComponentAndMemberLoops:
+    class _FakeLive:
+        def update(self, renderable):
+            self.last = renderable
+
+    @staticmethod
+    def _console():
+        from types import SimpleNamespace
+
+        return SimpleNamespace(size=(100, 40))
+
+    @staticmethod
+    def _reader(keys):
+        it = iter(keys)
+
+        def read_key(timeout=None):
+            return next(it)
+
+        return read_key
+
+    def _components(self, keys, sources):
+        from yeaboi.ui.mode_select import _run_component_select
+
+        return _run_component_select(self._FakeLive(), self._console(), self._reader(keys), 0.01, True, sources)
+
+    def _members(self, keys, roster):
+        from yeaboi.ui.mode_select import _run_member_select
+
+        return _run_member_select(self._FakeLive(), self._console(), self._reader(keys), 0.01, True, roster)
+
+    def test_all_checked_returns_none(self):
+        # Default is everything checked; Enter immediately → None (= full analysis).
+        assert self._components(["enter"], ["jira"]) is None
+
+    def test_deselecting_yields_explicit_list(self):
+        # Toggle off "delivery" (row 0) → {jira: [code, docs]}.
+        assert self._components([" ", "enter"], ["jira"]) == {"jira": ["code", "docs"]}
+
+    def test_cannot_confirm_empty_source(self):
+        # Toggle off all three (down between toggles), then a final toggle-on so Enter succeeds.
+        keys = [" ", "down", " ", "down", " ", "enter", " ", "enter"]
+        # After 3 toggles all off → Enter blocked; toggle row2 on → Enter returns.
+        assert self._components(keys, ["jira"]) == {"jira": ["docs"]}
+
+    def test_cancel(self):
+        assert self._components(["esc"], ["jira"]) == "cancel"
+
+    def test_member_select_returns_names(self):
+        assert self._members(["down", " ", "enter"], ["Alice", "Bob"]) == ["Bob"]
+
+    def test_member_select_empty_is_none(self):
+        assert self._members(["enter"], ["Alice"]) is None
+
+    def test_member_cancel(self):
+        assert self._members(["esc"], ["Alice"]) == "cancel"
+
+    def test_prefetch_roster_unions_sources(self, monkeypatch):
+        from yeaboi.ui.mode_select import _prefetch_roster
+
+        rosters = {"jira": ["Bob", "Alice"], "azdevops": ["Alice", "Zoe"]}
+        monkeypatch.setattr("yeaboi.analysis.get_team_roster", lambda s, p, db_path=None: rosters[s])
+        names = _prefetch_roster(self._FakeLive(), self._console(), ["jira", "azdevops"], "", None)
+        assert names == ["Alice", "Bob", "Zoe"]  # sorted union across both trackers
+
+    def test_prefetch_roster_swallows_errors(self, monkeypatch):
+        from yeaboi.ui.mode_select import _prefetch_roster
+
+        def boom(s, p, db_path=None):
+            raise RuntimeError("no tracker")
+
+        monkeypatch.setattr("yeaboi.analysis.get_team_roster", boom)
+        assert _prefetch_roster(self._FakeLive(), self._console(), ["jira"], "", None) == []
 
 
 # ---------------------------------------------------------------------------

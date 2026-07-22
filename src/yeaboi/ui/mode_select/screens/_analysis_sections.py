@@ -76,6 +76,11 @@ class _TaCtx:
         # Set by the screen builder in 'both' mode: side-by-side headline rows
         # (label, jira_value, azdevops_value) rendered atop the overview.
         self.comparison: list[tuple[str, str, str]] | None = None
+        # Delivery-off runs have no TeamProfile to carry the AI-adoption/doc-quality
+        # signals, so the screen builder sets them here from examples["_signals"] and
+        # the two surviving cards read ctx.ai_sig/.doc_sig when profile is None.
+        self.ai_sig = None
+        self.doc_sig = None
         self.lines: list = []
         self.item_heights: list[int] = []
         self.rendered_lines = 0
@@ -1662,7 +1667,9 @@ def _ta_ai_adoption(ctx: _TaCtx, profile) -> None:
     profiles (no scan) show the same "run a new analysis" empty state as the other cards.
     """
     _add, _ex = ctx.add, ctx.ex
-    sig = getattr(profile, "ai_adoption", None)
+    # Prefer the profile's signal; fall back to ctx.ai_sig for a delivery-off run
+    # (no profile) where the signal is carried on the context instead.
+    sig = getattr(profile, "ai_adoption", None) or ctx.ai_sig
     blob = _ex.get("ai_adoption", {})
     scanned = (getattr(sig, "scanned_commits", 0) + getattr(sig, "scanned_prs", 0)) if sig else 0
 
@@ -1703,7 +1710,7 @@ def _ta_ai_adoption(ctx: _TaCtx, profile) -> None:
         ctx.kv("PRs scanned", f"{sig.ai_prs} of {sig.scanned_prs} show an AI marker")
     if sig.sources_scanned:
         ctx.kv("Sources", ", ".join(_source_label(s) for s in sig.sources_scanned))
-    # Which repo/path was actually scanned (local clone vs remote), so the source is unambiguous.
+    # Which remote repo/project was actually scanned, so the source is unambiguous.
     for repo in getattr(sig, "repos_scanned", ()):
         ctx.kv("Scanned", repo)
 
@@ -1714,7 +1721,7 @@ def _ta_ai_adoption(ctx: _TaCtx, profile) -> None:
             label = "unlabelled AI" if tool == "other_ai" else tool
             ctx.kv(label, f"{cnt} item(s)")
 
-    # By source (local clone vs remote) — where the AI-marked work was found
+    # By source (which remote) — where the AI-marked work was found
     if getattr(sig, "per_source", ()):
         ctx.heading("By source")
         for src, cnt in sig.per_source:
@@ -1801,7 +1808,7 @@ def _ta_doc_quality(ctx: _TaCtx, profile) -> None:
     "run a new analysis" empty state as the other cards.
     """
     _add, _ex = ctx.add, ctx.ex
-    sig = getattr(profile, "doc_quality", None)
+    sig = getattr(profile, "doc_quality", None) or ctx.doc_sig
     blob = _ex.get("doc_quality", {})
     pages = getattr(sig, "pages_scanned", 0) if sig else 0
 
@@ -1975,6 +1982,27 @@ _TA_CARDS: dict[str, dict] = {
 _TA_CARD_ORDER: tuple[str, ...] = tuple(_TA_CARDS)
 
 
+def visible_card_order(profile, examples: dict | None) -> tuple[str, ...]:
+    """Which section cards to show for this result.
+
+    A normal (delivery-on) analysis shows every card in ``_TA_CARD_ORDER``. A
+    delivery-off run (``profile is None`` — e.g. docs-only or code-only) has no
+    velocity/contributor data, so only the code/docs cards that actually ran are
+    shown. The overview and the results-loop card navigation share this order so the
+    selection index and the rendered card list can never drift apart.
+    """
+    if profile is not None:
+        return _TA_CARD_ORDER
+    ex = examples or {}
+    sigs = ex.get("_signals", {}) if isinstance(ex, dict) else {}
+    order: list[str] = []
+    if sigs.get("ai_adoption") is not None or ex.get("ai_adoption"):
+        order.append("ai-adoption")
+    if sigs.get("doc_quality") is not None or ex.get("doc_quality"):
+        order.append("documentation")
+    return tuple(order) or ("ai-adoption",)  # never empty — always render something
+
+
 def _ta_card_teaser(ctx: _TaCtx, profile, key: str) -> str:
     """One-line stat teaser shown next to a card title on the overview."""
     stats = ctx.stats
@@ -2022,13 +2050,13 @@ def _ta_card_teaser(ctx: _TaCtx, profile, key: str) -> str:
         n = len(compute_recommendations(profile, ex))
         return f"⚠ {n} flagged" if n else "none flagged"
     if key == "ai-adoption":
-        sig = getattr(profile, "ai_adoption", None)
+        sig = getattr(profile, "ai_adoption", None) or ctx.ai_sig
         scanned = (getattr(sig, "scanned_commits", 0) + getattr(sig, "scanned_prs", 0)) if sig else 0
         if scanned:
             return f"{sig.footprint_pct:.0f}% AI footprint"
         return "not scanned"
     if key == "documentation":
-        sig = getattr(profile, "doc_quality", None)
+        sig = getattr(profile, "doc_quality", None) or ctx.doc_sig
         pages = getattr(sig, "pages_scanned", 0) if sig else 0
         if pages:
             return f"{sig.avg_clarity:.0f}/100 clarity · {pages} pages"
@@ -2071,6 +2099,31 @@ def _ta_overview(ctx: _TaCtx, profile, selected_card: int) -> None:
     # 'Both'-mode: lead with the per-tracker side-by-side comparison.
     if ctx.comparison:
         _ta_source_comparison(ctx)
+
+    # Delivery-off run (no TeamProfile) — skip the velocity headline + AI summary
+    # (there are none) and lead straight into the code/docs cards.
+    if profile is None:
+        ctx.heading("Components")
+        t = Text(PAD + "  ", justify="left")
+        t.append(
+            "This analysis ran the code/documentation components only — no sprint or velocity profile.",
+            style=c_dim,
+        )
+        ctx.add(t)
+        ctx.heading("Sections")
+        ctx.overview_first_card_row = ctx.rendered_lines
+        order = visible_card_order(profile, ctx.ex)
+        for i, key in enumerate(order):
+            card = _TA_CARDS[key]
+            selected = i == selected_card
+            row = Text(PAD + "  ", justify="left")
+            row.append("▸ " if selected else "  ", style=c_accent if selected else c_dim)
+            row.append(f"{card['title']:<20s}", style=f"bold {c_accent}" if selected else c_value)
+            teaser = _ta_card_teaser(ctx, profile, key)
+            if teaser:
+                row.append(f"  {teaser}", style=c_muted if selected else c_dim)
+            ctx.add(row)
+        return
 
     ctx.heading("At a Glance")
     if stats.get("team_size"):

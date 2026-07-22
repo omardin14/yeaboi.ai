@@ -586,6 +586,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Skip the documentation scan (Notion/Confluence clarity + AI-likelihood)",
     )
+    analyze_p.add_argument(
+        "--jira-components",
+        nargs="+",
+        choices=["delivery", "code", "docs"],
+        default=None,
+        metavar="COMP",
+        help="Components to run for Jira (default: all). e.g. --jira-components docs. "
+        "Omitting 'delivery' skips velocity/calibration for that source.",
+    )
+    analyze_p.add_argument(
+        "--azdevops-components",
+        nargs="+",
+        choices=["delivery", "code", "docs"],
+        default=None,
+        metavar="COMP",
+        help="Components to run for Azure DevOps (default: all). e.g. --azdevops-components code.",
+    )
+    analyze_p.add_argument(
+        "--members",
+        nargs="+",
+        default=None,
+        metavar="NAME",
+        help="Re-scope velocity/contributors/code to these members (default: whole team)",
+    )
     analyze_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     analyze_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
@@ -1279,6 +1303,21 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
 
     from yeaboi.analysis import run_team_analysis
 
+    # Per-source component selection. A single --components flag is ambiguous under
+    # --source both, so components are expressed per source; --members applies to
+    # whichever source(s) run (the engine reads the resolved source's entry).
+    components: dict[str, list[str]] = {}
+    if args.jira_components:
+        components["jira"] = args.jira_components
+    if args.azdevops_components:
+        components["azdevops"] = args.azdevops_components
+    if args.source in ("jira", "azdevops"):
+        other = "azdevops" if args.source == "jira" else "jira"
+        if components.get(other):
+            console.print(f"[red]--{other}-components can't be used with --source {args.source}[/red]")
+            return 2
+    members = {"jira": args.members, "azdevops": args.members} if args.members else None
+
     console.print("[bold cyan]Analysing team history...[/bold cyan]")
     result = run_team_analysis(
         source=args.source,
@@ -1288,6 +1327,8 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
         include_insights=not args.no_insights,
         include_ai_usage=args.include_ai_usage,
         include_doc_quality=args.include_doc_quality,
+        components=components or None,
+        members=members,
     )
     for warning in result["warnings"]:
         print(f"⚠ {warning}", file=sys.stderr)
@@ -1319,6 +1360,23 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
 def _print_profile_summary(console: "Console", result: dict) -> None:
     """Print the one-tracker analysis summary (saved profile + top coaching insights)."""
     profile = result["profile"]
+    if profile is None:
+        # Delivery-off run (e.g. docs only / code only) — there is no velocity
+        # profile, so summarise the components that did run.
+        comps = result.get("components") or []
+        src = result.get("source", "")
+        key = result.get("project_key", "")
+        console.print(f"[green]Analysis complete for {src}/{key}[/green]  ([bold]{', '.join(comps) or 'none'}[/bold])")
+        ex = result.get("examples") or {}
+        ai = (ex.get("ai_adoption") or {}).get("summary") or {}
+        if ai:
+            console.print(f"  AI footprint: [bold]{ai.get('footprint_pct', 0):.0f}%[/bold] (lower bound)")
+        dq = (ex.get("doc_quality") or {}).get("summary") or {}
+        if dq:
+            console.print(
+                f"  Docs: [bold]{dq.get('avg_clarity', 0):.0f}/100[/bold] clarity · {dq.get('pages_scanned', 0)} pages"
+            )
+        return
     console.print(f"[green]Team profile saved for {profile.source}/{profile.project_key}[/green]")
     console.print(
         f"  Analysed [bold]{profile.sample_sprints}[/bold] sprints, [bold]{profile.sample_stories}[/bold] stories"

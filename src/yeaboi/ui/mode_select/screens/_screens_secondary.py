@@ -286,6 +286,8 @@ def _build_team_analysis_screen(
     source_toggle: list[str] | None = None,
     active_source: str = "",
     comparison: list | None = None,
+    source: str = "",
+    project_key: str = "",
 ) -> Panel:
     """Build the team analysis results screen (overview + section cards).
 
@@ -301,16 +303,31 @@ def _build_team_analysis_screen(
     """
     from yeaboi.tools.team_learning import compute_headline_stats
 
-    src = profile.source
-    key = profile.project_key
-    sprints = profile.sample_sprints
-    stories = profile.sample_stories
+    # A delivery-off run (docs-only / code-only) has no TeamProfile; fall back to the
+    # caller-supplied source/project and describe which components ran in the header.
+    if profile is not None:
+        src = profile.source
+        key = profile.project_key
+        sprints = profile.sample_sprints
+        stories = profile.sample_stories
+    else:
+        src = source
+        key = project_key
 
     # Build header: show team name for AzDO, board name for Jira
     board_label = key
     if team_name:
         board_label = f"{team_name} ({key})"
-    header_str = f"Team Analysis  ·  {src}/{board_label}  ·  {sprints} sprints  ·  {stories} stories"
+    if profile is not None:
+        header_str = f"Team Analysis  ·  {src}/{board_label}  ·  {sprints} sprints  ·  {stories} stories"
+    else:
+        _ex = examples or {}
+        bits = []
+        if _ex.get("ai_adoption"):
+            bits.append("code scan")
+        if _ex.get("doc_quality"):
+            bits.append("docs")
+        header_str = f"Team Analysis  ·  {src}/{board_label}  ·  {' + '.join(bits) or 'components'} only"
     sub = Text(_PAD + header_str, style="bold white", justify="left")
 
     # 'Both'-mode source toggle line: highlight the active tracker.
@@ -328,9 +345,14 @@ def _build_team_analysis_screen(
                 toggle_line.append(f"  {lbl}  ", style="dim")
         toggle_line.append("    (Tab: switch source)", style="rgb(90,90,110)")
 
-    stats = compute_headline_stats(profile, examples)
+    stats = compute_headline_stats(profile, examples) if profile is not None else {}
     ctx = _TaCtx(width, examples, sprint_names=sprint_names, stats=stats)
     ctx.comparison = comparison
+    # Carry the code/docs signals for a delivery-off run so those two cards render
+    # without a profile to hang them off.
+    _signals = (examples or {}).get("_signals", {}) if isinstance(examples, dict) else {}
+    ctx.ai_sig = _signals.get("ai_adoption")
+    ctx.doc_sig = _signals.get("doc_quality")
 
     if view == "overview":
         crumb_text = "Overview  ·  ↑/↓ choose a section, Enter to open"
@@ -423,6 +445,157 @@ def _build_team_analysis_screen(
         height=height,
         padding=(1, 2),
     )
+
+
+# Component picker — order + friendly labels shared by the screen and the loop.
+_COMPONENT_KEYS: tuple[str, ...] = ("delivery", "code", "docs")
+_COMPONENT_LABELS: dict[str, str] = {
+    "delivery": "Delivery — velocity, calibration, contributors",
+    "code": "Code — remote AI-usage scan (GitHub / Azure Repos)",
+    "docs": "Docs — Confluence / Notion clarity + AI-likelihood",
+}
+_SOURCE_TITLES: dict[str, str] = {"jira": "Jira", "azdevops": "Azure DevOps"}
+
+
+def _build_component_select_screen(
+    sources: list[str],
+    checked: dict[str, set[int]],
+    row_idx: int,
+    col_idx: int,
+    *,
+    width: int = 80,
+    height: int = 24,
+    message: str = "",
+) -> Panel:
+    """Per-source component multi-select (checkbox grid).
+
+    ``sources`` is ["jira"], ["azdevops"] or both; ``checked`` maps each source to
+    the set of selected component indices (into ``_COMPONENT_KEYS``). Rows are the
+    three components; columns are the sources. ``row_idx``/``col_idx`` locate the
+    focused cell. Modelled on the reporting sprint-select checkbox list."""
+    from yeaboi.ui.shared._components import analysis_title
+
+    theme = ANALYSIS_THEME
+    title = analysis_title()
+    sub = Text(_PAD + "Choose what to analyse for each source", style="bold white", justify="left")
+    crumb = Text(
+        _PAD + "↑/↓ component · ←/→ source · Space toggle · Enter run · Esc cancel",
+        style="rgb(120,120,140)",
+        justify="left",
+    )
+
+    rows: list = []
+    if message:
+        rows.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        rows.append(Text(""))
+
+    # Column header (source names), only meaningful with >1 source.
+    if len(sources) > 1:
+        head = Text(_PAD + "  " + " " * 4, justify="left")
+        for si, s in enumerate(sources):
+            lbl = _SOURCE_TITLES.get(s, s)
+            head.append(f"{lbl:<16s}", style="bold white" if si == col_idx else theme.muted)
+        rows.append(head)
+        rows.append(Text(""))
+
+    for ci, ckey in enumerate(_COMPONENT_KEYS):
+        row = Text(_PAD + "  ", justify="left")
+        row.append(_COMPONENT_LABELS[ckey], style=theme.value if ci == row_idx else theme.desc)
+        rows.append(row)
+        # Checkbox line under each component label, one box per source.
+        boxline = Text(_PAD + "    ", justify="left")
+        for si, s in enumerate(sources):
+            is_focused = ci == row_idx and si == col_idx
+            is_checked = ci in checked.get(s, set())
+            box = "■" if is_checked else "□"
+            cur = "▸ " if is_focused else "  "
+            boxline.append(cur, style=theme.accent_bright if is_focused else theme.dim)
+            box_lbl = f"{box} {_SOURCE_TITLES.get(s, s)}" if len(sources) > 1 else box
+            boxline.append(f"{box_lbl:<16s}", style=theme.accent if is_checked else theme.dim)
+        rows.append(boxline)
+    rows.append(Text(""))
+    # Per-source selection count / at-least-one hint.
+    for s in sources:
+        n = len(checked.get(s, set()))
+        note = Text(_PAD + "  ", justify="left")
+        style = theme.muted if n else theme.accent_bright
+        note.append(f"{_SOURCE_TITLES.get(s, s)}: {n} selected" + ("" if n else "  — pick at least one"), style=style)
+        rows.append(note)
+
+    viewport_h = calc_viewport(height, header_h=11, action_h=2)
+    padded = list(rows[:viewport_h])
+    for _ in range(max(0, viewport_h - len(padded))):
+        padded.append(Text(""))
+
+    content = Group(Text(""), title, Text(""), sub, crumb, Text(""), Group(*padded))
+    return Panel(content, border_style="white", box=rich.box.ROUNDED, expand=True, height=height, padding=(1, 2))
+
+
+def _build_member_select_screen(
+    roster: list[str],
+    checked: set[int],
+    cursor: int,
+    *,
+    width: int = 80,
+    height: int = 24,
+    message: str = "",
+) -> Panel:
+    """Roster multi-select (checkbox list). Empty ``checked`` = whole team."""
+    from yeaboi.ui.shared._components import analysis_title
+
+    theme = ANALYSIS_THEME
+    title = analysis_title()
+    sub = Text(_PAD + "Scope the analysis to selected members (none = whole team)", style="bold white", justify="left")
+    crumb = Text(
+        _PAD + "↑/↓ move · Space toggle · Enter run · Esc cancel",
+        style="rgb(120,120,140)",
+        justify="left",
+    )
+
+    rows: list = []
+    if message:
+        rows.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
+        rows.append(Text(""))
+    n_checked = len(checked)
+    scope = f"{n_checked} selected" if n_checked else "whole team"
+    rows.append(Text(_PAD + f"  Space to toggle · {scope} · Enter to run", style=theme.muted))
+    rows.append(Text(""))
+    for idx, name in enumerate(roster):
+        is_cursor = idx == cursor
+        is_checked = idx in checked
+        box = "■" if is_checked else "□"
+        cur = "▸ " if is_cursor else "  "
+        row = Text(_PAD + "  ", justify="left")
+        row.append(cur, style=theme.accent_bright if is_cursor else theme.dim)
+        row.append(box + " ", style=theme.accent if is_checked else theme.dim)
+        row.append(name, style="bold white" if is_cursor else (theme.value if is_checked else theme.desc))
+        rows.append(row)
+    if not roster:
+        rows.append(Text(_PAD + "  No members found — the analysis will cover the whole team.", style=theme.muted))
+
+    viewport_h = calc_viewport(height, header_h=10, action_h=2)
+    total = len(rows)
+    cursor_line = min(total - 1, cursor + 2) if roster else 0
+    max_scroll = max(0, total - viewport_h)
+    start = 0 if total <= viewport_h else max(0, min(cursor_line - viewport_h // 2, max_scroll))
+    visible = rows[start : start + viewport_h]
+    _sb = build_scrollbar(viewport_h, total, start, max_scroll, always_show=True)
+    padded = list(visible)
+    for _ in range(max(0, viewport_h - len(visible))):
+        padded.append(Text(""))
+    if _sb is not None:
+        from rich.table import Table as _SbTable
+
+        _vp = _SbTable(show_header=False, show_edge=False, box=None, padding=0, pad_edge=False, expand=True)
+        _vp.add_column(ratio=1)
+        _vp.add_column(width=1)
+        _vp.add_row(Group(*padded), _sb)
+        viewport_renderable = _vp
+    else:
+        viewport_renderable = Group(*padded)
+
+    content = Group(Text(""), title, Text(""), sub, crumb, Text(""), viewport_renderable)
+    return Panel(content, border_style="white", box=rich.box.ROUNDED, expand=True, height=height, padding=(1, 2))
 
 
 def _build_instructions_review_screen(

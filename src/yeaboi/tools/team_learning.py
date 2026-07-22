@@ -2249,6 +2249,109 @@ def _worker_dod_signals(all_stories: list[dict], progress: list[str]) -> DoDSign
     )
 
 
+def selected_member_velocity(contributor_stats: list[dict], members: list[str]) -> float:
+    """Combined velocity from selected members' per-sprint contributions.
+
+    Sprint velocity is a sprint-level aggregate, so a member subset's velocity is the
+    sum of each selected member's ``per_sprint`` figure (matched case-insensitively by
+    name). Shared by the analysis engine (re-scoping a run) and planning mode
+    (``agent/nodes.py`` recomputes velocity when the lead picks a subset).
+    """
+    if not contributor_stats or not members:
+        return 0.0
+    norm = {m.strip().lower() for m in members if m and m.strip()}
+    total = 0.0
+    matched = 0
+    for c in contributor_stats:
+        name = (c.get("name", "") or "").strip()
+        per_sprint = c.get("per_sprint", 0.0)
+        if name and per_sprint > 0 and name.lower() in norm:
+            total += per_sprint
+            matched += 1
+    logger.info("Velocity from %d/%d selected members: %.1f pts/sprint", matched, len(members), total)
+    return round(total, 1)
+
+
+def _run_ai_usage_component(
+    source: str,
+    project_key: str,
+    delivery_stories: list[dict],
+    all_stories: list[dict],
+    members: list[str] | None,
+    progress: list[str],
+) -> tuple[object | None, dict | None]:
+    """Run the AI-adoption ('code') sub-analysis. Returns ``(signal, blob)`` or
+    ``(None, None)`` on failure. Best-effort — never raises. Extracted so both the
+    delivery pipeline and the delivery-off ``run_components_only`` path can call it."""
+    progress.append("Scanning AI-tool footprint…")
+    try:
+        from yeaboi.analysis.ai_usage import generate_ai_adoption_insights, run_ai_adoption
+
+        signal, ai_examples = run_ai_adoption(source, project_key, delivery_stories, all_stories, members=members)
+        # Only spend an LLM call on coaching when something was actually scanned;
+        # an empty footprint (no repos/creds) coaches deterministically.
+        if signal.scanned_commits + signal.scanned_prs > 0:
+            ai_examples["insights"] = generate_ai_adoption_insights(signal, ai_examples)
+        return signal, ai_examples
+    except Exception:  # pragma: no cover - defensive; run_ai_adoption already guards
+        logger.exception("AI-adoption analysis failed; continuing without it")
+        return None, None
+
+
+def _run_doc_quality_component(
+    source: str,
+    project_key: str,
+    progress: list[str],
+) -> tuple[object | None, dict | None]:
+    """Run the documentation-quality ('docs') sub-analysis. Returns ``(signal, blob)``
+    or ``(None, None)`` on failure. Best-effort — never raises."""
+    progress.append("Assessing documentation clarity…")
+    try:
+        from yeaboi.analysis.doc_quality import generate_doc_quality_insights, run_doc_quality
+
+        dq_signal, dq_examples = run_doc_quality(source, project_key)
+        # Only spend an LLM call on coaching when pages were actually read.
+        if dq_signal.pages_scanned > 0:
+            dq_examples["insights"] = generate_doc_quality_insights(dq_signal, dq_examples)
+        return dq_signal, dq_examples
+    except Exception:  # pragma: no cover - defensive; run_doc_quality already guards
+        logger.exception("Doc-quality analysis failed; continuing without it")
+        return None, None
+
+
+def run_components_only(
+    source: str,
+    project_key: str,
+    run_code: bool,
+    run_docs: bool,
+    members: list[str] | None,
+    progress: list[str] | None = None,
+) -> dict:
+    """Run just the code/docs sub-analyses — no sprint fetch, no delivery profile.
+
+    Backs the delivery-off analysis path (e.g. "Jira: docs only"). Returns an
+    ``examples`` dict carrying only the requested blobs, plus a ``"_signals"`` entry
+    holding the raw ``AiAdoptionSignal``/``DocQualitySignal`` so a profile-less
+    results screen can still render the code/docs cards. Never raises.
+    """
+    if progress is None:
+        progress = []
+    examples: dict = {}
+    signals: dict = {}
+    if run_code:
+        signal, ai_examples = _run_ai_usage_component(source, project_key, [], [], members, progress)
+        if ai_examples is not None:
+            examples["ai_adoption"] = ai_examples
+            signals["ai_adoption"] = signal
+    if run_docs:
+        dq_signal, dq_examples = _run_doc_quality_component(source, project_key, progress)
+        if dq_examples is not None:
+            examples["doc_quality"] = dq_examples
+            signals["doc_quality"] = dq_signal
+    examples["_signals"] = signals
+    return examples
+
+
 def _run_parallel_analysis(
     source: str,
     project_key: str,
@@ -2256,6 +2359,8 @@ def _run_parallel_analysis(
     progress: list[str] | None = None,
     include_ai_usage: bool = True,
     include_doc_quality: bool = True,
+    members: list[str] | None = None,
+    warnings: list[str] | None = None,
 ) -> TeamProfile:
     """Run the 4-worker parallel analysis and merge results into a TeamProfile.
 
@@ -2270,6 +2375,15 @@ def _run_parallel_analysis(
     recently-changed Notion/Confluence pages, scores their clarity + a stylometric
     AI-likelihood estimate, and attaches a ``DocQualitySignal`` plus an
     ``examples["doc_quality"]`` blob (see ``analysis/doc_quality.py``).
+
+    When ``members`` (a subset of assignee names) is given the analysis is
+    **re-scoped** to those people: stories are filtered by assignee (so calibration,
+    DoD, writing patterns and per-contributor stats reflect only them) and velocity
+    is recomputed from their per-sprint contributions, and calibration/estimation
+    accuracy reflect only their tickets. Sprint completion rate stays board-level (it
+    is a sprint-level figure that can't be attributed per person) \u2014 the caveat is
+    appended to ``warnings``. An empty match falls back to the whole team (a warning
+    is recorded).
     """
     if progress is None:
         progress = []
@@ -2277,6 +2391,28 @@ def _run_parallel_analysis(
     all_stories: list[dict] = []
     for sd in sprint_data:
         all_stories.extend(sd.get("stories", []))
+
+    # Member subset \u2014 re-scope the analysis to the selected people. Filter here (once,
+    # before tagging/enrichment) so every downstream derivation (calibration, DoD,
+    # contributor stats) inherits the subset automatically. An empty match would make
+    # for an empty analysis, so we fall back to the whole team with a warning.
+    if members:
+        _norm = {m.strip().lower() for m in members if m and m.strip()}
+        _scoped = [s for s in all_stories if (s.get("assignee", "") or "").strip().lower() in _norm]
+        if _scoped:
+            logger.info("Member filter: %d\u2192%d stories for %s", len(all_stories), len(_scoped), members)
+            all_stories = _scoped
+            if warnings is not None:
+                warnings.append(
+                    "Velocity, calibration and estimation accuracy are scoped to the selected "
+                    "members; sprint completion rate stays board-level (it's a sprint-level "
+                    "figure that can't be attributed per person)."
+                )
+        else:
+            logger.warning("Member filter %s matched 0 stories \u2014 analysing the whole team", members)
+            if warnings is not None:
+                warnings.append("Member filter matched no stories \u2014 analysed the whole team instead.")
+            members = None
 
     # Tag recurring/ceremony tickets so they're excluded from calibration
     _tag_recurring_batch(all_stories)
@@ -2651,6 +2787,13 @@ def _run_parallel_analysis(
         )
     contributor_stats.sort(key=lambda x: -x["delivery_pts"])
 
+    # Member re-scope: sprint velocity is a sprint-level aggregate that can't be
+    # split by assignee, so when a subset is selected we recompute it from those
+    # members' per-sprint contributions (the same basis planning mode uses).
+    if members:
+        vel_avg = selected_member_velocity(contributor_stats, members)
+        per_dev_velocity = round(vel_avg / team_size, 1) if team_size > 0 else 0.0
+
     examples["team_members"] = sorted(all_assignees)  # type: ignore[assignment]
     examples["team_size"] = team_size  # type: ignore[assignment]
     examples["per_dev_velocity"] = per_dev_velocity  # type: ignore[assignment]
@@ -2665,7 +2808,7 @@ def _run_parallel_analysis(
         project_key=project_key,
         sample_sprints=len(sprint_data),
         sample_stories=len(delivery_stories),
-        velocity_avg=vel.get("velocity_avg", 0.0),
+        velocity_avg=vel_avg,
         velocity_stddev=vel.get("velocity_stddev", 0.0),
         point_calibrations=cal.get("calibrations", ()),
         story_shapes=tuple(shapes),
@@ -2706,52 +2849,26 @@ def _run_parallel_analysis(
         sum(len(v) for v in examples.values() if isinstance(v, list)),
     )
 
-    # AI-adoption footprint — scan the team's commits/PRs for AI-tool markers
-    # (Co-Authored-By: Claude, Copilot, Cursor, …) and coach on adoption. This is
-    # a network step (GitHub/AzDO) so it's gated by ``include_ai_usage`` and wholly
-    # best-effort — a failure leaves the default empty signal, never raises.
+    # AI-adoption footprint + documentation quality — two best-effort network
+    # sub-analyses (the 'code' and 'docs' components). Extracted into helpers so the
+    # delivery-off path (``run_components_only``) can reuse them without a profile.
     if include_ai_usage:
-        progress.append("Scanning AI-tool footprint…")
-        try:
+        signal, ai_examples = _run_ai_usage_component(
+            source, project_key, delivery_stories, all_stories, members, progress
+        )
+        if signal is not None:
             from dataclasses import replace
 
-            from yeaboi.analysis.ai_usage import (
-                generate_ai_adoption_insights,
-                run_ai_adoption,
-            )
-
-            signal, ai_examples = run_ai_adoption(source, project_key, delivery_stories, all_stories)
-            # Only spend an LLM call on coaching when something was actually scanned;
-            # an empty footprint (no repos/creds) coaches deterministically.
-            if signal.scanned_commits + signal.scanned_prs > 0:
-                ai_examples["insights"] = generate_ai_adoption_insights(signal, ai_examples)
             profile = replace(profile, ai_adoption=signal)
             examples["ai_adoption"] = ai_examples  # type: ignore[assignment]
-        except Exception:  # pragma: no cover - defensive; run_ai_adoption already guards
-            logger.exception("AI-adoption analysis failed; continuing without it")
 
-    # Documentation quality — read the team's recent Notion/Confluence pages and
-    # score clarity + a stylometric AI-likelihood estimate (see analysis/doc_quality.py).
-    # Network step (doc platforms), gated by ``include_doc_quality`` and wholly
-    # best-effort — a failure leaves the default empty signal, never raises.
     if include_doc_quality:
-        progress.append("Assessing documentation clarity…")
-        try:
+        dq_signal, dq_examples = _run_doc_quality_component(source, project_key, progress)
+        if dq_signal is not None:
             from dataclasses import replace
 
-            from yeaboi.analysis.doc_quality import (
-                generate_doc_quality_insights,
-                run_doc_quality,
-            )
-
-            dq_signal, dq_examples = run_doc_quality(source, project_key)
-            # Only spend an LLM call on coaching when pages were actually read.
-            if dq_signal.pages_scanned > 0:
-                dq_examples["insights"] = generate_doc_quality_insights(dq_signal, dq_examples)
             profile = replace(profile, doc_quality=dq_signal)
             examples["doc_quality"] = dq_examples  # type: ignore[assignment]
-        except Exception:  # pragma: no cover - defensive; run_doc_quality already guards
-            logger.exception("Doc-quality analysis failed; continuing without it")
 
     # Plain-English narrative — one LLM call explaining what the numbers mean
     # per section card. Falls back to deterministic text; never raises.

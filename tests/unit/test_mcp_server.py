@@ -46,6 +46,7 @@ EXPECTED_TOOLS = {
     "team_profile_get",
     "team_compare_plan_to_actuals",
     "team_analyze",
+    "team_roster",
     "anonymize_text",
 }
 
@@ -584,6 +585,33 @@ class TestInputValidation:
         assert payload["data"]["source"] == "both"
         assert set(payload["data"]["results"]) == {"jira", "azdevops"}
         assert payload["data"]["comparison"] == [["Avg velocity", "23", "15"]]
+
+    def test_team_analyze_components_and_members(self, tmp_db, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        def fake_analysis(**kwargs):
+            captured.update(kwargs)
+            return {"source": "jira", "profile": None, "components": ["docs"], "warnings": []}
+
+        monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
+        payload = call_tool(
+            "team_analyze",
+            {"components": {"jira": ["docs"], "azdevops": ["code"]}, "members": {"jira": ["Alice"]}},
+        )
+        assert payload["ok"] is True
+        assert captured["components"] == {"jira": ["docs"], "azdevops": ["code"]}
+        assert captured["members"] == {"jira": ["Alice"]}
+
+    def test_team_analyze_rejects_bad_component(self, tmp_db, provider_mode):
+        payload = call_tool("team_analyze", {"components": {"jira": ["velocity"]}})
+        assert payload["ok"] is False
+        assert "delivery" in payload["error"]["message"]
+
+    def test_team_roster(self, tmp_db, provider_mode, monkeypatch):
+        monkeypatch.setattr("yeaboi.analysis.get_team_roster", lambda source, project_key: ["Alice", "Bob"])
+        payload = call_tool("team_roster", {"source": "jira", "project_key": "P"})
+        assert payload["ok"] is True
+        assert payload["data"]["members"] == ["Alice", "Bob"]
 
     def test_perf_prep_rejects_unknown_engineer(self, tmp_db, provider_mode, monkeypatch):
         from types import SimpleNamespace

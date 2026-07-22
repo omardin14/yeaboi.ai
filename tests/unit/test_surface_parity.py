@@ -141,8 +141,11 @@ CAPABILITIES: dict[str, dict] = {
         "skill": Exempt("no plugin skill yet — tracked gap"),
     },
     "team-analysis": {
-        "engines": {("yeaboi.analysis.engine", "run_team_analysis")},
-        "mcp_tools": {"team_analyze"},
+        "engines": {
+            ("yeaboi.analysis.engine", "run_team_analysis"),
+            ("yeaboi.analysis.engine", "get_team_roster"),
+        },
+        "mcp_tools": {"team_analyze", "team_roster"},
         "tui_mode": "team-analysis",
         "cli": {"analyze", "--learn"},
         "skill": "team-analysis",
@@ -271,7 +274,9 @@ CLI_ONLY_DESTS: dict[str, set[str]] = {
     "perf prep": {"strict"},
     "perf complete": {"strict"},
     "perf review": {"strict"},
-    "analyze": {"format", "strict"},
+    # jira_components/azdevops_components are assembled into the engine's per-source
+    # `components` dict (a single --components is ambiguous under --source both).
+    "analyze": {"format", "strict", "jira_components", "azdevops_components"},
 }
 
 # Engine params deliberately without a CLI flag. Reasoned; staleness-checked.
@@ -279,6 +284,7 @@ CLI_HIDDEN: dict[str, dict[str, str]] = {
     "analyze": {
         "progress": "live shared-list progress feed for the TUI frame loop — the CLI prints a banner instead",
         "team_name": "AzDO team label; auto-resolved from the configured AZURE_DEVOPS_TEAM",
+        "components": "assembled from per-source --jira-components/--azdevops-components flags",
     },
 }
 

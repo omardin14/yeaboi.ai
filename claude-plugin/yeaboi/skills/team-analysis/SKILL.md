@@ -20,6 +20,23 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
    `generate_samples` (sample tickets in the team's
    style — extra LLM calls, only when asked).
 
+   **Per-source components + member subset.** `components` picks which parts run
+   *per source*, e.g. `{"jira": ["docs"], "azdevops": ["code"]}` — each value a
+   subset of `delivery` (velocity/calibration/contributors), `code` (remote
+   AI-usage scan), `docs` (Confluence/Notion clarity). Omitting `delivery` for a
+   source returns a **code/docs-only** result for it (`profile: null`, not saved) —
+   use this for "just Confluence for Jira" / "just code for Azure DevOps". A source
+   left out of `components` falls back to the `include_*` booleans. `members` scopes
+   velocity/contributors/code to a subset per source, e.g.
+   `{"jira": ["Alice", "Bob"]}` (blank = whole team); discover names with
+   `team_roster` first. Note: with a member subset, **velocity, calibration and
+   estimation accuracy** reflect only those people, but **sprint completion rate
+   stays board-level** (a sprint-level figure that can't be attributed per person) —
+   the caveat is surfaced in `warnings`.
+
+   Code scanning is **remote only** (GitHub + Azure Repos); there is no local-clone
+   scan.
+
 3. **Present it in layers.** Lead with the headline stats (velocity ± stddev,
    estimation accuracy, sprint completion), then the coaching `insights` as
    start/stop/keep/try, then the **AI adoption** footprint (`profile.ai_adoption`
@@ -46,7 +63,12 @@ description: "Analyse a team's Jira/Azure DevOps history with yeaboi into a cali
    Present the two trackers **clearly separated** ("From Jira" / "From Azure DevOps") — never blend
    their numbers (velocity/point scales aren't comparable across trackers) — and lead with the
    `comparison` side-by-side table. If only one tracker is configured, 'both' degrades to that
-   single run and says so in `warnings`.
+   single run and says so in `warnings`. In 'both' mode `components`/`members` are keyed per
+   source, so each tracker can run a different set (e.g. Jira docs, Azure DevOps code).
+
+   **A delivery-off result has `profile: null`** — there is no velocity/calibration; present the
+   `examples.ai_adoption` / `examples.doc_quality` findings for that source instead, and don't
+   offer it as planning calibration.
 
 4. **Close the loop.** The saved profile automatically calibrates future
    `plan_generate` runs. For "how did the last plan actually go?", call

@@ -43,10 +43,19 @@ def _team_analyze(
     include_insights: bool,
     include_ai_usage: bool,
     include_doc_quality: bool,
+    components=None,
+    members=None,
     progress=None,
 ):
     if source not in ("", "jira", "azdevops", "both"):
         raise ValueError(f"source must be 'jira', 'azdevops', or 'both' (blank auto-detects) — got {source!r}")
+    if components:
+        for src, comps in components.items():
+            if src not in ("jira", "azdevops"):
+                raise ValueError(f"components keys must be 'jira'/'azdevops' — got {src!r}")
+            bad = [c for c in comps if c not in ("delivery", "code", "docs")]
+            if bad:
+                raise ValueError(f"components must be a subset of delivery/code/docs — got {bad!r}")
     from yeaboi.analysis import run_team_analysis
 
     return run_team_analysis(
@@ -57,8 +66,16 @@ def _team_analyze(
         include_insights=include_insights,
         include_ai_usage=include_ai_usage,
         include_doc_quality=include_doc_quality,
+        components=components,
+        members=members,
         progress=progress,
     )
+
+
+def _team_roster(source: str, project_key: str) -> dict:
+    from yeaboi.analysis import get_team_roster
+
+    return {"source": source, "project_key": project_key, "members": get_team_roster(source, project_key)}
 
 
 def _team_profile_get() -> dict:
@@ -100,6 +117,8 @@ def register(app) -> None:
         include_insights: bool = True,
         include_ai_usage: bool = True,
         include_doc_quality: bool = True,
+        components: dict[str, list[str]] | None = None,
+        members: dict[str, list[str]] | None = None,
     ) -> dict:
         """Analyse the team's tracker history (closed sprints) into a calibration profile:
         velocity, story-point calibration, writing style, DoD signals, plus coaching insights
@@ -116,7 +135,14 @@ def register(app) -> None:
         trace); set False to skip those GitHub/AzDO network calls. include_doc_quality also reads
         the team's recent Notion/Confluence pages and reports a documentation clarity score plus a
         stylometric AI-likelihood ESTIMATE (not a detection); set False to skip those doc-platform
-        network calls."""
+        network calls.
+        components selects which analysis parts run PER SOURCE, e.g.
+        {"jira": ["docs"], "azdevops": ["code"]} — each value a subset of
+        delivery/code/docs. Omitting 'delivery' for a source skips its velocity profile
+        (that source returns profile=null, code/docs only, and is not saved). A source
+        missing from components falls back to the include_* booleans.
+        members re-scopes velocity/contributors/code to a subset of people per source,
+        e.g. {"jira": ["Alice", "Bob"]} (blank = whole team); discover names with team_roster."""
         import asyncio
 
         try:
@@ -133,8 +159,17 @@ def register(app) -> None:
             include_insights,
             include_ai_usage,
             include_doc_quality,
+            components,
+            members,
             progress,
         )
+
+    @app.tool()
+    async def team_roster(source: str = "", project_key: str = "") -> dict:
+        """List candidate team member names for a tracker (assignees on recent closed
+        sprints) — a cheap, no-LLM lookup for building team_analyze's members= filter.
+        source: 'jira' or 'azdevops' (blank auto-detects a single tracker)."""
+        return await run_readonly(_team_roster, source, project_key)
 
     @app.tool()
     async def team_profile_get() -> dict:

@@ -485,6 +485,73 @@ class TestAnalyzeCommand:
         # Both trackers' figures shown side by side, never blended.
         assert "23" in out and "15" in out
 
+    def test_per_source_components_and_members(self, monkeypatch):
+        from yeaboi.team_profile import TeamProfile
+
+        captured: dict = {}
+
+        def fake_analysis(**kwargs):
+            captured.update(kwargs)
+            return {
+                "profile": TeamProfile(team_id="jira:P", source="jira", project_key="P"),
+                "insights": {},
+                "warnings": [],
+            }
+
+        monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
+        args = build_parser().parse_args(
+            [
+                "analyze",
+                "--source",
+                "both",
+                "--jira-components",
+                "docs",
+                "--azdevops-components",
+                "code",
+                "delivery",
+                "--members",
+                "Alice",
+                "Bob",
+            ]
+        )
+        assert _cmd_analyze(args, _console()) == 0
+        assert captured["components"] == {"jira": ["docs"], "azdevops": ["code", "delivery"]}
+        assert captured["members"] == {"jira": ["Alice", "Bob"], "azdevops": ["Alice", "Bob"]}
+
+    def test_wrong_source_component_flag_errors(self, monkeypatch):
+        called = False
+
+        def fake_analysis(**kwargs):
+            nonlocal called
+            called = True
+            return {"profile": None, "warnings": []}
+
+        monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
+        args = build_parser().parse_args(["analyze", "--source", "jira", "--azdevops-components", "code"])
+        assert _cmd_analyze(args, _console()) == 2
+        assert called is False  # never reaches the engine
+
+    def test_delivery_off_result_prints_without_profile(self, monkeypatch):
+        import io
+
+        def fake_analysis(**kwargs):
+            return {
+                "source": "jira",
+                "project_key": "P",
+                "components": ["docs"],
+                "profile": None,
+                "examples": {"doc_quality": {"summary": {"avg_clarity": 72, "pages_scanned": 5}}},
+                "warnings": [],
+            }
+
+        monkeypatch.setattr("yeaboi.analysis.run_team_analysis", fake_analysis)
+        args = build_parser().parse_args(["analyze", "--source", "jira", "--jira-components", "docs"])
+        buf = io.StringIO()
+        assert _cmd_analyze(args, _console(buf)) == 0
+        out = buf.getvalue()
+        assert "docs" in out
+        assert "72/100" in out  # doc clarity summarised in place of a velocity profile
+
 
 class TestDispatch:
     def test_unhandled_error_returns_1(self, monkeypatch, capsys):

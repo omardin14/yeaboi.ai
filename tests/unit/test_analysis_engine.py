@@ -40,11 +40,21 @@ def wired(monkeypatch, db, tmp_path):
         lambda project, count: [{"sprint_name": "Iteration 1"}],
     )
 
-    def fake_parallel(source, project, sprint_data, progress, include_ai_usage=True, include_doc_quality=True):
+    def fake_parallel(
+        source,
+        project,
+        sprint_data,
+        progress,
+        include_ai_usage=True,
+        include_doc_quality=True,
+        members=None,
+        warnings=None,
+    ):
         progress.append("Analysing…")
         captured["parallel"] = (source, project, len(sprint_data))
         captured["include_ai_usage"] = include_ai_usage
         captured["include_doc_quality"] = include_doc_quality
+        captured["members"] = members
         # Distinct team_id per source (the DB primary key), mirroring the real
         # analysis so a 'both' run persists two rows rather than colliding.
         return _profile(team_id=f"{source}:{project}", source=source, project_key=project), {"sprint_details": []}
@@ -188,6 +198,149 @@ class TestRunTeamAnalysisBoth:
         monkeypatch.setattr("yeaboi.tools.team_learning._fetch_azdevops_history", lambda project, count: [])
         with pytest.raises(ValueError, match="Both trackers failed"):
             run_team_analysis(source="both", db_path=db)
+
+
+class TestComponentSelection:
+    def test_legacy_ai_usage_flag_folds_into_components(self, wired, db):
+        run_team_analysis(source="jira", project_key="PROJ", include_ai_usage=False, db_path=db)
+        assert wired["include_ai_usage"] is False
+        assert wired["include_doc_quality"] is True
+
+    def test_delivery_only_components_skip_code_and_docs(self, wired, db):
+        run_team_analysis(source="jira", project_key="PROJ", components={"jira": ["delivery"]}, db_path=db)
+        assert wired["include_ai_usage"] is False
+        assert wired["include_doc_quality"] is False
+
+    def test_components_none_reproduces_default(self, wired, db):
+        run_team_analysis(source="jira", project_key="PROJ", components=None, db_path=db)
+        assert wired["include_ai_usage"] is True
+        assert wired["include_doc_quality"] is True
+
+    def test_delivery_off_docs_only(self, wired, db, monkeypatch):
+        # Delivery off → no board fetch, no profile, not persisted.
+        def boom_fetch(project, count):
+            raise AssertionError("board must not be fetched when delivery is off")
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._fetch_jira_history", boom_fetch)
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning.run_components_only",
+            lambda source, project, run_code, run_docs, members, progress: {
+                "doc_quality": {"summary": {"pages_scanned": 3}},
+                "_signals": {},
+            },
+        )
+        result = run_team_analysis(source="jira", project_key="PROJ", components={"jira": ["docs"]}, db_path=db)
+        assert result["profile"] is None
+        assert result["components"] == ["docs"]
+        assert result["headline_stats"] is None
+        assert result["insights"] is None
+        assert result["samples"] is None
+        assert "doc_quality" in result["examples"]
+        # Nothing persisted for a delivery-off run.
+        with TeamProfileStore(db) as store:
+            assert store.list_profiles() == []
+
+    def test_delivery_off_does_not_raise_on_empty_board(self, wired, db, monkeypatch):
+        monkeypatch.setattr("yeaboi.tools.team_learning._fetch_jira_history", lambda project, count: [])
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning.run_components_only",
+            lambda *a, **k: {"ai_adoption": {"summary": {}}, "_signals": {}},
+        )
+        result = run_team_analysis(source="jira", project_key="PROJ", components={"jira": ["code"]}, db_path=db)
+        assert result["profile"] is None
+        assert result["components"] == ["code"]
+
+    def test_both_per_source_components(self, wired, db, monkeypatch):
+        _configure(monkeypatch, jira=True, azdevops=True)
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning.run_components_only",
+            lambda *a, **k: {"doc_quality": {"summary": {}}, "_signals": {}},
+        )
+        result = run_team_analysis(
+            source="both",
+            components={"jira": ["delivery"], "azdevops": ["docs"]},
+            db_path=db,
+        )
+        assert result["results"]["jira"]["profile"] is not None
+        assert result["results"]["azdevops"]["profile"] is None
+        assert result["results"]["azdevops"]["components"] == ["docs"]
+
+
+class TestMemberSubset:
+    def test_members_passed_through_to_analysis(self, wired, db):
+        run_team_analysis(source="jira", project_key="PROJ", members={"jira": ["Alice", "Bob"]}, db_path=db)
+        assert wired["members"] == ["Alice", "Bob"]
+
+    def test_members_none_by_default(self, wired, db):
+        run_team_analysis(source="jira", project_key="PROJ", db_path=db)
+        assert wired["members"] is None
+
+    def test_both_per_source_members(self, wired, db, monkeypatch):
+        _configure(monkeypatch, jira=True, azdevops=True)
+        seen: list = []
+
+        def fake_parallel(source, project, sprint_data, progress, members=None, **kw):
+            seen.append((source, members))
+            return _profile(team_id=f"{source}:{project}", source=source, project_key=project), {}
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._run_parallel_analysis", fake_parallel)
+        run_team_analysis(
+            source="both",
+            members={"jira": ["Alice"], "azdevops": ["Zoe"]},
+            db_path=db,
+        )
+        assert ("jira", ["Alice"]) in seen
+        assert ("azdevops", ["Zoe"]) in seen
+
+
+class TestSelectedMemberVelocity:
+    def test_sums_selected_per_sprint_case_insensitive(self):
+        from yeaboi.tools.team_learning import selected_member_velocity
+
+        contrib = [
+            {"name": "Alice", "per_sprint": 8.0},
+            {"name": "Bob", "per_sprint": 5.0},
+            {"name": "Carol", "per_sprint": 3.0},
+        ]
+        assert selected_member_velocity(contrib, ["alice", "bob"]) == 13.0
+
+    def test_empty_inputs(self):
+        from yeaboi.tools.team_learning import selected_member_velocity
+
+        assert selected_member_velocity([], ["Alice"]) == 0.0
+        assert selected_member_velocity([{"name": "A", "per_sprint": 5}], []) == 0.0
+
+
+class TestGetTeamRoster:
+    def test_returns_sorted_unique_assignees(self, monkeypatch):
+        from yeaboi.analysis import get_team_roster
+
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._fetch_jira_history",
+            lambda project, count: [
+                {"sprint_name": "S1", "stories": [{"assignee": "Bob"}, {"assignee": "Alice"}]},
+                {"sprint_name": "S2", "stories": [{"assignee": "Alice"}, {"assignee": ""}]},
+            ],
+        )
+
+        def boom(*a, **k):
+            raise AssertionError("roster must not run the LLM analysis")
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._run_parallel_analysis", boom)
+        assert get_team_roster(source="jira", project_key="PROJ") == ["Alice", "Bob"]
+
+    def test_empty_board_returns_empty(self, monkeypatch):
+        from yeaboi.analysis import get_team_roster
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._fetch_jira_history", lambda project, count: [])
+        assert get_team_roster(source="jira", project_key="PROJ") == []
+
+    def test_no_tracker_raises(self, monkeypatch):
+        from yeaboi.analysis import get_team_roster
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._detect_source", lambda: "")
+        with pytest.raises(ValueError, match="No tracker configured"):
+            get_team_roster()
 
 
 class TestCliRunLearn:
