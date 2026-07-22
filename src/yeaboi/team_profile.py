@@ -165,6 +165,72 @@ class SprintScopeTimeline:
 
 
 @dataclass(frozen=True)
+class AiAdoptionSignal:
+    """How much the team's *tracked* work shows an AI-tool footprint.
+
+    Built by scanning commit message bodies and PR descriptions for markers left
+    by AI coding tools (``Co-Authored-By: Claude``, "Generated with Claude Code",
+    Copilot's co-author line, Cursor/aider/Devin/Codeium, …).
+
+    IMPORTANT — this is a **lower bound**, never ground truth: only tools that
+    leave a textual trace in commit/PR metadata are counted. Inline IDE
+    autocomplete (Copilot ghost-text, Cursor Tab) leaves no trace, so real usage
+    is always *at least* this. ``is_lower_bound`` stays True to force honest
+    framing everywhere this is rendered.
+
+    All fields default so old saved profiles (no ``ai_adoption`` key) deserialize
+    to an empty signal. Collection fields are tuple-of-pairs to stay JSON-round-trippable.
+    """
+
+    scanned_commits: int = 0  # commits whose text we inspected
+    scanned_prs: int = 0  # PRs whose text we inspected
+    ai_commits: int = 0  # commits with >= 1 AI marker
+    ai_prs: int = 0  # PRs with >= 1 AI marker
+    footprint_pct: float = 0.0  # (ai_commits + ai_prs) / (scanned_commits + scanned_prs) * 100
+    per_tool: tuple[tuple[str, int], ...] = ()  # (("claude", 12), ("copilot", 3), ...)
+    per_author: tuple[tuple[str, int], ...] = ()  # (author, ai-marked-item count), desc
+    per_activity: tuple[tuple[str, int], ...] = ()  # (("code", n), ("pr", n), ("docs", n))
+    per_source: tuple[tuple[str, int], ...] = ()  # (("local_git", n), ("github", n), ("azdo", n)) AI-marked
+    repos_scanned: tuple[str, ...] = ()  # friendly "what was scanned" labels (path/slug/project)
+    sources_scanned: tuple[str, ...] = ()  # ("github", "local_git", "azdo")
+    is_lower_bound: bool = True  # always True — honesty flag, see class docstring
+
+
+@dataclass(frozen=True)
+class DocQualitySignal:
+    """How clear the team's *written* knowledge is, and how AI shows up in it.
+
+    Built by reading recently-changed Notion & Confluence pages and, per page,
+    computing a deterministic clarity score plus a heuristic AI-likelihood estimate
+    from prose features. Explicit AI markers (e.g. a pasted "Generated with Claude"
+    disclosure) are also counted as a genuine lower bound.
+
+    IMPORTANT — two different confidence levels, never conflate them:
+    - ``avg_clarity`` is a **heuristic readability score** (0–100, higher = clearer).
+    - ``avg_ai_likelihood`` / ``likely_ai_pages`` are a **stylometric ESTIMATE**, not a
+      detection — prose has no reliable AI marker. ``is_ai_estimate`` stays True to
+      force honest framing everywhere this is rendered.
+    - ``ai_marked_pages`` is a **lower bound** — pages carrying an explicit AI trailer.
+
+    All fields default so old saved profiles (no ``doc_quality`` key) deserialize to
+    an empty signal. Collection fields are tuple-of-pairs to stay JSON-round-trippable.
+    """
+
+    pages_scanned: int = 0  # doc pages whose body we read
+    platforms_scanned: tuple[str, ...] = ()  # ("confluence", "notion")
+    avg_clarity: float = 0.0  # mean readability score 0–100 (higher = clearer)
+    clear_pages: int = 0  # pages scoring clear
+    mixed_pages: int = 0  # pages scoring mixed
+    unclear_pages: int = 0  # pages scoring unclear
+    avg_ai_likelihood: float = 0.0  # mean stylometric AI-likelihood ESTIMATE 0–100
+    likely_ai_pages: int = 0  # pages whose estimate crosses the "likely AI" threshold
+    ai_marked_pages: int = 0  # pages with an EXPLICIT AI marker (lower bound)
+    per_platform: tuple[tuple[str, int], ...] = ()  # (("confluence", 12), ("notion", 3))
+    flagged_pages: tuple[tuple[str, str], ...] = ()  # ((title, reason), …) sample call-outs
+    is_ai_estimate: bool = True  # always True — honesty flag, see class docstring
+
+
+@dataclass(frozen=True)
 class TeamProfile:
     """Top-level container for a team's calibration data.
 
@@ -191,6 +257,8 @@ class TeamProfile:
     spillover: SpilloverStats = field(default_factory=SpilloverStats)
     dod_signal: DoDSignal = field(default_factory=DoDSignal)
     writing_patterns: WritingPatterns = field(default_factory=WritingPatterns)
+    ai_adoption: AiAdoptionSignal = field(default_factory=AiAdoptionSignal)
+    doc_quality: DocQualitySignal = field(default_factory=DocQualitySignal)
     sprints_fully_completed: int = 0
     sprints_partially_completed: int = 0
     sprints_analysed: int = 0
@@ -285,6 +353,10 @@ def merge_profiles(old: TeamProfile, new: TeamProfile) -> TeamProfile:
         spillover=new.spillover,
         dod_signal=new.dod_signal,
         writing_patterns=new.writing_patterns,
+        # AI-adoption reflects current behaviour — replace outright (like DoD/writing).
+        ai_adoption=new.ai_adoption,
+        # Doc quality reflects the latest scan — replace outright (like ai_adoption).
+        doc_quality=new.doc_quality,
         sprints_fully_completed=old.sprints_fully_completed + new.sprints_fully_completed,
         sprints_partially_completed=old.sprints_partially_completed + new.sprints_partially_completed,
         sprints_analysed=old.sprints_analysed + new.sprints_analysed,
@@ -460,6 +532,81 @@ def _dict_to_writing_patterns(d: dict) -> WritingPatterns:
     )
 
 
+def _dict_to_ai_adoption(d: dict) -> AiAdoptionSignal:
+    """Reconstruct an AiAdoptionSignal from a JSON-parsed dict.
+
+    Tuple-izes the pair lists (JSON turns them into lists of lists). ``.get``
+    defaults mean an old profile without an ``ai_adoption`` key round-trips to
+    an empty signal — backward compatible with pre-feature saved rows.
+    """
+
+    def _pairs(raw: object) -> tuple[tuple[str, int], ...]:
+        if not isinstance(raw, (list, tuple)):
+            return ()
+        out: list[tuple[str, int]] = []
+        for pair in raw:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                out.append((str(pair[0]), int(pair[1])))
+        return tuple(out)
+
+    return AiAdoptionSignal(
+        scanned_commits=d.get("scanned_commits", 0),
+        scanned_prs=d.get("scanned_prs", 0),
+        ai_commits=d.get("ai_commits", 0),
+        ai_prs=d.get("ai_prs", 0),
+        footprint_pct=d.get("footprint_pct", 0.0),
+        per_tool=_pairs(d.get("per_tool", ())),
+        per_author=_pairs(d.get("per_author", ())),
+        per_activity=_pairs(d.get("per_activity", ())),
+        per_source=_pairs(d.get("per_source", ())),
+        repos_scanned=tuple(str(r) for r in d.get("repos_scanned", ())),
+        sources_scanned=tuple(str(s) for s in d.get("sources_scanned", ())),
+        is_lower_bound=d.get("is_lower_bound", True),
+    )
+
+
+def _dict_to_doc_quality(d: dict) -> DocQualitySignal:
+    """Reconstruct a DocQualitySignal from a JSON-parsed dict.
+
+    Tuple-izes the pair lists (JSON turns them into lists of lists). ``.get``
+    defaults mean an old profile without a ``doc_quality`` key round-trips to an
+    empty signal — backward compatible with pre-feature saved rows.
+    """
+
+    def _pairs(raw: object) -> tuple[tuple[str, int], ...]:
+        if not isinstance(raw, (list, tuple)):
+            return ()
+        out: list[tuple[str, int]] = []
+        for pair in raw:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                out.append((str(pair[0]), int(pair[1])))
+        return tuple(out)
+
+    def _str_pairs(raw: object) -> tuple[tuple[str, str], ...]:
+        if not isinstance(raw, (list, tuple)):
+            return ()
+        out: list[tuple[str, str]] = []
+        for pair in raw:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                out.append((str(pair[0]), str(pair[1])))
+        return tuple(out)
+
+    return DocQualitySignal(
+        pages_scanned=d.get("pages_scanned", 0),
+        platforms_scanned=tuple(str(p) for p in d.get("platforms_scanned", ())),
+        avg_clarity=d.get("avg_clarity", 0.0),
+        clear_pages=d.get("clear_pages", 0),
+        mixed_pages=d.get("mixed_pages", 0),
+        unclear_pages=d.get("unclear_pages", 0),
+        avg_ai_likelihood=d.get("avg_ai_likelihood", 0.0),
+        likely_ai_pages=d.get("likely_ai_pages", 0),
+        ai_marked_pages=d.get("ai_marked_pages", 0),
+        per_platform=_pairs(d.get("per_platform", ())),
+        flagged_pages=_str_pairs(d.get("flagged_pages", ())),
+        is_ai_estimate=d.get("is_ai_estimate", True),
+    )
+
+
 def _dict_to_profile(d: dict) -> TeamProfile:
     """Reconstruct a TeamProfile from a plain dict (JSON-parsed or ``asdict`` output).
 
@@ -482,6 +629,8 @@ def _dict_to_profile(d: dict) -> TeamProfile:
         spillover=_dict_to_spillover_stats(d.get("spillover", {})),
         dod_signal=_dict_to_dod_signal(d.get("dod_signal", {})),
         writing_patterns=_dict_to_writing_patterns(d.get("writing_patterns", {})),
+        ai_adoption=_dict_to_ai_adoption(d.get("ai_adoption", {})),
+        doc_quality=_dict_to_doc_quality(d.get("doc_quality", {})),
         sprints_fully_completed=d.get("sprints_fully_completed", 0),
         sprints_partially_completed=d.get("sprints_partially_completed", 0),
         sprints_analysed=d.get("sprints_analysed", 0),

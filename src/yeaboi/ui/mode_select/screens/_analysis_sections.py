@@ -17,6 +17,7 @@ from rich.padding import Padding
 from rich.table import Table as RichTable
 from rich.text import Text
 
+from yeaboi.analysis.ai_usage import _source_label
 from yeaboi.tools.team_learning import ANALYSIS_GLOSSARY as _TA_GLOSSARY
 from yeaboi.tools.team_learning import INSIGHT_CATEGORIES, compute_recommendations
 from yeaboi.ui.shared._components import PAD
@@ -1650,7 +1651,258 @@ def _ta_insights(ctx: _TaCtx, profile) -> None:
                 _add(r)
 
 
-# The eight overview cards: title, section builders (render order), glossary terms.
+def _ta_ai_adoption(ctx: _TaCtx, profile) -> None:
+    """AI-adoption footprint: how much tracked work shows an AI-tool trace + coaching.
+
+    Reads ``profile.ai_adoption`` for the numbers and ``examples["ai_adoption"]`` for
+    coaching insights + coverage. Always frames the footprint as a lower bound. Old
+    profiles (no scan) show the same "run a new analysis" empty state as the other cards.
+    """
+    _add, _ex = ctx.add, ctx.ex
+    sig = getattr(profile, "ai_adoption", None)
+    blob = _ex.get("ai_adoption", {})
+    scanned = (getattr(sig, "scanned_commits", 0) + getattr(sig, "scanned_prs", 0)) if sig else 0
+
+    ctx.heading("AI Adoption")
+    # Lower-bound disclaimer — always shown so the number is never over-read.
+    max_w = max(40, ctx.width - len(PAD) - 10)
+    for wrapped in _ta_wrap(
+        "Lower bound — only AI tools that leave a marker in commit messages or PR "
+        "descriptions are counted. Inline IDE assist (Copilot ghost-text, Cursor Tab) "
+        "leaves no trace, so real usage is at least this.",
+        max_w,
+    ):
+        t = Text(PAD + "  ", justify="left")
+        t.append(wrapped, style=c_dim)
+        _add(t)
+
+    if not sig or scanned == 0:
+        _add(Text(""))
+        t = Text(PAD + "  ", justify="left")
+        note = (
+            "No AI-usage scan for this analysis — run a new analysis (with a repo/tracker configured) to generate one."
+        )
+        t.append(note, style=c_dim)
+        _add(t)
+        # Surface why nothing was scanned, if we know.
+        for gap in (blob.get("coverage") or [])[:4]:
+            g = Text(PAD + "    ", justify="left")
+            g.append(f"• {gap}", style=c_example)
+            _add(g)
+        return
+
+    _add(Text(""))
+    fp = getattr(sig, "footprint_pct", 0.0)
+    fp_sty = c_good if fp >= 40 else (c_warn if fp >= 15 else c_bad)
+    ctx.kv("Detectable footprint", ctx.pct_dots(fp), fp_sty)
+    ctx.kv("Commits scanned", f"{sig.ai_commits} of {sig.scanned_commits} show an AI marker")
+    if sig.scanned_prs:
+        ctx.kv("PRs scanned", f"{sig.ai_prs} of {sig.scanned_prs} show an AI marker")
+    if sig.sources_scanned:
+        ctx.kv("Sources", ", ".join(_source_label(s) for s in sig.sources_scanned))
+    # Which repo/path was actually scanned (local clone vs remote), so the source is unambiguous.
+    for repo in getattr(sig, "repos_scanned", ()):
+        ctx.kv("Scanned", repo)
+
+    # By tool
+    if sig.per_tool:
+        ctx.heading("By tool")
+        for tool, cnt in sig.per_tool:
+            label = "unlabelled AI" if tool == "other_ai" else tool
+            ctx.kv(label, f"{cnt} item(s)")
+
+    # By source (local clone vs remote) — where the AI-marked work was found
+    if getattr(sig, "per_source", ()):
+        ctx.heading("By source")
+        for src, cnt in sig.per_source:
+            ctx.kv(_source_label(src), f"{cnt} AI-marked item(s)")
+
+    # By activity type (code / PR / docs)
+    if sig.per_activity:
+        ctx.heading("By activity")
+        for act, cnt in sig.per_activity:
+            ctx.kv(act, f"{cnt} AI-marked item(s)")
+
+    # Who's leaving a footprint (top authors)
+    if sig.per_author:
+        ctx.heading("By contributor")
+        for author, cnt in sig.per_author[:8]:
+            ctx.kv(author, f"{cnt} AI-marked item(s)")
+
+    # Sources that were NOT scanned (so local-vs-remote coverage is explicit, not silent).
+    coverage = blob.get("coverage") if isinstance(blob, dict) else None
+    if coverage:
+        ctx.heading("Not scanned")
+        for gap in coverage[:4]:
+            g = Text(PAD + "  ", justify="left")
+            g.append(f"• {gap}", style=c_dim)
+            _add(g)
+
+    # Examples — real AI-marked items (with links/SHAs) so the numbers are inspectable.
+    samples = blob.get("samples") if isinstance(blob, dict) else None
+    if samples:
+        ctx.heading("Examples")
+        for s in samples[:5]:
+            tool = "unlabelled AI" if s.get("tool") == "other_ai" else s.get("tool", "")
+            title = str(s.get("title", "")).strip()
+            ref = s.get("url") or (f"commit {s.get('key')}" if s.get("key") else "")
+            line = Text(PAD + "  ", justify="left")
+            line.append(f"[{tool}] ", style=c_dim)
+            line.append(title, style=c_value)
+            if ref:
+                line.append(f"  {ref}", style=c_example)
+            _add(line)
+
+    # Coaching — start / stop / keep / try (mirrors _ta_insights)
+    insights = blob.get("insights", {}) if isinstance(blob, dict) else {}
+    if isinstance(insights, dict) and any(insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+        for key, label in INSIGHT_CATEGORIES:
+            items = insights.get(key)
+            if not isinstance(items, list) or not items:
+                continue
+            icon, colour = _INSIGHT_STYLE[key]
+            _add(Text(""))
+            h = Text(PAD, justify="left")
+            h.append(f"{icon} {label.upper()}", style=f"bold {colour}")
+            _add(h)
+            _add(Text(PAD + "─" * min(len(label) + 2, 40), style="rgb(50,60,80)"))
+            for it in items:
+                if not isinstance(it, dict) or not str(it.get("title", "")).strip():
+                    continue
+                _add(Text(""))
+                t = Text(PAD + "  ", justify="left")
+                t.append(str(it["title"]).strip(), style=c_value)
+                _add(t)
+                for wrapped in _ta_wrap(str(it.get("detail", "") or ""), max_w):
+                    r = Text(PAD + "    ", justify="left")
+                    r.append(wrapped, style=c_muted)
+                    _add(r)
+                evidence = str(it.get("evidence", "") or "").strip()
+                if evidence:
+                    r = Text(PAD + "    ", justify="left")
+                    r.append(f"— {evidence}", style=c_dim)
+                    _add(r)
+                link = str(it.get("link", "") or "").strip()
+                if link:
+                    r = Text(PAD + "    ", justify="left")
+                    r.append(f"↳ {link}", style=c_example)
+                    _add(r)
+
+
+def _ta_doc_quality(ctx: _TaCtx, profile) -> None:
+    """Documentation quality: how clear the team's written pages are + how AI shows up.
+
+    Reads ``profile.doc_quality`` for the numbers and ``examples["doc_quality"]`` for
+    coaching insights + coverage. Clarity is a readability score; the AI-likelihood is
+    a stylometric ESTIMATE (never a detection). Old profiles (no scan) show the same
+    "run a new analysis" empty state as the other cards.
+    """
+    _add, _ex = ctx.add, ctx.ex
+    sig = getattr(profile, "doc_quality", None)
+    blob = _ex.get("doc_quality", {})
+    pages = getattr(sig, "pages_scanned", 0) if sig else 0
+
+    ctx.heading("Documentation")
+    # Estimate disclaimer — always shown so the AI number is never over-read.
+    max_w = max(40, ctx.width - len(PAD) - 10)
+    for wrapped in _ta_wrap(
+        "Clarity is a readability score. AI-likelihood is a heuristic estimate from writing "
+        "style, not a detection — prose has no reliable AI marker. Explicit AI markers are a "
+        "lower bound.",
+        max_w,
+    ):
+        t = Text(PAD + "  ", justify="left")
+        t.append(wrapped, style=c_dim)
+        _add(t)
+
+    if not sig or pages == 0:
+        _add(Text(""))
+        t = Text(PAD + "  ", justify="left")
+        note = (
+            "No documentation scan for this analysis — run a new analysis "
+            "(with Notion/Confluence configured) to generate one."
+        )
+        t.append(note, style=c_dim)
+        _add(t)
+        for gap in (blob.get("coverage") or [])[:4]:
+            g = Text(PAD + "    ", justify="left")
+            g.append(f"• {gap}", style=c_example)
+            _add(g)
+        return
+
+    _add(Text(""))
+    clarity = getattr(sig, "avg_clarity", 0.0)
+    cl_sty = c_good if clarity >= 60 else (c_warn if clarity >= 40 else c_bad)
+    ctx.kv("Avg clarity", f"{clarity:.0f}/100", cl_sty)
+    ctx.kv("Pages scanned", f"{pages} across {', '.join(sig.platforms_scanned) or 'n/a'}")
+    ctx.kv("Clarity split", f"{sig.clear_pages} clear · {sig.mixed_pages} mixed · {sig.unclear_pages} unclear")
+
+    # AI usage in the content — estimate + explicit-marker lower bound.
+    # 55 mirrors doc_quality._AI_LIKELY_MIN (the "likely AI-drafted" threshold).
+    ai_sty = c_bad if sig.avg_ai_likelihood >= 55 else c_muted
+    ai_val = f"{sig.avg_ai_likelihood:.0f}/100 · ~{sig.likely_ai_pages} page(s) look AI-drafted"
+    ctx.kv("AI-likelihood (est.)", ai_val, ai_sty)
+    ctx.kv("Explicit AI markers", f"{sig.ai_marked_pages} page(s) (lower bound)")
+
+    # Pages worth a look
+    if sig.flagged_pages:
+        ctx.heading("Flagged pages")
+        for title, reason in sig.flagged_pages:
+            ctx.kv(title, reason)
+
+    # Examples — real scanned pages (with links) so the scores are inspectable.
+    samples = blob.get("samples") if isinstance(blob, dict) else None
+    if samples:
+        ctx.heading("Examples")
+        for s in samples[:5]:
+            title = str(s.get("title", "")).strip()
+            meta = (
+                f"{s.get('platform', '')} · clarity {s.get('clarity', 0):.0f} · AI-est {s.get('ai_likelihood', 0):.0f}"
+            )
+            line = Text(PAD + "  ", justify="left")
+            line.append(title, style=c_value)
+            line.append(f"  {meta}", style=c_dim)
+            if s.get("url"):
+                line.append(f"  {s['url']}", style=c_example)
+            _add(line)
+
+    # Coaching — start / stop / keep / try (mirrors _ta_insights / _ta_ai_adoption)
+    insights = blob.get("insights", {}) if isinstance(blob, dict) else {}
+    if isinstance(insights, dict) and any(insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+        for key, label in INSIGHT_CATEGORIES:
+            items = insights.get(key)
+            if not isinstance(items, list) or not items:
+                continue
+            icon, colour = _INSIGHT_STYLE[key]
+            _add(Text(""))
+            h = Text(PAD, justify="left")
+            h.append(f"{icon} {label.upper()}", style=f"bold {colour}")
+            _add(h)
+            _add(Text(PAD + "─" * min(len(label) + 2, 40), style="rgb(50,60,80)"))
+            for it in items:
+                if not isinstance(it, dict) or not str(it.get("title", "")).strip():
+                    continue
+                _add(Text(""))
+                t = Text(PAD + "  ", justify="left")
+                t.append(str(it["title"]).strip(), style=c_value)
+                _add(t)
+                for wrapped in _ta_wrap(str(it.get("detail", "") or ""), max_w):
+                    r = Text(PAD + "    ", justify="left")
+                    r.append(wrapped, style=c_muted)
+                    _add(r)
+                evidence = str(it.get("evidence", "") or "").strip()
+                if evidence:
+                    r = Text(PAD + "    ", justify="left")
+                    r.append(f"— {evidence}", style=c_dim)
+                    _add(r)
+                link = str(it.get("link", "") or "").strip()
+                if link:
+                    r = Text(PAD + "    ", justify="left")
+                    r.append(f"↳ {link}", style=c_example)
+                    _add(r)
+
+
+# The overview cards: title, section builders (render order), glossary terms.
 _TA_CARDS: dict[str, dict] = {
     "velocity": {
         "title": "Velocity & Sprints",
@@ -1699,6 +1951,16 @@ _TA_CARDS: dict[str, dict] = {
     "recommendations": {
         "title": "Recommendations",
         "builders": (_ta_recommendations,),
+        "glossary": (),
+    },
+    "ai-adoption": {
+        "title": "AI Adoption",
+        "builders": (_ta_ai_adoption,),
+        "glossary": (),
+    },
+    "documentation": {
+        "title": "Documentation",
+        "builders": (_ta_doc_quality,),
         "glossary": (),
     },
     "insights": {
@@ -1756,6 +2018,18 @@ def _ta_card_teaser(ctx: _TaCtx, profile, key: str) -> str:
     if key == "recommendations":
         n = len(compute_recommendations(profile, ex))
         return f"⚠ {n} flagged" if n else "none flagged"
+    if key == "ai-adoption":
+        sig = getattr(profile, "ai_adoption", None)
+        scanned = (getattr(sig, "scanned_commits", 0) + getattr(sig, "scanned_prs", 0)) if sig else 0
+        if scanned:
+            return f"{sig.footprint_pct:.0f}% AI footprint"
+        return "not scanned"
+    if key == "documentation":
+        sig = getattr(profile, "doc_quality", None)
+        pages = getattr(sig, "pages_scanned", 0) if sig else 0
+        if pages:
+            return f"{sig.avg_clarity:.0f}/100 clarity · {pages} pages"
+        return "not scanned"
     if key == "insights":
         ins = ex.get("insights", {})
         if isinstance(ins, dict):

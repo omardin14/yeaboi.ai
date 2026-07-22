@@ -36,7 +36,14 @@ class _BridgedProgress(list):
 
 
 def _team_analyze(
-    source: str, project_key: str, sprint_count: int, generate_samples: bool, include_insights: bool, progress=None
+    source: str,
+    project_key: str,
+    sprint_count: int,
+    generate_samples: bool,
+    include_insights: bool,
+    include_ai_usage: bool,
+    include_doc_quality: bool,
+    progress=None,
 ):
     if source not in ("", "jira", "azdevops"):
         raise ValueError(f"source must be 'jira' or 'azdevops' (blank auto-detects) — got {source!r}")
@@ -48,6 +55,8 @@ def _team_analyze(
         sprint_count=sprint_count,
         generate_samples=generate_samples,
         include_insights=include_insights,
+        include_ai_usage=include_ai_usage,
+        include_doc_quality=include_doc_quality,
         progress=progress,
     )
 
@@ -89,13 +98,21 @@ def register(app) -> None:
         sprint_count: int = 8,
         generate_samples: bool = False,
         include_insights: bool = True,
+        include_ai_usage: bool = True,
+        include_doc_quality: bool = True,
     ) -> dict:
         """Analyse the team's tracker history (closed sprints) into a calibration profile:
         velocity, story-point calibration, writing style, DoD signals, plus coaching insights
         and headline stats. The profile is saved and feeds future planning. HEAVY: several LLM
         calls plus tracker API paging — takes minutes; warn the user before running.
         source: 'jira' or 'azdevops' (blank auto-detects); generate_samples additionally drafts
-        sample tickets in the team's style (more LLM calls)."""
+        sample tickets in the team's style (more LLM calls). include_ai_usage also scans the
+        team's commits/PRs for AI-tool markers (Co-Authored-By: Claude, Copilot, Cursor, …) and
+        reports a detectable AI-adoption footprint — a LOWER BOUND (inline IDE assist leaves no
+        trace); set False to skip those GitHub/AzDO network calls. include_doc_quality also reads
+        the team's recent Notion/Confluence pages and reports a documentation clarity score plus a
+        stylometric AI-likelihood ESTIMATE (not a detection); set False to skip those doc-platform
+        network calls."""
         import asyncio
 
         try:
@@ -103,7 +120,16 @@ def register(app) -> None:
         except RuntimeError:  # non-asyncio backend — run without progress
             progress = None
         return await run_engine(
-            ctx, _team_analyze, source, project_key, sprint_count, generate_samples, include_insights, progress
+            ctx,
+            _team_analyze,
+            source,
+            project_key,
+            sprint_count,
+            generate_samples,
+            include_insights,
+            include_ai_usage,
+            include_doc_quality,
+            progress,
         )
 
     @app.tool()

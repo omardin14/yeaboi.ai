@@ -569,6 +569,18 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_p.add_argument("--sprints", type=int, default=8, help="Closed sprints to analyse (default 8)")
     analyze_p.add_argument("--samples", action="store_true", help="Also generate sample tickets (extra LLM calls)")
     analyze_p.add_argument("--no-insights", action="store_true", help="Skip the coaching-insights LLM call")
+    analyze_p.add_argument(
+        "--no-ai-usage",
+        dest="include_ai_usage",
+        action="store_false",
+        help="Skip the AI-adoption scan (commit/PR AI-tool markers)",
+    )
+    analyze_p.add_argument(
+        "--no-doc-quality",
+        dest="include_doc_quality",
+        action="store_false",
+        help="Skip the documentation scan (Notion/Confluence clarity + AI-likelihood)",
+    )
     analyze_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     analyze_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
@@ -1267,6 +1279,8 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
         sprint_count=args.sprints,
         generate_samples=args.samples,
         include_insights=not args.no_insights,
+        include_ai_usage=args.include_ai_usage,
+        include_doc_quality=args.include_doc_quality,
     )
     for warning in result["warnings"]:
         print(f"⚠ {warning}", file=sys.stderr)

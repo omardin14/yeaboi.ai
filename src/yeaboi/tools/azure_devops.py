@@ -1055,7 +1055,8 @@ def azdevops_recent_commits(project: str = "", days: int = 1, since=None) -> lis
     Scans up to the first _MAX_ACTIVITY_REPOS repositories in the project (all
     branches are NOT walked — the commit search covers the default branch per
     repo, which is where merged work lands). Each item: {author, author_email,
-    kind='commit', title(first line + repo name), timestamp, key(sha[:8])}.
+    kind='commit', title(first line + repo name), body, timestamp, key(sha[:8])}.
+    ``body`` is the commit message body (Co-Authored-By / AI-tool trailers).
     Returns [] when Azure DevOps is unconfigured or the API fails.
     """
     project = project or get_azure_devops_project() or ""
@@ -1081,6 +1082,7 @@ def azdevops_recent_commits(project: str = "", days: int = 1, since=None) -> lis
             for commit in commits or []:
                 author = getattr(commit, "author", None)
                 message = (getattr(commit, "comment", "") or "").splitlines()
+                body = "\n".join(message[1:]).strip()  # Co-Authored-By / AI-tool trailers live here
                 sha = getattr(commit, "commit_id", "") or ""
                 items.append(
                     {
@@ -1088,6 +1090,7 @@ def azdevops_recent_commits(project: str = "", days: int = 1, since=None) -> lis
                         "author_email": getattr(author, "email", "") or "",
                         "kind": "commit",
                         "title": f"{message[0] if message else ''} ({repo.name})",
+                        "body": body,
                         "timestamp": str(getattr(author, "date", "") or "")[:19],
                         "key": sha[:8],
                         "url": f"{repo_web}/commit/{sha}" if repo_web and sha else "",
@@ -1114,8 +1117,9 @@ def azdevops_recent_prs(project: str = "", days: int = 1, since=None) -> list[di
 
     The v7_1 PR search criteria has no time filters, so PRs are fetched
     newest-first per repo (top 25) and filtered client-side by creation/closed
-    date. Each item: {author, author_email, kind='pr', title(+repo name),
-    status, timestamp, key(!id)}. Returns [] on missing config or API failure.
+    date. Each item: {author, author_email, kind='pr', title(+repo name), body,
+    status, timestamp, key(!id)} (``body`` is the PR description). Returns [] on
+    missing config or API failure.
     """
     project = project or get_azure_devops_project() or ""
     logger.info("azdevops_recent_prs: project=%r days=%d since=%s", project, days, since)
@@ -1151,6 +1155,7 @@ def azdevops_recent_prs(project: str = "", days: int = 1, since=None) -> list[di
                         "author_email": getattr(creator, "unique_name", "") or "",
                         "kind": "pr",
                         "title": f"{getattr(pr, 'title', '') or ''} ({repo.name})",
+                        "body": getattr(pr, "description", "") or "",  # PR description
                         "status": "merged" if status == "completed" else status,
                         "timestamp": str(closed or created or "")[:19],
                         "key": f"!{pr_id}",
