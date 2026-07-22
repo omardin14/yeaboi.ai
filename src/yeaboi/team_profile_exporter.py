@@ -19,6 +19,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
+from yeaboi.analysis.ai_usage import _source_label
 from yeaboi.team_profile import TeamProfile
 from yeaboi.tools.team_learning import ANALYSIS_GLOSSARY, INSIGHT_CATEGORIES
 
@@ -88,6 +89,72 @@ def _kv_table(rows: list[tuple[str, str]]) -> str:
         for lbl, v in rows
     )
     return f'<div class="card" style="padding:0;overflow:hidden;"><table class="data-table">{trs}</table></div>'
+
+
+def _insight_html(it: dict) -> str:
+    """Render one coaching insight as an <li>, linking the cited example when present."""
+    body = f"<strong>{_e(str(it.get('title', '')))}</strong> &mdash; {_e(str(it.get('detail', '')))}"
+    if it.get("evidence"):
+        body += f" <em>({_e(str(it['evidence']))})</em>"
+    link = str(it.get("link", "") or "").strip()
+    if link:
+        body += f' <a href="{_e(link)}">↳ example</a>'
+    return f"<li>{body}</li>"
+
+
+def _insight_md(it: dict) -> str:
+    """Render one coaching insight as a Markdown bullet, linking the cited example when present."""
+    line = f"- **{it.get('title', '')}** — {it.get('detail', '')}"
+    if it.get("evidence"):
+        line += f" *({it['evidence']})*"
+    link = str(it.get("link", "") or "").strip()
+    if link:
+        line += f" [↳ example]({link})"
+    return line
+
+
+def _ai_example_md(s: dict) -> str:
+    """Render one AI-adoption sample as a Markdown bullet (link when available, else SHA)."""
+    tool = "unlabelled AI" if s.get("tool") == "other_ai" else str(s.get("tool", ""))
+    title = str(s.get("title", ""))
+    url = str(s.get("url", "") or "")
+    if url:
+        return f"- [{tool}] [{title}]({url}) — {_source_label(str(s.get('source', '')))}"
+    key = str(s.get("key", "") or "")
+    return f"- [{tool}] {title}" + (f" — commit `{key}`" if key else "")
+
+
+def _doc_example_md(s: dict) -> str:
+    """Render one documentation sample as a Markdown bullet (linked page + scores)."""
+    title = str(s.get("title", "Untitled"))
+    url = str(s.get("url", "") or "")
+    head = f"[{title}]({url})" if url else title
+    meta = f"{s.get('platform', '')} · clarity {s.get('clarity', 0):.0f} · AI-est {s.get('ai_likelihood', 0):.0f}"
+    return f"- {head} ({meta})"
+
+
+def _ai_example_html(s: dict) -> str:
+    """Render one AI-adoption sample as an <li> (link when available, else SHA/key)."""
+    tool = "unlabelled AI" if s.get("tool") == "other_ai" else str(s.get("tool", ""))
+    title = _e(str(s.get("title", "")))
+    label = f"[{_e(tool)}] {title}"
+    url = str(s.get("url", "") or "")
+    if url:
+        return f'<li>{label} — <a href="{_e(url)}">{_e(_source_label(str(s.get("source", ""))))}</a></li>'
+    key = str(s.get("key", "") or "")
+    ref = f" — commit {_e(key)}" if key else ""
+    return f"<li>{label}{ref}</li>"
+
+
+def _doc_example_html(s: dict) -> str:
+    """Render one documentation sample as an <li> (linked page title + scores)."""
+    title = _e(str(s.get("title", "Untitled")))
+    meta = (
+        f"{_e(str(s.get('platform', '')))} · clarity {s.get('clarity', 0):.0f} · AI-est {s.get('ai_likelihood', 0):.0f}"
+    )
+    url = str(s.get("url", "") or "")
+    head = f'<a href="{_e(url)}">{title}</a>' if url else title
+    return f"<li>{head} <span style='color:var(--text-muted);'>({meta})</span></li>"
 
 
 def _ceremony_rows(ceremony) -> list[tuple[str, str]]:
@@ -196,6 +263,100 @@ def export_team_profile_html(
         if i_parts:
             _nav("insights", "Insights")
             sections.append(_section("insights", "Team Insights", "".join(i_parts)))
+
+    # ── AI Adoption (detectable AI-tool footprint — lower bound) ─────
+    ai_sig = getattr(profile, "ai_adoption", None)
+    ai_blob = ex.get("ai_adoption", {})
+    ai_scanned = (getattr(ai_sig, "scanned_commits", 0) + getattr(ai_sig, "scanned_prs", 0)) if ai_sig else 0
+    if ai_sig and ai_scanned:
+        disclaimer = (
+            '<p class="muted"><em>Lower bound — only AI tools that leave a marker in commit '
+            "messages or PR descriptions are counted. Inline IDE assist (Copilot ghost-text, "
+            "Cursor Tab) leaves no trace, so real usage is at least this.</em></p>"
+        )
+        a_rows = [
+            ("Detectable footprint", f"{ai_sig.footprint_pct:.0f}%"),
+            ("Commits with AI marker", f"{ai_sig.ai_commits} of {ai_sig.scanned_commits}"),
+        ]
+        if ai_sig.scanned_prs:
+            a_rows.append(("PRs with AI marker", f"{ai_sig.ai_prs} of {ai_sig.scanned_prs}"))
+        if ai_sig.sources_scanned:
+            a_rows.append(("Sources scanned", ", ".join(_source_label(s) for s in ai_sig.sources_scanned)))
+        for repo in getattr(ai_sig, "repos_scanned", ()):
+            a_rows.append(("Scanned", repo))
+        a_html = disclaimer + _kv_table(a_rows)
+        if ai_sig.per_tool:
+            tool_lis = "".join(
+                f"<li>{_e('unlabelled AI' if t == 'other_ai' else t)}: {n}</li>" for t, n in ai_sig.per_tool
+            )
+            a_html += f"<h4>By tool</h4><ul>{tool_lis}</ul>"
+        if getattr(ai_sig, "per_source", ()):
+            src_lis = "".join(f"<li>{_e(_source_label(s))}: {n}</li>" for s, n in ai_sig.per_source)
+            a_html += f"<h4>By source</h4><ul>{src_lis}</ul>"
+        if ai_sig.per_activity:
+            act_lis = "".join(f"<li>{_e(a)}: {n}</li>" for a, n in ai_sig.per_activity)
+            a_html += f"<h4>By activity</h4><ul>{act_lis}</ul>"
+        if ai_sig.per_author:
+            auth_lis = "".join(f"<li>{_e(a)}: {n}</li>" for a, n in ai_sig.per_author[:8])
+            a_html += f"<h4>By contributor</h4><ul>{auth_lis}</ul>"
+        ai_coverage = ai_blob.get("coverage") if isinstance(ai_blob, dict) else None
+        if ai_coverage:
+            gap_lis = "".join(f"<li>{_e(g)}</li>" for g in ai_coverage[:4])
+            a_html += f"<h4>Not scanned</h4><ul>{gap_lis}</ul>"
+        ai_samples = ai_blob.get("samples") if isinstance(ai_blob, dict) else None
+        if ai_samples:
+            ex_lis = "".join(_ai_example_html(s) for s in ai_samples[:5])
+            a_html += f"<h4>Examples</h4><ul>{ex_lis}</ul>"
+        ai_insights = ai_blob.get("insights", {}) if isinstance(ai_blob, dict) else {}
+        if isinstance(ai_insights, dict) and any(ai_insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+            for ik, ilabel in INSIGHT_CATEGORIES:
+                i_items = ai_insights.get(ik)
+                if not isinstance(i_items, list) or not i_items:
+                    continue
+                i_lis = "".join(_insight_html(it) for it in i_items if isinstance(it, dict) and it.get("title"))
+                if i_lis:
+                    a_html += f'<div class="card"><strong>{_e(ilabel)}</strong><ul>{i_lis}</ul></div>'
+        _nav("ai-adoption", "AI Adoption")
+        sections.append(_section("ai-adoption", "AI Adoption", a_html))
+
+    # ── Documentation (Notion/Confluence clarity + AI-usage estimate) ─────
+    dq_sig = getattr(profile, "doc_quality", None)
+    dq_blob = ex.get("doc_quality", {})
+    dq_pages = getattr(dq_sig, "pages_scanned", 0) if dq_sig else 0
+    if dq_sig and dq_pages:
+        dq_disclaimer = (
+            '<p class="muted"><em>Clarity is a readability score. AI-likelihood is a heuristic '
+            "estimate from writing style, not a detection — prose has no reliable AI marker. "
+            "Explicit AI markers are a lower bound.</em></p>"
+        )
+        d_split = f"{dq_sig.clear_pages} clear / {dq_sig.mixed_pages} mixed / {dq_sig.unclear_pages} unclear"
+        d_ai = f"{dq_sig.avg_ai_likelihood:.0f}/100 — ~{dq_sig.likely_ai_pages} page(s) look AI-drafted"
+        d_rows = [
+            ("Average clarity", f"{dq_sig.avg_clarity:.0f}/100"),
+            ("Pages scanned", f"{dq_pages} ({', '.join(dq_sig.platforms_scanned) or 'n/a'})"),
+            ("Clarity split", d_split),
+            ("AI-likelihood (estimate)", d_ai),
+            ("Explicit AI markers", f"{dq_sig.ai_marked_pages} page(s) (lower bound)"),
+        ]
+        d_html = dq_disclaimer + _kv_table(d_rows)
+        if dq_sig.flagged_pages:
+            flag_lis = "".join(f"<li>{_e(title)}: {_e(reason)}</li>" for title, reason in dq_sig.flagged_pages)
+            d_html += f"<h4>Flagged pages</h4><ul>{flag_lis}</ul>"
+        dq_samples = dq_blob.get("samples") if isinstance(dq_blob, dict) else None
+        if dq_samples:
+            ex_lis = "".join(_doc_example_html(s) for s in dq_samples[:5])
+            d_html += f"<h4>Examples</h4><ul>{ex_lis}</ul>"
+        dq_insights = dq_blob.get("insights", {}) if isinstance(dq_blob, dict) else {}
+        if isinstance(dq_insights, dict) and any(dq_insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+            for ik, ilabel in INSIGHT_CATEGORIES:
+                i_items = dq_insights.get(ik)
+                if not isinstance(i_items, list) or not i_items:
+                    continue
+                i_lis = "".join(_insight_html(it) for it in i_items if isinstance(it, dict) and it.get("title"))
+                if i_lis:
+                    d_html += f'<div class="card"><strong>{_e(ilabel)}</strong><ul>{i_lis}</ul></div>'
+        _nav("documentation", "Documentation")
+        sections.append(_section("documentation", "Documentation", d_html))
 
     # ── Team & Velocity ─────────────────────────────────────────────
     vel_rows: list[tuple[str, str]] = []
@@ -1452,6 +1613,94 @@ def build_team_profile_markdown(
                 lines.append(i_line)
             lines.append("")
 
+    # ── AI Adoption (detectable AI-tool footprint — lower bound) ─────
+    ai_sig = getattr(profile, "ai_adoption", None)
+    ai_blob = ex.get("ai_adoption", {})
+    ai_scanned = (getattr(ai_sig, "scanned_commits", 0) + getattr(ai_sig, "scanned_prs", 0)) if ai_sig else 0
+    if ai_sig and ai_scanned:
+        lines.extend(["## AI Adoption", ""])
+        lines.append(
+            "> _Lower bound — only AI tools that leave a marker in commit messages or PR "
+            "descriptions are counted. Inline IDE assist (Copilot ghost-text, Cursor Tab) "
+            "leaves no trace, so real usage is at least this._"
+        )
+        lines.append("")
+        lines.append(f"- **Detectable footprint:** {ai_sig.footprint_pct:.0f}%")
+        lines.append(f"- **Commits with AI marker:** {ai_sig.ai_commits} of {ai_sig.scanned_commits}")
+        if ai_sig.scanned_prs:
+            lines.append(f"- **PRs with AI marker:** {ai_sig.ai_prs} of {ai_sig.scanned_prs}")
+        if ai_sig.sources_scanned:
+            lines.append(f"- **Sources scanned:** {', '.join(_source_label(s) for s in ai_sig.sources_scanned)}")
+        for repo in getattr(ai_sig, "repos_scanned", ()):
+            lines.append(f"- **Scanned:** {repo}")
+        if ai_sig.per_tool:
+            tools = ", ".join(f"{'unlabelled AI' if t == 'other_ai' else t} ({n})" for t, n in ai_sig.per_tool)
+            lines.append(f"- **By tool:** {tools}")
+        if getattr(ai_sig, "per_source", ()):
+            lines.append(f"- **By source:** {', '.join(f'{_source_label(s)} ({n})' for s, n in ai_sig.per_source)}")
+        if ai_sig.per_activity:
+            lines.append(f"- **By activity:** {', '.join(f'{a} ({n})' for a, n in ai_sig.per_activity)}")
+        if ai_sig.per_author:
+            lines.append(f"- **By contributor:** {', '.join(f'{a} ({n})' for a, n in ai_sig.per_author[:8])}")
+        ai_coverage = ai_blob.get("coverage") if isinstance(ai_blob, dict) else None
+        if ai_coverage:
+            lines.append(f"- **Not scanned:** {'; '.join(ai_coverage[:4])}")
+        lines.append("")
+        ai_samples = ai_blob.get("samples") if isinstance(ai_blob, dict) else None
+        if ai_samples:
+            lines.extend(["### Examples", ""])
+            lines.extend(_ai_example_md(s) for s in ai_samples[:5])
+            lines.append("")
+        ai_insights = ai_blob.get("insights", {}) if isinstance(ai_blob, dict) else {}
+        if isinstance(ai_insights, dict) and any(ai_insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+            for ik, ilabel in INSIGHT_CATEGORIES:
+                i_items = ai_insights.get(ik)
+                if not isinstance(i_items, list) or not i_items:
+                    continue
+                lines.extend([f"### {ilabel}", ""])
+                lines.extend(_insight_md(it) for it in i_items if isinstance(it, dict) and it.get("title"))
+                lines.append("")
+
+    # ── Documentation (Notion/Confluence clarity + AI-usage estimate) ─────
+    dq_sig = getattr(profile, "doc_quality", None)
+    dq_blob = ex.get("doc_quality", {})
+    dq_pages = getattr(dq_sig, "pages_scanned", 0) if dq_sig else 0
+    if dq_sig and dq_pages:
+        lines.extend(["## Documentation", ""])
+        lines.append(
+            "> _Clarity is a readability score. AI-likelihood is a heuristic estimate from "
+            "writing style, not a detection — prose has no reliable AI marker. Explicit AI "
+            "markers are a lower bound._"
+        )
+        lines.append("")
+        dq_platforms = ", ".join(dq_sig.platforms_scanned) or "n/a"
+        dq_split = f"{dq_sig.clear_pages} clear / {dq_sig.mixed_pages} mixed / {dq_sig.unclear_pages} unclear"
+        lines.append(f"- **Average clarity:** {dq_sig.avg_clarity:.0f}/100")
+        lines.append(f"- **Pages scanned:** {dq_pages} ({dq_platforms})")
+        lines.append(f"- **Clarity split:** {dq_split}")
+        lines.append(
+            f"- **AI-likelihood (estimate):** {dq_sig.avg_ai_likelihood:.0f}/100 — "
+            f"~{dq_sig.likely_ai_pages} page(s) look AI-drafted"
+        )
+        lines.append(f"- **Explicit AI markers:** {dq_sig.ai_marked_pages} page(s) (lower bound)")
+        if dq_sig.flagged_pages:
+            lines.append(f"- **Flagged:** {', '.join(f'{t} ({r})' for t, r in dq_sig.flagged_pages)}")
+        lines.append("")
+        dq_samples = dq_blob.get("samples") if isinstance(dq_blob, dict) else None
+        if dq_samples:
+            lines.extend(["### Examples", ""])
+            lines.extend(_doc_example_md(s) for s in dq_samples[:5])
+            lines.append("")
+        dq_insights = dq_blob.get("insights", {}) if isinstance(dq_blob, dict) else {}
+        if isinstance(dq_insights, dict) and any(dq_insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+            for ik, ilabel in INSIGHT_CATEGORIES:
+                i_items = dq_insights.get(ik)
+                if not isinstance(i_items, list) or not i_items:
+                    continue
+                lines.extend([f"### {ilabel}", ""])
+                lines.extend(_insight_md(it) for it in i_items if isinstance(it, dict) and it.get("title"))
+                lines.append("")
+
     # ── Recurring work ──────────────────────────────────────────────
     rec_count = ex.get("recurring_count", 0)
     del_count = ex.get("delivery_count", 0)
@@ -2364,6 +2613,74 @@ def write_analysis_log(
                 if isinstance(it, dict) and it.get("title"):
                     ev = f" ({it['evidence']})" if it.get("evidence") else ""
                     sections.append(f"  {ilabel.upper():<14s}{it['title']}{ev}")
+
+    # AI-adoption footprint (lower bound — commit/PR markers only)
+    ai_sig = getattr(profile, "ai_adoption", None)
+    ai_blob = examples.get("ai_adoption", {}) if examples else {}
+    ai_scanned = (getattr(ai_sig, "scanned_commits", 0) + getattr(ai_sig, "scanned_prs", 0)) if ai_sig else 0
+    if ai_sig and ai_scanned:
+        sections.extend(["", "AI Adoption (lower bound — commit/PR markers only):"])
+        sections.append(f"  Detectable footprint: {ai_sig.footprint_pct:.0f}%")
+        sections.append(f"  Commits with AI marker: {ai_sig.ai_commits} of {ai_sig.scanned_commits}")
+        if ai_sig.scanned_prs:
+            sections.append(f"  PRs with AI marker: {ai_sig.ai_prs} of {ai_sig.scanned_prs}")
+        if ai_sig.sources_scanned:
+            sections.append(f"  Sources: {', '.join(_source_label(s) for s in ai_sig.sources_scanned)}")
+        for repo in getattr(ai_sig, "repos_scanned", ()):
+            sections.append(f"  Scanned: {repo}")
+        if ai_sig.per_tool:
+            sections.append(
+                "  By tool: "
+                + ", ".join(f"{'unlabelled AI' if t == 'other_ai' else t}={n}" for t, n in ai_sig.per_tool)
+            )
+        if getattr(ai_sig, "per_source", ()):
+            sections.append("  By source: " + ", ".join(f"{_source_label(s)}={n}" for s, n in ai_sig.per_source))
+        ai_coverage = ai_blob.get("coverage") if isinstance(ai_blob, dict) else None
+        if ai_coverage:
+            sections.append(f"  Not scanned: {'; '.join(ai_coverage[:4])}")
+        ai_samples = ai_blob.get("samples") if isinstance(ai_blob, dict) else None
+        if ai_samples:
+            sections.append("  Examples:")
+            for s in ai_samples[:5]:
+                ref = s.get("url") or (f"commit {s.get('key')}" if s.get("key") else "")
+                sections.append(f"    [{s.get('tool', '')}] {s.get('title', '')} {ref}".rstrip())
+        ai_insights = ai_blob.get("insights", {}) if isinstance(ai_blob, dict) else {}
+        if isinstance(ai_insights, dict) and any(ai_insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+            for ik, ilabel in INSIGHT_CATEGORIES:
+                for it in ai_insights.get(ik) or []:
+                    if isinstance(it, dict) and it.get("title"):
+                        ev = f" ({it['evidence']})" if it.get("evidence") else ""
+                        link = f" [{it['link']}]" if it.get("link") else ""
+                        sections.append(f"  {ilabel.upper():<14s}{it['title']}{ev}{link}")
+
+    # Documentation quality (clarity score + AI-likelihood estimate + explicit-marker lower bound)
+    dq_sig = getattr(profile, "doc_quality", None)
+    dq_blob = examples.get("doc_quality", {}) if examples else {}
+    dq_pages = getattr(dq_sig, "pages_scanned", 0) if dq_sig else 0
+    if dq_sig and dq_pages:
+        dq_platforms = ", ".join(dq_sig.platforms_scanned) or "n/a"
+        dq_split = f"{dq_sig.clear_pages} clear / {dq_sig.mixed_pages} mixed / {dq_sig.unclear_pages} unclear"
+        dq_ai = f"{dq_sig.avg_ai_likelihood:.0f}/100, ~{dq_sig.likely_ai_pages} page(s) look AI-drafted"
+        sections.extend(["", "Documentation (clarity score; AI-likelihood is an estimate, markers a lower bound):"])
+        sections.append(f"  Average clarity: {dq_sig.avg_clarity:.0f}/100")
+        sections.append(f"  Pages scanned: {dq_pages} ({dq_platforms})")
+        sections.append(f"  Clarity split: {dq_split}")
+        sections.append(f"  AI-likelihood (estimate): {dq_ai}")
+        sections.append(f"  Explicit AI markers: {dq_sig.ai_marked_pages} page(s)")
+        dq_samples = dq_blob.get("samples") if isinstance(dq_blob, dict) else None
+        if dq_samples:
+            sections.append("  Examples:")
+            for s in dq_samples[:5]:
+                ref = f" {s['url']}" if s.get("url") else ""
+                sections.append(f"    {s.get('title', '')} ({s.get('platform', '')}){ref}".rstrip())
+        dq_insights = dq_blob.get("insights", {}) if isinstance(dq_blob, dict) else {}
+        if isinstance(dq_insights, dict) and any(dq_insights.get(k) for k, _ in INSIGHT_CATEGORIES):
+            for ik, ilabel in INSIGHT_CATEGORIES:
+                for it in dq_insights.get(ik) or []:
+                    if isinstance(it, dict) and it.get("title"):
+                        ev = f" ({it['evidence']})" if it.get("evidence") else ""
+                        link = f" [{it['link']}]" if it.get("link") else ""
+                        sections.append(f"  {ilabel.upper():<14s}{it['title']}{ev}{link}")
 
     # Full profile JSON for machine-readable recovery
     sections.extend(["", "=" * 60, "", "Raw profile JSON:", ""])

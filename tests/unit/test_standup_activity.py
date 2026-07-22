@@ -663,6 +663,7 @@ class TestAzdoRepoActivity:
                 "author_email": "gina@corp.com",
                 "kind": "commit",
                 "title": "add endpoint (api)",
+                "body": "body",
                 "timestamp": "2026-07-17T08:00:00",
                 "key": "abcdef12",
                 "url": "https://dev.azure.com/org/Proj/_git/api/commit/abcdef1234567890",

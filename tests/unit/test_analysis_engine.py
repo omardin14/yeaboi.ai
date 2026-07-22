@@ -40,9 +40,11 @@ def wired(monkeypatch, db, tmp_path):
         lambda project, count: [{"sprint_name": "Iteration 1"}],
     )
 
-    def fake_parallel(source, project, sprint_data, progress):
+    def fake_parallel(source, project, sprint_data, progress, include_ai_usage=True, include_doc_quality=True):
         progress.append("Analysing…")
         captured["parallel"] = (source, project, len(sprint_data))
+        captured["include_ai_usage"] = include_ai_usage
+        captured["include_doc_quality"] = include_doc_quality
         return _profile(source=source, project_key=project), {"sprint_details": []}
 
     monkeypatch.setattr("yeaboi.tools.team_learning._run_parallel_analysis", fake_parallel)

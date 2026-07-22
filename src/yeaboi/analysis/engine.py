@@ -85,6 +85,8 @@ def run_team_analysis(
     sprint_count: int = 8,
     generate_samples: bool = False,
     include_insights: bool = True,
+    include_ai_usage: bool = True,
+    include_doc_quality: bool = True,
     *,
     progress: list | None = None,
     db_path=None,
@@ -106,6 +108,13 @@ def run_team_analysis(
             (epic/stories/tasks/sprint) in the team's style — extra LLM calls.
         include_insights: also generate the start/stop/keep/try coaching
             insights (one extra LLM call).
+        include_ai_usage: also scan the team's commits/PRs for AI-tool markers
+            and attach an AI-adoption footprint + coaching to the profile. This
+            makes best-effort GitHub/AzDO network calls; set False to skip them.
+        include_doc_quality: also read the team's recent Notion/Confluence pages
+            and attach a documentation clarity score + stylometric AI-likelihood
+            estimate + coaching. Best-effort doc-platform network calls; set
+            False to skip them.
         progress: optional shared list the analysis workers append status
             strings to (the TUI reads it from its frame loop).
         db_path: sessions DB override (tests). Defaults to paths.get_db_path().
@@ -141,7 +150,12 @@ def run_team_analysis(
     sprint_names = [sd.get("sprint_name", "") for sd in sprint_data]
 
     profile, examples = _run_parallel_analysis(
-        resolved_source, resolved_project or "unknown", sprint_data, progress if progress is not None else []
+        resolved_source,
+        resolved_project or "unknown",
+        sprint_data,
+        progress if progress is not None else [],
+        include_ai_usage=include_ai_usage,
+        include_doc_quality=include_doc_quality,
     )
     if resolved_team and not profile.team_name:
         from dataclasses import replace

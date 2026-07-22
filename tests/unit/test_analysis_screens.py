@@ -1097,7 +1097,7 @@ class TestAnalysisOverview:
         # Selection auto-scrolls, so check the top half with card 0 selected
         # and the bottom half with the last card selected.
         top = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=0)
-        bottom = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=7)
+        bottom = self._render_view(examples=_NARRATIVE_EXAMPLES, selected_card=9)
         combined = top + bottom
         for title in (
             "Velocity & Sprints",
@@ -1107,6 +1107,8 @@ class TestAnalysisOverview:
             "Writing Style",
             "Trends & Repos",
             "Recommendations",
+            "AI Adoption",
+            "Documentation",
             "Team Insights",
         ):
             assert title in combined, title
@@ -1277,6 +1279,86 @@ class TestAnalysisSectionDetail:
         assert isinstance(panel, Panel)
 
 
+class TestDocumentationCard:
+    """The Documentation card: clarity + AI-usage estimate + coaching (populated + empty)."""
+
+    def _profile(self, sig):
+        from yeaboi.team_profile import TeamProfile
+
+        return TeamProfile(
+            team_id="jira-D",
+            source="jira",
+            project_key="D",
+            sample_sprints=4,
+            sample_stories=40,
+            velocity_avg=30.0,
+            doc_quality=sig,
+        )
+
+    def test_populated_renders_clarity_estimate_and_flag(self):
+        from yeaboi.team_profile import DocQualitySignal
+
+        sig = DocQualitySignal(
+            pages_scanned=6,
+            platforms_scanned=("confluence", "notion"),
+            avg_clarity=52.0,
+            clear_pages=2,
+            mixed_pages=2,
+            unclear_pages=2,
+            avg_ai_likelihood=61.0,
+            likely_ai_pages=3,
+            ai_marked_pages=1,
+            per_platform=(("confluence", 4), ("notion", 2)),
+            flagged_pages=(("Onboarding guide", "clarity 30/100 — dense or long-winded"),),
+        )
+        ex = {
+            "doc_quality": {
+                "samples": [
+                    {
+                        "title": "Onboarding guide",
+                        "platform": "confluence",
+                        "clarity": 30,
+                        "ai_likelihood": 12,
+                        "url": "https://wiki/onboarding",
+                    }
+                ],
+                "insights": {
+                    "start": [
+                        {
+                            "title": "Tighten the least-clear pages",
+                            "detail": "Trim it.",
+                            "evidence": "52/100",
+                            "link": "https://wiki/onboarding",
+                        }
+                    ],
+                    "stop": [],
+                    "keep": [],
+                    "try": [],
+                },
+            }
+        }
+        panel = _build_team_analysis_screen(self._profile(sig), examples=ex, view="documentation", width=100, height=60)
+        output = _render(panel, width=100)
+        assert "Documentation" in output
+        assert "52/100" in output  # clarity score
+        assert "estimate" in output.lower()  # AI-likelihood is framed as an estimate
+        assert "lower bound" in output.lower()  # explicit-marker framing
+        assert "Onboarding guide" in output  # flagged page
+        assert "Tighten the least-clear pages" in output  # coaching
+        assert "Examples" in output  # examples section
+        assert "https://wiki/onboarding" in output  # page link on example + coaching item
+
+    def test_empty_state_and_coverage(self):
+        from yeaboi.team_profile import TeamProfile
+
+        prof = TeamProfile(team_id="e", source="jira", project_key="X")
+        ex = {"doc_quality": {"coverage": ["notion: NOTION_TOKEN not set"]}}
+        panel = _build_team_analysis_screen(prof, examples=ex, view="documentation", width=90, height=30)
+        output = _render(panel, width=90)
+        assert "No documentation scan" in output
+        assert "NOTION_TOKEN not set" in output
+
+
 # ---------------------------------------------------------------------------
 # Team insights screen (results → insights → generate-tickets confirm)
 # ---------------------------------------------------------------------------
@@ -1361,7 +1443,7 @@ class TestBuildTeamInsightsScreen:
             _make_overview_profile(),
             examples=_NARRATIVE_EXAMPLES,
             view="overview",
-            selected_card=7,
+            selected_card=9,
             width=100,
             height=40,
         )

@@ -2254,11 +2254,22 @@ def _run_parallel_analysis(
     project_key: str,
     sprint_data: list[dict],
     progress: list[str] | None = None,
+    include_ai_usage: bool = True,
+    include_doc_quality: bool = True,
 ) -> TeamProfile:
     """Run the 4-worker parallel analysis and merge results into a TeamProfile.
 
     ``progress`` is a shared list the TUI can read to display live status messages.
     Each worker appends a string when it starts (e.g. "Fetching sprint history\u2026").
+
+    When ``include_ai_usage`` is set, an extra best-effort step scans the team's
+    commits and PRs for AI-tool markers and attaches an ``AiAdoptionSignal`` to the
+    profile plus an ``examples["ai_adoption"]`` blob (see ``analysis/ai_usage.py``).
+
+    When ``include_doc_quality`` is set, another best-effort step reads the team's
+    recently-changed Notion/Confluence pages, scores their clarity + a stylometric
+    AI-likelihood estimate, and attaches a ``DocQualitySignal`` plus an
+    ``examples["doc_quality"]`` blob (see ``analysis/doc_quality.py``).
     """
     if progress is None:
         progress = []
@@ -2694,6 +2705,53 @@ def _run_parallel_analysis(
         len(examples),
         sum(len(v) for v in examples.values() if isinstance(v, list)),
     )
+
+    # AI-adoption footprint — scan the team's commits/PRs for AI-tool markers
+    # (Co-Authored-By: Claude, Copilot, Cursor, …) and coach on adoption. This is
+    # a network step (GitHub/AzDO) so it's gated by ``include_ai_usage`` and wholly
+    # best-effort — a failure leaves the default empty signal, never raises.
+    if include_ai_usage:
+        progress.append("Scanning AI-tool footprint…")
+        try:
+            from dataclasses import replace
+
+            from yeaboi.analysis.ai_usage import (
+                generate_ai_adoption_insights,
+                run_ai_adoption,
+            )
+
+            signal, ai_examples = run_ai_adoption(source, project_key, delivery_stories, all_stories)
+            # Only spend an LLM call on coaching when something was actually scanned;
+            # an empty footprint (no repos/creds) coaches deterministically.
+            if signal.scanned_commits + signal.scanned_prs > 0:
+                ai_examples["insights"] = generate_ai_adoption_insights(signal, ai_examples)
+            profile = replace(profile, ai_adoption=signal)
+            examples["ai_adoption"] = ai_examples  # type: ignore[assignment]
+        except Exception:  # pragma: no cover - defensive; run_ai_adoption already guards
+            logger.exception("AI-adoption analysis failed; continuing without it")
+
+    # Documentation quality — read the team's recent Notion/Confluence pages and
+    # score clarity + a stylometric AI-likelihood estimate (see analysis/doc_quality.py).
+    # Network step (doc platforms), gated by ``include_doc_quality`` and wholly
+    # best-effort — a failure leaves the default empty signal, never raises.
+    if include_doc_quality:
+        progress.append("Assessing documentation clarity…")
+        try:
+            from dataclasses import replace
+
+            from yeaboi.analysis.doc_quality import (
+                generate_doc_quality_insights,
+                run_doc_quality,
+            )
+
+            dq_signal, dq_examples = run_doc_quality(source, project_key)
+            # Only spend an LLM call on coaching when pages were actually read.
+            if dq_signal.pages_scanned > 0:
+                dq_examples["insights"] = generate_doc_quality_insights(dq_signal, dq_examples)
+            profile = replace(profile, doc_quality=dq_signal)
+            examples["doc_quality"] = dq_examples  # type: ignore[assignment]
+        except Exception:  # pragma: no cover - defensive; run_doc_quality already guards
+            logger.exception("Doc-quality analysis failed; continuing without it")
 
     # Plain-English narrative — one LLM call explaining what the numbers mean
     # per section card. Falls back to deterministic text; never raises.

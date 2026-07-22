@@ -374,8 +374,9 @@ def github_recent_commits(repo_url: str, days: int = 1, since=None) -> list[dict
     """Return commits pushed to the default branch since the window start.
 
     The window is ``since → now`` when ``since`` (tz-aware datetime) is given,
-    else the last ``days`` days. Each item: {author, kind='commit', title,
-    timestamp, key(sha)}. Returns [] when the repo can't be read (no token /
+    else the last ``days`` days. Each item: {author, kind='commit', title, body,
+    timestamp, key(sha)}. ``body`` is the commit message body (Co-Authored-By /
+    AI-tool trailers). Returns [] when the repo can't be read (no token /
     not found / rate-limited).
     """
     logger.info("github_recent_commits: repo=%r days=%d since=%s", repo_url, days, since)
@@ -388,7 +389,10 @@ def github_recent_commits(repo_url: str, days: int = 1, since=None) -> list[dict
             commit = c.commit
             author = commit.author.name if commit.author else ""
             email = (getattr(commit.author, "email", "") or "") if commit.author else ""
-            msg = (commit.message or "").splitlines()[0] if commit.message else ""
+            full = commit.message or ""
+            lines = full.splitlines()
+            msg = lines[0] if lines else ""
+            body = "\n".join(lines[1:]).strip()  # message body: Co-Authored-By / AI-tool trailers live here
             ts = commit.author.date.isoformat()[:19] if commit.author and commit.author.date else ""
             items.append(
                 {
@@ -396,6 +400,7 @@ def github_recent_commits(repo_url: str, days: int = 1, since=None) -> list[dict
                     "author_email": email,
                     "kind": "commit",
                     "title": msg,
+                    "body": body,
                     "timestamp": ts,
                     "key": c.sha[:8],
                     "url": getattr(c, "html_url", "") or "",
@@ -436,13 +441,17 @@ def _pr_branch_commit_items(pr, cutoff) -> list[dict]:
         when = commit.author.date if commit.author else None
         if when is None or when.tzinfo is None or when < cutoff:
             continue
-        msg = (commit.message or "").splitlines()[0] if commit.message else ""
+        full = commit.message or ""
+        lines = full.splitlines()
+        msg = lines[0] if lines else ""
+        body = "\n".join(lines[1:]).strip()
         items.append(
             {
                 "author": commit.author.name if commit.author else "",
                 "author_email": (getattr(commit.author, "email", "") or "") if commit.author else "",
                 "kind": "commit",
                 "title": f"{msg} (PR #{pr.number})",
+                "body": body,
                 "timestamp": commit.author.date.isoformat()[:19],
                 "key": c.sha[:8],
                 "url": getattr(c, "html_url", "") or "",
@@ -455,8 +464,9 @@ def github_recent_prs(repo_url: str, days: int = 1, since=None) -> list[dict]:
     """Return pull requests updated since the window start, plus their branch commits.
 
     The window is ``since → now`` when ``since`` (tz-aware datetime) is given,
-    else the last ``days`` days. Each PR item: {author, kind='pr', title, status,
-    timestamp, key(#num)}. For the newest in-window PRs (open or merged, capped
+    else the last ``days`` days. Each PR item: {author, kind='pr', title, body,
+    status, timestamp, key(#num)} (``body`` is the PR description). For the newest
+    in-window PRs (open or merged, capped
     at _MAX_PR_COMMIT_LOOKUPS) the PR's branch commits are also emitted as
     kind='commit' items so unmerged feature-branch work is visible. Returns []
     on any error. Sorted by updated desc; stops once older than the window.
@@ -481,6 +491,7 @@ def github_recent_prs(repo_url: str, days: int = 1, since=None) -> list[dict]:
                     "author": pr.user.login if pr.user else "",
                     "kind": "pr",
                     "title": pr.title or "",
+                    "body": getattr(pr, "body", "") or "",  # PR description — AI-drafted summaries / trailers live here
                     "status": status,
                     "timestamp": ts,
                     "key": f"#{pr.number}",

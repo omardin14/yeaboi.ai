@@ -13,6 +13,7 @@ import pytest
 
 from yeaboi.team_profile import (
     DailyScopeSnapshot,
+    DocQualitySignal,
     DoDSignal,
     EpicPattern,
     ScopeChangeEvent,
@@ -404,6 +405,46 @@ class TestExtendedProfileSerialisation:
         )
         assert restored.writing_patterns.subtasks_use_consistent_naming is True
         assert restored.writing_patterns.epic_description_length_avg == 450
+
+    def test_round_trip_doc_quality(self):
+        profile = TeamProfile(
+            team_id="jira-DQ",
+            source="jira",
+            project_key="DQ",
+            doc_quality=DocQualitySignal(
+                pages_scanned=6,
+                platforms_scanned=("confluence", "notion"),
+                avg_clarity=57.5,
+                clear_pages=2,
+                mixed_pages=3,
+                unclear_pages=1,
+                avg_ai_likelihood=48.0,
+                likely_ai_pages=2,
+                ai_marked_pages=1,
+                per_platform=(("confluence", 4), ("notion", 2)),
+                flagged_pages=(("Onboarding guide", "clarity 30/100 — dense or long-winded"),),
+            ),
+        )
+        restored = _json_to_profile(_profile_to_json(profile))
+        dq = restored.doc_quality
+        assert dq.pages_scanned == 6
+        assert dq.platforms_scanned == ("confluence", "notion")
+        assert dq.avg_clarity == 57.5
+        assert (dq.clear_pages, dq.mixed_pages, dq.unclear_pages) == (2, 3, 1)
+        assert dq.avg_ai_likelihood == 48.0
+        assert dq.likely_ai_pages == 2
+        assert dq.ai_marked_pages == 1
+        # Pair lists survive as tuples-of-tuples, not lists-of-lists.
+        assert dq.per_platform == (("confluence", 4), ("notion", 2))
+        assert dq.flagged_pages == (("Onboarding guide", "clarity 30/100 — dense or long-winded"),)
+        assert dq.is_ai_estimate is True
+
+    def test_doc_quality_backward_compat_default(self):
+        """An old profile with no doc_quality key deserializes to an empty signal."""
+        old_json = json.dumps({"team_id": "jira-OLD", "source": "jira", "project_key": "OLD", "sample_sprints": 3})
+        restored = _json_to_profile(old_json)
+        assert restored.doc_quality == DocQualitySignal()
+        assert restored.doc_quality.pages_scanned == 0
 
     def test_round_trip_sprint_counts(self):
         profile = _make_extended_profile()
@@ -1132,6 +1173,56 @@ class TestTeamProfileExporter:
 
         md = build_team_profile_markdown(TeamProfile(team_id="x", source="jira", project_key="X"))
         assert "# Team Profile" in md
+
+    def test_markdown_ai_adoption_source_and_examples(self):
+        from yeaboi.team_profile import AiAdoptionSignal
+        from yeaboi.team_profile_exporter import build_team_profile_markdown
+
+        sig = AiAdoptionSignal(
+            scanned_commits=134,
+            ai_commits=133,
+            footprint_pct=99.0,
+            per_tool=(("claude", 131),),
+            per_source=(("local_git", 133),),
+            repos_scanned=("Local clone: /Users/dinho/repo",),
+            sources_scanned=("local_git",),
+        )
+        profile = TeamProfile(team_id="t", source="jira", project_key="P", ai_adoption=sig)
+        ex = {
+            "ai_adoption": {
+                "coverage": ["github: STANDUP_GITHUB_REPO / GITHUB_TOKEN not set"],
+                "samples": [
+                    {
+                        "tool": "claude",
+                        "title": "Fix login",
+                        "source": "local_git",
+                        "key": "a1b2c3d4",
+                        "url": "https://github.com/o/r/commit/a1b2c3d4",
+                    },
+                ],
+                "insights": {
+                    "start": [
+                        {
+                            "title": "Open PRs",
+                            "detail": "d",
+                            "evidence": "e",
+                            "link": "https://github.com/o/r/commit/a1b2c3d4",
+                        }
+                    ],
+                    "stop": [],
+                    "keep": [],
+                    "try": [],
+                },
+            }
+        }
+        md = build_team_profile_markdown(profile, examples=ex)
+        assert "Local clone (remote)" in md or "Local clone" in md  # friendly source label
+        assert "/Users/dinho/repo" in md  # scanned path
+        assert "**By source:**" in md
+        assert "Not scanned:" in md and "STANDUP_GITHUB_REPO" in md
+        assert "### Examples" in md
+        assert "[Fix login](https://github.com/o/r/commit/a1b2c3d4)" in md  # linked example
+        assert "[↳ example](https://github.com/o/r/commit/a1b2c3d4)" in md  # linked coaching
 
     def test_build_markdown_embeds_velocity_chart(self, tmp_path):
         import pytest
