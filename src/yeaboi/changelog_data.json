@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.28.0",
+      "date": "2026-07-22",
+      "summary": "Team analysis can now run on both Jira and Azure DevOps in a single pass. Set source to 'both' and yeaboi fans out over your configured trackers, presents each one's full analysis with clear source-aware labelling so you can see exactly which findings came from where, and includes a side-by-side comparison. Metrics are deliberately never blended across sources since velocity and story-point scales aren't comparable between teams — only the findings stay clearly separated. Graceful degradation means if only one tracker is configured it runs that one instead, and if one tracker's analysis fails the other still returns.",
+      "highlights": [
+        {"text": "New 'both' source for team analysis: scan Jira and Azure DevOps in one run with clear source labelling", "areas": ["analysis"]},
+        {"text": "Side-by-side comparison of findings across Jira and Azure DevOps, with metrics deliberately kept separate", "areas": ["analysis"]},
+        {"text": "Graceful degradation: one configured tracker runs alone, one failing tracker doesn't block the other", "areas": ["analysis"]}
+      ]
+    },
+    {
       "version": "2.27.0",
       "date": "2026-07-22",
       "summary": "Team analysis now includes two new sub-analyses that deepen your understanding of how your team works. AI adoption scanning finds markers of Claude, Copilot, Cursor, aider, Devin, Codeium, and other AI tools in your recent commits and pull requests across GitHub, Azure DevOps, and your local git clone — showing you the AI footprint as a lower bound with source-aware reporting and real evidence links. Documentation quality analysis scores the clarity and AI-likelihood of your team's Notion and Confluence pages, again with cited examples and improvement suggestions. Both ride on the existing team profile machinery, gracefully skip when nothing is configured, and frame their findings honestly as footprints and heuristics rather than definitive counts.",
