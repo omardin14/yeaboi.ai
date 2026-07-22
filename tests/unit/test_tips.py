@@ -4,6 +4,7 @@ from yeaboi.ui.shared import _tips
 from yeaboi.ui.shared._tips import (
     TIP_ROTATE_SECONDS,
     FeatureTip,
+    build_tips_text,
     current_tip,
     get_tips,
     resolve_index,
@@ -124,6 +125,32 @@ def test_resolve_index_applies_browse_offset(monkeypatch):
     # Offset is additive on top of the tick-driven index, so rotation continues:
     # at one full window the auto index is 1, plus offset 2 → 3.
     assert resolve_index(TIP_ROTATE_SECONDS + 0.1, 2) == 3
+    _clear_cache()
+
+
+def test_build_tips_text_lists_every_tip(monkeypatch):
+    _clear_cache()
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    text = build_tips_text()
+    assert text.startswith("# yeaboi — Tips")
+    # Every tip's text appears as a bullet.
+    for tip in get_tips():
+        assert tip.text in text
+    assert text.endswith("\n")
+    _clear_cache()
+
+
+def test_build_tips_text_marks_new_and_opens(monkeypatch):
+    _clear_cache()
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    text = build_tips_text()
+    # The flagged feature is marked NEW and notes the mode it opens.
+    assert "(NEW)" in text
+    assert "→ opens Analysis" in text  # team-analysis tip → "Analysis" card
+    # An ambient tip (no mode_key) has no opens-note.
+    assert "→ opens" not in "\n".join(
+        line for line in text.splitlines() if "double-tap Space" in line or "focus music" in line
+    )
     _clear_cache()
 
 

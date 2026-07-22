@@ -3,6 +3,7 @@
 from rich.panel import Panel
 
 from yeaboi.ui.mode_select.screens._screens import _build_mode_screen, _build_tip_rows
+from yeaboi.ui.mode_select.screens._screens_secondary import _build_all_tips_screen
 from yeaboi.ui.session.screens._screens_input import _image_hint, _voice_hint
 from yeaboi.ui.shared import _tips
 from yeaboi.voice import voice_install_command
@@ -163,4 +164,51 @@ def test_tip_offset_shifts_the_shown_tip(monkeypatch):
     # and because it's an offset (not a pin) auto-rotation keeps advancing.
     assert tips[0].text in _tip_rows_text(shimmer_tick=0.0, tip_offset=0)
     assert tips[2].text in _tip_rows_text(shimmer_tick=0.0, tip_offset=2)
+    _tips.get_tips.cache_clear()
+
+
+# --- All Tips gallery page (opened with `a`) ---------------------------------
+
+
+def _all_tips_rendered(**kwargs) -> str:
+    import io
+
+    from rich.console import Console
+
+    buf = io.StringIO()
+    Console(file=buf, width=100, height=30).print(_build_all_tips_screen(**kwargs))
+    return buf.getvalue()
+
+
+def test_all_tips_screen_renders_panel(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    result = _build_all_tips_screen(shimmer_tick=0.0, sub_reveal=99, actions=["Copy all", "Back"])
+    assert isinstance(result, Panel)
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_shows_a_tip_and_new_badge(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    out = _all_tips_rendered(shimmer_tick=0.0, sub_reveal=99)
+    assert "NEW" in out
+    assert "opens" in out  # a carded tip's "→ opens <Mode>" note
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_shows_status_message(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    out = _all_tips_rendered(shimmer_tick=0.0, sub_reveal=99, message="Copied to clipboard")
+    assert "Copied to clipboard" in out
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_scrolls(monkeypatch):
+    # A large scroll offset is clamped and still renders a Panel (no crash).
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    result = _build_all_tips_screen(scroll_offset=999, shimmer_tick=1.0, sub_reveal=99)
+    assert isinstance(result, Panel)
     _tips.get_tips.cache_clear()

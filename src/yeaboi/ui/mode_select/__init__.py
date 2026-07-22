@@ -2384,6 +2384,67 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
     logger.info("changelog: page closed")
 
 
+def _run_all_tips_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Event loop for the All Tips page (opened with `a` from mode select).
+
+    Read-only gallery of every tip: Up/Down scrolls, "Copy all" copies the whole
+    list to the clipboard, Enter/Esc/q returns to mode select. Mirrors
+    ``_run_changelog_page``; content comes live from ``get_tips()``.
+    """
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_all_tips_screen
+
+    logger.info("all tips: page opened")
+    scroll = 0
+    _scroll_meta: dict = {}
+    actions = ["Copy all", "Back"]
+    sel = 0
+    message = ""
+    anim_start = time.monotonic()  # shimmer title + typewriter subtitle clock
+
+    def _render() -> None:
+        w, h = console.size
+        elapsed = time.monotonic() - anim_start
+        live.update(
+            _build_all_tips_screen(
+                scroll_offset=scroll,
+                scroll_meta=_scroll_meta,
+                width=w,
+                height=max(10, h - 1),
+                action_sel=sel,
+                shimmer_tick=elapsed,
+                sub_reveal=elapsed * _HEADER_SUB_SPEED,
+                actions=actions,
+                message=message,
+            )
+        )
+
+    _render()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if k in SCROLL_KEYS:
+            _ns = coalesce_scroll(scroll, k, _scroll_meta, read_key)
+            if _ns == scroll:
+                continue
+            scroll = _ns
+        elif k == "left":
+            sel = max(0, sel - 1)
+        elif k == "right":
+            sel = min(len(actions) - 1, sel + 1)
+        elif k in ("enter", " "):
+            if actions[sel] == "Copy all":
+                from yeaboi.clipboard import copy_markdown_status
+                from yeaboi.ui.shared._tips import build_tips_text
+
+                logger.info("all tips: Copy all pressed")
+                message = copy_markdown_status(build_tips_text())
+            else:  # Back
+                break
+        elif k in ("esc", "q"):
+            break
+        _render()
+    logger.info("all tips: page closed")
+
+
 def _run_feedback_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
     """Event loop for the Feedback page (opened with `f` from mode select).
 
@@ -5320,6 +5381,13 @@ def select_mode(
                     logger.info("feedback opened from mode select")
                     play_wordmark_intro(console, live, "Feedback", "rgb(160,160,180)", frame_time=_FRAME_TIME)
                     _run_feedback_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                    select_time = time.monotonic()  # restart the description typewriter
+                elif key == "a":
+                    # Open the All Tips gallery (bottom-left hint) — same inline
+                    # pattern as the Changelog/Feedback pages above.
+                    logger.info("all tips opened from mode select")
+                    play_wordmark_intro(console, live, "All Tips", "rgb(160,160,180)", frame_time=_FRAME_TIME)
+                    _run_all_tips_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
                     select_time = time.monotonic()  # restart the description typewriter
 
                 elapsed = time.monotonic() - select_time

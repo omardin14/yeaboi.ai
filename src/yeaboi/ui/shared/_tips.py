@@ -157,6 +157,29 @@ def get_tips() -> tuple[FeatureTip, ...]:
     return (voice_tip, *_FEATURE_TIPS, *_META_TIPS, music_tip)
 
 
+def build_tips_text() -> str:
+    """Render every tip as a copy-pasteable Markdown list.
+
+    Powers the "Copy all" action on the All Tips page, mirroring
+    ``build_changelog_text``. Pure — :func:`get_tips` already resolves
+    voice/music availability. Carded tips note the mode they open (by its
+    friendly ``_MODE_CARDS`` title) and freshly-shipped ones are marked ``(NEW)``.
+    """
+    # Lazy import to avoid a UI import cycle (screens import from this module).
+    from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS
+
+    titles = {card["key"]: card["title"] for card in _MODE_CARDS}
+    lines = ["# yeaboi — Tips", ""]
+    for tip in get_tips():
+        line = f"- {tip.text}"
+        if tip.is_new:
+            line += " (NEW)"
+        if tip.mode_key and tip.mode_key in titles:
+            line += f" → opens {titles[tip.mode_key]}"
+        lines.append(line)
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def tip_count() -> int:
     """Number of tips in rotation (used to render position dots)."""
     return len(get_tips())

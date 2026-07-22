@@ -279,6 +279,11 @@ def feedback_title(shimmer_tick: float | None = None, *, width: int | None = Non
     return build_ascii_title("Feedback", "rgb(160,160,180)", shimmer_tick=shimmer_tick, width=width)
 
 
+def tips_title(shimmer_tick: float | None = None, *, width: int | None = None) -> Text:
+    """Return the Tips ASCII title (silver accent). Optionally shimmering."""
+    return build_ascii_title("Tips", "rgb(160,160,180)", shimmer_tick=shimmer_tick, width=width)
+
+
 def build_popup(
     message: str,
     *,
