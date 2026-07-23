@@ -38,6 +38,7 @@ from yeaboi.retro.board import (
     REACTION_EMOJIS,
     RETRO_GRID_LABELS,
     RETRO_GRIDS,
+    RETRO_THEMES,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,6 +240,13 @@ header .spacer { flex:1; }
 .act.danger:hover { color:#f85149; }
 .editbox { width:100%; background:var(--card); color:var(--text); border:1px solid var(--accent);
            border-radius:6px; padding:6px; font:inherit; resize:vertical; }
+.edit-actions { display:flex; gap:8px; margin-top:8px; }
+.btn-save { background:var(--accent); color:var(--ink); border:0; border-radius:7px;
+            padding:6px 18px; font:inherit; font-weight:600; cursor:pointer; }
+.btn-save:hover { filter:brightness(1.08); }
+.btn-cancel { background:transparent; color:var(--text); border:1px solid var(--line);
+              border-radius:7px; padding:6px 14px; font:inherit; cursor:pointer; }
+.btn-cancel:hover { border-color:var(--accent); }
 .rx { display:flex; flex-wrap:wrap; gap:4px; margin-top:7px; }
 .chip { background:transparent; border:1px solid var(--line); border-radius:999px;
         padding:1px 7px; cursor:pointer; font:inherit; font-size:13px; line-height:1.5; color:var(--text); }
@@ -263,6 +271,28 @@ textarea { width:100%; background:var(--card); color:var(--text); border:1px sol
 .addbtn { margin-top:6px; background:var(--accent); color:var(--ink); border:0; border-radius:8px;
           padding:7px 14px; font:inherit; font-weight:600; cursor:pointer; }
 .addbtn:hover { filter:brightness(1.1); }
+.addbtn:disabled, .add textarea:disabled { opacity:.5; cursor:not-allowed; }
+.add { margin-bottom:10px; }  /* input now sits at the top of the column */
+
+/* Small relative timestamp beside the author badge. */
+.card .who .ago { color:var(--muted); font-size:11px; }
+
+/* Group-by-author clusters within a column. */
+.author-group { margin-bottom:10px; }
+.ag-head { font-size:12px; color:var(--muted); margin:2px 0 5px; letter-spacing:.02em; }
+
+/* Header view controls: focus-one-person picker + group-by toggle. */
+.viewctl { display:flex; align-items:center; gap:8px; }
+.viewctl select { background:var(--panel); color:var(--text); border:1px solid var(--line);
+                  border-radius:9px; padding:6px 8px; font:inherit; font-size:13px; cursor:pointer; }
+.viewctl select:hover { border-color:var(--accent); }
+
+/* Host-broadcast banners (autoplay tap-to-listen + board lock). */
+.banner { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:28;
+          background:var(--panel); color:var(--text); border:1px solid var(--accent);
+          border-radius:999px; padding:9px 18px; font-size:13.5px; cursor:pointer;
+          box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.banner.lock { border-color:#f85149; cursor:default; }
 
 .overlay { position:fixed; inset:0; background:rgba(0,0,0,.75); display:flex;
            align-items:center; justify-content:center; padding:16px; z-index:20; }
@@ -307,6 +337,10 @@ const ADJS = __ADJS__;
 const NOUNS = __NOUNS__;
 
 let TOKEN = new URLSearchParams(location.search).get("token") || sessionStorage.getItem("retro_token") || "";
+// The admin secret only ever rides in the host's private link (server.py appends
+// &admin=…). Whoever has it gets the host controls (music/theme/timer/lock).
+let ADMIN = new URLSearchParams(location.search).get("admin") || sessionStorage.getItem("retro_admin") || "";
+let IS_ADMIN = !!ADMIN;
 let PID = localStorage.getItem("retro_pid");
 if (!PID) { PID = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : "p" + Math.random().toString(36).slice(2); localStorage.setItem("retro_pid", PID); }
 let NAME = localStorage.getItem("retro_name") || "";
@@ -316,16 +350,24 @@ let JOINED = false, LOOPING = false;
 let TYPING_GRID = "", typingTimer = null;
 let TIMER = { running: false }, OFFSET = 0, firedFor = null;
 let EDITING = null;                          // card id being edited inline
+let LAST_STATE = null;                        // most recent poll payload (for local re-renders)
 const MY_REACTIONS = {};                     // card_id -> Set(emoji) I reacted with
 let lastRxEvent = -1, seededRx = false;       // high-water mark of animated reaction events
 let RX_CARD = null;                           // card whose react-picker is open
 let DRAG_ID = null;
+let FOCUS = "";                               // when set, show only this author's cards (their turn)
+let GROUPED = localStorage.getItem("retro_grouped") === "1";  // cluster cards by author
+let focusSig = null;                          // cached author set so we rebuild the picker only on change
+let lastBcastTheme = null, lastMusicSeq = 0;  // host broadcasts applied once, on change
+let LOCKED = false;                           // board frozen by the host
 
 function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
 function api(path) { return path + (path.indexOf("?") < 0 ? "?" : "&") + "token=" + encodeURIComponent(TOKEN); }
 function postJSON(path, body) {
+  // `admin` is sent on every POST but only checked by the server on /api/admin/* and
+  // /api/timer — harmless (empty) for teammates who never received the secret.
   return fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(Object.assign({ pid: PID }, body || {})) });
+    body: JSON.stringify(Object.assign({ pid: PID, admin: ADMIN }, body || {})) });
 }
 function randomName() { return ADJS[Math.floor(Math.random()*ADJS.length)] + " " + NOUNS[Math.floor(Math.random()*NOUNS.length)]; }
 function applyTheme(t) { THEME = t; document.documentElement.setAttribute("data-theme", t); localStorage.setItem("retro_theme", t); }
@@ -372,12 +414,14 @@ function paintMe() { document.getElementById("me").innerHTML = (AVATAR || "🙂"
 /* ── Grids + cards ──────────────────────────────────────────── */
 function buildCols() {
   const g = document.getElementById("grids");
+  // Add form sits directly under the heading so you never scroll to the bottom of a
+  // tall column to write a card. Cards then fill below it (newest appended at the end).
   g.innerHTML = GRIDS.map(([k, label]) =>
     '<div class="col"><h2>' + esc(label) + '</h2>' +
-    '<div class="cards" id="cards-' + k + '" data-grid="' + k + '"></div>' +
-    '<div class="typing" id="typing-' + k + '"></div>' +
     '<div class="add"><textarea rows="2" id="in-' + k + '" placeholder="Add a card…"></textarea>' +
-    '<button class="addbtn" data-grid="' + k + '">Add</button></div></div>'
+    '<button class="addbtn" data-grid="' + k + '">Add</button></div>' +
+    '<div class="cards" id="cards-' + k + '" data-grid="' + k + '"></div>' +
+    '<div class="typing" id="typing-' + k + '"></div></div>'
   ).join("");
   g.querySelectorAll("button.addbtn").forEach(b => b.addEventListener("click", () => addCard(b.getAttribute("data-grid"))));
   g.querySelectorAll("textarea").forEach(t => {
@@ -404,20 +448,39 @@ function reactionBar(card) {
   return '<div class="rx">' + chips +
     '<button class="react-btn" data-react="' + card.id + '" title="Add a reaction">😊<span class="plus">+</span></button></div>';
 }
+/* Relative "age" of a card from its ISO-8601 created_at: a live "just now / 3m"
+ * for fresh cards, falling back to a wall-clock HH:MM once past an hour (matches a
+ * retro's short lifespan). Labels refresh for free on each ~1.2s poll re-render. */
+function fmtAgo(iso) {
+  const t = Date.parse(iso);
+  if (!t) return null;
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  const d = new Date(t);
+  let label;
+  if (s < 10) label = "just now";
+  else if (s < 60) label = s + "s";
+  else if (s < 3600) label = Math.floor(s / 60) + "m";
+  else label = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return { label: label, title: d.toLocaleString() };
+}
 function cardHTML(card, avatarByName) {
   const isAI = card.origin === "ai";
   const badge = isAI ? "🤖 AI" : ((avatarByName[card.author] || "") + " " + esc(card.author)).trim();
+  const t = fmtAgo(card.created_at);
+  const ago = t ? '<span class="ago" title="' + esc(t.title) + '">' + esc(t.label) + "</span>" : "";
   let actions = '<span class="spacer"></span>';
-  if (card.mine && !isAI) {
+  if (card.mine && !isAI && !LOCKED) {  // host lock hides the ✎/✕ controls
     actions += '<button class="act" data-edit="' + card.id + '" title="Edit">✎</button>' +
                '<button class="act danger" data-del="' + card.id + '" title="Delete">✕</button>';
   }
   const body = EDITING === card.id
     ? '<textarea class="editbox" id="edit-' + card.id + '" rows="2">' + esc(card.text) + '</textarea>' +
-      '<button class="act" data-save="' + card.id + '">Save</button><button class="act" data-cancel="1">Cancel</button>'
+      '<div class="edit-actions">' +
+      '<button class="btn-save" data-save="' + card.id + '">Save</button>' +
+      '<button class="btn-cancel" data-cancel="1">Cancel</button></div>'
     : '<div class="body">' + esc(card.text) + '</div>';
   return '<div class="card ' + (isAI ? "ai" : "") + '" draggable="true" data-id="' + card.id + '">' +
-         body + '<div class="who">' + badge + actions + '</div>' + reactionBar(card) + '</div>';
+         body + '<div class="who">' + badge + ago + actions + '</div>' + reactionBar(card) + '</div>';
 }
 
 async function addCard(grid) {
@@ -542,9 +605,72 @@ function paintTimer() {
 }
 setInterval(paintTimer, 250);
 
+/* ── Focus one person / group by author (for turn-by-turn walkthroughs) ─ */
+function gridInner(cards, avatarByName) {
+  let list = FOCUS ? cards.filter(c => c.author === FOCUS) : cards;
+  if (!GROUPED) return list.map(c => cardHTML(c, avatarByName)).join("");
+  // Cluster by author, preserving first-seen order within the grid.
+  const order = [], groups = {};
+  list.forEach(c => { const a = c.origin === "ai" ? "🤖 AI" : c.author; if (!groups[a]) { groups[a] = []; order.push(a); } groups[a].push(c); });
+  return order.map(a => {
+    const av = a === "🤖 AI" ? "" : (avatarByName[a] || "");
+    return '<div class="author-group"><div class="ag-head">' + (av ? esc(av) + " " : "") + esc(a) +
+      "</div>" + groups[a].map(c => cardHTML(c, avatarByName)).join("") + "</div>";
+  }).join("");
+}
+function updateFocusOptions(cards) {
+  // Rebuild the picker only when the human-author set actually changes, so it never
+  // clobbers an open selection mid-poll. Keep FOCUS if that author is still around.
+  const authors = [];
+  (cards || []).forEach(c => { if (c.origin !== "ai" && c.author && authors.indexOf(c.author) < 0) authors.push(c.author); });
+  authors.sort();
+  const sig = authors.join("");
+  if (sig === focusSig) return;
+  focusSig = sig;
+  const sel = document.getElementById("focus-author");
+  if (!sel) return;
+  if (FOCUS && authors.indexOf(FOCUS) < 0) FOCUS = "";
+  sel.innerHTML = '<option value="">Everyone</option>' +
+    authors.map(a => '<option value="' + esc(a) + '">' + esc(a) + "</option>").join("");
+  sel.value = FOCUS;
+}
+function markGroup() { const b = document.getElementById("group-toggle"); if (b) b.classList.toggle("open", GROUPED); }
+
+/* ── Host broadcasts (theme / music) + board lock, applied by every browser ─ */
+function applyBroadcast(state) {
+  const b = state.broadcast || {};
+  // Theme: apply only when the broadcast value *changes* — so a teammate who then
+  // re-picks a theme locally isn't yanked back every poll.
+  if (b.theme && b.theme !== lastBcastTheme) {
+    lastBcastTheme = b.theme;
+    if (b.theme !== THEME) { applyTheme(b.theme); markSwatch(); }
+  }
+  // Music: a fresh seq means a new host command — apply it exactly once.
+  const m = b.music;
+  if (m && m.seq && m.seq > lastMusicSeq) {
+    lastMusicSeq = m.seq;
+    Music.cast(m.channel, m.playing)
+      .then(() => hideMusicBanner())
+      .catch(() => { if (m.playing) showMusicBanner(); });
+  }
+  applyLock(!!state.locked);
+}
+function applyLock(locked) {
+  LOCKED = locked;
+  const banner = document.getElementById("lock-banner");
+  if (banner) banner.classList.toggle("hidden", !locked);
+  document.querySelectorAll(".add textarea, .add .addbtn").forEach(el => { el.disabled = locked; });
+  const lb = document.getElementById("lock-btn");
+  if (lb) { lb.classList.toggle("open", locked); lb.title = locked ? "Unlock the board" : "Lock the board"; }
+}
+function showMusicBanner() { const b = document.getElementById("music-banner"); if (b) b.classList.remove("hidden"); }
+function hideMusicBanner() { const b = document.getElementById("music-banner"); if (b) b.classList.add("hidden"); }
+
 /* ── Render live state ──────────────────────────────────────── */
 function render(state) {
   if (!state) return;
+  LAST_STATE = state;
+  applyBroadcast(state);   // set LOCKED before cards render so cardHTML hides ✎/✕
   if (state.timer) { TIMER = state.timer; OFFSET = state.timer.now_epoch - Date.now() / 1000; }
   // Float any reaction events we haven't shown yet. On the first render we only
   // seed the high-water mark (no backlog burst for someone who just joined).
@@ -563,10 +689,18 @@ function render(state) {
 
   GRIDS.forEach(([k]) => {
     const box = document.getElementById("cards-" + k);
-    if (box) box.innerHTML = (byGrid[k] || []).map(c => cardHTML(c, avatarByName)).join("");
+    if (box) {
+      // Don't clobber an open inline editor (poll fires ~1.2s) — skip re-rendering the
+      // grid that holds the card being edited until Save/Cancel clears EDITING. Keyed
+      // on the id (not live focus) so clicking a toolbar control mid-edit can't wipe
+      // the unsaved text on the next poll; other grids still refresh live.
+      const editingHere = EDITING && (byGrid[k] || []).some(c => c.id === EDITING);
+      if (!editingHere) box.innerHTML = gridInner(byGrid[k] || [], avatarByName);
+    }
     const tl = document.getElementById("typing-" + k);
     if (tl) { const names = (typingByGrid[k] || []).filter(n => n !== NAME); tl.textContent = names.length ? (names.join(", ") + (names.length > 1 ? " are" : " is") + " typing…") : ""; }
   });
+  updateFocusOptions(state.cards || []);
   wireCards();
   renderCarried(state);
 
@@ -601,7 +735,14 @@ function renderRoom(state) {
 function wireCards() {
   document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => react(ch.getAttribute("data-card"), ch.getAttribute("data-emoji")));
   document.querySelectorAll("[data-react]").forEach(b => b.onclick = e => { e.stopPropagation(); openReactPicker(b.getAttribute("data-react"), b); });
-  document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => { EDITING = b.getAttribute("data-edit"); tick(); });
+  document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
+    // Render the inline editor locally (not via a network tick), then focus it with
+    // the caret at the end. render() then guards this grid from poll-clobbering.
+    EDITING = b.getAttribute("data-edit");
+    if (LAST_STATE) render(LAST_STATE);
+    const t = document.getElementById("edit-" + EDITING);
+    if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+  });
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteCard(b.getAttribute("data-del")));
   document.querySelectorAll("[data-save]").forEach(b => b.onclick = () => saveEdit(b.getAttribute("data-save")));
   document.querySelectorAll("[data-cancel]").forEach(b => b.onclick = () => { EDITING = null; tick(); });
@@ -661,7 +802,7 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => { if (e.key === "Escape") { closePops(); closeReactPicker(); } });
 
 /* ── Theme swatches ─────────────────────────────────────────── */
-const THEMES = ["midnight", "light", "solarized", "synthwave", "forest"];
+const THEMES = __THEMES__;   // canonical set, injected from board.RETRO_THEMES
 function buildSwatches() {
   const wrap = document.getElementById("swatches");
   wrap.innerHTML = THEMES.map(t =>
@@ -738,6 +879,13 @@ const Music = (function () {
     setChannel(i) { const wasPlaying = playing || !audio.paused; load(i); if (wasPlaying) play(); },
     playing() { return playing; },
     channels() { return CHANNELS; },
+    channelIndex() { return channel; },
+    // Apply a host broadcast: play the given station, or stop. Returns the audio
+    // play() promise so the caller can show a "tap to listen" banner if autoplay is
+    // blocked (a browser rejects play() without a prior user gesture).
+    cast(i, on) { if (!on) { stop(); return Promise.resolve(); } load(i); return audio.play(); },
+    // Resume after the user taps the autoplay banner (their tap is the gesture).
+    playNow() { if (!audio.src) load(channel); return audio.play(); },
   };
 })();
 
@@ -770,6 +918,14 @@ function alarm() {
   } catch (e) {}
 }
 
+/* ── Host (admin) controls: broadcast to every browser ──────── */
+async function toggleLock() { try { const r = await postJSON("/api/admin/lock", { locked: !LOCKED }); if (r.ok) render((await r.json()).state); } catch (e) {} }
+async function castTheme() { try { const r = await postJSON("/api/admin/broadcast", { theme: THEME }); if (r.ok) render((await r.json()).state); } catch (e) {} }
+async function castMusic() {
+  // Broadcast the host's current play state + station; teammates apply it on poll.
+  try { const r = await postJSON("/api/admin/broadcast", { music: { playing: Music.playing(), channel: Music.channelIndex() } }); if (r.ok) render((await r.json()).state); } catch (e) {}
+}
+
 /* ── Wire up + start ────────────────────────────────────────── */
 applyTheme(THEME);
 buildCols();
@@ -777,6 +933,17 @@ buildAvatars();
 buildSwatches();
 buildChannels();
 paintTimer();
+markGroup();
+// Host controls (music/theme/timer/lock) show only to the admin; teammates see the
+// matching "host controls this" note instead.
+document.querySelectorAll(".admin-only").forEach(el => el.classList.toggle("hidden", !IS_ADMIN));
+document.querySelectorAll(".guest-only").forEach(el => el.classList.toggle("hidden", IS_ADMIN));
+document.getElementById("focus-author").addEventListener("change", e => { FOCUS = e.target.value; if (LAST_STATE) render(LAST_STATE); });
+document.getElementById("group-toggle").addEventListener("click", () => { GROUPED = !GROUPED; localStorage.setItem("retro_grouped", GROUPED ? "1" : "0"); markGroup(); if (LAST_STATE) render(LAST_STATE); });
+document.getElementById("music-banner").addEventListener("click", () => { Music.playNow().then(hideMusicBanner).catch(() => {}); });
+document.getElementById("lock-btn").addEventListener("click", toggleLock);
+document.getElementById("theme-cast").addEventListener("click", castTheme);
+document.getElementById("music-cast").addEventListener("click", castMusic);
 document.getElementById("dice").addEventListener("click", () => { document.getElementById("name-in").value = randomName(); });
 document.getElementById("name-in").addEventListener("keydown", e => { if (e.key === "Enter") saveProfile(); });
 document.getElementById("save-profile").addEventListener("click", saveProfile);
@@ -799,7 +966,9 @@ document.getElementById("invite-close").addEventListener("click", toggleInvite);
 
 function afterToken() {
   // Token known: keep it in sessionStorage (per-tab, survives refresh) and strip
-  // it from the address bar, so copying the URL never leaks access to others.
+  // it (and the admin secret) from the address bar, so copying the URL never leaks
+  // access — or admin — to others.
+  if (ADMIN) sessionStorage.setItem("retro_admin", ADMIN);
   if (TOKEN) { sessionStorage.setItem("retro_token", TOKEN); history.replaceState(null, "", "/"); }
   paintMe();
   if (NAME && localStorage.getItem("retro_avatar")) { JOINED = true; document.getElementById("modal").classList.add("hidden"); startLoop(); }
@@ -822,6 +991,7 @@ def build_board_html() -> str:
         .replace("__CARRIED_STATUSES__", _lit(_CARRIED_STATUS_JS))
         .replace("__EMOJIS__", _lit(list(REACTION_EMOJIS)))
         .replace("__AVATARS__", _lit(list(AVATARS)))
+        .replace("__THEMES__", _lit(list(RETRO_THEMES)))
         .replace("__ADJS__", _lit(_ADJECTIVES))
         .replace("__NOUNS__", _lit(_NOUNS))
         # Same internet-radio library the TUI uses (yeaboi.music.CHANNELS),
@@ -842,8 +1012,14 @@ def build_board_html() -> str:
         '<button class="room-btn" id="room-btn" title="Who\'s in the room">'
         '👥 <span id="roomcount">1</span></button></div>\n'
         '  <span class="spacer"></span>\n'
+        # View controls: focus one person's cards (their turn) / group cards by author.
+        '  <div class="viewctl">\n'
+        '    <select id="focus-author" title="Show only one person\'s cards"><option value="">Everyone</option></select>\n'
+        '    <button class="tbtn" id="group-toggle" title="Group cards by author">⊞ Group</button>\n'
+        "  </div>\n"
         '  <div class="toolbar">\n'
         '    <canvas id="viz" width="34" height="22" title="Now playing"></canvas>\n'
+        '    <button class="tbtn admin-only hidden" id="lock-btn" title="Lock the board"><span class="ico">🔒</span></button>\n'
         '    <button class="tbtn" id="music-btn" title="Music"><span class="ico">♪</span></button>\n'
         '    <button class="tbtn" id="timer-btn" title="Timer"><span class="ico">⏱</span>'
         '<span class="rd" id="timer-readout"></span></button>\n'
@@ -856,24 +1032,32 @@ def build_board_html() -> str:
         '  <button class="playbtn" id="music-play">▶</button>\n'
         '  <input type="range" id="music-vol" min="0" max="1" step="0.05" value="0.35" title="Volume">\n'
         '  <select id="music-mood" title="Station"></select>\n'
-        "</div></div>\n"
-        # Timer popover
+        "</div>\n"
+        '  <div class="row admin-only hidden" style="margin-top:10px">'
+        '<button class="tbtn" id="music-cast" title="Play this for the whole team">📣 Play for everyone</button></div>\n'
+        "</div>\n"
+        # Timer popover — starting/stopping is admin-only; everyone still sees the readout.
         '<div id="timer-pop" class="pop hidden">\n'
         "  <label>Countdown</label>\n"
-        '  <div class="row"><div class="seg">'
+        '  <div class="admin-only hidden">\n'
+        '    <div class="row"><div class="seg">'
         '<button class="preset" data-secs="60">1m</button>'
         '<button class="preset" data-secs="120">2m</button>'
         '<button class="preset" data-secs="180">3m</button>'
         '<button class="preset" data-secs="300">5m</button></div></div>\n'
-        '  <div class="row" style="margin-top:10px">'
+        '    <div class="row" style="margin-top:10px">'
         '<input type="number" id="custom-min" min="1" max="60" placeholder="min">'
         '<button class="tbtn" id="custom-go">Start</button>'
         '<button class="tbtn" id="timer-stop">Stop</button></div>\n'
+        "  </div>\n"
+        '  <p class="sub guest-only hidden" style="margin:6px 0 0">The host controls the timer.</p>\n'
         "</div>\n"
         # Theme popover
         '<div id="theme-pop" class="pop hidden">\n'
         "  <label>Theme</label>\n"
         '  <div class="swatches" id="swatches"></div>\n'
+        '  <div class="row admin-only hidden" style="margin-top:10px">'
+        '<button class="tbtn" id="theme-cast" title="Apply this theme for the whole team">📣 Apply to everyone</button></div>\n'
         "</div>\n"
         # Room roster popover (who's here) — left-anchored under the presence cluster
         '<div id="room-pop" class="pop left hidden">\n'
@@ -892,6 +1076,9 @@ def build_board_html() -> str:
         '<canvas id="confetti"></canvas>\n'
         '<div id="rx-fx"></div>\n'
         '<div id="rx-picker" class="rx-picker hidden"></div>\n'
+        # Host-broadcast banners: tap-to-listen (autoplay fallback) + board-locked notice.
+        '<div id="music-banner" class="banner hidden">▶ The host started music — tap to listen</div>\n'
+        '<div id="lock-banner" class="banner lock hidden">🔒 The host locked the board</div>\n'
         # Code-entry gate (shown when the URL has no token)
         '<div id="code-modal" class="overlay hidden"><div class="box">\n'
         "  <h2>Join a retro</h2>\n"

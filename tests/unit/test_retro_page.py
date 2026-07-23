@@ -123,6 +123,41 @@ class TestBuildBoardHtml:
         assert 'sessionStorage.setItem("retro_token"' in html
         assert '"/?token="' not in html  # never rebuild a token'd URL client-side
 
+    def test_timestamps_on_cards(self):
+        html = build_board_html()
+        # Relative "age" helper + the .ago span in the card's who-row.
+        assert "function fmtAgo(" in html and 'class="ago"' in html
+
+    def test_focus_and_group_controls(self):
+        html = build_board_html()
+        assert 'id="focus-author"' in html and 'id="group-toggle"' in html
+        # Grouping/focus render path + persisted group toggle.
+        assert "function gridInner(" in html and "updateFocusOptions" in html
+        assert 'localStorage.setItem("retro_grouped"' in html
+
+    def test_edit_focuses_and_guards_render(self):
+        html = build_board_html()
+        # Entering edit focuses the box and moves the caret to the end…
+        assert "setSelectionRange" in html
+        # …and the poll re-render skips the grid holding the focused editbox.
+        assert "editingHere" in html
+
+    def test_theme_set_injected_from_board(self):
+        html = build_board_html()
+        # THEMES comes from board.RETRO_THEMES (no leftover placeholder).
+        assert "const THEMES = __THEMES__" not in html
+        assert '"midnight"' in html and '"forest"' in html
+
+    def test_admin_controls_present(self):
+        html = build_board_html()
+        # Admin secret read from the host link + the four host controls.
+        assert 'new URLSearchParams(location.search).get("admin")' in html
+        for eid in ("lock-btn", "music-cast", "theme-cast", "music-banner", "lock-banner"):
+            assert f'id="{eid}"' in html
+        # Admin-gated broadcast/lock endpoints + autoplay-fallback banner logic.
+        assert "/api/admin/broadcast" in html and "/api/admin/lock" in html
+        assert "showMusicBanner" in html and "applyLock" in html
+
 
 class TestConfig:
     def test_default_port(self, monkeypatch):
