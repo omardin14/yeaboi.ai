@@ -61,6 +61,12 @@ CARRIED_STATUS_LABELS: dict[str, str] = {
 # Statuses that still count as "open" for the Planning/Analysis feed (ceremony_history).
 CARRIED_OPEN_STATUSES: tuple[str, ...] = ("pending", "in_progress", "carried_over")
 
+# Canonical, server-validated theme names. The host (admin) can broadcast one of
+# these to every browser; a name from a LAN peer is rejected unless it's here. These
+# MUST match the [data-theme="…"] blocks in retro/page.py's _CSS (page.py injects
+# this tuple as __THEMES__ so client and server never drift).
+RETRO_THEMES: tuple[str, ...] = ("midnight", "light", "solarized", "synthwave", "forest")
+
 # Canonical, server-validated sets shared with the browser page (retro/page.py
 # injects these so client and server agree). Reactions/avatars from a LAN peer are
 # rejected unless they're in these tuples — bounding what can be stored/rendered.
@@ -135,6 +141,16 @@ class RetroBoard:
         self._card_owner: dict[str, str] = {}  # card_id -> creator pid (edit/delete permission)
         self._presence: dict[str, dict] = {}  # pid -> {name, avatar, typing_grid, last_seen}
         self._timer: dict = {"running": False, "end_epoch": None, "duration": 0}
+        # Host-driven "global" state applied by every browser on its next poll (the
+        # same broadcast-by-polling trick as the timer). Only the admin (host link)
+        # can set these; see server.py's _admin_authed gate. All guarded by _lock.
+        #   _broadcast["theme"]: a RETRO_THEMES name forced on every client, or None.
+        #   _broadcast["music"]: {"playing", "channel", "seq"} — seq lets each client
+        #       apply a given command exactly once (and re-trigger "play"), or None.
+        #   _locked: when True, card add/edit/delete/move are frozen for everyone.
+        self._broadcast: dict = {"theme": None, "music": None}
+        self._music_seq = 0
+        self._locked = False
 
     def add_card(self, *, grid: str, text: str, author: str, origin: str = "web", pid: str = "") -> RetroCard | None:
         """Add one card, validating + capping inputs. Returns the card, or None if invalid.
@@ -157,6 +173,9 @@ class RetroBoard:
             origin=origin,
         )
         with self._lock:
+            if self._locked:  # host froze the board — no new cards from anyone
+                logger.info("retro board: card rejected — board locked")
+                return None
             if len(self._cards) >= _MAX_CARDS:
                 logger.warning("retro board: card rejected — board full (%d cards)", _MAX_CARDS)
                 return None
@@ -312,6 +331,8 @@ class RetroBoard:
         if not text:
             return False
         with self._lock:
+            if self._locked:  # board frozen by the host
+                return False
             if self._card_owner.get(card_id) != pid or not pid:
                 return False
             i = self._index_of_locked(card_id)
@@ -326,6 +347,8 @@ class RetroBoard:
     def delete_card(self, card_id: str, pid: str) -> bool:
         """Delete a card (and its reactions/owner). Author-only. Returns True on success."""
         with self._lock:
+            if self._locked:  # board frozen by the host
+                return False
             if self._card_owner.get(card_id) != pid or not pid:
                 return False
             i = self._index_of_locked(card_id)
@@ -351,6 +374,8 @@ class RetroBoard:
         if to_grid not in RETRO_GRIDS:
             return False
         with self._lock:
+            if self._locked:  # board frozen by the host
+                return False
             i = self._index_of_locked(card_id)
             if i < 0:
                 return False
@@ -485,6 +510,51 @@ class RetroBoard:
         # Include the server clock so clients can compute an offset and tick locally.
         return {**self._timer, "now_epoch": time.time()}
 
+    # ── Host broadcast (theme / music) + board lock ───────────────────────
+    #
+    # These are the "global admin" controls: the host (whoever holds the admin
+    # token — see server.py) sets them and every browser applies them on its next
+    # poll. Enums are server-validated (LAN peers untrusted), like REACTION_EMOJIS.
+
+    def set_broadcast_theme(self, theme: str) -> bool:
+        """Force a theme on every browser. Returns True if accepted (a known theme)."""
+        if theme not in RETRO_THEMES:
+            return False
+        with self._lock:
+            self._broadcast["theme"] = theme
+            self._revision += 1
+        logger.info("retro board: host broadcast theme=%s", theme)
+        return True
+
+    def set_broadcast_music(self, *, playing: bool, channel: int) -> bool:
+        """Broadcast a music command (play/stop + station) to every browser.
+
+        ``channel`` is validated against the shared internet-radio library. A fresh
+        ``seq`` is stamped on each call so clients apply the command exactly once
+        (and can re-trigger "play" even if the play/channel values are unchanged).
+        """
+        from yeaboi.music import CHANNELS
+
+        try:
+            channel = int(channel)
+        except (TypeError, ValueError):
+            return False
+        if not CHANNELS or not (0 <= channel < len(CHANNELS)):
+            return False
+        with self._lock:
+            self._music_seq += 1
+            self._broadcast["music"] = {"playing": bool(playing), "channel": channel, "seq": self._music_seq}
+            self._revision += 1
+        logger.info("retro board: host broadcast music — playing=%s channel=%d", bool(playing), channel)
+        return True
+
+    def set_locked(self, flag: bool) -> None:
+        """Freeze (or unfreeze) card add/edit/delete/move for everyone."""
+        with self._lock:
+            self._locked = bool(flag)
+            self._revision += 1
+        logger.info("retro board: board %s by host", "locked" if flag else "unlocked")
+
     # ── Unified live snapshot (the browser's poll payload) ─────────────────
 
     def state_snapshot(self, viewer_pid: str = "") -> dict:
@@ -522,6 +592,9 @@ class RetroBoard:
                 "typing": typing,
                 "timer": self._timer_locked(),
                 "reaction_events": list(self._reaction_events),
+                # Host-driven globals every browser applies on poll (theme/music/lock).
+                "broadcast": {"theme": self._broadcast["theme"], "music": self._broadcast["music"]},
+                "locked": self._locked,
             }
 
 

@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.30.0",
+      "date": "2026-07-23",
+      "summary": "Retro web board gained several quality-of-life features. You can now focus on one team member's cards at a time (useful for turn-taking discussions), group cards by author, add sticky cards at the top of each column so you don't have to scroll on tall boards, and see relative timestamps on each card. The host also gained admin powers: broadcast theme changes and ambient music to all teammates at once, and lock the board during discussions to freeze card editing. Cards can still get reactions and carried-item status updates during a lock. Security tightening removed an information leak in the access log that could have exposed session tokens.",
+      "highlights": [
+        {"text": "Focus and Group controls to filter or cluster cards by author for better turn-taking", "areas": ["retro"]},
+        {"text": "Add-card input at the top of each column; relative timestamps on all cards", "areas": ["retro"]},
+        {"text": "Host admin controls: broadcast theme and music, lock the board during discussions", "areas": ["retro"]},
+        {"text": "Fixed an access-log security regression that leaked session tokens and admin secrets", "areas": ["retro", "general"]}
+      ]
+    },
+    {
       "version": "2.29.0",
       "date": "2026-07-22",
       "summary": "Team analysis got a major rework. It can now run across Jira and Azure DevOps together, and — more importantly — each part of the analysis scans its OWN sources: Delivery (velocity, calibration, contributors) reads your Jira/Azure DevOps boards, Code scans GitHub and Azure Repos, and Docs reads Confluence and Notion. A single grid lets you pick exactly what to analyse — e.g. just Confluence docs, or just one code host — and scope the run to a subset of team members. Delivery is analysed per tracker (never blended, with a side-by-side comparison), while code and docs run once as global scans. Local code scanning was dropped in favour of remote-only.",

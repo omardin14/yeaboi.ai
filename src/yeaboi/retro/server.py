@@ -167,7 +167,12 @@ class _RetroHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"  # keep-alive; every response sets Content-Length
 
     # Route the default noisy stderr access log into our logger at DEBUG, and never
-    # log the query string (it carries the token).
+    # log the query string — it carries the token AND the admin secret.
+    def log_request(self, code: object = "-", size: object = "-") -> None:  # noqa: N802 - stdlib signature
+        # The default logs ``self.requestline`` (path WITH query) — that would leak
+        # the token/admin secret into the log file at DEBUG. Log method + path only.
+        logger.debug("retro-http %s %s -> %s", self.command, urlparse(self.path).path, code)
+
     def log_message(self, fmt: str, *args: object) -> None:  # noqa: A003 - stdlib signature
         logger.debug("retro-http %s", fmt % args if args else fmt)
 
@@ -178,6 +183,10 @@ class _RetroHandler(BaseHTTPRequestHandler):
     @property
     def _token(self) -> str:
         return self.server.token  # type: ignore[attr-defined]
+
+    @property
+    def _admin_token(self) -> str:
+        return self.server.admin_token  # type: ignore[attr-defined]
 
     @property
     def _join_code(self) -> str:
@@ -192,6 +201,10 @@ class _RetroHandler(BaseHTTPRequestHandler):
 
     def _authed(self) -> bool:
         return secrets.compare_digest(self._query("token"), self._token)
+
+    def _admin_authed(self, admin: str) -> bool:
+        """True iff ``admin`` matches the host's admin secret (constant-time)."""
+        return bool(admin) and secrets.compare_digest(admin, self._admin_token)
 
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
@@ -292,15 +305,47 @@ class _RetroHandler(BaseHTTPRequestHandler):
             "/api/card/delete",
             "/api/card/move",
             "/api/carried/status",
+            "/api/admin/broadcast",
+            "/api/admin/lock",
         )
         if path not in authed_paths or not self._authed():
             self._send_json(403, {"error": "forbidden"})
             return
 
         pid = str(payload.get("pid", ""))
+        admin = str(payload.get("admin", ""))
 
         def _state() -> dict:
             return self._board.state_snapshot(pid)
+
+        # ── Admin-only routes (host link holds the admin secret) ──────────────
+        # /api/timer is admin-only too — the shared countdown belongs to the host.
+        if path in ("/api/admin/broadcast", "/api/admin/lock", "/api/timer"):
+            if not self._admin_authed(admin):
+                self._send_json(403, {"error": "admin only"})
+                return
+
+        if path == "/api/admin/broadcast":
+            ok, applied = True, False
+            if "theme" in payload:
+                ok = self._board.set_broadcast_theme(str(payload.get("theme", ""))) and ok
+                applied = True
+            music = payload.get("music")
+            if isinstance(music, dict):
+                ok = (
+                    self._board.set_broadcast_music(playing=bool(music.get("playing")), channel=music.get("channel", 0))
+                    and ok
+                )
+                applied = True
+            # An empty/malformed broadcast (neither theme nor music) is a client error,
+            # not a silent success.
+            self._send_json(200 if (ok and applied) else 400, {"ok": ok and applied, "state": _state()})
+            return
+
+        if path == "/api/admin/lock":
+            self._board.set_locked(bool(payload.get("locked")))
+            self._send_json(200, {"ok": True, "state": _state()})
+            return
 
         if path == "/api/cards":
             card = self._board.add_card(
@@ -381,6 +426,11 @@ class RetroServer:
     def __init__(self, board: RetroBoard, *, port: int = _DEFAULT_PORT) -> None:
         self.board = board
         self.token = make_token()
+        # A second, stronger secret that ONLY rides in the host's private link
+        # (:attr:`url`). Whoever opens that link becomes the retro's admin (music /
+        # theme / timer / board-lock). It is never in the shared join flow, the
+        # share code, or the tunnel URL — so a join-code teammate is never an admin.
+        self.admin_token = make_token()
         self.join_code = make_join_code()
         self.join_limiter = JoinLimiter()
         self.ip = get_lan_ip()
@@ -393,10 +443,11 @@ class RetroServer:
         """The host's private direct link (carries the token — do not share).
 
         This is the host's own convenience link and the value logged on startup;
-        anyone opening it is let straight in. Teammates get :attr:`share_url`
-        instead and must enter the join code.
+        anyone opening it is let straight in AND granted admin controls (the
+        ``admin`` secret). Teammates get :attr:`share_url` instead and must enter
+        the join code — they never receive the admin secret.
         """
-        return f"http://{self.ip}:{self.port}/?token={self.token}"
+        return f"http://{self.ip}:{self.port}/?token={self.token}&admin={self.admin_token}"
 
     @property
     def share_url(self) -> str:
@@ -435,6 +486,7 @@ class RetroServer:
         # Attach shared state to the server object so the stateless handler can reach it.
         httpd.board = self.board  # type: ignore[attr-defined]
         httpd.token = self.token  # type: ignore[attr-defined]
+        httpd.admin_token = self.admin_token  # type: ignore[attr-defined]
         httpd.join_code = self.join_code  # type: ignore[attr-defined]
         httpd.join_limiter = self.join_limiter  # type: ignore[attr-defined]
         httpd.page_html = page_html  # type: ignore[attr-defined]

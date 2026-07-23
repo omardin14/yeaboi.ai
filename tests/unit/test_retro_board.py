@@ -258,7 +258,17 @@ class TestStateSnapshot:
         b.toggle_reaction(c.id, "👍", "p1")
         b.heartbeat("p1", name="Sam", avatar="🤠", typing_grid="went_well")
         snap = b.state_snapshot()
-        assert set(snap) == {"revision", "cards", "carried", "presence", "typing", "timer", "reaction_events"}
+        assert set(snap) == {
+            "revision",
+            "cards",
+            "carried",
+            "presence",
+            "typing",
+            "timer",
+            "reaction_events",
+            "broadcast",
+            "locked",
+        }
         assert snap["cards"][0]["reactions"] == {"👍": 1}
         assert snap["presence"] and snap["typing"][0]["grid"] == "went_well"
 
@@ -369,3 +379,34 @@ class TestCarriedActionItems:
         assert texts == ["ship docs", "new one"]
         carry = [c for c in b.cards_by_grid()["action_items"] if c.origin == "carryover"]
         assert carry and carry[0].text == "new one"
+
+
+class TestHostBroadcast:
+    def test_theme_accepts_known_and_rejects_unknown(self):
+        b = RetroBoard("s")
+        assert b.set_broadcast_theme("synthwave") is True
+        assert b.state_snapshot()["broadcast"]["theme"] == "synthwave"
+        assert b.set_broadcast_theme("chartreuse") is False  # not a real theme
+        assert b.state_snapshot()["broadcast"]["theme"] == "synthwave"  # unchanged
+
+    def test_music_validates_channel_and_bumps_seq(self):
+        b = RetroBoard("s")
+        assert b.set_broadcast_music(playing=True, channel=0) is True
+        first = b.state_snapshot()["broadcast"]["music"]
+        assert first["playing"] is True and first["channel"] == 0 and first["seq"] == 1
+        assert b.set_broadcast_music(playing=False, channel=0) is True
+        assert b.state_snapshot()["broadcast"]["music"]["seq"] == 2  # each command is unique
+        assert b.set_broadcast_music(playing=True, channel=9999) is False  # out of range
+        assert b.set_broadcast_music(playing=True, channel="x") is False  # non-int
+
+    def test_lock_freezes_add_edit_move_delete(self):
+        b = RetroBoard("s")
+        c = b.add_card(grid="went_well", text="ci", author="Sam", pid="p1")
+        b.set_locked(True)
+        assert b.state_snapshot()["locked"] is True
+        assert b.add_card(grid="went_well", text="blocked", author="Sam", pid="p1") is None
+        assert b.edit_card(c.id, "nope", "p1") is False
+        assert b.move_card(c.id, "demos", 0, "p1") is False
+        assert b.delete_card(c.id, "p1") is False
+        b.set_locked(False)
+        assert b.edit_card(c.id, "now ok", "p1") is True

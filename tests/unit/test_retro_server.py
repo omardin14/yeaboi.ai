@@ -180,7 +180,17 @@ class TestStateEndpoint:
         srv, b = running_server
         b.add_card(grid="went_well", text="ci", author="Sam")
         data = json.load(_get(f"http://127.0.0.1:{srv.port}/api/state?token={srv.token}"))
-        assert set(data) == {"revision", "cards", "carried", "presence", "typing", "timer", "reaction_events"}
+        assert set(data) == {
+            "revision",
+            "cards",
+            "carried",
+            "presence",
+            "typing",
+            "timer",
+            "reaction_events",
+            "broadcast",
+            "locked",
+        }
 
     def test_state_forbidden_without_token(self, running_server):
         srv, _ = running_server
@@ -252,10 +262,17 @@ class TestPresenceEndpoint:
 class TestTimerEndpoint:
     def test_start_and_stop(self, running_server):
         srv, _ = running_server
-        r = _post(srv, "/api/timer", {"action": "start", "duration": 120, "pid": "p1"})
+        # The shared timer is admin-only — pass the host admin secret.
+        r = _post(srv, "/api/timer", {"action": "start", "duration": 120, "pid": "p1", "admin": srv.admin_token})
         assert r["state"]["timer"]["running"] is True
-        r = _post(srv, "/api/timer", {"action": "stop", "pid": "p1"})
+        r = _post(srv, "/api/timer", {"action": "stop", "pid": "p1", "admin": srv.admin_token})
         assert r["state"]["timer"]["running"] is False
+
+    def test_non_admin_forbidden(self, running_server):
+        srv, _ = running_server
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post(srv, "/api/timer", {"action": "start", "duration": 60, "pid": "p1"})
+        assert exc.value.code == 403
 
 
 class TestCardsReturnsState:
@@ -348,3 +365,60 @@ class TestLifecycle:
         srv.start()
         srv.stop()
         srv.stop()  # second stop is a no-op, must not raise
+
+
+class TestAdminEndpoints:
+    def test_url_carries_admin_share_url_does_not(self, running_server):
+        srv, _ = running_server
+        assert f"admin={srv.admin_token}" in srv.url
+        assert "admin=" not in srv.share_url and srv.admin_token not in srv.share_url
+
+    def test_broadcast_requires_admin(self, running_server):
+        srv, _ = running_server
+        # Authed teammate (token) but no admin secret → 403.
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post(srv, "/api/admin/broadcast", {"theme": "synthwave"})
+        assert exc.value.code == 403
+
+    def test_broadcast_theme_and_music_with_admin(self, running_server):
+        srv, _ = running_server
+        r = _post(srv, "/api/admin/broadcast", {"theme": "forest", "admin": srv.admin_token})
+        assert r["ok"] and r["state"]["broadcast"]["theme"] == "forest"
+        r = _post(srv, "/api/admin/broadcast", {"music": {"playing": True, "channel": 0}, "admin": srv.admin_token})
+        assert r["state"]["broadcast"]["music"]["playing"] is True
+
+    def test_lock_requires_admin_and_freezes_board(self, running_server):
+        srv, b = running_server
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post(srv, "/api/admin/lock", {"locked": True})
+        assert exc.value.code == 403
+        r = _post(srv, "/api/admin/lock", {"locked": True, "admin": srv.admin_token})
+        assert r["ok"] and r["state"]["locked"] is True
+        # A normal card POST is now rejected while locked.
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post(srv, "/api/cards", {"grid": "demos", "text": "blocked", "author": "Sam"})
+        assert exc.value.code == 400
+
+
+class TestAdminBroadcastValidation:
+    def test_empty_broadcast_is_400(self, running_server):
+        srv, _ = running_server
+        # Neither theme nor music → client error, not a silent 200 no-op.
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post(srv, "/api/admin/broadcast", {"admin": srv.admin_token})
+        assert exc.value.code == 400
+
+
+class TestNoSecretLogging:
+    def test_query_string_secrets_not_logged(self, running_server, caplog):
+        import logging
+
+        srv, _ = running_server
+        # The host link carries token + admin in the query string; the access log
+        # must never write either to disk (regression: log_request logged the full
+        # request line, leaking the token/admin secret at DEBUG).
+        with caplog.at_level(logging.DEBUG, logger="yeaboi.retro.server"):
+            _get(f"http://127.0.0.1:{srv.port}/api/state?token={srv.token}&admin={srv.admin_token}")
+        blob = "\n".join(r.getMessage() for r in caplog.records)
+        assert srv.token not in blob
+        assert srv.admin_token not in blob
