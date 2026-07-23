@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.31.0",
+      "date": "2026-07-23",
+      "summary": "Standup, Retro, Reporting, and Performance modes now surface a browsable saved-runs hub showing the history of past runs alongside the current working session. Instead of jumping straight into a single run, you land on a unified hub with Open, Delete, and Export options for each run — the same experience Planning and Analysis already offer. Saved runs render with rich mode-specific formatting: Standup shows the full meter strip and section drill-in, Reporting displays its indigo card layout, Performance shows the coral metrics grid, and Retro renders the full grid view with a snapshot flag that suppresses the live-only join block. Each mode's own screen builder handles rendering, not flat text, so historical runs read as complete, real snapshots of past work.",
+      "highlights": [
+        {"text": "Saved-runs hub surfaces historical runs with Open / Delete / Export across Standup, Retro, Reporting, and Performance", "areas": ["standup", "retro", "reporting", "performance"]},
+        {"text": "Saved runs render with rich mode-specific formatting: Standup meter strips, Reporting cards, Performance grids, Retro boards", "areas": ["standup", "retro", "reporting", "performance"]},
+        {"text": "Browse, open, delete, or export past runs from one hub; each mode's own screen builder ensures faithful historical rendering", "areas": ["usage", "general"]}
+      ]
+    },
+    {
       "version": "2.30.0",
       "date": "2026-07-23",
       "summary": "Retro web board gained several quality-of-life features. You can now focus on one team member's cards at a time (useful for turn-taking discussions), group cards by author, add sticky cards at the top of each column so you don't have to scroll on tall boards, and see relative timestamps on each card. The host also gained admin powers: broadcast theme changes and ambient music to all teammates at once, and lock the board during discussions to freeze card editing. Cards can still get reactions and carried-item status updates during a lock. Security tightening removed an information leak in the access log that could have exposed session tokens.",
