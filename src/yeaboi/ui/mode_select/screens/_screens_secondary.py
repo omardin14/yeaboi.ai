@@ -2055,8 +2055,13 @@ def _build_standup_screen(
     elif warnings:
         n = len(warnings)
         prefix = f"⚠ {n} notice{'s' if n != 1 else ''} · "
-        # Panel border (2) + padding (4) leave width-6 columns for content.
-        room = max(16, (width - 6) - len(_PAD) - len(prefix) - 1)
+        # Panel border (2) + padding (4) leave width-6 columns. Keep a 3-col safety
+        # margin so an ambiguous-width glyph (⚠ / — count as 1 cell to Rich but often
+        # render as 2 in the terminal) can't nudge the line past the right border, and
+        # cap the gist so this stays a readable teaser instead of stretching edge-to-edge
+        # on ultra-wide terminals — the full warning list lives in the Notices section.
+        avail = (width - 6) - len(_PAD) - len(prefix) - 3
+        room = max(16, min(avail, 90))
         gist = warnings[0]
         if len(gist) > room:
             gist = gist[: room - 1] + "…"
@@ -3420,18 +3425,22 @@ def _build_retro_screen(
         body_lines.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
 
     # ── Join info ─────────────────────────────────────────────────
-    _heading("Join this retro")
-    _row("Share code", retro_data.get("display_code", "—"), f"bold {theme.accent_bright}")
-    _row("LAN URL", retro_data.get("url", "—"), theme.value)
-    _line("Teammates on the same Wi-Fi open the LAN URL, then enter the Share code above.", theme.muted)
-    public_url = retro_data.get("public_url", "")
-    if public_url:
-        _row("Remote URL", public_url, f"bold {theme.accent_bright}")
-        _line("Off-network teammates open the Remote URL (public HTTPS link), then enter the code.", theme.muted)
-    host_url = retro_data.get("host_url", "")
-    if host_url:
-        _row("Host link (private)", host_url, theme.muted)
-        _line("For you only — this link skips the code. Don't share it.", theme.muted)
+    # Live-board only: a saved-run snapshot has no share code / LAN URL, so the
+    # hub passes snapshot=True to suppress this whole block (the report replays
+    # the grids + carried actions, not a resumable board).
+    if not retro_data.get("snapshot"):
+        _heading("Join this retro")
+        _row("Share code", retro_data.get("display_code", "—"), f"bold {theme.accent_bright}")
+        _row("LAN URL", retro_data.get("url", "—"), theme.value)
+        _line("Teammates on the same Wi-Fi open the LAN URL, then enter the Share code above.", theme.muted)
+        public_url = retro_data.get("public_url", "")
+        if public_url:
+            _row("Remote URL", public_url, f"bold {theme.accent_bright}")
+            _line("Off-network teammates open the Remote URL (public HTTPS link), then enter the code.", theme.muted)
+        host_url = retro_data.get("host_url", "")
+        if host_url:
+            _row("Host link (private)", host_url, theme.muted)
+            _line("For you only — this link skips the code. Don't share it.", theme.muted)
 
     # ── Last sprint's actions (progress review) ───────────────────
     # Set from teammates' browsers (the review column); the host view is read-only,

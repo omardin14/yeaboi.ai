@@ -201,12 +201,44 @@ class TestRunHistory:
         assert len(history) == 2
         assert history[0]["standup_date"] == "2026-07-10"  # newest first
         assert history[0]["confidence_pct"] == 82
+        assert "id" in history[0]  # saved-runs hub needs the row id
 
     def test_corrupt_report_json_returns_none(self, db_path):
         with StandupStore(db_path) as store:
             store.record_run(_make_report())
             store._conn.execute("UPDATE standup_history SET report_json = 'garbage'")
             assert store.get_latest_report("s1") is None
+
+
+class TestSavedRunsHub:
+    """get_all_history / get_run_by_id / delete_run — power the TUI saved-runs hub."""
+
+    def test_get_all_history_carries_id_and_session(self, db_path):
+        with StandupStore(db_path) as store:
+            store.record_run(_make_report(date="2026-07-09"))
+            rows = store.get_all_history()
+        assert rows and "id" in rows[0] and rows[0]["session_id"] == "s1"
+
+    def test_get_run_by_id_round_trips_and_missing(self, db_path):
+        report = _make_report(date="2026-07-10")
+        with StandupStore(db_path) as store:
+            rid = store.record_run(report)
+            assert store.get_run_by_id(rid) == report
+            assert store.get_run_by_id(999) is None
+
+    def test_get_run_by_id_corrupt_returns_none(self, db_path):
+        with StandupStore(db_path) as store:
+            rid = store.record_run(_make_report())
+            store._conn.execute("UPDATE standup_history SET report_json='{bad' WHERE id=?", (rid,))
+            assert store.get_run_by_id(rid) is None
+
+    def test_delete_run_removes_only_that_row(self, db_path):
+        with StandupStore(db_path) as store:
+            keep = store.record_run(_make_report(date="2026-07-09"))
+            drop = store.record_run(_make_report(date="2026-07-10"))
+            assert store.delete_run(drop) is True
+            assert store.delete_run(drop) is False
+            assert {r["id"] for r in store.get_all_history()} == {keep}
 
     def test_self_report_round_trips(self, db_path):
         report = _make_report(

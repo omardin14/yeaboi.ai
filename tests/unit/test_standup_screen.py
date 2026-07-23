@@ -126,6 +126,28 @@ class TestBuildStandupScreen:
         out = cap.get()
         assert "⚠ 2 notices · Jira: authentication failed" in out
 
+    def test_long_notice_capped_and_stays_within_border(self):
+        # A long run-on warning must not stretch edge-to-edge on a wide terminal nor push
+        # the notice past the panel's right border (ambiguous-width ⚠/— safety margin).
+        import re
+
+        from rich.console import Console
+
+        long_warn = (
+            "Not scanned: Azure Devops (AZURE_DEVOPS_PROJECT not set), Github (STANDUP_GITHUB_REPO not set), "
+            "Local Git (no repo path configured), Notion (NOTION_ROOT_PAGE_ID not set) — connect these in Settings"
+        )
+        width = 220
+        panel = _build_standup_screen({"report": StandupReport(warnings=(long_warn,))}, width=width, height=40)
+        console = Console(width=width, file=open("/dev/null", "w"))
+        with console.capture() as cap:
+            console.print(panel)
+        notice = next(ln for ln in cap.get().splitlines() if "notice" in ln)
+        vis = re.sub(r"\x1b\[[0-9;]*m", "", notice).rstrip()
+        assert vis.endswith("│")  # right border intact
+        assert vis.endswith("…   │") or "…" in vis  # truncated, not full text
+        assert len(vis[:-1].rstrip()) < 130  # capped teaser, not stretched across 220 cols
+
     def test_banner_message_wins_over_warnings(self):
         from rich.console import Console
 

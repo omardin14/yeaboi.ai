@@ -61,6 +61,42 @@ class TestStore:
             assert len(hist) == 1
             assert hist[0]["item_count"] == 1
             assert hist[0]["period"] == "Last sprint"
+            assert "id" in hist[0]  # saved-runs hub needs the row id to open/delete
+
+
+class TestSavedRunsHub:
+    """get_all_history / get_run_by_id / delete_run — power the TUI saved-runs hub."""
+
+    def test_get_all_history_spans_sessions(self, db_path):
+        with ReportingStore(db_path) as store:
+            store.record_run(_report(), session_id="s1")
+            store.record_run(_report(), session_id="s2")
+            rows = store.get_all_history()
+            assert len(rows) == 2
+            assert {r["session_id"] for r in rows} == {"s1", "s2"}
+            assert all("id" in r for r in rows)
+
+    def test_get_run_by_id_round_trips(self, db_path):
+        with ReportingStore(db_path) as store:
+            rid = store.record_run(_report(), session_id="s1")
+            got = store.get_run_by_id(rid)
+            assert got is not None and got.headline == "Shipped."
+            assert store.get_run_by_id(999) is None  # missing id
+
+    def test_get_run_by_id_corrupt_returns_none(self, db_path):
+        with ReportingStore(db_path) as store:
+            rid = store.record_run(_report(), session_id="s1")
+            store._conn.execute("UPDATE reporting_history SET report_json='{bad' WHERE id=?", (rid,))
+            assert store.get_run_by_id(rid) is None  # corrupt json → None, no raise
+
+    def test_delete_run_removes_only_that_row(self, db_path):
+        with ReportingStore(db_path) as store:
+            keep = store.record_run(_report(), session_id="s1")
+            drop = store.record_run(_report(), session_id="s2")
+            assert store.delete_run(drop) is True
+            assert store.delete_run(drop) is False  # already gone → no-op
+            remaining = {r["id"] for r in store.get_all_history()}
+            assert remaining == {keep}
 
 
 class TestSchemaMigration:

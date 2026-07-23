@@ -178,19 +178,70 @@ class ReportingStore:
             return None
 
     def get_history(self, session_id: str = "", limit: int = 30) -> list[dict]:
-        """Return recent delivery-report run metadata (newest first)."""
+        """Return recent delivery-report run metadata (newest first).
+
+        Each row carries its ``id`` so the saved-runs hub can reopen or delete a
+        specific run via ``get_run_by_id`` / ``delete_run``.
+        """
         if session_id:
             rows = self._conn.execute(
-                "SELECT run_at, period, period_end, project_name, item_count FROM reporting_history "
+                "SELECT id, run_at, period, period_end, project_name, item_count FROM reporting_history "
                 "WHERE session_id = ? ORDER BY run_at DESC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT run_at, period, period_end, project_name, item_count FROM reporting_history "
+                "SELECT id, run_at, period, period_end, project_name, item_count FROM reporting_history "
                 "ORDER BY run_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [
-            {"run_at": r[0], "period": r[1], "period_end": r[2], "project_name": r[3], "item_count": r[4]} for r in rows
+            {"id": r[0], "run_at": r[1], "period": r[2], "period_end": r[3], "project_name": r[4], "item_count": r[5]}
+            for r in rows
         ]
+
+    def get_all_history(self, limit: int = 100) -> list[dict]:
+        """Return recent delivery-report run metadata across ALL sessions (for the hub).
+
+        Reporting piggybacks on the latest planning session, so the hub lists runs
+        across every session (matching how Analysis lists all saved sessions).
+        """
+        rows = self._conn.execute(
+            "SELECT id, session_id, run_at, period, period_end, project_name, item_count FROM reporting_history "
+            "ORDER BY run_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "session_id": r[1],
+                "run_at": r[2],
+                "period": r[3],
+                "period_end": r[4],
+                "project_name": r[5],
+                "item_count": r[6],
+            }
+            for r in rows
+        ]
+
+    def get_run_by_id(self, run_id: int) -> DeliveryReport | None:
+        """Return the DeliveryReport for a single history row, or None if missing/corrupt."""
+        row = self._conn.execute(
+            "SELECT report_json FROM reporting_history WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None or not row[0]:
+            return None
+        try:
+            return _dict_to_report(json.loads(row[0]))
+        except (json.JSONDecodeError, TypeError, KeyError) as exc:
+            logger.warning("Failed to deserialize delivery report run id=%s: %s", run_id, exc)
+            return None
+
+    def delete_run(self, run_id: int) -> bool:
+        """Delete a single delivery-report history row. Returns True if a row was removed."""
+        cursor = self._conn.execute("DELETE FROM reporting_history WHERE id = ?", (run_id,))
+        deleted = (cursor.rowcount or 0) > 0
+        if deleted:
+            logger.info("Deleted delivery report run id=%s", run_id)
+        return deleted

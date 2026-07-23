@@ -8,11 +8,52 @@ import logging
 # stringified type hints (PEP 563) of tool functions against this namespace.
 from mcp.server.fastmcp import Context
 
-from yeaboi.mcp.runtime import run_engine
+from yeaboi.mcp.runtime import run_engine, run_readonly, to_jsonable
 
 logger = logging.getLogger(__name__)
 
 _PERIODS = ("last_sprint", "last_month", "quarter")
+
+
+def _reporting_history(session_id: str, limit: int) -> dict:
+    from yeaboi.mcp.tools_sessions import resolve_session_id
+    from yeaboi.paths import get_db_path
+    from yeaboi.reporting.store import ReportingStore
+
+    resolved = resolve_session_id(session_id)
+    with ReportingStore(get_db_path()) as store:
+        history = store.get_history(resolved, limit=limit)
+        latest = store.get_latest_report(resolved)
+    # to_jsonable only unpacks a top-level dataclass; convert the nested report
+    # here so latest_report is a structured dict rather than its str() repr.
+    return {
+        "session_id": resolved,
+        "history": history,
+        "latest_report": to_jsonable(latest) if latest is not None else None,
+    }
+
+
+def _reporting_export(session_id: str) -> dict:
+    from yeaboi.mcp.tools_sessions import resolve_session_id
+    from yeaboi.paths import get_db_path
+    from yeaboi.reporting.export import export_report
+    from yeaboi.reporting.store import ReportingStore
+
+    resolved = resolve_session_id(session_id)
+    with ReportingStore(get_db_path()) as store:
+        report = store.get_latest_report(resolved)
+    if report is None:
+        raise ValueError(
+            f"No delivery report recorded for session {resolved!r} — generate one from the yeaboi TUI first."
+        )
+    paths = export_report(report)
+    logger.info("Delivery report exported via MCP: session=%s period=%s", resolved, report.period_label)
+    return {
+        "session_id": resolved,
+        "period": report.period_label,
+        "markdown": str(paths["markdown"]),
+        "html": str(paths["html"]),
+    }
 
 
 def _report_delivery(
@@ -74,3 +115,15 @@ def register(app) -> None:
             sprint_names,
             period_label_override,
         )
+
+    @app.tool()
+    async def reporting_history(session_id: str = "", limit: int = 30) -> dict:
+        """Get past delivery reports (executive summary, themes, metrics, delivered items) for a
+        session. Blank session_id = most recent session. Generating a new report uses report_delivery."""
+        return await run_readonly(_reporting_history, session_id, limit)
+
+    @app.tool()
+    async def reporting_export(session_id: str = "") -> dict:
+        """Export the most recent delivery report as Markdown + HTML files (under
+        ~/.yeaboi/exports/reporting/) and return their paths. Blank session_id = most recent session."""
+        return await run_readonly(_reporting_export, session_id)

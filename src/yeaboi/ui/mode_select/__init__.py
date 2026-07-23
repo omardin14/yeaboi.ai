@@ -2728,6 +2728,741 @@ def _run_feedback_page(console: Console, live, read_key, frame_time: float, supp
         logger.info("feedback: page closed")
 
 
+def _run_mode_hub(
+    console: Console,
+    live,
+    read_key,
+    frame_time: float,
+    supports_timeout: bool,
+    *,
+    mode: str,
+    title_fn,
+    subtitle: str,
+    empty_title: str,
+    empty_subtitle: str,
+    new_label: str,
+    load_runs,
+    files_export,
+    get_document,
+    delete_run,
+    run_new,
+    make_detail=None,
+    open_snapshot=None,
+    new_breaks_out: bool = False,
+) -> None:
+    """Generic saved-runs hub loop shared by standup / retro / reporting.
+
+    Landing screen for a mode: a browsable list of past runs (``load_runs`` →
+    ``RunSummary``s). On a selected run row, Left/Right move focus across
+    [card, Delete, Export]; Enter on the card opens the read-only snapshot, on
+    Delete raises a confirm popup, on Export opens the shared destination picker.
+    The "+ New run" card runs the mode's live page (``run_new``) then reloads. This
+    is the TUI half of the "Saved-Sessions Hub" — the store already kept every run;
+    this makes them openable / deletable / exportable instead of latest-only.
+
+    All the per-mode behaviour is injected as callables so retro/standup/reporting
+    share one loop. Performance uses ``_run_performance_hub`` (per-engineer, mixed
+    artifact kinds) but reuses the same screen builders.
+
+    Opening a saved run renders it through the mode's OWN rich screen builder (the
+    same one its live page uses) so a snapshot looks identical to the live view —
+    themed, with meters / section cards / grids — not flat grey text. ``make_detail``
+    (run) loads the report once and returns a per-frame ``render(scroll, action_sel,
+    actions, scroll_meta, width, height, message, shimmer_tick) -> Panel`` (or None if
+    the run vanished). Standup needs section drill-in beyond plain scroll, so it passes
+    an ``open_snapshot`` override instead; the other three use the shared scroll loop.
+    """
+    from yeaboi.ui.mode_select.screens._run_hub_screen import _build_run_hub_screen
+
+    runs = load_runs()
+    selected = 0
+    focus = 0  # 0 = card, 1 = Delete, 2 = Export (only on a run row)
+    message = ""
+    confirm = False  # delete-confirmation popup showing
+    anim_start = time.monotonic()
+    logger.info("%s hub: opened (%d saved run(s))", mode, len(runs))
+
+    def _reload(msg: str = "") -> None:
+        nonlocal runs, selected, focus, message, confirm
+        runs = load_runs()
+        selected = min(selected, max(0, len(runs)))  # keep within [0, new_idx]
+        focus = 0
+        confirm = False
+        message = msg
+
+    def _render_list() -> None:
+        w, h = console.size
+        tick = time.monotonic() - anim_start
+        on_run = selected < len(runs)
+        live.update(
+            _build_run_hub_screen(
+                runs,
+                selected,
+                title_fn=title_fn,
+                subtitle=subtitle,
+                message=message,
+                width=w,
+                height=max(10, h - 1),
+                focus=focus if on_run else 0,
+                del_fade=1.0 if (on_run and focus == 1) else 0.0,
+                exp_fade=1.0 if (on_run and focus == 2) else 0.0,
+                card_fade=1.0,
+                action_btns_visible=2.0 if on_run else 0.0,
+                delete_popup_name=(runs[selected].title if (confirm and on_run) else ""),
+                delete_popup_t=1.0 if confirm else 0.0,
+                new_label=new_label,
+                empty_title=empty_title,
+                empty_subtitle=empty_subtitle,
+                shimmer_tick=tick,
+            )
+        )
+
+    def _run_action(run, act: str) -> tuple[bool, str | None]:
+        """Perform a snapshot action button. Returns (leave_snapshot, message).
+
+        message is None when nothing should change on screen (e.g. Export cancelled).
+        Shared by the generic scroll loop and the standup section-drill override so the
+        Export / Delete / Run again / Back behaviour stays identical across modes.
+        """
+        if act == "Back":
+            return True, None
+        if act == "Export":
+            return False, _export_via_picker(
+                console,
+                live,
+                read_key,
+                frame_time,
+                supports_timeout,
+                mode=mode,
+                files_export=lambda r=run: files_export(r),
+                get_document=lambda r=run: get_document(r),
+            )
+        if act == "Delete":
+            delete_run(run)
+            _reload("Run deleted.")
+            return True, None
+        if act == "Run again":
+            run_new()
+            _reload("New run recorded.")
+            return True, None
+        return False, None
+
+    def _open_snapshot(run) -> None:
+        """Read-only view of one saved run rendered through the mode's rich builder.
+
+        Standup overrides this (``open_snapshot``) for section drill-in; the other three
+        modes use this shared loop: Up/Down scroll the report, Left/Right move across the
+        [Export, Delete, Run again, Back] buttons, Enter presses one. Scroll is clamped to
+        the geometry the builder publishes into ``scroll_meta`` (the live-page pattern).
+        """
+        if open_snapshot is not None:
+            # The override drives the same actions via a run-bound callable: run_action(act).
+            open_snapshot(run, lambda act, r=run: _run_action(r, act))
+            return
+        render = make_detail(run)
+        if render is None:
+            _reload("That run is no longer available.")
+            return
+        scroll = 0
+        sel = 0
+        actions = ["Export", "Delete", "Run again", "Back"]
+        msg = ""
+        s_anim = time.monotonic()
+        logger.info("%s hub: opened run id=%s", mode, run.run_id)
+
+        def _render_snap() -> None:
+            nonlocal scroll
+            w, h = console.size
+            scroll_meta: dict = {}
+            panel = render(
+                scroll=scroll,
+                action_sel=sel,
+                actions=actions,
+                scroll_meta=scroll_meta,
+                width=w,
+                height=max(10, h - 1),
+                message=msg,
+                shimmer_tick=time.monotonic() - s_anim,
+            )
+            # The builder reports its max scroll only after laying the body out — clamp
+            # here so held Down keys don't run the offset past the end.
+            scroll = max(0, min(scroll, scroll_meta.get("max_scroll", scroll)))
+            live.update(panel)
+
+        _render_snap()
+        while True:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+            if k in SCROLL_KEYS:
+                step = 1 if k in ("down", "scroll_down", "pagedown") else -1
+                scroll = max(0, scroll + step)
+            elif k == "left":
+                sel = max(0, sel - 1)
+            elif k == "right":
+                sel = min(len(actions) - 1, sel + 1)
+            elif k in ("enter", " "):
+                leave, m = _run_action(run, actions[sel])
+                if leave:
+                    return
+                if m is not None:
+                    msg = m
+            elif k in ("esc", "q"):
+                return
+            _render_snap()
+
+    _render_list()
+    while True:
+        k = read_key(timeout=frame_time) if supports_timeout else read_key()
+        n_items = len(runs) + 1
+        on_run = selected < len(runs)
+        if confirm:
+            # Delete-confirmation popup is modal: Enter confirms, Esc cancels.
+            if k in ("enter", " "):
+                run = runs[selected]
+                delete_run(run)
+                _reload("Run deleted.")
+            elif k in ("esc", "q"):
+                confirm = False
+            _render_list()
+            continue
+        if k in SCROLL_KEYS or k in ("up", "down"):
+            step = 1 if k in ("down", "scroll_down", "pagedown") else -1
+            selected = (selected + step) % n_items
+            focus = 0
+        elif k == "left":
+            focus = max(0, focus - 1)
+        elif k == "right":
+            if on_run:
+                focus = min(2, focus + 1)
+        elif k in ("enter", " "):
+            if not on_run:
+                if new_breaks_out:
+                    # Performance: "+ New" hands control back to the roster (where the
+                    # create actions live) instead of running a live page in place.
+                    break
+                # "+ New run" card → run the live page, then reload the list.
+                run_new()
+                _reload("New run recorded.")
+                _render_list()
+                continue
+            run = runs[selected]
+            if focus == 0:
+                _open_snapshot(run)
+            elif focus == 1:
+                confirm = True
+            elif focus == 2:
+                msg = _export_via_picker(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    mode=mode,
+                    files_export=lambda r=run: files_export(r),
+                    get_document=lambda r=run: get_document(r),
+                )
+                if msg is not None:
+                    message = msg
+        elif k in ("esc", "q"):
+            break
+        _render_list()
+    logger.info("%s hub: closed", mode)
+
+
+def _run_standup_hub(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Standup saved-runs hub → landing for the Standup card (was: straight into latest)."""
+    from yeaboi.persistence import _relative_time
+    from yeaboi.standup.export import build_standup_markdown, export_standup
+    from yeaboi.standup.store import StandupStore
+    from yeaboi.ui.mode_select.screens._project_cards import RunSummary
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_screen
+    from yeaboi.ui.mode_select.screens._standup_sections import standup_card_order
+    from yeaboi.ui.shared._components import standup_title
+
+    def _report(run_id: int):
+        with StandupStore(_ana_dbp) as store:
+            return store.get_run_by_id(run_id)
+
+    def load_runs():
+        with StandupStore(_ana_dbp) as store:
+            rows = store.get_all_history(100)
+        out = []
+        for r in rows:
+            date = r.get("standup_date") or ""
+            conf = r.get("confidence_pct", 0)
+            sub = f"Day {r.get('sprint_day', 0)} · {conf}% confident" if conf else "standup"
+            out.append(
+                RunSummary(
+                    "standup",
+                    r["id"],
+                    f"Standup — {date or _relative_time(r['run_at'])}",
+                    sub,
+                    _relative_time(r["run_at"]),
+                    session_id=r.get("session_id", ""),
+                )
+            )
+        return out
+
+    def open_standup_snapshot(run, run_action) -> None:
+        """Read-only standup snapshot with section drill-in (the live overview, replayed).
+
+        The overview is just a section list, so a flat scroll would show less than the
+        markdown did. Instead this replays the live standup screen: ↑/↓ move the section
+        selection, Enter opens that section's detail (or toggles the Team row's inline
+        member rows, matching the live board), Esc returns to the overview. Left/Right +
+        Enter drive the shared [Export, Delete, Run again, Back] actions via ``run_action``.
+        """
+        report = _report(run.run_id)
+        if report is None:
+            return
+        # StandupReport has no project name; the header just reads "Daily standup" for a
+        # saved run (the run row already names the date). my_name drives the "My Update" row.
+        data = {"report": report, "session_name": "", "my_name": report.my_name, "team_expanded": False, "message": ""}
+        order = standup_card_order(data)
+        actions = ["Export", "Delete", "Run again", "Back"]
+        view = "overview"  # "overview" | a section key
+        focus = "sections"  # overview focus zone: "sections" | "buttons"
+        card_idx, scroll, sel = 0, 0, 0
+        s_anim = time.monotonic()
+        logger.info("standup hub: opened run id=%s", run.run_id)
+
+        def _render() -> None:
+            nonlocal scroll
+            w, h = console.size
+            scroll_meta: dict = {}
+            panel = _build_standup_screen(
+                data,
+                scroll_offset=scroll,
+                scroll_meta=scroll_meta,
+                width=w,
+                height=max(10, h - 1),
+                action_sel=sel,
+                shimmer_tick=time.monotonic() - s_anim,
+                view=view,
+                selected_card=card_idx,
+                actions=(actions if view == "overview" else ["← Overview"]),
+            )
+            scroll = max(0, min(scroll, scroll_meta.get("max_scroll", scroll)))
+            live.update(panel)
+
+        _render()
+        while True:
+            k = read_key(timeout=frame_time) if supports_timeout else read_key()
+            if view != "overview":
+                # Drilled into a section: Up/Down scroll it; any exit key returns to overview.
+                if k in SCROLL_KEYS:
+                    scroll = max(0, scroll + (1 if k in ("down", "scroll_down", "pagedown") else -1))
+                elif k in ("enter", " ", "esc", "q", "left", "right"):
+                    view, scroll = "overview", 0
+                _render()
+                continue
+            if k in ("up", "down") or k in SCROLL_KEYS:
+                focus = "sections"
+                card_idx = (card_idx + (1 if k in ("down", "scroll_down", "pagedown") else -1)) % len(order)
+            elif k == "left":
+                focus = "buttons"
+                sel = max(0, sel - 1)
+            elif k == "right":
+                focus = "buttons"
+                sel = min(len(actions) - 1, sel + 1)
+            elif k in ("enter", " "):
+                if focus == "buttons":
+                    leave, m = run_action(actions[sel])
+                    if leave:
+                        return
+                    if m is not None:
+                        data["message"] = m
+                elif order[card_idx] == "team":
+                    # Team row expands inline into member sub-rows (live behaviour), not a detail view.
+                    data["team_expanded"] = not data["team_expanded"]
+                    order = standup_card_order(data)
+                else:
+                    view, scroll = order[card_idx], 0
+            elif k in ("esc", "q"):
+                return
+            _render()
+
+    def files_export(run):
+        report = _report(run.run_id)
+        if report is None:
+            return "That run is no longer available."
+        paths = export_standup(report)
+        return f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
+
+    def get_document(run):
+        report = _report(run.run_id)
+        return (
+            "That run is no longer available."
+            if report is None
+            else (f"Standup — {report.date}", build_standup_markdown(report))
+        )
+
+    def delete_run(run):
+        with StandupStore(_ana_dbp) as store:
+            store.delete_run(run.run_id)
+
+    _run_mode_hub(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        mode="standup",
+        title_fn=standup_title,
+        subtitle="Saved standups",
+        empty_title="No standups yet",
+        empty_subtitle="Press Enter to run your first standup",
+        new_label="+ New standup",
+        load_runs=load_runs,
+        open_snapshot=open_standup_snapshot,
+        files_export=files_export,
+        get_document=get_document,
+        delete_run=delete_run,
+        run_new=lambda: _run_standup_page(console, live, read_key, frame_time, supports_timeout),
+    )
+
+
+def _run_retro_hub(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Retro saved-runs hub → landing for the Retro card.
+
+    Opening a saved retro renders the recorded board as a read-only text snapshot
+    (from ``build_retro_markdown``) rather than resurrecting the live LAN board —
+    "+ New retro" starts a fresh live board via the existing page.
+    """
+    from yeaboi.persistence import _relative_time
+    from yeaboi.retro.export import _title, build_retro_markdown, export_retro
+    from yeaboi.retro.store import RetroStore
+    from yeaboi.ui.mode_select.screens._project_cards import RunSummary
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_retro_screen
+    from yeaboi.ui.shared._components import retro_title
+
+    def _report(run_id: int):
+        with RetroStore(_ana_dbp) as store:
+            return store.get_run_by_id(run_id)
+
+    def load_runs():
+        with RetroStore(_ana_dbp) as store:
+            rows = store.get_all_history(100)
+        out = []
+        for r in rows:
+            date = r.get("retro_date") or ""
+            proj = r.get("project_name") or ""
+            n = r.get("card_count", 0)
+            sub = " · ".join(p for p in (proj, f"{n} card{'s' if n != 1 else ''}") if p)
+            out.append(
+                RunSummary(
+                    "retro",
+                    r["id"],
+                    f"Retro — {date or _relative_time(r['run_at'])}",
+                    sub,
+                    _relative_time(r["run_at"]),
+                    session_id=r.get("session_id", ""),
+                )
+            )
+        return out
+
+    def make_detail(run):
+        # Replay the saved board through the live Retro screen (structured grids +
+        # card badges + carried-actions review), suppressing the live-only join block.
+        report = _report(run.run_id)
+        if report is None:
+            return None
+        grids = report.by_grid()
+        carried = list(report.carried_action_items)
+        session_name = report.project_name
+
+        def render(*, scroll, action_sel, actions, scroll_meta, width, height, message, shimmer_tick):
+            return _build_retro_screen(
+                {
+                    "grids": grids,
+                    "carried": carried,
+                    "session_name": session_name,
+                    "snapshot": True,
+                    "actions": actions,
+                    "message": message,
+                },
+                scroll_offset=scroll,
+                scroll_meta=scroll_meta,
+                action_sel=action_sel,
+                width=width,
+                height=height,
+                shimmer_tick=shimmer_tick,
+            )
+
+        return render
+
+    def files_export(run):
+        report = _report(run.run_id)
+        if report is None:
+            return "That run is no longer available."
+        paths = export_retro(report)
+        return f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
+
+    def get_document(run):
+        report = _report(run.run_id)
+        return "That run is no longer available." if report is None else (_title(report), build_retro_markdown(report))
+
+    def delete_run(run):
+        with RetroStore(_ana_dbp) as store:
+            store.delete_run(run.run_id)
+
+    _run_mode_hub(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        mode="retro",
+        title_fn=retro_title,
+        subtitle="Saved retros",
+        empty_title="No retros yet",
+        empty_subtitle="Press Enter to start your first retro board",
+        new_label="+ New retro",
+        load_runs=load_runs,
+        make_detail=make_detail,
+        files_export=files_export,
+        get_document=get_document,
+        delete_run=delete_run,
+        run_new=lambda: _run_retro_page(console, live, read_key, frame_time, supports_timeout),
+    )
+
+
+def _run_reporting_hub(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+    """Reporting saved-runs hub → landing for the Reporting card."""
+    from yeaboi.persistence import _relative_time
+    from yeaboi.reporting.export import _title, build_report_markdown, export_report
+    from yeaboi.reporting.render import format_report_lines
+    from yeaboi.reporting.store import ReportingStore
+    from yeaboi.ui.mode_select.screens._project_cards import RunSummary
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_reporting_screen
+    from yeaboi.ui.shared._components import reporting_title
+
+    def _report(run_id: int):
+        with ReportingStore(_ana_dbp) as store:
+            return store.get_run_by_id(run_id)
+
+    def load_runs():
+        with ReportingStore(_ana_dbp) as store:
+            rows = store.get_all_history(100)
+        out = []
+        for r in rows:
+            period = r.get("period") or ""
+            proj = r.get("project_name") or ""
+            n = r.get("item_count", 0)
+            sub = " · ".join(p for p in (proj, f"{n} item{'s' if n != 1 else ''} delivered") if p)
+            out.append(
+                RunSummary(
+                    "reporting",
+                    r["id"],
+                    f"Report — {period or _relative_time(r['run_at'])}",
+                    sub,
+                    _relative_time(r["run_at"]),
+                    session_id=r.get("session_id", ""),
+                )
+            )
+        return out
+
+    def make_detail(run):
+        # Render the saved report through the live Reporting detail screen (indigo
+        # theme + semantic _styled colouring) instead of flat grey lines.
+        report = _report(run.run_id)
+        if report is None:
+            return None
+        detail_lines = format_report_lines(report)
+        detail_title = f"Delivery Report — {report.period_label}"
+
+        def render(*, scroll, action_sel, actions, scroll_meta, width, height, message, shimmer_tick):
+            return _build_reporting_screen(
+                {
+                    "view": "detail",
+                    "detail_lines": detail_lines,
+                    "detail_title": detail_title,
+                    "actions": actions,
+                    "message": message,
+                },
+                scroll_offset=scroll,
+                scroll_meta=scroll_meta,
+                action_sel=action_sel,
+                width=width,
+                height=height,
+                shimmer_tick=shimmer_tick,
+            )
+
+        return render
+
+    def files_export(run):
+        report = _report(run.run_id)
+        if report is None:
+            return "That run is no longer available."
+        paths = export_report(report)
+        return f"Exported to {paths['markdown'].parent}  (Markdown + HTML + slides)"
+
+    def get_document(run):
+        report = _report(run.run_id)
+        return "That run is no longer available." if report is None else (_title(report), build_report_markdown(report))
+
+    def delete_run(run):
+        with ReportingStore(_ana_dbp) as store:
+            store.delete_run(run.run_id)
+
+    _run_mode_hub(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        mode="reporting",
+        title_fn=reporting_title,
+        subtitle="Saved reports",
+        empty_title="No reports yet",
+        empty_subtitle="Press Enter to generate your first delivery report",
+        new_label="+ New report",
+        load_runs=load_runs,
+        make_detail=make_detail,
+        files_export=files_export,
+        get_document=get_document,
+        delete_run=delete_run,
+        run_new=lambda: _run_reporting_page(console, live, read_key, frame_time, supports_timeout),
+    )
+
+
+def _run_performance_hub(
+    console: Console, live, read_key, frame_time: float, supports_timeout: bool, engineer: str
+) -> None:
+    """Per-engineer saved-artifacts hub (opened from the Performance roster's "History").
+
+    Performance is keyed by engineer, not by a single run, so the hub lists every saved
+    artifact for one engineer — 1:1 preps, completions, 6-month reviews, and notes — with
+    the same Open / Delete / Export experience. "+ New artifact" hands control back to the
+    roster, where the create actions (Prep / Complete / Review / Notes) live.
+    """
+    from yeaboi.performance.export import (
+        build_completion_markdown,
+        build_prep_markdown,
+        build_review_markdown,
+        export_artifact,
+    )
+    from yeaboi.performance.render import format_completion_lines, format_prep_lines, format_review_lines
+    from yeaboi.performance.store import PerformanceStore
+    from yeaboi.persistence import _relative_time
+    from yeaboi.ui.mode_select.screens._project_cards import RunSummary
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_performance_screen
+    from yeaboi.ui.shared._components import performance_title
+
+    def load_runs():
+        with PerformanceStore(_ana_dbp) as store:
+            rows = store.get_engineer_history(engineer, 100)
+        return [
+            RunSummary(
+                "performance",
+                r["id"],
+                r["title"],
+                r["kind"].capitalize(),
+                _relative_time(r["created_at"]),
+                kind=r["kind"],
+            )
+            for r in rows
+        ]
+
+    def _artifact(run):
+        """Return (artifact_or_text, kind, lines) for a saved row, or None if gone."""
+        with PerformanceStore(_ana_dbp) as store:
+            if run.kind == "review":
+                art = store.get_review_by_id(run.run_id)
+                return None if art is None else (art, "review", format_review_lines(art))
+            if run.kind == "note":
+                for n in store.get_notes(engineer, 200):
+                    if n["id"] == run.run_id:
+                        return (n["note_text"], "note", (n["note_text"] or "").splitlines() or ["(empty note)"])
+                return None
+            pair = store.get_one_on_one_by_id(run.run_id)
+        if pair is None:
+            return None
+        kind, art = pair
+        lines = format_completion_lines(art) if kind == "completion" else format_prep_lines(art)
+        return (art, kind, lines)
+
+    def make_detail(run):
+        # Render the saved artifact through the live Performance detail screen (coral
+        # theme + semantic _styled colouring) instead of flat grey lines.
+        got = _artifact(run)
+        if got is None:
+            return None
+        _art, _kind, lines = got
+        title = run.title
+
+        def render(*, scroll, action_sel, actions, scroll_meta, width, height, message, shimmer_tick):
+            return _build_performance_screen(
+                {
+                    "view": "detail",
+                    "detail_lines": lines,
+                    "detail_title": title,
+                    "actions": actions,
+                    "message": message,
+                },
+                scroll_offset=scroll,
+                scroll_meta=scroll_meta,
+                action_sel=action_sel,
+                width=width,
+                height=height,
+                shimmer_tick=shimmer_tick,
+            )
+
+        return render
+
+    def delete_run(run):
+        with PerformanceStore(_ana_dbp) as store:
+            if run.kind == "review":
+                store.delete_review(run.run_id)
+            elif run.kind == "note":
+                store.delete_note(run.run_id)
+            else:
+                store.delete_one_on_one(run.run_id)
+
+    def files_export(run):
+        got = _artifact(run)
+        if got is None:
+            return "That artifact is no longer available."
+        art, kind, _lines = got
+        if kind == "note":
+            return "Notes aren't exported to files individually — use Copy/Publish."
+        paths = export_artifact(art, engineer=engineer, kind=kind)
+        return f"Exported to {paths['markdown'].parent}  (Markdown + HTML)"
+
+    def get_document(run):
+        got = _artifact(run)
+        if got is None:
+            return "That artifact is no longer available."
+        art, kind, _lines = got
+        if kind == "note":
+            return (f"Note — {engineer}", art if isinstance(art, str) else "")
+        if kind == "completion":
+            return (run.title, build_completion_markdown(art))
+        if kind == "review":
+            return (run.title, build_review_markdown(art))
+        return (run.title, build_prep_markdown(art))
+
+    _run_mode_hub(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        mode="performance",
+        title_fn=performance_title,
+        subtitle=f"Saved artifacts — {engineer}",
+        empty_title=f"No saved artifacts for {engineer}",
+        empty_subtitle="Press Enter to create one from the roster",
+        new_label="+ New artifact",
+        load_runs=load_runs,
+        make_detail=make_detail,
+        files_export=files_export,
+        get_document=get_document,
+        delete_run=delete_run,
+        run_new=lambda: None,
+        new_breaks_out=True,
+    )
+
+
 def _run_standup_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
     """Event loop for the Daily Standup page (overview + expandable sections).
 
@@ -3756,7 +4491,7 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
         "detail_lines": [],
         "detail_title": "",
     }
-    roster_actions = ["1:1 Prep", "1:1 Complete", "6mo Review", "Notes", "Export", "Back"]
+    roster_actions = ["1:1 Prep", "1:1 Complete", "6mo Review", "Notes", "History", "Export", "Back"]
     detail_actions = ["Export", "Anonymize", "Back"]
     # Anonymize state: None = real artifact; an AnonymizedOutput = mask the detail lines.
     anon = None
@@ -3908,7 +4643,11 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                 else:
                     engineer = roster[state["selected"]]
                     logger.info("performance: %s pressed for engineer=%s", label, engineer)
-                    if label == "Export":
+                    if label == "History":
+                        # Browse this engineer's saved artifacts (open / delete / export).
+                        _run_performance_hub(console, live, read_key, frame_time, supports_timeout, engineer)
+                        roster_hints[:] = _performance_roster_hints(roster)
+                    elif label == "Export":
                         msg = _export_via_picker(
                             console,
                             live,
@@ -6464,7 +7203,7 @@ def select_mode(
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 # Route all records to logs/standup/standup.log while the page runs.
                 with mode_log("standup"):
-                    _run_standup_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                    _run_standup_hub(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
@@ -6474,7 +7213,7 @@ def select_mode(
                 logger.info("Retro mode selected")
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 with mode_log("retro"):
-                    _run_retro_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                    _run_retro_hub(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
@@ -6494,7 +7233,7 @@ def select_mode(
                 logger.info("Reporting mode selected")
                 play_wordmark_intro(console, live, chosen["title"], chosen["color"], frame_time=_FRAME_TIME)
                 with mode_log("reporting"):
-                    _run_reporting_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                    _run_reporting_hub(console, live, read_key, _FRAME_TIME, _supports_timeout)
                 _restart_mode_select = True
                 _skip_fade_in = True
                 continue
