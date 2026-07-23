@@ -78,6 +78,56 @@ class TestNotes:
             store.add_note("Ada", "second")
             notes = store.get_notes("Ada")
         assert [n["note_text"] for n in notes] == ["second", "first"]
+        assert all("id" in n for n in notes)  # saved-runs hub needs per-note id
+
+    def test_delete_note(self, db_path):
+        with PerformanceStore(db_path) as store:
+            nid = store.add_note("Ada", "gone")
+            store.add_note("Ada", "kept")
+            assert store.delete_note(nid) is True
+            assert [n["note_text"] for n in store.get_notes("Ada")] == ["kept"]
+
+
+class TestSavedRunsHub:
+    """Per-id getters/deletes + merged history — power the per-engineer saved-artifacts hub."""
+
+    def test_get_engineer_history_merges_all_kinds(self, db_path):
+        with PerformanceStore(db_path) as store:
+            store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-07-01"))
+            store.record_completion(OneOnOneRecord(engineer="Ada", date="2026-07-05"))
+            store.record_review(SixMonthReview(engineer="Ada", overall="x"))
+            store.add_note("Ada", "a note")
+            store.record_prep(OneOnOnePrep(engineer="Bob", date="2026-07-01"))
+            rows = store.get_engineer_history("Ada")
+        kinds = sorted(r["kind"] for r in rows)
+        assert kinds == ["completion", "note", "prep", "review"]
+        assert all({"id", "created_at", "title"} <= set(r) for r in rows)
+
+    def test_one_on_one_by_id_dispatches_on_kind(self, db_path):
+        with PerformanceStore(db_path) as store:
+            pid = store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-07-01", goals=("g",)))
+            cid = store.record_completion(OneOnOneRecord(engineer="Ada", date="2026-07-05", highlights=("h",)))
+            pk, prep = store.get_one_on_one_by_id(pid)
+            ck, comp = store.get_one_on_one_by_id(cid)
+        assert pk == "prep" and prep.goals == ("g",)
+        assert ck == "completion" and comp.highlights == ("h",)
+
+    def test_get_by_id_missing_and_corrupt(self, db_path):
+        with PerformanceStore(db_path) as store:
+            rid = store.record_review(SixMonthReview(engineer="Ada", overall="x"))
+            assert store.get_review_by_id(rid) is not None
+            assert store.get_review_by_id(999) is None
+            assert store.get_one_on_one_by_id(999) is None
+            store._conn.execute("UPDATE performance_reviews SET report_json='{bad' WHERE id=?", (rid,))
+            assert store.get_review_by_id(rid) is None
+
+    def test_delete_one_on_one_and_review(self, db_path):
+        with PerformanceStore(db_path) as store:
+            pid = store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-07-01"))
+            rid = store.record_review(SixMonthReview(engineer="Ada", overall="x"))
+            assert store.delete_one_on_one(pid) is True
+            assert store.delete_review(rid) is True
+            assert store.get_engineer_history("Ada") == []
 
 
 class TestTeamWide:

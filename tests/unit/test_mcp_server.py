@@ -36,6 +36,8 @@ EXPECTED_TOOLS = {
     "standup_config_get",
     "standup_config_set",
     "report_delivery",
+    "reporting_history",
+    "reporting_export",
     "perf_roster",
     "perf_one_on_one_prep",
     "perf_one_on_one_complete",
@@ -206,6 +208,28 @@ class TestHistoryTools:
         payload = call_tool("retro_history")
         assert payload["ok"] is True
         assert payload["data"]["history"] == []
+
+    def test_reporting_history_empty(self, seeded_session):
+        payload = call_tool("reporting_history")
+        assert payload["ok"] is True
+        assert payload["data"]["history"] == []
+        assert payload["data"]["latest_report"] is None
+
+    def test_reporting_history_after_run(self, seeded_session, tmp_db):
+        from yeaboi.agent.state import DeliveryReport
+        from yeaboi.reporting.store import ReportingStore
+
+        with ReportingStore(tmp_db) as store:
+            store.record_run(DeliveryReport(period_label="Last month", headline="Shipped."), session_id=seeded_session)
+        payload = call_tool("reporting_history", {"session_id": seeded_session})
+        assert payload["ok"] is True
+        assert len(payload["data"]["history"]) == 1
+        assert payload["data"]["latest_report"]["headline"] == "Shipped."
+
+    def test_reporting_export_no_report(self, seeded_session):
+        payload = call_tool("reporting_export")
+        # No report recorded → the tool raises, surfaced as ok=False in the envelope.
+        assert payload["ok"] is False
 
     def test_team_profile_get_no_db(self, tmp_db):
         payload = call_tool("team_profile_get")

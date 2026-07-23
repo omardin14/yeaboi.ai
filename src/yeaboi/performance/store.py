@@ -260,6 +260,36 @@ class PerformanceStore:
             logger.warning("Failed to deserialize latest prep for %s: %s", engineer, exc)
             return None
 
+    def get_one_on_one_by_id(self, run_id: int) -> tuple[str, OneOnOnePrep | OneOnOneRecord] | None:
+        """Return ``(kind, artifact)`` for a single 1:1 row, or None if missing/corrupt.
+
+        The ``performance_one_on_ones`` table holds both preps and completions, so the
+        stored ``kind`` selects which dataclass the JSON deserializes into — the
+        saved-runs hub uses ``kind`` to pick the right formatter.
+        """
+        row = self._conn.execute(
+            "SELECT kind, report_json FROM performance_one_on_ones WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None or not row[1]:
+            return None
+        kind = row[0] or "prep"
+        try:
+            data = json.loads(row[1])
+            artifact = _dict_to_record(data) if kind == "completion" else _dict_to_prep(data)
+            return (kind, artifact)
+        except (json.JSONDecodeError, TypeError, KeyError) as exc:
+            logger.warning("Failed to deserialize 1:1 run id=%s: %s", run_id, exc)
+            return None
+
+    def delete_one_on_one(self, run_id: int) -> bool:
+        """Delete a single 1:1 (prep or completion) row. Returns True if removed."""
+        cursor = self._conn.execute("DELETE FROM performance_one_on_ones WHERE id = ?", (run_id,))
+        deleted = (cursor.rowcount or 0) > 0
+        if deleted:
+            logger.info("Deleted 1:1 run id=%s", run_id)
+        return deleted
+
     # ── 6-month review ────────────────────────────────────────────────────
 
     def record_review(self, review: SixMonthReview, *, session_id: str = "") -> int:
@@ -299,6 +329,28 @@ class PerformanceStore:
             logger.warning("Failed to deserialize latest review for %s: %s", engineer, exc)
             return None
 
+    def get_review_by_id(self, run_id: int) -> SixMonthReview | None:
+        """Return the SixMonthReview for a single review row, or None if missing/corrupt."""
+        row = self._conn.execute(
+            "SELECT report_json FROM performance_reviews WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None or not row[0]:
+            return None
+        try:
+            return _dict_to_review(json.loads(row[0]))
+        except (json.JSONDecodeError, TypeError, KeyError) as exc:
+            logger.warning("Failed to deserialize review run id=%s: %s", run_id, exc)
+            return None
+
+    def delete_review(self, run_id: int) -> bool:
+        """Delete a single 6-month review row. Returns True if removed."""
+        cursor = self._conn.execute("DELETE FROM performance_reviews WHERE id = ?", (run_id,))
+        deleted = (cursor.rowcount or 0) > 0
+        if deleted:
+            logger.info("Deleted review run id=%s", run_id)
+        return deleted
+
     # ── Notes ─────────────────────────────────────────────────────────────
 
     def add_note(self, engineer: str, note_text: str) -> int:
@@ -311,12 +363,60 @@ class PerformanceStore:
         return int(cursor.lastrowid or 0)
 
     def get_notes(self, engineer: str, limit: int = 50) -> list[dict]:
-        """Return the engineer's notes, newest first."""
+        """Return the engineer's notes, newest first (each row carries its ``id``)."""
         rows = self._conn.execute(
-            "SELECT note_text, created_at FROM performance_notes WHERE engineer = ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, note_text, created_at FROM performance_notes "
+            "WHERE engineer = ? ORDER BY created_at DESC LIMIT ?",
             (engineer, limit),
         ).fetchall()
-        return [{"note_text": r[0], "created_at": r[1]} for r in rows]
+        return [{"id": r[0], "note_text": r[1], "created_at": r[2]} for r in rows]
+
+    def delete_note(self, note_id: int) -> bool:
+        """Delete a single performance note row. Returns True if removed."""
+        cursor = self._conn.execute("DELETE FROM performance_notes WHERE id = ?", (note_id,))
+        deleted = (cursor.rowcount or 0) > 0
+        if deleted:
+            logger.info("Deleted performance note id=%s", note_id)
+        return deleted
+
+    # ── Per-engineer saved-runs hub ───────────────────────────────────────────
+
+    def get_engineer_history(self, engineer: str, limit: int = 100) -> list[dict]:
+        """Return every saved artifact for an engineer, newest first, for the hub.
+
+        Merges the three per-engineer tables (1:1 preps + completions, 6-month
+        reviews, notes) into one list of lightweight rows. Each row carries a
+        ``kind`` (``prep`` | ``completion`` | ``review`` | ``note``), its table
+        ``id``, ``created_at``, and a short ``title`` — enough for the run-hub list
+        to render and, on open/delete, dispatch to the right getter/deleter by kind.
+        """
+        rows: list[dict] = []
+        for r in self._conn.execute(
+            "SELECT id, kind, on_date, created_at FROM performance_one_on_ones "
+            "WHERE engineer = ? ORDER BY created_at DESC LIMIT ?",
+            (engineer, limit),
+        ).fetchall():
+            kind = r[1] or "prep"
+            label = "1:1 Prep" if kind == "prep" else "1:1 Summary"
+            rows.append({"kind": kind, "id": r[0], "created_at": r[3], "title": f"{label} — {r[2] or r[3][:10]}"})
+        for r in self._conn.execute(
+            "SELECT id, period_start, period_end, created_at FROM performance_reviews "
+            "WHERE engineer = ? ORDER BY created_at DESC LIMIT ?",
+            (engineer, limit),
+        ).fetchall():
+            span = f"{r[1]}..{r[2]}" if (r[1] or r[2]) else r[3][:10]
+            rows.append({"kind": "review", "id": r[0], "created_at": r[3], "title": f"6-Month Review — {span}"})
+        for r in self._conn.execute(
+            "SELECT id, note_text, created_at FROM performance_notes "
+            "WHERE engineer = ? ORDER BY created_at DESC LIMIT ?",
+            (engineer, limit),
+        ).fetchall():
+            snippet = (r[1] or "").strip().replace("\n", " ")
+            if len(snippet) > 48:
+                snippet = snippet[:47] + "…"
+            rows.append({"kind": "note", "id": r[0], "created_at": r[2], "title": f"Note — {snippet or r[2][:10]}"})
+        rows.sort(key=lambda d: d["created_at"], reverse=True)
+        return rows[:limit]
 
     # ── Team-wide (cross-engineer) reads — used by performance/context.py to
     #    feed Planning / Analysis with per-engineer open actions + focus areas.

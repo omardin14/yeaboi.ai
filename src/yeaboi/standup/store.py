@@ -381,22 +381,49 @@ class StandupStore:
             return None
 
     def get_history(self, session_id: str, limit: int = 30) -> list[dict]:
-        """Return recent run metadata (newest first) for a session."""
+        """Return recent run metadata (newest first) for a session.
+
+        Each row carries its ``id`` so callers (the saved-runs hub) can reopen or
+        delete a specific run via ``get_run_by_id`` / ``delete_run``.
+        """
         rows = self._conn.execute(
-            "SELECT run_at, standup_date, sprint_day, confidence_pct, status "
+            "SELECT id, run_at, standup_date, sprint_day, confidence_pct, status "
             "FROM standup_history WHERE session_id = ? ORDER BY run_at DESC LIMIT ?",
             (session_id, limit),
         ).fetchall()
         return [
             {
-                "run_at": r[0],
-                "standup_date": r[1],
-                "sprint_day": r[2],
-                "confidence_pct": r[3],
-                "status": r[4],
+                "id": r[0],
+                "run_at": r[1],
+                "standup_date": r[2],
+                "sprint_day": r[3],
+                "confidence_pct": r[4],
+                "status": r[5],
             }
             for r in rows
         ]
+
+    def get_run_by_id(self, run_id: int) -> StandupReport | None:
+        """Return the StandupReport for a single history row, or None if missing/corrupt."""
+        row = self._conn.execute(
+            "SELECT report_json FROM standup_history WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None or not row[0]:
+            return None
+        try:
+            return _dict_to_standup_report(json.loads(row[0]))
+        except (json.JSONDecodeError, TypeError, KeyError) as exc:
+            logger.warning("Failed to deserialize standup run id=%s: %s", run_id, exc)
+            return None
+
+    def delete_run(self, run_id: int) -> bool:
+        """Delete a single standup history row. Returns True if a row was removed."""
+        cursor = self._conn.execute("DELETE FROM standup_history WHERE id = ?", (run_id,))
+        deleted = (cursor.rowcount or 0) > 0
+        if deleted:
+            logger.info("Deleted standup run id=%s", run_id)
+        return deleted
 
     # ── Team-wide (cross-session) reads — used by ceremony_history to feed
     #    Planning / Analysis with the team's recent standups. standup_history has
@@ -419,13 +446,21 @@ class StandupStore:
         return reports
 
     def get_all_history(self, limit: int = 100) -> list[dict]:
-        """Return recent standup run metadata across ALL sessions (for cadence)."""
+        """Return recent standup run metadata across ALL sessions (for cadence + the hub)."""
         rows = self._conn.execute(
-            "SELECT run_at, standup_date, sprint_day, confidence_pct, status "
+            "SELECT id, session_id, run_at, standup_date, sprint_day, confidence_pct, status "
             "FROM standup_history ORDER BY run_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [
-            {"run_at": r[0], "standup_date": r[1], "sprint_day": r[2], "confidence_pct": r[3], "status": r[4]}
+            {
+                "id": r[0],
+                "session_id": r[1],
+                "run_at": r[2],
+                "standup_date": r[3],
+                "sprint_day": r[4],
+                "confidence_pct": r[5],
+                "status": r[6],
+            }
             for r in rows
         ]

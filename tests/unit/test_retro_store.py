@@ -103,3 +103,35 @@ class TestStore:
             store.record_run(_report())
             hist = store.get_history("sess-1")
         assert hist and hist[0]["card_count"] == 2 and hist[0]["project_name"] == "Demo"
+        assert "id" in hist[0]  # saved-runs hub needs the row id
+
+
+class TestSavedRunsHub:
+    """get_all_history / get_run_by_id / delete_run — power the TUI saved-runs hub."""
+
+    def test_get_all_history_carries_id_and_session(self, tmp_path):
+        with RetroStore(tmp_path / "sessions.db") as store:
+            store.record_run(_report())
+            rows = store.get_all_history()
+        assert rows and "id" in rows[0] and rows[0]["session_id"] == "sess-1"
+
+    def test_get_run_by_id_round_trips_and_missing(self, tmp_path):
+        with RetroStore(tmp_path / "sessions.db") as store:
+            rid = store.record_run(_report())
+            got = store.get_run_by_id(rid)
+            assert got is not None and len(got.cards) == 2
+            assert store.get_run_by_id(999) is None
+
+    def test_get_run_by_id_corrupt_returns_none(self, tmp_path):
+        with RetroStore(tmp_path / "sessions.db") as store:
+            rid = store.record_run(_report())
+            store._conn.execute("UPDATE retro_history SET report_json='{bad' WHERE id=?", (rid,))
+            assert store.get_run_by_id(rid) is None
+
+    def test_delete_run_removes_only_that_row(self, tmp_path):
+        with RetroStore(tmp_path / "sessions.db") as store:
+            keep = store.record_run(_report())
+            drop = store.record_run(RetroReport(session_id="sess-2", date="2026-07-12", cards=(RetroCard(text="x"),)))
+            assert store.delete_run(drop) is True
+            assert store.delete_run(drop) is False
+            assert {r["id"] for r in store.get_all_history()} == {keep}

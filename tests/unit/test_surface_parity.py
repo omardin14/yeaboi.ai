@@ -99,7 +99,9 @@ CAPABILITIES: dict[str, dict] = {
     },
     "reporting": {
         "engines": {("yeaboi.reporting.engine", "run_delivery_report")},
-        "mcp_tools": {"report_delivery"},
+        # reporting_history / reporting_export are read-only store/export wrappers
+        # (no pipeline) — the saved-runs hub surfaces them; parity with retro-board.
+        "mcp_tools": {"report_delivery", "reporting_history", "reporting_export"},
         "tui_mode": "reporting",
         "cli": {"report"},
         "skill": "delivery-report",

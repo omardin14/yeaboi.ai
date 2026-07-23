@@ -42,6 +42,35 @@ class ProjectSummary:
 
 
 @dataclass
+class RunSummary:
+    """One saved run in a mode's saved-runs hub (standup / retro / reporting / performance).
+
+    A run is a stored report snapshot — not a resumable graph session — so it carries
+    only what the hub list needs: the store row ``run_id`` (+ ``kind`` for performance's
+    mixed artifact table), a ``title``/``subtitle`` for the card, and ``run_at`` for the
+    relative-time line. ``to_project`` maps it onto a ProjectSummary so the existing
+    ``_build_project_card`` renders it identically to a planning/analysis card.
+    """
+
+    mode: str  # "standup" | "retro" | "reporting" | "performance"
+    run_id: int
+    title: str
+    subtitle: str = ""
+    run_at: str = ""  # relative time, e.g. "2 days ago"
+    kind: str = ""  # performance only: "prep" | "completion" | "review" | "note"
+    session_id: str = ""
+
+    def to_project(self) -> ProjectSummary:
+        """Adapt this run to a ProjectSummary for the shared card renderer."""
+        return ProjectSummary(
+            name=self.title,
+            created=self.run_at,
+            progress=self.subtitle,
+            kind="run",  # suppresses the [roadmap] tag; no count metadata
+        )
+
+
+@dataclass
 class ProfileSummary:
     """Lightweight team profile metadata for the project list screen."""
 

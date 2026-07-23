@@ -128,6 +128,10 @@ _BTN_COLORS: dict[str, tuple[str, str, str, str]] = {
     "Anonymize": ("rgb(120,110,170)", "rgb(165,150,220)", "rgb(44,42,54)", "rgb(54,52,64)"),
     "Copy": ("rgb(120,110,170)", "rgb(165,150,220)", "rgb(44,42,54)", "rgb(54,52,64)"),
     "Adjust": ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)"),
+    # Saved-runs hub actions (standup / retro / reporting / performance history).
+    "Delete": ("rgb(220,60,60)", "rgb(240,90,90)", "rgb(52,38,38)", "rgb(62,48,48)"),
+    "Run again": ("rgb(60,160,80)", "rgb(80,200,100)", "rgb(40,50,40)", "rgb(50,60,50)"),
+    "History": ("rgb(160,160,180)", "rgb(200,200,220)", "rgb(40,40,50)", "rgb(50,50,60)"),
 }
 _BTN_DEFAULT = ("rgb(100,100,120)", "rgb(140,140,160)", "rgb(40,40,50)", "rgb(50,50,60)")
 _BTN_MIN_W = 12
