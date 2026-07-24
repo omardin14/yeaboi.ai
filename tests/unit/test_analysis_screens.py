@@ -24,6 +24,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from yeaboi.ui.mode_select.screens._screens_secondary import (
+    _build_analysis_depth_screen,
     _build_analysis_progress_screen,
     _build_analysis_review_screen,
     _build_component_select_screen,
@@ -1201,6 +1202,17 @@ class TestComponentSelectScreen:
         )
 
 
+class TestAnalysisDepthScreen:
+    def test_quick_is_rendered_as_recommended(self):
+        out = _render(_build_analysis_depth_screen(0, width=100, height=30), width=100)
+        assert "QUICK" in out and "Recommended" in out
+        assert "DEEP" in out and "cached" in out.lower()
+
+    def test_deep_can_be_focused(self):
+        out = _render(_build_analysis_depth_screen(1, width=100, height=30), width=100)
+        assert "› DEEP" in out
+
+
 class TestMemberSelectScreen:
     def test_roster_render(self):
         out = _render(_build_member_select_screen(["Alice", "Bob"], {0}, 0, width=100, height=30), width=100)
@@ -1252,6 +1264,11 @@ class TestComponentAndMemberLoops:
 
         return _run_member_select(self._FakeLive(), self._console(), self._reader(keys), 0.01, True, roster)
 
+    def _depth(self, keys):
+        from yeaboi.ui.mode_select import _run_analysis_depth_select
+
+        return _run_analysis_depth_select(self._FakeLive(), self._console(), self._reader(keys), 0.01, True)
+
     def test_all_checked_returns_full_map(self):
         # Everything checked by default → Enter returns the full component→sub-source map.
         assert self._components(["enter"]) == {
@@ -1259,6 +1276,13 @@ class TestComponentAndMemberLoops:
             "code": ["github", "azdo"],
             "docs": ["confluence"],
         }
+
+    def test_depth_defaults_to_quick(self):
+        assert self._depth(["enter"]) == "quick"
+
+    def test_depth_can_select_deep_or_cancel(self):
+        assert self._depth(["right", "enter"]) == "deep"
+        assert self._depth(["esc"]) == "cancel"
 
     def test_deselecting_a_subsource(self):
         # Toggle off delivery[0]=jira → delivery keeps only azdevops.
@@ -1318,6 +1342,32 @@ class TestComponentAndMemberLoops:
         monkeypatch.setattr("yeaboi.analysis.get_team_roster", lambda s, p, db_path=None: rosters[s])
         names = _prefetch_roster(self._FakeLive(), self._console(), ["jira", "azdevops"], "", None)
         assert names == ["Alice", "Bob", "Zoe"]  # sorted union across both trackers
+
+    def test_prefetch_roster_fetches_sources_concurrently(self, monkeypatch):
+        import threading
+
+        from yeaboi.ui.mode_select import _prefetch_roster
+
+        barrier = threading.Barrier(2)
+        state = {"active": 0, "peak": 0}
+        lock = threading.Lock()
+
+        def roster(source, project, db_path=None):
+            with lock:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            try:
+                barrier.wait(timeout=2)
+                return [source]
+            finally:
+                with lock:
+                    state["active"] -= 1
+
+        monkeypatch.setattr("yeaboi.analysis.get_team_roster", roster)
+        names = _prefetch_roster(self._FakeLive(), self._console(), ["jira", "azdevops"], "", None)
+
+        assert state["peak"] == 2
+        assert names == ["azdevops", "jira"]
 
     def test_prefetch_roster_swallows_errors(self, monkeypatch):
         from yeaboi.ui.mode_select import _prefetch_roster

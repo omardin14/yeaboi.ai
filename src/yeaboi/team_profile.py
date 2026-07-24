@@ -385,6 +385,17 @@ _ADD_EXAMPLES_COL = """\
 ALTER TABLE team_profiles ADD COLUMN examples_json TEXT;
 """
 
+_ANALYSIS_TICKET_CACHE_SCHEMA = """\
+CREATE TABLE IF NOT EXISTS analysis_ticket_cache (
+    source         TEXT NOT NULL,
+    project_key    TEXT NOT NULL,
+    issue_key      TEXT NOT NULL,
+    content_hash   TEXT NOT NULL,
+    parsed_json    TEXT NOT NULL,
+    last_used_at   TEXT NOT NULL,
+    PRIMARY KEY (source, project_key, issue_key)
+);"""
+
 
 # ---------------------------------------------------------------------------
 # Serialisation helpers — same pattern as sessions.py
@@ -665,6 +676,7 @@ class TeamProfileStore:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.isolation_level = None
         self._conn.execute(_TEAM_PROFILES_SCHEMA)
+        self._conn.execute(_ANALYSIS_TICKET_CACHE_SCHEMA)
         # Migrate: add examples_json column if missing
         try:
             self._conn.execute(_ADD_EXAMPLES_COL)
@@ -709,6 +721,56 @@ class TeamProfileStore:
             (profile.team_id, profile.project_key, profile.source, json_str, ex_str, now, now),
         )
         logger.info("Saved team profile: %s", profile.team_id)
+
+    def load_ticket_parse_cache(
+        self,
+        source: str,
+        project_key: str,
+        content_hashes: dict[str, str],
+    ) -> dict[str, dict]:
+        """Return cached ticket parses whose stored hash matches current content."""
+        if not content_hashes:
+            return {}
+        rows = self._conn.execute(
+            """SELECT issue_key, content_hash, parsed_json
+               FROM analysis_ticket_cache
+               WHERE source = ? AND project_key = ?""",
+            (source, project_key),
+        ).fetchall()
+        out: dict[str, dict] = {}
+        for issue_key, content_hash, parsed_json in rows:
+            if content_hashes.get(issue_key) != content_hash:
+                continue
+            try:
+                parsed = json.loads(parsed_json)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(parsed, dict):
+                out[issue_key] = parsed
+        return out
+
+    def save_ticket_parse_cache(
+        self,
+        source: str,
+        project_key: str,
+        entries: dict[str, tuple[str, dict]],
+    ) -> None:
+        """Upsert valid Deep-analysis ticket parses and prune stale cache rows."""
+        now = datetime.now(UTC).isoformat()
+        for issue_key, (content_hash, parsed) in entries.items():
+            self._conn.execute(
+                """INSERT INTO analysis_ticket_cache
+                       (source, project_key, issue_key, content_hash, parsed_json, last_used_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(source, project_key, issue_key) DO UPDATE SET
+                       content_hash = excluded.content_hash,
+                       parsed_json = excluded.parsed_json,
+                       last_used_at = excluded.last_used_at""",
+                (source, project_key, issue_key, content_hash, json.dumps(parsed, ensure_ascii=False), now),
+            )
+        self._conn.execute(
+            "DELETE FROM analysis_ticket_cache WHERE julianday(last_used_at) < julianday('now', '-90 days')"
+        )
 
     def delete(self, team_id: str) -> bool:
         """Delete a team profile by ID and clean up associated exports/logs.

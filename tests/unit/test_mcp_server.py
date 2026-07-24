@@ -423,6 +423,18 @@ class TestEngineTools:
         assert payload["warnings"] == ["log skipped"]
         assert captured["sprint_count"] == 4
         assert captured["generate_samples"] is True
+        assert captured["analysis_depth"] == "quick"
+
+    def test_team_analyze_deep_passthrough(self, tmp_db, provider_mode, monkeypatch):
+        captured: dict = {}
+
+        monkeypatch.setattr(
+            "yeaboi.analysis.run_team_analysis",
+            lambda **kwargs: captured.update(kwargs) or {"warnings": []},
+        )
+        payload = call_tool("team_analyze", {"analysis_depth": "deep"})
+        assert payload["ok"] is True
+        assert captured["analysis_depth"] == "deep"
 
     def test_anonymize_text(self, tmp_db, provider_mode, monkeypatch):
         captured: dict = {}

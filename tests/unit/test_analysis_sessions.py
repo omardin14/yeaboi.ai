@@ -42,8 +42,9 @@ class TestSchemaVersion:
         # Reporting table (reporting_history); v10 added the Roadmap tables
         # (roadmap_config, roadmap_history); v11 added the multi-row roadmaps
         # list; v12 added the token_usage performance columns (duration_ms /
-        # eval_duration_ms / load_duration_ms / tokens_per_sec) for local metrics.
-        assert CURRENT_SCHEMA_VERSION == 12
+        # eval_duration_ms / load_duration_ms / tokens_per_sec) for local metrics;
+        # v13 added the Deep-analysis ticket parse cache.
+        assert CURRENT_SCHEMA_VERSION == 13
 
     def test_new_db_has_session_mode_column(self, store: SessionStore):
         """A freshly created DB should have the session_mode column."""
@@ -52,6 +53,31 @@ class TestSchemaVersion:
         row = store._conn.execute("SELECT session_mode FROM sessions_meta WHERE session_id = ?", (sid,)).fetchone()
         assert row is not None
         assert row[0] == "analysis"
+
+    def test_new_db_has_analysis_ticket_cache(self, store: SessionStore):
+        row = store._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis_ticket_cache'"
+        ).fetchone()
+        assert row == ("analysis_ticket_cache",)
+
+    def test_v12_db_migrates_analysis_ticket_cache(self, tmp_path: Path):
+        import sqlite3
+
+        db_path = tmp_path / "v12.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE schema_info (schema_version INT NOT NULL)")
+        conn.execute("INSERT INTO schema_info (schema_version) VALUES (12)")
+        conn.commit()
+        conn.close()
+
+        with SessionStore(db_path) as migrated:
+            row = migrated._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='analysis_ticket_cache'"
+            ).fetchone()
+            version = migrated._conn.execute("SELECT schema_version FROM schema_info").fetchone()[0]
+
+        assert row == ("analysis_ticket_cache",)
+        assert version == CURRENT_SCHEMA_VERSION
 
 
 # ---------------------------------------------------------------------------

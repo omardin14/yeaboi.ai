@@ -43,12 +43,15 @@ def _team_analyze(
     include_insights: bool,
     include_ai_usage: bool,
     include_doc_quality: bool,
+    analysis_depth: str,
     components=None,
     members=None,
     progress=None,
 ):
     if source not in ("", "jira", "azdevops", "both"):
         raise ValueError(f"source must be 'jira', 'azdevops', or 'both' (blank auto-detects) — got {source!r}")
+    if analysis_depth not in ("quick", "deep"):
+        raise ValueError(f"analysis_depth must be 'quick' or 'deep' — got {analysis_depth!r}")
     allowed = {"delivery": ("jira", "azdevops"), "code": ("github", "azdo"), "docs": ("confluence", "notion")}
     if components:
         for comp, subs in components.items():
@@ -67,6 +70,7 @@ def _team_analyze(
         include_insights=include_insights,
         include_ai_usage=include_ai_usage,
         include_doc_quality=include_doc_quality,
+        analysis_depth=analysis_depth,
         components=components,
         members=members,
         progress=progress,
@@ -118,13 +122,14 @@ def register(app) -> None:
         include_insights: bool = True,
         include_ai_usage: bool = True,
         include_doc_quality: bool = True,
+        analysis_depth: str = "quick",
         components: dict[str, list[str]] | None = None,
         members: dict[str, list[str]] | None = None,
     ) -> dict:
         """Analyse the team's tracker history (closed sprints) into a calibration profile:
         velocity, story-point calibration, writing style, DoD signals, plus coaching insights
-        and headline stats. The profile is saved and feeds future planning. HEAVY: several LLM
-        calls plus tracker API paging — takes minutes; warn the user before running.
+        and headline stats. The profile is saved and feeds future planning. Quick depth
+        performs tracker paging but no LLM calls; Deep may take minutes on a cold cache.
         source: 'jira', 'azdevops', or 'both' (blank auto-detects a single tracker). With 'both'
         the analysis runs once per configured tracker and returns a combined result
         {source:'both', results:{jira:..., azdevops:...}, comparison:[[label,jira,azdevops],...]} —
@@ -137,6 +142,8 @@ def register(app) -> None:
         the team's recent Notion/Confluence pages and reports a documentation clarity score plus a
         stylometric AI-likelihood ESTIMATE (not a detection); set False to skip those doc-platform
         network calls.
+        analysis_depth is "quick" (default, zero LLM calls) or "deep" (cached AI ticket
+        classification and AI-written explanations).
         components selects which parts run, each over its OWN sub-sources:
         {"delivery": ["jira","azdevops"], "code": ["github","azdo"], "docs": ["confluence","notion"]}.
         Delivery runs one velocity profile PER selected tracker; code and docs are each ONE global
@@ -161,6 +168,7 @@ def register(app) -> None:
             include_insights,
             include_ai_usage,
             include_doc_quality,
+            analysis_depth,
             components,
             members,
             progress,

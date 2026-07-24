@@ -56,6 +56,10 @@ def wired(monkeypatch, db, tmp_path):
         include_doc_quality=True,
         members=None,
         warnings=None,
+        analysis_depth="deep",
+        include_insights=True,
+        db_path=None,
+        cache_updates=None,
     ):
         progress.append("Analysing…")
         captured["parallel"] = (source, project, len(sprint_data))
@@ -63,7 +67,11 @@ def wired(monkeypatch, db, tmp_path):
         captured["inline_ai"] = include_ai_usage
         captured["inline_docs"] = include_doc_quality
         captured["members"][source] = members
-        return _profile(team_id=f"{source}:{project}", source=source, project_key=project), {"sprint_details": []}
+        examples = {"sprint_details": []}
+        if include_insights:
+            examples["insights"] = {"start": [], "stop": [], "keep": [], "try": []}
+        captured["analysis_depth"] = analysis_depth
+        return _profile(team_id=f"{source}:{project}", source=source, project_key=project), examples
 
     monkeypatch.setattr("yeaboi.tools.team_learning._run_parallel_analysis", fake_parallel)
     monkeypatch.setattr(
@@ -154,6 +162,23 @@ class TestDelivery:
         with pytest.raises(ValueError, match="No tracker configured"):
             run_team_analysis(components={"delivery": [], "code": [], "docs": []}, db_path=db)
 
+    def test_quick_is_default_and_metadata_is_persisted(self, wired, db):
+        result = run_team_analysis(components={"delivery": ["jira"]}, db_path=db)
+        sub = result["delivery"]["jira"]
+        assert result["analysis_depth"] == "quick"
+        assert sub["analysis_depth"] == "quick"
+        assert sub["examples"]["analysis_depth"] == "quick"
+        assert set(sub["stage_timings"]) == {"fetch_secs", "analysis_secs", "total_secs"}
+        assert wired["analysis_depth"] == "quick"
+
+    def test_rejects_unknown_analysis_depth(self, db):
+        with pytest.raises(ValueError, match="analysis_depth"):
+            run_team_analysis(analysis_depth="turbo", components={"delivery": []}, db_path=db)
+
+    def test_quick_rejects_llm_generated_samples(self, db):
+        with pytest.raises(ValueError, match="requires analysis_depth='deep'"):
+            run_team_analysis(generate_samples=True, components={"delivery": []}, db_path=db)
+
 
 class TestGlobalCodeDocs:
     def test_code_and_docs_run_once_and_attach(self, wired, db):
@@ -192,6 +217,121 @@ class TestGlobalCodeDocs:
         r = run_team_analysis(components={"docs": ["confluence"]}, db_path=db)
         assert r["delivery"] == {} and r["code"] is None
         assert r["docs"]["signal"].avg_clarity == 70.0
+
+
+class TestTopLevelConcurrency:
+    def test_all_four_component_jobs_overlap_and_persist_after_completion(self, monkeypatch, db):
+        import threading
+
+        barrier = threading.Barrier(4)
+        state = {"active": 0, "peak": 0, "completed": set()}
+        lock = threading.Lock()
+
+        def overlap(label, result):
+            with lock:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            try:
+                barrier.wait(timeout=2)
+                return result
+            finally:
+                with lock:
+                    state["active"] -= 1
+                    state["completed"].add(label)
+
+        def delivery(tracker, *args, **kwargs):
+            profile = _profile(
+                team_id=f"{tracker}:PROJ",
+                source=tracker,
+                project_key="PROJ",
+            )
+            return overlap(
+                tracker,
+                {
+                    "profile": profile,
+                    "examples": {},
+                    "warnings": [],
+                },
+            )
+
+        monkeypatch.setattr("yeaboi.analysis.engine._run_delivery", delivery)
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._run_ai_usage_component",
+            lambda *a, **k: overlap(
+                "code",
+                (AiAdoptionSignal(scanned_commits=1), {}),
+            ),
+        )
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._run_doc_quality_component",
+            lambda *a, **k: overlap(
+                "docs",
+                (DocQualitySignal(pages_scanned=1), {}),
+            ),
+        )
+
+        def persist(delivery_results, code, docs, path):
+            assert state["completed"] == {"jira", "azdevops", "code", "docs"}
+
+        monkeypatch.setattr("yeaboi.analysis.engine._persist_delivery", persist)
+
+        result = run_team_analysis(
+            components={
+                "delivery": ["jira", "azdevops"],
+                "code": ["github"],
+                "docs": ["confluence"],
+            },
+            include_insights=False,
+            db_path=db,
+        )
+
+        assert state["peak"] == 4
+        assert list(result["delivery"]) == ["jira", "azdevops"]
+        assert result["code"] is not None and result["docs"] is not None
+
+    def test_delivery_order_is_configured_order_not_completion_order(self, monkeypatch, db):
+        import threading
+
+        azdo_finished = threading.Event()
+
+        def delivery(tracker, *args, **kwargs):
+            if tracker == "jira":
+                assert azdo_finished.wait(timeout=2)
+            else:
+                azdo_finished.set()
+            return {
+                "profile": _profile(
+                    team_id=f"{tracker}:PROJ",
+                    source=tracker,
+                    project_key="PROJ",
+                ),
+                "examples": {},
+                "warnings": [],
+            }
+
+        monkeypatch.setattr("yeaboi.analysis.engine._run_delivery", delivery)
+        monkeypatch.setattr("yeaboi.analysis.engine._persist_delivery", lambda *a, **k: None)
+
+        result = run_team_analysis(
+            components={"delivery": ["jira", "azdevops"]},
+            include_insights=False,
+            db_path=db,
+        )
+
+        assert list(result["delivery"]) == ["jira", "azdevops"]
+
+    def test_unexpected_component_failure_does_not_cancel_other_jobs(self, wired, monkeypatch, db):
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._run_ai_usage_component",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rate limited")),
+        )
+
+        result = run_team_analysis(components=_ALL, db_path=db)
+
+        assert result["delivery"]["jira"]["profile"] is not None
+        assert result["docs"] is not None
+        assert result["code"] is None
+        assert "Code analysis failed: rate limited" in result["warnings"]
 
 
 def _configure(monkeypatch, *, jira=True, azdevops=True):

@@ -273,6 +273,7 @@ CLI_RENAMES: dict[str, dict[str, str]] = {
     "analyze": {
         "project": "project_key",
         "sprints": "sprint_count",
+        "depth": "analysis_depth",
         "samples": "generate_samples",
         "no_insights": "include_insights",  # inverted store_true flag
     },

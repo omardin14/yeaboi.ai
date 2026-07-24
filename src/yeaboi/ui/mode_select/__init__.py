@@ -4084,6 +4084,25 @@ def _run_component_select(live, console: Console, read_key, frame_time: float, s
             return "cancel"
 
 
+def _run_analysis_depth_select(live, console: Console, read_key, frame_time: float, supports_timeout: bool):
+    """Choose Quick/Deep analysis. Quick is preselected; Esc returns ``cancel``."""
+    from yeaboi.ui.mode_select.screens._screens_secondary import _build_analysis_depth_screen
+
+    selected = 0
+    while True:
+        w, h = console.size
+        live.update(_build_analysis_depth_screen(selected, width=w, height=h))
+        key = read_key(timeout=frame_time) if supports_timeout else read_key()
+        if key in ("up", "left", "scroll_up"):
+            selected = (selected - 1) % 2
+        elif key in ("down", "right", "scroll_down"):
+            selected = (selected + 1) % 2
+        elif key == "enter":
+            return ("quick", "deep")[selected]
+        elif key in ("esc", "q"):
+            return "cancel"
+
+
 def _run_member_select(live, console: Console, read_key, frame_time: float, supports_timeout: bool, roster: list):
     """Blocking roster picker.
 
@@ -4123,6 +4142,7 @@ def _prefetch_roster(live, console: Console, sources: list, project_key: str, db
     showing a progress screen while the lookup runs. Returns a sorted name list ([] on
     any failure — the caller can then skip member selection)."""
     import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from yeaboi.analysis import get_team_roster
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_analysis_progress_screen
@@ -4131,11 +4151,26 @@ def _prefetch_roster(live, console: Console, sources: list, project_key: str, db
 
     def _work():
         found: set[str] = set()
-        for s in sources:
-            try:
-                found.update(get_team_roster(s, project_key if len(sources) == 1 else "", db_path=db_path))
-            except Exception as exc:  # best-effort — a failed roster just means "no subset offered"
-                logger.warning("Roster prefetch failed for %s: %s", s, exc)
+        if sources:
+            with ThreadPoolExecutor(
+                max_workers=min(2, len(sources)),
+                thread_name_prefix="analysis-roster",
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        get_team_roster,
+                        source,
+                        project_key if len(sources) == 1 else "",
+                        db_path=db_path,
+                    ): source
+                    for source in sources
+                }
+                for future in as_completed(futures):
+                    source = futures[future]
+                    try:
+                        found.update(future.result())
+                    except Exception as exc:  # best-effort — a failed roster just means "no subset offered"
+                        logger.warning("Roster prefetch failed for %s: %s", source, exc)
         names_box[0] = sorted(found)
 
     done = threading.Event()
@@ -7082,6 +7117,11 @@ def select_mode(
                             _team_popup_result = ""
                             continue
 
+                        _ta_depth = _run_analysis_depth_select(live, console, read_key, _FRAME_TIME, _supports_timeout)
+                        if _ta_depth == "cancel":
+                            _team_popup_result = ""
+                            continue
+
                         # Member subset \u2014 only meaningful for delivery (velocity) or code
                         # (authors). Prefetch the roster over the selected delivery trackers.
                         _ta_dlv = _ta_components.get("delivery") or []
@@ -7112,7 +7152,7 @@ def select_mode(
                                 # One code path with CLI/MCP: the engine fetches,
                                 # analyses, saves the profile, and writes the log.
                                 _res = run_team_analysis(
-                                    include_insights=False,
+                                    analysis_depth=_ta_depth,
                                     components=_ta_components,
                                     members=_ta_members_map,
                                     progress=_ta_progress,
@@ -8351,6 +8391,11 @@ def select_mode(
                     except Exception:
                         pass
 
+                    _ta_depth = _run_analysis_depth_select(live, console, read_key, _FRAME_TIME, _supports_timeout)
+                    if _ta_depth == "cancel":
+                        _team_popup_result = ""
+                        continue
+
                     _ta_progress: list[str] = ["Fetching sprint history\u2026"]
                     _ta_profile_box: list = [None]
                     _ta_examples_box: list = [None]
@@ -8367,7 +8412,7 @@ def select_mode(
                                 source=_ta_source,
                                 project_key=_ta_project_key,
                                 team_name=_ta_team_name,
-                                include_insights=False,
+                                analysis_depth=_ta_depth,
                                 progress=_ta_progress,
                                 db_path=_ana_dbp,
                             )

@@ -572,7 +572,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze_p.add_argument("--project", default="", metavar="KEY", help="Project key (default: configured)")
     analyze_p.add_argument("--sprints", type=int, default=8, help="Closed sprints to analyse (default 8)")
-    analyze_p.add_argument("--samples", action="store_true", help="Also generate sample tickets (extra LLM calls)")
+    analyze_p.add_argument(
+        "--depth",
+        choices=["quick", "deep"],
+        default="quick",
+        help="Analysis depth: quick uses no LLM calls; deep adds cached AI enrichment (default quick)",
+    )
+    analyze_p.add_argument(
+        "--samples",
+        action="store_true",
+        help="Also generate sample tickets (requires --depth deep; extra LLM calls)",
+    )
     analyze_p.add_argument("--no-insights", action="store_true", help="Skip the coaching-insights LLM call")
     analyze_p.add_argument(
         "--no-ai-usage",
@@ -1340,6 +1350,7 @@ def _cmd_analyze(args: argparse.Namespace, console: "Console") -> int:
         include_insights=not args.no_insights,
         include_ai_usage=args.include_ai_usage,
         include_doc_quality=args.include_doc_quality,
+        analysis_depth=args.depth,
         components=components or None,
         members=members,
     )
