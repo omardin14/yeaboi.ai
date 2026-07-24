@@ -116,6 +116,11 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
         "anonymize",
         "\U0001f576️ Tip: press Anonymize on any result screen to mask names before sharing",
     ),
+    FeatureTip(
+        "output-sharing",
+        "🌐 Tip: Share Online publishes any generated output behind a temporary access code",
+        is_new=True,
+    ),
 )
 
 # Ambient tips — not tied to a capability, so exempt from parity. The generic

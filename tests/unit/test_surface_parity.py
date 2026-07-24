@@ -175,6 +175,15 @@ CAPABILITIES: dict[str, dict] = {
         "cli": Exempt("headless callers anonymize via the anonymize_text MCP tool"),
         "skill": Exempt("post-processing action, not a guided workflow"),
     },
+    "output-sharing": {
+        "engines": Exempt("transport over already-generated HTML artifacts, not an artifact-generation pipeline"),
+        "mcp_tools": Exempt(
+            "a stdio tool cannot safely own an interactive host process and temporary tunnel lifecycle"
+        ),
+        "tui_mode": Exempt("a Share Online action on existing result screens, not a dedicated mode card"),
+        "cli": Exempt("temporary shares intentionally remain visible and cancellable in the interactive TUI"),
+        "skill": Exempt("local process and access-code ownership belongs to the human host in the TUI"),
+    },
     "usage": {
         "engines": Exempt("TUI utility page — reads the local token_usage table"),
         "mcp_tools": {"usage_get"},

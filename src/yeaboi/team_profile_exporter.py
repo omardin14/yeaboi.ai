@@ -199,26 +199,20 @@ def _ceremony_md(ceremony) -> list[str]:
     return lines
 
 
-def export_team_profile_html(
+def build_team_profile_html(
     profile: TeamProfile,
-    output_dir: Path | None = None,
     *,
     examples: dict | None = None,
     sprint_names: list[str] | None = None,
     ceremony=None,
-) -> Path:
-    """Generate a self-contained HTML report matching the TUI results screen.
+    charts_dir: Path | None = None,
+) -> str:
+    """Build a self-contained HTML report matching the TUI results screen.
 
     ``ceremony`` is an optional CeremonyContext (agent/ceremony_history.py). When
     present and non-empty, a "Ceremony Cadence & Trends" section is added.
-
-    Returns the path to the generated file.
     """
     from yeaboi.html_exporter import _CSS
-
-    out_dir = _project_export_dir(profile.project_key, output_dir)
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_path = out_dir / f"team-profile-{ts}.html"
 
     ex = examples or {}
     sections: list[str] = []
@@ -516,7 +510,7 @@ def export_team_profile_html(
                 for sd in sp_details
                 if isinstance(sd, dict)
             ]
-            chart = velocity_chart(chart_rows, out_dir / "velocity.png")
+            chart = velocity_chart(chart_rows, charts_dir / "velocity.png") if charts_dir is not None else None
             chart_html = img_b64_tag(chart, "Sprint velocity") if chart else ""
             sprint_content = chart_html + (
                 f'<div class="card" style="padding:0;overflow:hidden;">'
@@ -1523,6 +1517,28 @@ def export_team_profile_html(
 </body>
 </html>"""
 
+    return page
+
+
+def export_team_profile_html(
+    profile: TeamProfile,
+    output_dir: Path | None = None,
+    *,
+    examples: dict | None = None,
+    sprint_names: list[str] | None = None,
+    ceremony=None,
+) -> Path:
+    """Write the self-contained team-profile HTML report and return its path."""
+    out_dir = _project_export_dir(profile.project_key, output_dir)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_path = out_dir / f"team-profile-{ts}.html"
+    page = build_team_profile_html(
+        profile,
+        examples=examples,
+        sprint_names=sprint_names,
+        ceremony=ceremony,
+        charts_dir=out_dir,
+    )
     out_path.write_text(page, encoding="utf-8")
     logger.info("Exported team profile HTML to %s", out_path)
     return out_path
