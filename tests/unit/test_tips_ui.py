@@ -197,6 +197,64 @@ def test_all_tips_screen_shows_a_tip_and_new_badge(monkeypatch):
     _tips.get_tips.cache_clear()
 
 
+def test_all_tips_screen_groups_every_tip_once(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    monkeypatch.setattr(
+        "yeaboi.ui.mode_select.screens._screens_secondary.build_scrollbar",
+        lambda *_args, **_kwargs: None,
+    )
+    _tips.get_tips.cache_clear()
+    tips = _tips.get_tips()
+    out = _all_tips_rendered(height=200, shimmer_tick=0.0, sub_reveal=99)
+    assert out.index("Modes") < out.index("More workflows") < out.index("Shortcuts & setup")
+    content_lines = [line.strip().strip("│").strip() for line in out.splitlines()[1:-1]]
+    normalized_out = " ".join(" ".join(content_lines).split())
+    for tip in tips:
+        _prefix, marker, display_text = tip.text.partition("Tip: ")
+        expected = display_text if marker else tip.text
+        assert normalized_out.count(" ".join(expected.split())) == 1
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_omits_terminal_unsafe_emoji_prefixes(monkeypatch):
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    out = _all_tips_rendered(height=200, shimmer_tick=0.0, sub_reveal=99)
+    assert "Analysis reads your board" in out
+    assert "🔍" not in out
+    assert "🗺️" not in out
+    assert "Tip:" not in out
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_keeps_full_frame_at_common_widths(monkeypatch):
+    import io
+
+    from rich.cells import cell_len
+    from rich.console import Console
+
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+    for width, height in ((60, 20), (80, 24), (100, 30)):
+        buf = io.StringIO()
+        console = Console(file=buf, width=width, height=height, color_system=None)
+        console.print(
+            _build_all_tips_screen(
+                width=width,
+                height=height,
+                shimmer_tick=0.0,
+                sub_reveal=99,
+            )
+        )
+        lines = buf.getvalue().splitlines()
+        assert len(lines) == height
+        assert lines[0].startswith("╭") and lines[0].endswith("╮")
+        assert lines[-1].startswith("╰") and lines[-1].endswith("╯")
+        assert all(cell_len(line) == width for line in lines)
+        assert all(line.startswith("│") and line.endswith("│") for line in lines[1:-1])
+    _tips.get_tips.cache_clear()
+
+
 def test_all_tips_screen_shows_status_message(monkeypatch):
     monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
     _tips.get_tips.cache_clear()

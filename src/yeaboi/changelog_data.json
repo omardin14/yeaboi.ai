@@ -2,6 +2,16 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.31.1",
+      "date": "2026-07-24",
+      "summary": "The All Tips screen now displays better, with tips grouped into logical sections (Modes, More Workflows, and Shortcuts & Setup), improved spacing and text wrapping, colored metadata badges, and scrollbar gutters that prevent layout fragmentation. The gallery preserves emoji in copied tip text while avoiding terminal-unsafe characters in the displayed view.",
+      "highlights": [
+        {"text": "All Tips screen reorganized into logical sections with better spacing and layout", "areas": ["general"]},
+        {"text": "Improved text wrapping, colored metadata badges, and scrollbar gutters prevent layout fragmentation", "areas": ["general"]},
+        {"text": "Emoji preserved in copied text while terminal display stays safe", "areas": ["general"]}
+      ]
+    },
+    {
       "version": "2.31.0",
       "date": "2026-07-23",
       "summary": "Standup, Retro, Reporting, and Performance modes now surface a browsable saved-runs hub showing the history of past runs alongside the current working session. Instead of jumping straight into a single run, you land on a unified hub with Open, Delete, and Export options for each run — the same experience Planning and Analysis already offer. Saved runs render with rich mode-specific formatting: Standup shows the full meter strip and section drill-in, Reporting displays its indigo card layout, Performance shows the coral metrics grid, and Retro renders the full grid view with a snapshot flag that suppresses the live-only join block. Each mode's own screen builder handles rendering, not flat text, so historical runs read as complete, real snapshots of past work.",

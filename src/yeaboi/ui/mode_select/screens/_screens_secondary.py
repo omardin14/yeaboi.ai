@@ -2316,10 +2316,11 @@ def _build_all_tips_screen(
     """Build the All Tips gallery page: every discoverability tip in one scroll.
 
     Same scrollable Panel skeleton as :func:`_build_changelog_screen`. Content is
-    the live ``get_tips()`` list, so it always reflects the current tips. Each tip
-    is one bullet; freshly-shipped features get a gold ``NEW`` badge and tips that
-    map to a home card note the mode they open. The ``Copy all`` action copies the
-    whole list to the clipboard (see the run loop in mode_select/__init__.py).
+    the live ``get_tips()`` list, grouped into modes, workflows, and setup so the
+    gallery scans like the other sectioned pages. Freshly-shipped features get a
+    gold ``NEW`` badge and tips that map to a home card note the mode they open.
+    The ``Copy all`` action copies the whole list to the clipboard (see the run
+    loop in mode_select/__init__.py).
     """
     import textwrap
 
@@ -2330,28 +2331,82 @@ def _build_all_tips_screen(
     theme = CHANGELOG_THEME
     title = tips_title(shimmer_tick, width=width)
     sub = build_reveal_subtitle("Everything yeaboi can do", sub_reveal, pad=PAD)
-    titles = {card["key"]: card["title"] for card in _MODE_CARDS}
+    cards = {card["key"]: card for card in _MODE_CARDS}
     gold = f"rgb({_TIP_DOT_ON[0]},{_TIP_DOT_ON[1]},{_TIP_DOT_ON[2]})"
 
     body_lines: list = []
     if message:
         body_lines.append(Text(PAD + "  " + message, style=theme.accent_bright, justify="left"))
         body_lines.append(Text(""))
-    wrap_w = max(24, width - len(PAD) - 12)
 
-    for tip in get_tips():
-        chunks = textwrap.wrap(tip.text, width=max(24, wrap_w - 3)) or [""]
-        for i, chunk in enumerate(chunks):
-            prefix = "  •  " if i == 0 else "     "
-            line = Text(PAD + prefix + chunk, style=theme.value, justify="left")
-            if i == len(chunks) - 1:  # append badges to the tip's last line
+    # Account explicitly for the frame, horizontal panel padding, scrollbar,
+    # and the gutter beside it. Keeping wrapping inside this budget prevents
+    # wide glyphs or metadata from visually colliding with the right frame.
+    panel_inner_w = max(20, width - 2 - 4)
+    viewport_body_w = max(18, panel_inner_w - 3)
+    bullet_prefix = PAD + "    •  "
+    continuation_prefix = PAD + "       "
+    tip_wrap_w = max(16, viewport_body_w - len(bullet_prefix) - 1)
+    separator_w = max(8, min(viewport_body_w - len(PAD) - 2, 40))
+
+    tips = get_tips()
+    grouped_tips = (
+        ("Modes", [tip for tip in tips if tip.mode_key]),
+        (
+            "More workflows",
+            [
+                tip
+                for tip in tips
+                if not tip.mode_key and tip.key not in {"voice", "music"} and not tip.key.startswith("meta:")
+            ],
+        ),
+        (
+            "Shortcuts & setup",
+            [tip for tip in tips if tip.key in {"voice", "music"} or tip.key.startswith("meta:")],
+        ),
+    )
+
+    rendered_section = False
+    for section, section_tips in grouped_tips:
+        if not section_tips:
+            continue
+        if rendered_section:
+            body_lines.append(Text(""))
+        rendered_section = True
+        heading = Text(PAD + "  ", justify="left")
+        heading.append(section, style=f"bold {theme.accent_bright}")
+        body_lines.append(heading)
+        body_lines.append(Text(PAD + "  " + "─" * separator_w, style=theme.sep, justify="left"))
+
+        for tip in section_tips:
+            # Emoji variation selectors are not measured consistently across
+            # terminals. On a full-width panel that disagreement shifts Rich's
+            # final frame cell and makes the right border appear fragmented.
+            # The gallery already has a bullet and colour-coded mode metadata,
+            # so omit the decorative "<emoji> Tip:" prefix here. The canonical
+            # tip text (and therefore Copy all) remains unchanged.
+            _prefix, marker, display_text = tip.text.partition("Tip: ")
+            if not marker:
+                display_text = tip.text
+            chunks = textwrap.wrap(display_text, width=tip_wrap_w) or [""]
+            for i, chunk in enumerate(chunks):
+                prefix = bullet_prefix if i == 0 else continuation_prefix
+                body_lines.append(Text(prefix + chunk, style=theme.value, justify="left"))
+
+            if tip.is_new or (tip.mode_key and tip.mode_key in cards):
+                metadata = Text(continuation_prefix, justify="left")
                 if tip.is_new:
-                    line.append("  ")
-                    line.append("NEW", style=f"bold {gold}")
-                if tip.mode_key and tip.mode_key in titles:
-                    line.append("  → opens ", style=theme.muted)
-                    line.append(titles[tip.mode_key], style=theme.desc)
-            body_lines.append(line)
+                    metadata.append("NEW", style=f"bold {gold}")
+                if tip.mode_key and tip.mode_key in cards:
+                    if tip.is_new:
+                        metadata.append("  ·  ", style=theme.sep)
+                    metadata.append("opens ", style=theme.muted)
+                    card = cards[tip.mode_key]
+                    metadata.append(card["title"], style=f"bold {card['color']}")
+                body_lines.append(metadata)
+
+            # A deliberate spacer makes each wrapped record read as one unit.
+            body_lines.append(Text(""))
 
     # ── Layout using shared components (identical to the changelog page) ──
     viewport_h = calc_viewport(height, header_h=10, action_h=4)
@@ -2381,7 +2436,9 @@ def _build_all_tips_screen(
         )
         _vp_table.add_column(ratio=1)
         _vp_table.add_column(width=1)
-        _vp_table.add_row(Group(*padded_lines), _sb_text)
+        _vp_table.add_column(width=1)
+        _vp_table.add_column(width=1)
+        _vp_table.add_row(Group(*padded_lines), Text(""), _sb_text, Text(""))
         viewport_renderable = _vp_table
     else:
         viewport_renderable = Group(*padded_lines)
