@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.33.0",
+      "date": "2026-07-24",
+      "summary": "Analysis mode gained significantly improved insights dashboards. AI Adoption and Documentation sections now display as evidence-led dashboards with metric tiles, meters, ranked member breakdowns, evidence tables, and actionable cards — replacing a flat text layout with data-forward visualization. Team Insights was reorganized into consistent Focus Now, Keep Working, and Experiments sections, each with category badges for quick scanning. Member selection was redesigned: every team member starts pre-selected in the analysis scope picker, you can toggle one at a time or press A to select or deselect all, and the app prevents running with nobody selected. Overall scrolling and navigation improved for better usability with rich content.",
+      "highlights": [
+        {"text": "Redesigned AI Adoption and Documentation as data-driven dashboards with metrics, breakdowns, evidence tables, and actions", "areas": ["analysis"]},
+        {"text": "Team Insights reorganized into Focus Now, Keep Working, and Experiments with category badges", "areas": ["analysis"]},
+        {"text": "Member selection pre-selects everyone; toggle individual members or press A to select/deselect all; prevents running with nobody selected", "areas": ["analysis"]},
+        {"text": "Improved scrolling and navigation for better usability with rich dashboard content", "areas": ["analysis"]}
+      ]
+    },
+    {
       "version": "2.32.0",
       "date": "2026-07-24",
       "summary": "Share your yeaboi output publicly without exposing anything private. Every mode's result screen — planning, analysis, standups, retros, performance, reporting, and roadmaps — now has a Share Online button: press it and a local artifact server starts up, exchanges a short access code for a strong token with rate limiting, and opens a public Cloudflare tunnel URL you can send to teammates or stakeholders. The browser displays your rich output in full fidelity (cards, tables, meters, grids, all styled exactly as you see it in the app), and the link stays active only while the sharing screen is open. Security is baked in: the local server binds to loopback only, tokens carry no-store headers, and logs never expose URLs, codes, or artifact content.",
