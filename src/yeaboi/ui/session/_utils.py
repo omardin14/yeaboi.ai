@@ -20,6 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from yeaboi.ui.shared._animations import FRAME_TIME_30FPS, loading_border_color
+from yeaboi.ui.shared._screensaver import suppress_during_call
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -294,6 +295,7 @@ def _handle_rate_limit_tui(graph, invoke_state: dict, result_box: list) -> bool:
 # ---------------------------------------------------------------------------
 
 
+@suppress_during_call
 def _invoke_with_animation(
     live,
     console: Console,

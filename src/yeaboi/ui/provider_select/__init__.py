@@ -357,18 +357,21 @@ def select_provider(
                 def _do() -> None:
                     result.append(pull_ollama_model(api_key_val, model_id, _on_progress, cancel_event=cancel))
 
-                thread = threading.Thread(target=_do, daemon=True)
-                thread.start()
-                while thread.is_alive():
-                    frac = prog["frac"]
-                    pct = f"{frac * 100:3.0f}% · " if frac is not None else ""
-                    render_progress(f"⬇ Downloading {model_id} — {pct}{prog['status']}  ·  Esc cancels")
-                    if _supports_timeout:
-                        if read_key(timeout=FRAME_TIME_30FPS) == "esc":
-                            cancel.set()
-                    else:
-                        time.sleep(FRAME_TIME_30FPS)
-                thread.join()
+                from yeaboi.ui.shared._screensaver import suppress_screensaver
+
+                with suppress_screensaver():
+                    thread = threading.Thread(target=_do, daemon=True)
+                    thread.start()
+                    while thread.is_alive():
+                        frac = prog["frac"]
+                        pct = f"{frac * 100:3.0f}% · " if frac is not None else ""
+                        render_progress(f"⬇ Downloading {model_id} — {pct}{prog['status']}  ·  Esc cancels")
+                        if _supports_timeout:
+                            if read_key(timeout=FRAME_TIME_30FPS) == "esc":
+                                cancel.set()
+                        else:
+                            time.sleep(FRAME_TIME_30FPS)
+                    thread.join()
                 return result[0] if result else (False, "Download failed")
 
             def _run_custom_input() -> str | None:

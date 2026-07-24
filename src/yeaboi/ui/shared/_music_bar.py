@@ -114,7 +114,7 @@ def build_music_subtitle(theme: Theme = PLANNING_THEME) -> Text:
 
 
 class MusicLive(Live):
-    """A Rich ``Live`` that stamps the music status onto every Panel it renders."""
+    """App-wide ``Live`` with music chrome and idle-screensaver rendering."""
 
     def __init__(self, *args, **kwargs) -> None:
         # Default vertical_overflow to "crop". The TUI is a hand-rolled scroller:
@@ -136,6 +136,15 @@ class MusicLive(Live):
         self._last_renderable = renderable
         self._stamp(renderable)
         super().update(renderable, refresh=refresh)
+
+    def get_renderable(self):
+        """Return the saver while idle, otherwise the preserved app screen."""
+        from yeaboi.ui.shared._screensaver import build_screensaver, idle_controller
+
+        if idle_controller.should_show():
+            width, height = self.console.size
+            return build_screensaver(width=width, height=height)
+        return super().get_renderable()
 
     def refresh(self) -> None:
         # Re-stamp before every auto-refresh tick so the equalizer keeps animating
