@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See README: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 12  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token_usage perf columns  # noqa: E501
+CURRENT_SCHEMA_VERSION = 13  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -587,6 +587,12 @@ class SessionStore:
                 except sqlite3.OperationalError:
                     pass  # column already exists
             logger.info("Migration v12: added token_usage performance columns")
+
+        if from_version < 13:
+            from yeaboi.team_profile import _ANALYSIS_TICKET_CACHE_SCHEMA
+
+            self._conn.execute(_ANALYSIS_TICKET_CACHE_SCHEMA)
+            logger.info("Migration v13: created analysis ticket parse cache")
 
     # ── Token usage persistence ──────────────────────────────────────────
 

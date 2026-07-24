@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _llm_invoke(prompt: str, *, temperature: float = 0.0):
+def _llm_invoke(prompt: str, *, temperature: float = 0.0, max_reasks: int = 1):
     """Invoke the LLM expecting a JSON reply; tracks token usage internally.
 
     Every caller of this wrapper parses the response as JSON, so it routes
@@ -53,7 +54,7 @@ def _llm_invoke(prompt: str, *, temperature: float = 0.0):
     """
     from yeaboi.agent.llm import invoke_json
 
-    return invoke_json(prompt, temperature=temperature)
+    return invoke_json(prompt, temperature=temperature, max_reasks=max_reasks)
 
 
 def _safe_float(val: object) -> float:
@@ -638,13 +639,9 @@ _TICKET_PARSE_SCHEMA = """\
 [
   {
     "key": "ISSUE-123",
-    "description": "The actual problem/feature description",
     "acceptance_criteria": ["AC item 1", "AC item 2"],
     "ac_specificity": "precise",
-    "risks": ["Risk 1"],
-    "justification": "Why this matters",
     "dod_signals": ["Code reviewed", "Deployed to staging"],
-    "personas": ["developer", "admin"],
     "gwt": false,
     "discipline": "backend",
     "work_type": "create/build",
@@ -662,12 +659,8 @@ Return a JSON array with one object per work item matching this schema:
 {schema}
 
 Section extraction — look for these patterns in the description:
-- "What is this about?" / "Description" / problem statement → description
 - "What does done look like?" / "Acceptance criteria" / "AC" → acceptance_criteria
-- "Are there any risks?" / "Blockers" / "Dependencies" → risks
-- "Why does it matter?" / "Business value" / "Impact" → justification
 - Definition of done items (testing, review, deployment steps) → dod_signals
-- User personas ("As a developer...", "As an admin...") → personas
 
 Classification fields:
 - discipline: infer the primary discipline from the content. Common values include \
@@ -712,7 +705,12 @@ def _strip_html(text: str) -> str:
 def _parse_tickets_with_llm(
     stories: list[dict],
     progress: list[str],
-    batch_size: int = 6,
+    batch_size: int = 12,
+    *,
+    source: str = "",
+    project_key: str = "",
+    db_path=None,
+    cache_updates: dict[str, tuple[str, dict]] | None = None,
 ) -> dict[str, dict]:
     """Parse tickets using LLM in batches. Returns {issue_key: parsed_dict}.
 
@@ -721,18 +719,43 @@ def _parse_tickets_with_llm(
     if not stories:
         return {}
 
-    try:
-        pass
-    except Exception:
-        logger.debug("LLM not available for ticket parsing, using regex fallback")
-        return {}
+    parser_version = "compact-v1"
 
-    # Build batches
-    batches: list[list[dict]] = []
-    for i in range(0, len(stories), batch_size):
-        batches.append(stories[i : i + batch_size])
+    def _content_hash(story: dict) -> str:
+        material = {
+            "parser": parser_version,
+            "summary": story.get("summary", ""),
+            "description": _strip_html(story.get("description", "") or ""),
+            "points": story.get("points", 0),
+            "task_count": story.get("task_count", 0),
+            "carried_over": bool(story.get("carried_over")),
+        }
+        raw = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+    content_hashes = {str(s.get("issue_key", "")): _content_hash(s) for s in stories if str(s.get("issue_key", ""))}
     results: dict[str, dict] = {}
+    if source and project_key and db_path and content_hashes:
+        try:
+            from yeaboi.team_profile import TeamProfileStore
+
+            with TeamProfileStore(db_path) as store:
+                results.update(store.load_ticket_parse_cache(source, project_key, content_hashes))
+        except Exception:
+            logger.debug("Ticket parse cache read failed", exc_info=True)
+
+    uncached = [s for s in stories if str(s.get("issue_key", "")) not in results]
+    if results:
+        logger.info("Ticket parse cache: %d hit(s), %d miss(es)", len(results), len(uncached))
+    if not uncached:
+        if cache_updates is not None:
+            cache_updates.update({key: (content_hashes[key], value) for key, value in results.items()})
+        return results
+
+    # Build batches from cache misses only.
+    batches: list[list[dict]] = []
+    for i in range(0, len(uncached), batch_size):
+        batches.append(uncached[i : i + batch_size])
 
     def _parse_batch(batch: list[dict]) -> dict[str, dict]:
         """Parse a single batch of stories."""
@@ -755,7 +778,10 @@ def _parse_tickets_with_llm(
         prompt = _TICKET_PARSE_PROMPT.format(schema=_TICKET_PARSE_SCHEMA, items=items_block)
 
         try:
-            response = _llm_invoke(prompt, temperature=0.0)
+            # A malformed batch falls back deterministically. Repair re-asks can
+            # double the dominant cost on large boards, so ticket parsing does not
+            # retry; narrative/insight calls retain the shared repair behaviour.
+            response = _llm_invoke(prompt, temperature=0.0, max_reasks=0)
             text = response.content if hasattr(response, "content") else str(response)
             # Extract JSON from response (handle markdown fences)
             text = text.strip()
@@ -777,7 +803,7 @@ def _parse_tickets_with_llm(
     # Run batches in parallel
     progress.append("Parsing ticket structure\u2026")
     try:
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=min(4, len(batches))) as executor:
             futures = {executor.submit(_parse_batch, b): i for i, b in enumerate(batches)}
             for future in as_completed(futures):
                 try:
@@ -789,7 +815,11 @@ def _parse_tickets_with_llm(
         logger.warning("LLM ticket parsing failed entirely: %s", exc)
         return {}
 
-    logger.info("LLM parsed %d/%d stories", len(results), len(stories))
+    if cache_updates is not None:
+        cache_updates.update(
+            {key: (content_hashes[key], value) for key, value in results.items() if key in content_hashes}
+        )
+    logger.info("Deep parser resolved %d/%d stories", len(results), len(stories))
     return results
 
 
@@ -2280,6 +2310,7 @@ def _run_ai_usage_component(
     members: list[str] | None,
     progress: list[str],
     sub_sources: list[str] | None = None,
+    analysis_depth: str = "deep",
 ) -> tuple[object | None, dict | None]:
     """Run the AI-adoption ('code') sub-analysis over ``sub_sources`` (github/azdo;
     None = all). Returns ``(signal, blob)`` or ``(None, None)`` on failure. Best-effort
@@ -2294,8 +2325,12 @@ def _run_ai_usage_component(
         )
         # Only spend an LLM call on coaching when something was actually scanned;
         # an empty footprint (no repos/creds) coaches deterministically.
-        if signal.scanned_commits + signal.scanned_prs > 0:
+        if analysis_depth == "deep" and signal.scanned_commits + signal.scanned_prs > 0:
             ai_examples["insights"] = generate_ai_adoption_insights(signal, ai_examples)
+        else:
+            from yeaboi.analysis.ai_usage import _fallback_ai_adoption_insights
+
+            ai_examples["insights"] = _fallback_ai_adoption_insights(signal, ai_examples.get("samples"))
         return signal, ai_examples
     except Exception:  # pragma: no cover - defensive; run_ai_adoption already guards
         logger.exception("AI-adoption analysis failed; continuing without it")
@@ -2307,6 +2342,7 @@ def _run_doc_quality_component(
     project_key: str,
     progress: list[str],
     sub_sources: list[str] | None = None,
+    analysis_depth: str = "deep",
 ) -> tuple[object | None, dict | None]:
     """Run the documentation-quality ('docs') sub-analysis over ``sub_sources``
     (confluence/notion; None = all). Returns ``(signal, blob)`` or ``(None, None)`` on
@@ -2317,8 +2353,12 @@ def _run_doc_quality_component(
 
         dq_signal, dq_examples = run_doc_quality(source, project_key, sub_sources=sub_sources)
         # Only spend an LLM call on coaching when pages were actually read.
-        if dq_signal.pages_scanned > 0:
+        if analysis_depth == "deep" and dq_signal.pages_scanned > 0:
             dq_examples["insights"] = generate_doc_quality_insights(dq_signal, dq_examples)
+        else:
+            from yeaboi.analysis.doc_quality import _fallback_doc_quality_insights
+
+            dq_examples["insights"] = _fallback_doc_quality_insights(dq_signal, dq_examples.get("samples"))
         return dq_signal, dq_examples
     except Exception:  # pragma: no cover - defensive; run_doc_quality already guards
         logger.exception("Doc-quality analysis failed; continuing without it")
@@ -2334,7 +2374,11 @@ def _run_parallel_analysis(
     include_doc_quality: bool = True,
     members: list[str] | None = None,
     warnings: list[str] | None = None,
-) -> TeamProfile:
+    analysis_depth: str = "deep",
+    include_insights: bool = True,
+    db_path=None,
+    cache_updates: dict[str, tuple[str, dict]] | None = None,
+) -> tuple[TeamProfile, dict]:
     """Run the 4-worker parallel analysis and merge results into a TeamProfile.
 
     ``progress`` is a shared list the TUI can read to display live status messages.
@@ -2399,11 +2443,20 @@ def _run_parallel_analysis(
         len(sprint_data),
     )
 
-    # LLM-powered ticket structure parsing — enriches story dicts with
-    # extracted acceptance criteria, DoD signals, risks, personas.
-    # Runs BEFORE workers so they all get enriched data.
-    # Falls back silently to regex if LLM is unavailable.
-    _parsed_tickets = _parse_tickets_with_llm(delivery_stories, progress)
+    # Deep mode enriches tickets with cached/batched LLM classification. Quick
+    # mode deliberately stays zero-LLM and uses the existing deterministic fields.
+    if analysis_depth == "deep":
+        _parsed_tickets = _parse_tickets_with_llm(
+            delivery_stories,
+            progress,
+            source=source,
+            project_key=project_key,
+            db_path=db_path,
+            cache_updates=cache_updates,
+        )
+    else:
+        progress.append("Using fast ticket parsing…")
+        _parsed_tickets = {}
     _enrich_stories_with_parsed(delivery_stories, _parsed_tickets)
 
     # Re-filter: LLM may have flagged additional stories as recurring
@@ -2625,8 +2678,9 @@ def _run_parallel_analysis(
     }
     examples["spillover_correlation"] = spillover_correlation  # type: ignore[assignment]
 
-    # LLM-generated point value descriptions
-    examples["point_descriptions"] = _generate_point_descriptions(  # type: ignore[assignment]
+    # Inputs for point descriptions are retained until the final enrichment
+    # phase, where Deep mode runs this alongside narrative and coaching.
+    point_description_args = (
         delivery_stories,
         cal.get("calibrations", ()),
         discipline_calibration,
@@ -2830,7 +2884,13 @@ def _run_parallel_analysis(
     # engine's global scans.
     if include_ai_usage:
         signal, ai_examples = _run_ai_usage_component(
-            source, project_key, delivery_stories, all_stories, members, progress
+            source,
+            project_key,
+            delivery_stories,
+            all_stories,
+            members,
+            progress,
+            analysis_depth=analysis_depth,
         )
         if signal is not None:
             from dataclasses import replace
@@ -2839,23 +2899,47 @@ def _run_parallel_analysis(
             examples["ai_adoption"] = ai_examples  # type: ignore[assignment]
 
     if include_doc_quality:
-        dq_signal, dq_examples = _run_doc_quality_component(source, project_key, progress)
+        dq_signal, dq_examples = _run_doc_quality_component(
+            source,
+            project_key,
+            progress,
+            analysis_depth=analysis_depth,
+        )
         if dq_signal is not None:
             from dataclasses import replace
 
             profile = replace(profile, doc_quality=dq_signal)
             examples["doc_quality"] = dq_examples  # type: ignore[assignment]
 
-    # Plain-English narrative — one LLM call explaining what the numbers mean
-    # per section card. Falls back to deterministic text; never raises.
-    progress.append("Writing plain-English summary…")
-    examples["narrative"] = _generate_analysis_narrative(profile, examples)
-
-    # Coaching insights — one LLM call turning the same digest into
-    # start/stop/keep/try advice for the team lead. Falls back to
-    # deterministic insights; never raises.
-    progress.append("Coaching insights…")
-    examples["insights"] = _generate_team_insights(profile, examples)
+    if analysis_depth == "quick":
+        progress.append("Building fast summaries…")
+        examples["point_descriptions"] = _fallback_point_descriptions(point_description_args[1])
+        examples["narrative"] = _fallback_narrative(profile, examples)
+        if include_insights:
+            examples["insights"] = _fallback_team_insights(profile, examples)
+    else:
+        progress.append("Generating AI enrichments in parallel…")
+        enrichment: dict[str, object] = {}
+        with ThreadPoolExecutor(max_workers=3 if include_insights else 2) as executor:
+            futures = {
+                executor.submit(_generate_point_descriptions, *point_description_args): "point_descriptions",
+                executor.submit(_generate_analysis_narrative, profile, examples): "narrative",
+            }
+            if include_insights:
+                futures[executor.submit(_generate_team_insights, profile, examples)] = "insights"
+            for future in as_completed(futures):
+                key = futures[future]
+                try:
+                    enrichment[key] = future.result()
+                except Exception:
+                    logger.exception("Final analysis enrichment %s failed", key)
+        examples["point_descriptions"] = enrichment.get(
+            "point_descriptions",
+            _fallback_point_descriptions(point_description_args[1]),
+        )
+        examples["narrative"] = enrichment.get("narrative", _fallback_narrative(profile, examples))
+        if include_insights:
+            examples["insights"] = enrichment.get("insights", _fallback_team_insights(profile, examples))
 
     return profile, examples
 

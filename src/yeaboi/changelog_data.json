@@ -2,6 +2,18 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.34.0",
+      "date": "2026-07-24",
+      "summary": "Team analysis now offers two speed tiers. Quick mode runs instantly with deterministic summaries and no LLM calls—perfect for fast iterations during planning sessions. Deep mode activates AI-enriched analysis with larger ticket batches and parallel processing of all three analysis components (delivery, code, and documentation) for comprehensive insights. The Quick/Deep choice appears right before analysis starts in both the TUI workflow and CLI, with mode details and stage timings visible throughout the run. All three components now run concurrently instead of serially, cutting analysis wall-clock time significantly. The choice is exposed through CLI flags and MCP tools so teammates and AI agents can pick the right depth for their workflow.",
+      "highlights": [
+        {"text": "Quick mode: instant, deterministic analysis with no LLM calls; perfect for fast iterations", "areas": ["analysis"]},
+        {"text": "Deep mode: AI-enriched with larger ticket batches and parallel processing of delivery, code, and docs components", "areas": ["analysis"]},
+        {"text": "Choose Quick or Deep right before analysis starts; mode details and stage timings shown during the run", "areas": ["analysis"]},
+        {"text": "Concurrent component analysis cuts wall-clock time; delivery, code, and documentation run in parallel", "areas": ["analysis"]},
+        {"text": "Analysis depth exposed through CLI flags and MCP tools for programmatic control", "areas": ["analysis"]}
+      ]
+    },
+    {
       "version": "2.33.0",
       "date": "2026-07-24",
       "summary": "Analysis mode gained significantly improved insights dashboards. AI Adoption and Documentation sections now display as evidence-led dashboards with metric tiles, meters, ranked member breakdowns, evidence tables, and actionable cards — replacing a flat text layout with data-forward visualization. Team Insights was reorganized into consistent Focus Now, Keep Working, and Experiments sections, each with category badges for quick scanning. Member selection was redesigned: every team member starts pre-selected in the analysis scope picker, you can toggle one at a time or press A to select or deselect all, and the app prevents running with nobody selected. Overall scrolling and navigation improved for better usability with rich content.",

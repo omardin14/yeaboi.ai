@@ -514,7 +514,7 @@ def _build_component_select_screen(
     title = analysis_title()
     sub = Text(_PAD + "Choose what to analyse — each part scans its own sources", style="bold white", justify="left")
     crumb = Text(
-        _PAD + "↑/↓ · ←/→ · Space toggle · Enter run · Esc cancel",
+        _PAD + "↑/↓ · ←/→ · Space toggle · Enter continue · Esc cancel",
         style="rgb(120,120,140)",
         justify="left",
     )
@@ -584,6 +584,46 @@ def _build_component_select_screen(
         padded.append(Text(""))
 
     content = Group(Text(""), title, Text(""), sub, crumb, Text(""), Group(*padded))
+    return Panel(content, border_style="white", box=rich.box.ROUNDED, expand=True, height=height, padding=(1, 2))
+
+
+def _build_analysis_depth_screen(selected: int = 0, *, width: int = 80, height: int = 24) -> Panel:
+    """Choose Quick (zero LLM calls) or Deep (cached AI enrichment)."""
+    from yeaboi.ui.shared._components import analysis_title
+
+    theme = ANALYSIS_THEME
+    options = (
+        (
+            "QUICK",
+            "Recommended · fastest",
+            "Computed metrics, deterministic summaries and coaching. No LLM wait.",
+        ),
+        (
+            "DEEP",
+            "Richer AI enrichment",
+            "Classifies ticket structure and writes AI explanations. Cached, but slower.",
+        ),
+    )
+    lines: list[Text] = []
+    for idx, (name, label, detail) in enumerate(options):
+        focused = idx == selected
+        line = Text(_PAD + "  ", justify="left")
+        line.append("› " if focused else "  ", style=theme.accent_bright)
+        line.append(name, style=f"bold {theme.accent_bright if focused else theme.accent}")
+        line.append(f"  {label}", style="bold white" if focused else theme.muted)
+        lines.append(line)
+        lines.append(Text(_PAD + "    " + detail, style=theme.dim, justify="left"))
+        lines.append(Text(""))
+
+    content = Group(
+        Text(""),
+        analysis_title(),
+        Text(""),
+        Text(_PAD + "Choose analysis depth", style="bold white", justify="left"),
+        Text(_PAD + "↑/↓ or ←/→ · Enter continue · Esc cancel", style=theme.muted, justify="left"),
+        Text(""),
+        Group(*lines),
+    )
     return Panel(content, border_style="white", box=rich.box.ROUNDED, expand=True, height=height, padding=(1, 2))
 
 

@@ -2199,6 +2199,9 @@ def _ta_overview(ctx: _TaCtx, profile, selected_card: int) -> None:
     # active tracker; a code/docs-only view leads straight into its cards.
     if profile is not None:
         ctx.heading("At a Glance")
+        depth = str(ctx.ex.get("analysis_depth", "")).strip().lower()
+        if depth in ("quick", "deep"):
+            ctx.kv("Analysis", f"{depth.capitalize()} mode")
         if stats.get("team_size"):
             ctx.kv("Team size", f"{stats['team_size']} contributors")
         if stats.get("velocity"):

@@ -147,6 +147,7 @@ class TestParsing:
         assert args.sprints == 4
         assert args.samples is True
         assert args.no_insights is False
+        assert args.depth == "quick"
 
 
 class TestReportCommand:
@@ -453,6 +454,18 @@ class TestAnalyzeCommand:
         assert captured["source"] == "jira"
         assert captured["sprint_count"] == 4
         assert captured["include_insights"] is False
+        assert captured["analysis_depth"] == "quick"
+
+    def test_depth_deep_passthrough(self, monkeypatch):
+        captured: dict = {}
+
+        monkeypatch.setattr(
+            "yeaboi.analysis.run_team_analysis",
+            lambda **kwargs: captured.update(kwargs) or {"delivery": {}, "code": None, "docs": None, "warnings": []},
+        )
+        args = build_parser().parse_args(["analyze", "--depth", "deep", "--delivery", "jira"])
+        assert _cmd_analyze(args, _console()) == 0
+        assert captured["analysis_depth"] == "deep"
 
     def test_delivery_banners_and_comparison(self, monkeypatch):
         import io

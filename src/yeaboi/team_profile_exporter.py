@@ -217,6 +217,11 @@ def build_team_profile_html(
     ex = examples or {}
     sections: list[str] = []
     nav_links: list[str] = []
+    depth = str(ex.get("analysis_depth", "")).strip().lower()
+    if depth in ("quick", "deep"):
+        _depth_html = f"<p><strong>Analysis depth:</strong> {_e(depth.capitalize())}</p>"
+    else:
+        _depth_html = ""
 
     def _nav(id_: str, label: str) -> None:
         nav_links.append(f'<a href="#{id_}">{_e(label)}</a>')
@@ -224,7 +229,7 @@ def build_team_profile_html(
     # ── Executive Summary (AI narrative, generated at analysis time) ─
     narrative = ex.get("narrative", {})
     if isinstance(narrative, dict) and narrative.get("executive_summary"):
-        n_html = f"<p>{_e(str(narrative['executive_summary']))}</p>"
+        n_html = _depth_html + f"<p>{_e(str(narrative['executive_summary']))}</p>"
         n_sections = narrative.get("sections", {})
         if isinstance(n_sections, dict):
             n_items = "".join(
@@ -1596,6 +1601,9 @@ def build_team_profile_markdown(
         "",
         f"*{profile.sample_sprints} sprints · {profile.sample_stories} stories · Generated {gen_ts}*",
     ]
+    depth = str(ex.get("analysis_depth", "")).strip().lower()
+    if depth in ("quick", "deep"):
+        lines.extend(["", f"**Analysis depth:** {depth.capitalize()}"])
     if sprint_names:
         lines.append(f"\nSprints: {', '.join(sprint_names)}")
     lines.append("")

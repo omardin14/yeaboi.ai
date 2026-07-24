@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,7 @@ def run_team_analysis(
     components: dict[str, list[str]] | None = None,
     members: dict[str, list[str]] | None = None,
     *,
+    analysis_depth: str = "quick",
     progress: list | None = None,
     db_path=None,
 ) -> dict:
@@ -293,6 +295,9 @@ def run_team_analysis(
             None — scan commits/PRs for AI-tool markers (Code component).
         include_doc_quality: legacy toggle folded into ``components`` when None — read
             recent Notion/Confluence pages (Docs component).
+        analysis_depth: ``quick`` makes no LLM calls and uses deterministic
+            explanations; ``deep`` adds cached ticket classification and AI-written
+            enrichments. Defaults to ``quick``.
         components: component → sub-source map, e.g.
             ``{"delivery": ["jira"], "code": ["github", "azdo"], "docs": ["confluence"]}``.
             Each component runs over ONLY its listed sub-sources; an absent/empty
@@ -310,6 +315,13 @@ def run_team_analysis(
     Raises ValueError when nothing at all can be analysed (no tracker/component
     configured); per-tracker board errors degrade to a ``warnings`` entry.
     """
+    if analysis_depth not in ("quick", "deep"):
+        raise ValueError(f"analysis_depth must be 'quick' or 'deep' — got {analysis_depth!r}")
+    if analysis_depth == "quick" and generate_samples:
+        raise ValueError("generate_samples requires analysis_depth='deep' because sample generation uses the LLM.")
+    from yeaboi.paths import get_db_path
+
+    effective_db_path = db_path or get_db_path()
     comps = _resolve_components(source, components, include_ai_usage, include_doc_quality)
     members = members or {}
     warnings: list[str] = []
@@ -322,45 +334,105 @@ def run_team_analysis(
         members or "all",
     )
 
-    # Delivery — one TeamProfile per selected tracker (never blended).
-    delivery: dict[str, dict] = {}
+    # Build one independent top-level job per delivery tracker plus one global Code
+    # and Docs job.  Delivery's own four-worker analysis remains unchanged; this
+    # outer pool removes the serial wait between otherwise unrelated components.
+    delivery_results: dict[str, dict] = {}
     single = len(comps["delivery"]) == 1
-    for tracker in comps["delivery"]:
-        try:
-            delivery[tracker] = _run_delivery(
-                tracker,
-                project_key if single else "",
-                team_name if single else "",
-                members.get(tracker),
-                sprint_count,
-                generate_samples,
-                include_insights,
-                progress_list,
-            )
-        except Exception as exc:  # a per-tracker failure degrades to a warning, not a crash
-            logger.warning("Delivery analysis failed for %s: %s", tracker, exc)
-            warnings.append(f"{_SOURCE_NAMES.get(tracker, tracker)} delivery analysis failed: {exc}")
-
-    # Code + Docs — one global scan each, over their selected sub-sources.
     union_members = sorted({m for names in members.values() for m in (names or [])}) or None
-    code = None
+    jobs: list[tuple[str, str, tuple, dict]] = []
+    for tracker in comps["delivery"]:
+        jobs.append(
+            (
+                "delivery",
+                tracker,
+                (
+                    tracker,
+                    project_key if single else "",
+                    team_name if single else "",
+                    members.get(tracker),
+                    sprint_count,
+                    generate_samples,
+                    include_insights,
+                    analysis_depth,
+                    progress_list,
+                    effective_db_path,
+                ),
+                {},
+            )
+        )
+
     if comps["code"]:
         from yeaboi.tools.team_learning import _run_ai_usage_component
 
-        signal, blob = _run_ai_usage_component("", "", [], [], union_members, progress_list, sub_sources=comps["code"])
-        if signal is not None:
-            code = {"signal": signal, "examples": blob}
-    docs = None
+        jobs.append(
+            (
+                "code",
+                "code",
+                ("", "", [], [], union_members, progress_list),
+                {"sub_sources": comps["code"], "analysis_depth": analysis_depth},
+            )
+        )
     if comps["docs"]:
         from yeaboi.tools.team_learning import _run_doc_quality_component
 
-        signal, blob = _run_doc_quality_component("", "", progress_list, sub_sources=comps["docs"])
-        if signal is not None:
-            docs = {"signal": signal, "examples": blob}
+        jobs.append(
+            (
+                "docs",
+                "docs",
+                ("", "", progress_list),
+                {"sub_sources": comps["docs"], "analysis_depth": analysis_depth},
+            )
+        )
+
+    code = None
+    docs = None
+    if jobs:
+        max_workers = min(4, len(jobs))
+        logger.info("Running %d top-level analysis job(s) with %d worker(s)", len(jobs), max_workers)
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="team-analysis") as executor:
+            futures = {}
+            for kind, key, args, kwargs in jobs:
+                if kind == "delivery":
+                    future = executor.submit(_run_delivery, *args, **kwargs)
+                elif kind == "code":
+                    future = executor.submit(_run_ai_usage_component, *args, **kwargs)
+                else:
+                    future = executor.submit(_run_doc_quality_component, *args, **kwargs)
+                futures[future] = (kind, key)
+
+            for future in as_completed(futures):
+                kind, key = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    if kind == "delivery":
+                        logger.warning("Delivery analysis failed for %s: %s", key, exc)
+                        warnings.append(f"{_SOURCE_NAMES.get(key, key)} delivery analysis failed: {exc}")
+                    else:
+                        label = "Code" if kind == "code" else "Docs"
+                        logger.warning("%s analysis failed: %s", label, exc)
+                        warnings.append(f"{label} analysis failed: {exc}")
+                    continue
+
+                if kind == "delivery":
+                    delivery_results[key] = result
+                elif kind == "code":
+                    signal, blob = result
+                    if signal is not None:
+                        code = {"signal": signal, "examples": blob}
+                else:
+                    signal, blob = result
+                    if signal is not None:
+                        docs = {"signal": signal, "examples": blob}
+
+    # Futures complete in arbitrary order. Rebuild delivery in configured order so
+    # the comparison table and TUI's initial tracker stay deterministic.
+    delivery = {tracker: delivery_results[tracker] for tracker in comps["delivery"] if tracker in delivery_results}
 
     # Attach the global code/docs signals to every delivery profile, then persist.
     if delivery:
-        _persist_delivery(delivery, code, docs, db_path)
+        _persist_delivery(delivery, code, docs, effective_db_path)
     for sub in delivery.values():
         warnings.extend(sub.get("warnings", []))
 
@@ -378,6 +450,7 @@ def run_team_analysis(
         "docs": docs,
         "comparison": _build_comparison(delivery) if len(ran) >= 2 else [],
         "components": comps,
+        "analysis_depth": analysis_depth,
         "warnings": warnings,
     }
 
@@ -390,7 +463,9 @@ def _run_delivery(
     sprint_count: int,
     generate_samples: bool,
     include_insights: bool,
+    analysis_depth: str,
     progress: list,
+    db_path,
 ) -> dict:
     """Run the Delivery component for one tracker → a per-tracker result sub-dict.
 
@@ -415,12 +490,16 @@ def _run_delivery(
         sprint_count,
         members or "all",
     )
+    fetch_started = time.monotonic()
     fetch = _fetch_jira_history if resolved_source == "jira" else _fetch_azdevops_history
     sprint_data = fetch(resolved_project, sprint_count)
+    fetch_secs = time.monotonic() - fetch_started
     if not sprint_data:
         raise ValueError("No closed sprints found on the board — nothing to analyse.")
     sprint_names = [sd.get("sprint_name", "") for sd in sprint_data]
 
+    analysis_started = time.monotonic()
+    cache_updates: dict[str, tuple[str, dict]] = {}
     profile, examples = _run_parallel_analysis(
         resolved_source,
         resolved_project or "unknown",
@@ -430,14 +509,20 @@ def _run_delivery(
         include_doc_quality=False,
         members=members,
         warnings=warnings,
+        analysis_depth=analysis_depth,
+        include_insights=include_insights,
+        db_path=db_path,
+        cache_updates=cache_updates,
     )
+    analysis_secs = time.monotonic() - analysis_started
     if resolved_team and not profile.team_name:
         from dataclasses import replace
 
         profile = replace(profile, team_name=resolved_team)
 
     duration = time.monotonic() - started
-    insights = _generate_team_insights_safe(profile, examples) if include_insights else None
+    examples["analysis_depth"] = analysis_depth
+    insights = examples.get("insights") if include_insights else None
     samples = _generate_samples(profile, examples or {}, warnings) if generate_samples else None
     return {
         "source": resolved_source,
@@ -449,15 +534,16 @@ def _run_delivery(
         "headline_stats": compute_headline_stats(profile, examples),
         "insights": insights,
         "samples": samples,
+        "analysis_depth": analysis_depth,
+        "stage_timings": {
+            "fetch_secs": round(fetch_secs, 1),
+            "analysis_secs": round(analysis_secs, 1),
+            "total_secs": round(duration, 1),
+        },
+        "_ticket_cache_updates": cache_updates,
         "log_path": "",
         "warnings": warnings,
     }
-
-
-def _generate_team_insights_safe(profile, examples):
-    from yeaboi.tools.team_learning import _generate_team_insights
-
-    return _generate_team_insights(profile, examples)  # never raises — deterministic fallback inside
 
 
 def _persist_delivery(delivery: dict, code: dict | None, docs: dict | None, db_path) -> None:
@@ -476,6 +562,9 @@ def _persist_delivery(delivery: dict, code: dict | None, docs: dict | None, db_p
         for sub in delivery.values():
             profile = sub["profile"]
             examples = sub["examples"]
+            cache_updates = sub.pop("_ticket_cache_updates", {})
+            if cache_updates:
+                store.save_ticket_parse_cache(profile.source, profile.project_key, cache_updates)
             if code_sig is not None:
                 profile = replace(profile, ai_adoption=code_sig)
                 examples["ai_adoption"] = code["examples"]

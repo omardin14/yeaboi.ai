@@ -1633,7 +1633,7 @@ class TestNarrativeInParallelAnalysis:
         assert isinstance(narrative, dict)
         assert narrative["executive_summary"]
         assert len(narrative["sections"]) == 7
-        assert "Writing plain-English summary…" in progress
+        assert "Generating AI enrichments in parallel…" in progress
 
 
 class TestInsightsPersistenceAndExport:
@@ -1761,4 +1761,192 @@ class TestInsightsInParallelAnalysis:
         insights = examples.get("insights")
         assert isinstance(insights, dict)
         assert all(insights[k] for k in ("start", "stop", "keep", "try"))
-        assert "Coaching insights…" in progress
+        assert "Generating AI enrichments in parallel…" in progress
+
+
+class TestAnalysisDepth:
+    @staticmethod
+    def _sprint_data(summary: str = "Story A"):
+        return [
+            {
+                "sprint_name": "Sprint 1",
+                "completed_points": 3.0,
+                "planned_count": 1,
+                "completed_count": 1,
+                "stories": [
+                    {
+                        "points": 3,
+                        "cycle_time_days": 2.0,
+                        "discipline": "backend",
+                        "task_count": 2,
+                        "ac_count": 2,
+                        "epic_key": "EP-1",
+                        "point_changed": False,
+                        "issue_key": "P-1",
+                        "description": "Acceptance Criteria: returns HTTP 200",
+                        "summary": summary,
+                    }
+                ],
+            }
+        ]
+
+    def test_quick_mode_makes_no_llm_calls(self, monkeypatch):
+        from yeaboi.tools.team_learning import _run_parallel_analysis
+
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._llm_invoke",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("Quick must not invoke an LLM")),
+        )
+        progress: list[str] = []
+        _profile, examples = _run_parallel_analysis(
+            "jira",
+            "PROJ",
+            self._sprint_data(),
+            progress,
+            include_ai_usage=False,
+            include_doc_quality=False,
+            analysis_depth="quick",
+        )
+
+        assert "Building fast summaries…" in progress
+        assert examples["narrative"]["executive_summary"]
+        assert examples["point_descriptions"]
+        assert all(examples["insights"][key] for key in ("start", "stop", "keep", "try"))
+
+    def test_quick_mode_can_omit_insights(self):
+        from yeaboi.tools.team_learning import _run_parallel_analysis
+
+        _profile, examples = _run_parallel_analysis(
+            "jira",
+            "PROJ",
+            self._sprint_data(),
+            include_ai_usage=False,
+            include_doc_quality=False,
+            analysis_depth="quick",
+            include_insights=False,
+        )
+        assert "insights" not in examples
+
+    def test_deep_final_enrichments_overlap(self, monkeypatch):
+        import threading
+
+        from yeaboi.tools.team_learning import _run_parallel_analysis
+
+        barrier = threading.Barrier(3)
+        active = {"value": 0, "peak": 0}
+        lock = threading.Lock()
+
+        def overlap(result):
+            with lock:
+                active["value"] += 1
+                active["peak"] = max(active["peak"], active["value"])
+            try:
+                barrier.wait(timeout=2)
+                return result
+            finally:
+                with lock:
+                    active["value"] -= 1
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._parse_tickets_with_llm", lambda *a, **k: {})
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._generate_point_descriptions",
+            lambda *a, **k: overlap({"3": "Three points"}),
+        )
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._generate_analysis_narrative",
+            lambda *a, **k: overlap({"executive_summary": "Summary", "sections": {}}),
+        )
+        monkeypatch.setattr(
+            "yeaboi.tools.team_learning._generate_team_insights",
+            lambda *a, **k: overlap({"start": [], "stop": [], "keep": [], "try": []}),
+        )
+
+        _run_parallel_analysis(
+            "jira",
+            "PROJ",
+            self._sprint_data(),
+            include_ai_usage=False,
+            include_doc_quality=False,
+            analysis_depth="deep",
+        )
+        assert active["peak"] == 3
+
+
+class TestTicketParseCache:
+    @staticmethod
+    def _story(description: str = "Acceptance Criteria: returns HTTP 200"):
+        return {
+            "issue_key": "P-1",
+            "summary": "Build endpoint",
+            "description": description,
+            "points": 3,
+            "task_count": 2,
+            "carried_over": False,
+        }
+
+    def test_cache_hit_skips_llm_and_content_change_invalidates(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        from yeaboi.tools.team_learning import _parse_tickets_with_llm
+
+        calls = {"count": 0}
+
+        def invoke(*args, **kwargs):
+            calls["count"] += 1
+            return SimpleNamespace(content='[{"key":"P-1","discipline":"backend"}]')
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._llm_invoke", invoke)
+        db = tmp_path / "sessions.db"
+        updates: dict = {}
+        first = _parse_tickets_with_llm(
+            [self._story()],
+            [],
+            source="jira",
+            project_key="PROJ",
+            db_path=db,
+            cache_updates=updates,
+        )
+        with TeamProfileStore(db) as store:
+            store.save_ticket_parse_cache("jira", "PROJ", updates)
+
+        second_updates: dict = {}
+        second = _parse_tickets_with_llm(
+            [self._story()],
+            [],
+            source="jira",
+            project_key="PROJ",
+            db_path=db,
+            cache_updates=second_updates,
+        )
+        changed = _parse_tickets_with_llm(
+            [self._story("Acceptance Criteria: returns HTTP 201")],
+            [],
+            source="jira",
+            project_key="PROJ",
+            db_path=db,
+            cache_updates={},
+        )
+
+        assert first == second
+        assert changed["P-1"]["discipline"] == "backend"
+        assert calls["count"] == 2
+
+    def test_deep_parser_uses_compact_twelve_ticket_batches(self, monkeypatch):
+        import re
+        from types import SimpleNamespace
+
+        from yeaboi.tools.team_learning import _parse_tickets_with_llm
+
+        calls = {"count": 0}
+
+        def invoke(prompt, **kwargs):
+            calls["count"] += 1
+            keys = re.findall(r"--- ([A-Z]+-\d+):", prompt)
+            return SimpleNamespace(content=json.dumps([{"key": key} for key in keys]))
+
+        monkeypatch.setattr("yeaboi.tools.team_learning._llm_invoke", invoke)
+        stories = [{**self._story(), "issue_key": f"P-{idx}", "summary": f"Story {idx}"} for idx in range(25)]
+        result = _parse_tickets_with_llm(stories, [])
+
+        assert len(result) == 25
+        assert calls["count"] == 3
