@@ -16,6 +16,7 @@ from rich.text import Text
 
 from yeaboi.ui.mode_select.screens._analysis_sections import (
     _TA_CARDS,
+    _measure_render_height,
     _ta_glossary_lines,
     _ta_insights,
     _ta_narrative_block,
@@ -68,13 +69,13 @@ def _build_analysis_review_screen(
     # ── Viewport (height-aware for line wrapping)
     viewport_h = calc_viewport(height, header_h=11, action_h=4)
 
-    # Estimate rendered height per line
+    # Measure actual terminal height. Most pages pass Text, while the redesigned
+    # Team Insights page also passes Rich panels and tables.
     _content_w = max(20, width - 7)
     _item_heights: list[int] = []
     _total_rendered = 0
     for bl in body_lines:
-        plain = bl.plain if hasattr(bl, "plain") else str(bl)
-        h = max(1, -(-len(plain) // _content_w))
+        h = max(1, _measure_render_height(bl, _content_w))
         _item_heights.append(h)
         _total_rendered += h
 
@@ -389,15 +390,27 @@ def _build_team_analysis_screen(
     # The 'both'-mode toggle line adds one header row; shrink the viewport to match.
     body_h = calc_viewport(height, header_h=12 if toggle_line is not None else 11, action_h=4)
 
-    max_scroll = max(0, ctx.rendered_lines - body_h)
-    if view == "overview" and ctx.overview_first_card_row is not None:
+    # Scroll by renderable rather than pretending every item is one terminal row.
+    # Dashboard tiles/tables/cards are atomic Rich renderables with measured heights.
+    # Choose the earliest trailing item that still lets the bottom of the report fit.
+    tail_h = 0
+    max_scroll = max(0, len(ctx.lines) - 1)
+    for i in range(len(ctx.lines) - 1, -1, -1):
+        ih = ctx.item_heights[i] if i < len(ctx.item_heights) else 1
+        if tail_h and tail_h + ih > body_h:
+            break
+        tail_h += ih
+        max_scroll = i
+    if view == "overview" and ctx.overview_card_rows:
         # ↑/↓ moves the card selection (not a free scroll) — keep the selected
-        # card row inside the viewport by deriving the scroll from it.
-        row_top = ctx.overview_first_card_row + selected_card
-        if row_top + 1 > scroll_offset + body_h:
-            scroll_offset = row_top + 1 - body_h
-        elif row_top < scroll_offset:
-            scroll_offset = row_top
+        # card inside the viewport, including the AI-feature group separator.
+        card_item = ctx.overview_card_rows[min(selected_card, len(ctx.overview_card_rows) - 1)]
+        visible_h = sum(
+            ctx.item_heights[i] if i < len(ctx.item_heights) else 1
+            for i in range(min(scroll_offset, card_item), card_item + 1)
+        )
+        if card_item < scroll_offset or visible_h > body_h:
+            scroll_offset = min(card_item, max_scroll)
     actual_scroll = min(scroll_offset, max_scroll)
     publish_geometry(scroll_meta, max_scroll, body_h)
 
@@ -411,7 +424,7 @@ def _build_team_analysis_screen(
         _vis_h += ih
 
     remaining = max(0, body_h - _vis_h)
-    _sb_text = build_scrollbar(body_h, ctx.rendered_lines, actual_scroll, max_scroll)
+    _sb_text = build_scrollbar(body_h, len(ctx.lines), actual_scroll, max_scroll)
 
     # Build viewport with optional scrollbar
     _body_group = Group(*_vis_items, *[Text("") for _ in range(remaining)])
@@ -583,14 +596,14 @@ def _build_member_select_screen(
     height: int = 24,
     message: str = "",
 ) -> Panel:
-    """Roster multi-select (checkbox list). Empty ``checked`` = whole team."""
+    """Roster multi-select with an explicit checked state for every member."""
     from yeaboi.ui.shared._components import analysis_title
 
     theme = ANALYSIS_THEME
     title = analysis_title()
-    sub = Text(_PAD + "Scope the analysis to selected members (none = whole team)", style="bold white", justify="left")
+    sub = Text(_PAD + "Choose who to include in the analysis", style="bold white", justify="left")
     crumb = Text(
-        _PAD + "↑/↓ move · Space toggle · Enter run · Esc cancel",
+        _PAD + "↑/↓ move · Space toggle · A toggle all · Enter run · Esc cancel",
         style="rgb(120,120,140)",
         justify="left",
     )
@@ -600,8 +613,8 @@ def _build_member_select_screen(
         rows.append(Text(_PAD + "  " + message, style=theme.accent_bright, justify="left"))
         rows.append(Text(""))
     n_checked = len(checked)
-    scope = f"{n_checked} selected" if n_checked else "whole team"
-    rows.append(Text(_PAD + f"  Space to toggle · {scope} · Enter to run", style=theme.muted))
+    scope = f"{n_checked} of {len(roster)} selected"
+    rows.append(Text(_PAD + f"  Space to toggle · A select/deselect all · {scope}", style=theme.muted))
     rows.append(Text(""))
     for idx, name in enumerate(roster):
         is_cursor = idx == cursor

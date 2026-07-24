@@ -482,9 +482,14 @@ class TestLocalGitBody:
 
 
 def _render_lines(ctx) -> str:
-    from rich.text import Text
+    import io
 
-    return "\n".join(line.plain for line in ctx.lines if isinstance(line, Text))
+    from rich.console import Console, Group
+
+    output = io.StringIO()
+    console = Console(file=output, width=100, color_system=None)
+    console.print(Group(*ctx.lines))
+    return output.getvalue()
 
 
 class TestAiAdoptionCard:
@@ -521,7 +526,7 @@ class TestAiAdoptionCard:
         ctx = self._ctx(examples)
         _ta_ai_adoption(ctx, profile)
         out = _render_lines(ctx)
-        assert "Lower bound" in out
+        assert "LOWER BOUND SIGNAL" in out
         assert "42%" in out
         assert "claude" in out
         assert "Do X" in out
@@ -574,9 +579,9 @@ class TestAiAdoptionCard:
         out = _render_lines(ctx)
         assert "Azure DevOps (remote)" in out  # friendly source label (not raw "azdo")
         assert "TeamProject" in out  # Scanned line names the remote project
-        assert "By source" in out
+        assert "Sources" in out
         assert "Not scanned" in out and "STANDUP_GITHUB_REPO" in out  # coverage shown even when populated
-        assert "Examples" in out and "Fix login" in out  # real example rendered
+        assert "Evidence" in out and "Fix login" in out  # real example rendered
         assert "https://github.com/o/r/commit/a1b2c3d4" in out  # link on the coaching item
 
     def test_empty_state_when_not_scanned(self):

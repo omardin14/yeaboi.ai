@@ -4085,15 +4085,19 @@ def _run_component_select(live, console: Console, read_key, frame_time: float, s
 
 
 def _run_member_select(live, console: Console, read_key, frame_time: float, supports_timeout: bool, roster: list):
-    """Blocking roster picker. Returns the selected names (empty selection → ``None``
-    = whole team) or the string ``"cancel"`` on Esc."""
+    """Blocking roster picker.
+
+    Every member starts selected. Returns at least one selected name, ``None`` only
+    when the roster itself is empty, or the string ``"cancel"`` on Esc.
+    """
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_member_select_screen
 
-    checked: set[int] = set()
+    checked: set[int] = set(range(len(roster)))
     cursor = 0
+    message = ""
     while True:
         w, h = console.size
-        live.update(_build_member_select_screen(roster, checked, cursor, width=w, height=h))
+        live.update(_build_member_select_screen(roster, checked, cursor, width=w, height=h, message=message))
         kk = read_key(timeout=frame_time) if supports_timeout else read_key()
         if kk in ("up", "scroll_up"):
             cursor = (cursor - 1) % len(roster) if roster else 0
@@ -4101,7 +4105,14 @@ def _run_member_select(live, console: Console, read_key, frame_time: float, supp
             cursor = (cursor + 1) % len(roster) if roster else 0
         elif kk == " " and roster:
             checked.symmetric_difference_update({cursor})
+            message = ""
+        elif kk in ("a", "A") and roster:
+            checked = set() if len(checked) == len(roster) else set(range(len(roster)))
+            message = ""
         elif kk == "enter":
+            if roster and not checked:
+                message = "Select at least one member to run the analysis."
+                continue
             return sorted(roster[i] for i in checked) or None
         elif kk in ("esc", "q"):
             return "cancel"
