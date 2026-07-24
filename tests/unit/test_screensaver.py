@@ -1,0 +1,143 @@
+"""Tests for app-wide idle tracking and the animated ANSI screensaver."""
+
+from __future__ import annotations
+
+from rich.console import Console
+from rich.text import Text
+
+from yeaboi.ui.shared import _input, _screensaver
+from yeaboi.ui.shared._music_bar import make_live
+from yeaboi.ui.shared._screensaver import IdleController, build_screensaver
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _controller(seconds: float = 300) -> tuple[IdleController, FakeClock]:
+    clock = FakeClock()
+    return IdleController(idle_seconds=seconds, clock=clock), clock
+
+
+def test_activates_at_idle_boundary_and_polling_does_not_reset():
+    controller, clock = _controller()
+    controller.begin_input_wait()
+    clock.advance(299)
+    controller.begin_input_wait()  # another timed input poll, not activity
+    assert controller.should_show() is False
+    clock.advance(1)
+    assert controller.should_show() is True
+
+
+def test_first_event_wakes_only_then_next_event_is_actionable():
+    controller, clock = _controller(seconds=5)
+    controller.begin_input_wait()
+    clock.advance(5)
+    assert controller.should_show() is True
+    assert controller.handle_input_event() is True
+    assert controller.should_show() is False
+    assert controller.handle_input_event() is False
+
+
+def test_processing_is_excluded_and_idle_restarts_afterward(monkeypatch):
+    controller, clock = _controller(seconds=10)
+    monkeypatch.setattr(_screensaver, "idle_controller", controller)
+    controller.begin_input_wait()
+    clock.advance(9)
+
+    with _screensaver.suppress_screensaver():
+        clock.advance(1000)
+        controller.begin_input_wait()
+        assert controller.should_show() is False
+
+    controller.begin_input_wait()
+    clock.advance(9)
+    assert controller.should_show() is False
+    clock.advance(1)
+    assert controller.should_show() is True
+
+
+def test_read_key_consumes_wake_before_music_shortcut(monkeypatch):
+    controller, clock = _controller(seconds=1)
+    monkeypatch.setattr(_screensaver, "idle_controller", controller)
+    controller.begin_input_wait()
+    clock.advance(1)
+    assert controller.should_show() is True
+
+    def fake_read(**_kwargs):
+        _input._last_read_had_input = True
+        return "ctrl+p"
+
+    toggles: list[bool] = []
+    monkeypatch.setattr(_input, "_read_key_impl", fake_read)
+    monkeypatch.setattr("yeaboi.music.toggle", lambda: toggles.append(True))
+
+    assert _input.read_key(timeout=0) == ""
+    assert toggles == []
+
+    # The same shortcut is actionable after the saver has been dismissed.
+    assert _input.read_key(timeout=0) == ""
+    assert toggles == [True]
+
+
+def test_ctrl_y_previews_saver_and_ctrl_y_again_only_wakes(monkeypatch):
+    controller, _clock = _controller()
+    monkeypatch.setattr(_screensaver, "idle_controller", controller)
+
+    def fake_read(**_kwargs):
+        _input._last_read_had_input = True
+        return "ctrl+y"
+
+    monkeypatch.setattr(_input, "_read_key_impl", fake_read)
+
+    assert _input.read_key(timeout=0) == ""
+    assert controller.should_show() is True
+    assert _input.read_key(timeout=0) == ""
+    assert controller.should_show() is False
+
+
+def test_ctrl_y_preview_is_ignored_during_processing(monkeypatch):
+    controller, _clock = _controller()
+    monkeypatch.setattr(_screensaver, "idle_controller", controller)
+
+    def fake_read(**_kwargs):
+        _input._last_read_had_input = True
+        return "ctrl+y"
+
+    monkeypatch.setattr(_input, "_read_key_impl", fake_read)
+    with _screensaver.suppress_screensaver():
+        assert _input.read_key(timeout=0) == ""
+        assert controller.should_show() is False
+
+
+def test_live_swaps_saver_without_losing_underlying_renderable(monkeypatch):
+    controller, clock = _controller(seconds=1)
+    monkeypatch.setattr(_screensaver, "idle_controller", controller)
+    underlying = Text("underlying")
+    live = make_live(underlying, console=Console(width=80, height=24))
+
+    controller.begin_input_wait()
+    clock.advance(1)
+    assert live.get_renderable() is not underlying
+
+    assert controller.handle_input_event() is True
+    assert live.get_renderable() is underlying
+
+
+def test_full_compact_and_tiny_layouts_fit_the_terminal():
+    for width, height in ((80, 24), (30, 14), (18, 5)):
+        console = Console(width=width, height=height, color_system=None)
+        lines = console.render_lines(
+            build_screensaver(width=width, height=height, elapsed=0.25),
+            console.options.update(width=width, height=height),
+            pad=False,
+        )
+        assert len(lines) <= height
+        assert all(sum(segment.cell_length for segment in line) <= width for line in lines)

@@ -18,6 +18,9 @@ import tty
 # by the next read_key() call, so no keypress is ever lost. Single-threaded input,
 # so a plain module list is safe. See coalesce_scroll() in _scroll.py.
 _pushback: list[str] = []
+# Set by _read_key_impl so the public wrapper can distinguish a real terminal
+# event that decoded to "" (for example a consumed mouse click) from a timeout.
+_last_read_had_input = False
 
 
 def push_back_key(key: str) -> None:
@@ -25,7 +28,7 @@ def push_back_key(key: str) -> None:
     _pushback.append(key)
 
 
-def read_key(stdin=None, timeout: float | None = None) -> str:
+def _read_key_impl(stdin=None, timeout: float | None = None) -> str:
     """Read a single keypress from the terminal in raw mode.
 
     If timeout is given, returns "" if no key is pressed within that time.
@@ -48,7 +51,11 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
     """
     import select as _select
 
+    global _last_read_had_input
+    _last_read_had_input = False
+
     if _pushback:
+        _last_read_had_input = True
         return _pushback.pop()
 
     fd = (stdin or sys.stdin).fileno()
@@ -91,6 +98,7 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
             return buf
 
         ch = _read1()
+        _last_read_had_input = True
         if ch == "\x1b":
             # Non-blocking check for the second byte — if nothing arrives
             # within 100ms, this is a bare Escape keypress (not an arrow
@@ -283,27 +291,57 @@ def read_key(stdin=None, timeout: float | None = None) -> str:
             # ui/shared/_attachments.py. Note: Cmd+V on macOS stays a terminal
             # *text* paste; Ctrl+V is the image binding, like Claude Code.
             return "ctrl+v"
-        # Ctrl+P / Ctrl+O — global background-music controls. Handled here (the one
-        # input chokepoint every screen's loop reads through) so music works app-wide
-        # with no per-loop changes, and works even inside text fields because these
-        # control bytes are never printable text. The action mutates music state and
-        # nudges the status bar; we return "" (idle) so loops just re-render.
-        # # See README: "Music (ffplay)"
+        # Return global music controls as internal key names. The public wrapper
+        # performs the action only after giving an active screensaver first chance
+        # to consume the event as its wake-only key.
         if ch in ("\x10", "\x0f"):
-            from yeaboi import music
-
-            if ch == "\x10":
-                music.toggle()  # Ctrl+P → play/pause
-            else:
-                music.cycle_channel()  # Ctrl+O → next channel
-            return ""
+            return "ctrl+p" if ch == "\x10" else "ctrl+o"
+        if ch == "\x19":
+            return "ctrl+y"
         if ch == "\x03":
-            raise KeyboardInterrupt
+            return "ctrl+c"
         if ch.isprintable():
             return ch
         return ch
     finally:
         termios.tcsetattr(fd, termios.TCSANOW, old_settings)
+
+
+def read_key(stdin=None, timeout: float | None = None) -> str:
+    """Read one standardized key, with app-wide idle and wake handling.
+
+    A real event wakes the screensaver before any global shortcut or underlying
+    screen action runs. Timed polls that return no input leave the idle baseline
+    untouched.
+    """
+    from yeaboi.ui.shared._screensaver import begin_input_wait, handle_input_event, show_screensaver_now
+
+    begin_input_wait()
+    key = _read_key_impl(stdin=stdin, timeout=timeout)
+    if _last_read_had_input and handle_input_event():
+        return ""
+
+    if key == "ctrl+c":
+        raise KeyboardInterrupt
+
+    # Hidden app-wide preview shortcut: Y for Yeaboi. It deliberately has no
+    # on-screen hint, but uses the same rendering/wake path as genuine idleness.
+    if key == "ctrl+y":
+        show_screensaver_now()
+        return ""
+
+    # Ctrl+P / Ctrl+O are global background-music controls. Keeping them after
+    # wake handling prevents the key that dismisses the saver from also changing
+    # playback state.
+    if key in ("ctrl+p", "ctrl+o"):
+        from yeaboi import music
+
+        if key == "ctrl+p":
+            music.toggle()
+        else:
+            music.cycle_channel()
+        return ""
+    return key
 
 
 # Terminal settings saved by enter_raw_mode(), restored by exit_raw_mode().

@@ -110,6 +110,23 @@ def test_ctrl_v_decodes_to_paste_image_key(pty_pair):
         t.cancel()
 
 
+def test_ctrl_y_decodes_to_hidden_screensaver_key(pty_pair):
+    import threading
+
+    master, slave = pty_pair
+
+    class _Stdin:
+        def fileno(self):
+            return slave
+
+    t = threading.Timer(0.2, os.write, args=(master, b"\x19"))
+    t.start()
+    try:
+        assert _input._read_key_impl(stdin=_Stdin(), timeout=3.0) == "ctrl+y"
+    finally:
+        t.cancel()
+
+
 def test_enter_raw_mode_on_non_tty_is_safe(monkeypatch):
     # A pipe fd is not a terminal — enter_raw_mode must swallow the error.
     r, w = os.pipe()
