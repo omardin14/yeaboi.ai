@@ -271,7 +271,7 @@ class CloudflareTunnel:
         # globally resolvable before declaring the tunnel ready.
         host = self._url.split("://", 1)[-1].split("/", 1)[0]
         self._wait_dns_live(host, deadline=time.monotonic() + 30.0)
-        logger.info("retro: tunnel ready at %s", self._url)
+        logger.info("cloudflare quick tunnel ready (local_port=%d)", self.port)
         return self._url
 
     def _dns_query(self, base: str, host: str) -> bool | None:
@@ -315,7 +315,7 @@ class CloudflareTunnel:
         while time.monotonic() < deadline:
             ext = self._dns_query(google, host)
             if ext:  # an ordinary public resolver sees it → joining teammates will too
-                logger.info("retro: tunnel DNS propagated for %s", host)
+                logger.info("cloudflare quick tunnel DNS propagated")
                 time.sleep(3.0)  # small settle for slower downstream resolvers
                 return True
             if ext is not None:  # reachable (just NXDOMAIN for now) — keep waiting on Google
@@ -325,14 +325,13 @@ class CloudflareTunnel:
             # which would forfeit the external-propagation guarantee and re-poison caches.
             elif not google_reachable and (time.monotonic() - start) > (deadline - start) * 0.5:
                 if self._dns_query(cloudflare, host):
-                    logger.info("retro: tunnel DNS live for %s (cloudflare resolver; google unreachable)", host)
+                    logger.info("cloudflare quick tunnel DNS live (cloudflare resolver; google unreachable)")
                     time.sleep(3.0)
                     return True
             time.sleep(1.5)
         logger.warning(
-            "retro: tunnel host %s not resolvable via public DNS yet — give it a few more "
+            "cloudflare quick tunnel host not resolvable via public DNS yet — give it a few more "
             "seconds, or the joining network may block/slow trycloudflare.com (NXDOMAIN).",
-            host,
         )
         return False
 

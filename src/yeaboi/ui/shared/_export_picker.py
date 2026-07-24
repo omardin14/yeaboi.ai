@@ -126,6 +126,8 @@ def _dest_description(key: str, label: str, mode: str) -> str:
         return "Needs a Confluence space key — press Enter to set it up"
     if key == "back":
         return "Return without exporting"
+    if key == "shareonline":
+        return "Publish this saved HTML temporarily behind an access code"
     return f"Send to {label}"
 
 

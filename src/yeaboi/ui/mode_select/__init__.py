@@ -81,6 +81,32 @@ _HEADER_SUB_SPEED = 45  # characters per second for the page subtitle typewriter
 _FRAME_TIME = FRAME_TIME_60FPS
 
 
+def _run_output_share_flow(
+    console,
+    live,
+    read_key,
+    frame_time: float,
+    supports_timeout: bool,
+    *,
+    document,
+    theme,
+    title_fn,
+) -> None:
+    """Open the shared temporary-output publishing view."""
+    from yeaboi.ui.shared._output_share import run_output_share
+
+    run_output_share(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        document=document,
+        theme=theme,
+        title_fn=title_fn,
+    )
+
+
 def _next_log_level(current: str) -> str:
     """Return the next level in the Settings cycle: DEBUG → INFO → WARNING → ERROR → DEBUG.
 
@@ -1832,6 +1858,22 @@ def _export_roadmap_via_picker(
 
         return (f"Roadmap — {label}", build_roadmap_markdown(analysis))
 
+    def _share() -> str:
+        from yeaboi.sharing.documents import roadmap_document
+        from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+
+        _run_output_share_flow(
+            console,
+            live,
+            read_key,
+            frame_time,
+            supports_timeout,
+            document=roadmap_document(analysis),
+            theme=PLANNING_THEME,
+            title_fn=planning_title,
+        )
+        return "Online share closed."
+
     return _export_via_picker(
         console,
         live,
@@ -1841,6 +1883,8 @@ def _export_roadmap_via_picker(
         mode="planning",
         files_export=_files,
         get_document=_doc,
+        extra_options=["Share Online"],
+        extra_handlers={"shareonline": _share},
     )
 
 
@@ -2748,6 +2792,8 @@ def _run_mode_hub(
     run_new,
     make_detail=None,
     open_snapshot=None,
+    get_share_document=None,
+    share_theme=None,
     new_breaks_out: bool = False,
 ) -> None:
     """Generic saved-runs hub loop shared by standup / retro / reporting.
@@ -2837,6 +2883,21 @@ def _run_mode_hub(
                 files_export=lambda r=run: files_export(r),
                 get_document=lambda r=run: get_document(r),
             )
+        if act == "Share Online" and get_share_document is not None:
+            document = get_share_document(run)
+            if document is None:
+                return False, "That artifact cannot be shared."
+            _run_output_share_flow(
+                console,
+                live,
+                read_key,
+                frame_time,
+                supports_timeout,
+                document=document,
+                theme=share_theme,
+                title_fn=title_fn,
+            )
+            return False, None
         if act == "Delete":
             delete_run(run)
             _reload("Run deleted.")
@@ -2865,7 +2926,10 @@ def _run_mode_hub(
             return
         scroll = 0
         sel = 0
-        actions = ["Export", "Delete", "Run again", "Back"]
+        actions = ["Export"]
+        if get_share_document is not None and get_share_document(run) is not None:
+            actions.append("Share Online")
+        actions.extend(["Delete", "Run again", "Back"])
         msg = ""
         s_anim = time.monotonic()
         logger.info("%s hub: opened run id=%s", mode, run.run_id)
@@ -2976,7 +3040,7 @@ def _run_standup_hub(console: Console, live, read_key, frame_time: float, suppor
     from yeaboi.ui.mode_select.screens._project_cards import RunSummary
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_screen
     from yeaboi.ui.mode_select.screens._standup_sections import standup_card_order
-    from yeaboi.ui.shared._components import standup_title
+    from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
 
     def _report(run_id: int):
         with StandupStore(_ana_dbp) as store:
@@ -3018,7 +3082,7 @@ def _run_standup_hub(console: Console, live, read_key, frame_time: float, suppor
         # saved run (the run row already names the date). my_name drives the "My Update" row.
         data = {"report": report, "session_name": "", "my_name": report.my_name, "team_expanded": False, "message": ""}
         order = standup_card_order(data)
-        actions = ["Export", "Delete", "Run again", "Back"]
+        actions = ["Export", "Share Online", "Delete", "Run again", "Back"]
         view = "overview"  # "overview" | a section key
         focus = "sections"  # overview focus zone: "sections" | "buttons"
         card_idx, scroll, sel = 0, 0, 0
@@ -3096,6 +3160,14 @@ def _run_standup_hub(console: Console, live, read_key, frame_time: float, suppor
             else (f"Standup — {report.date}", build_standup_markdown(report))
         )
 
+    def get_share_document(run):
+        report = _report(run.run_id)
+        if report is None:
+            return None
+        from yeaboi.sharing.documents import standup_document
+
+        return standup_document(report)
+
     def delete_run(run):
         with StandupStore(_ana_dbp) as store:
             store.delete_run(run.run_id)
@@ -3116,6 +3188,8 @@ def _run_standup_hub(console: Console, live, read_key, frame_time: float, suppor
         open_snapshot=open_standup_snapshot,
         files_export=files_export,
         get_document=get_document,
+        get_share_document=get_share_document,
+        share_theme=STANDUP_THEME,
         delete_run=delete_run,
         run_new=lambda: _run_standup_page(console, live, read_key, frame_time, supports_timeout),
     )
@@ -3133,7 +3207,7 @@ def _run_retro_hub(console: Console, live, read_key, frame_time: float, supports
     from yeaboi.retro.store import RetroStore
     from yeaboi.ui.mode_select.screens._project_cards import RunSummary
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_retro_screen
-    from yeaboi.ui.shared._components import retro_title
+    from yeaboi.ui.shared._components import RETRO_THEME, retro_title
 
     def _report(run_id: int):
         with RetroStore(_ana_dbp) as store:
@@ -3201,6 +3275,14 @@ def _run_retro_hub(console: Console, live, read_key, frame_time: float, supports
         report = _report(run.run_id)
         return "That run is no longer available." if report is None else (_title(report), build_retro_markdown(report))
 
+    def get_share_document(run):
+        report = _report(run.run_id)
+        if report is None:
+            return None
+        from yeaboi.sharing.documents import retro_document
+
+        return retro_document(report)
+
     def delete_run(run):
         with RetroStore(_ana_dbp) as store:
             store.delete_run(run.run_id)
@@ -3221,6 +3303,8 @@ def _run_retro_hub(console: Console, live, read_key, frame_time: float, supports
         make_detail=make_detail,
         files_export=files_export,
         get_document=get_document,
+        get_share_document=get_share_document,
+        share_theme=RETRO_THEME,
         delete_run=delete_run,
         run_new=lambda: _run_retro_page(console, live, read_key, frame_time, supports_timeout),
     )
@@ -3234,7 +3318,7 @@ def _run_reporting_hub(console: Console, live, read_key, frame_time: float, supp
     from yeaboi.reporting.store import ReportingStore
     from yeaboi.ui.mode_select.screens._project_cards import RunSummary
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_reporting_screen
-    from yeaboi.ui.shared._components import reporting_title
+    from yeaboi.ui.shared._components import REPORTING_THEME, reporting_title
 
     def _report(run_id: int):
         with ReportingStore(_ana_dbp) as store:
@@ -3300,6 +3384,14 @@ def _run_reporting_hub(console: Console, live, read_key, frame_time: float, supp
         report = _report(run.run_id)
         return "That run is no longer available." if report is None else (_title(report), build_report_markdown(report))
 
+    def get_share_document(run):
+        report = _report(run.run_id)
+        if report is None:
+            return None
+        from yeaboi.sharing.documents import reporting_document
+
+        return reporting_document(report)
+
     def delete_run(run):
         with ReportingStore(_ana_dbp) as store:
             store.delete_run(run.run_id)
@@ -3320,6 +3412,8 @@ def _run_reporting_hub(console: Console, live, read_key, frame_time: float, supp
         make_detail=make_detail,
         files_export=files_export,
         get_document=get_document,
+        get_share_document=get_share_document,
+        share_theme=REPORTING_THEME,
         delete_run=delete_run,
         run_new=lambda: _run_reporting_page(console, live, read_key, frame_time, supports_timeout),
     )
@@ -3346,7 +3440,7 @@ def _run_performance_hub(
     from yeaboi.persistence import _relative_time
     from yeaboi.ui.mode_select.screens._project_cards import RunSummary
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_performance_screen
-    from yeaboi.ui.shared._components import performance_title
+    from yeaboi.ui.shared._components import PERFORMANCE_THEME, performance_title
 
     def load_runs():
         with PerformanceStore(_ana_dbp) as store:
@@ -3441,6 +3535,17 @@ def _run_performance_hub(
             return (run.title, build_review_markdown(art))
         return (run.title, build_prep_markdown(art))
 
+    def get_share_document(run):
+        got = _artifact(run)
+        if got is None:
+            return None
+        art, kind, _lines = got
+        if kind == "note":
+            return None
+        from yeaboi.sharing.documents import performance_document
+
+        return performance_document(art, kind=kind)
+
     _run_mode_hub(
         console,
         live,
@@ -3457,6 +3562,8 @@ def _run_performance_hub(
         make_detail=make_detail,
         files_export=files_export,
         get_document=get_document,
+        get_share_document=get_share_document,
+        share_theme=PERFORMANCE_THEME,
         delete_run=delete_run,
         run_new=lambda: None,
         new_breaks_out=True,
@@ -3499,6 +3606,8 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
             base = ["Generate", "Anonymize", "Configure", "Back"]
         else:
             base = ["Back", "Export", "Anonymize"]
+        if data.get("report") is not None:
+            base.insert(-1, "Share Online")
         if anon is not None:  # swap Anonymize → Adjust + Revert while masked
             i = base.index("Anonymize")
             base[i : i + 1] = ["Adjust", "Revert"]
@@ -3644,6 +3753,23 @@ def _run_standup_page(console: Console, live, read_key, frame_time: float, suppo
                     )
                 if msg is not None:  # None = user backed out of the picker
                     data = _collect_standup_data(message=msg)
+                _reset_to_overview()
+            elif act == "Share Online":
+                report = data.get("report")
+                if report is not None:
+                    from yeaboi.sharing.documents import standup_document
+                    from yeaboi.ui.shared._components import STANDUP_THEME, standup_title
+
+                    _run_output_share_flow(
+                        console,
+                        live,
+                        read_key,
+                        frame_time,
+                        supports_timeout,
+                        document=standup_document(report, anon=anon),
+                        theme=STANDUP_THEME,
+                        title_fn=standup_title,
+                    )
                 _reset_to_overview()
             elif act == "Anonymize":  # mask the report in place for public sharing
                 logger.info("standup: Anonymize pressed (session=%s)", session_id)
@@ -4122,9 +4248,9 @@ def _run_team_analysis_results(
             actions = ["Open"] if view == "overview" else ["Back"]
         else:
             actions = (
-                ["Open", "Export", "Anonymize", "Continue"]
+                ["Open", "Export", "Share Online", "Anonymize", "Continue"]
                 if view == "overview"
-                else ["Back", "Export", "Anonymize", "Continue"]
+                else ["Back", "Export", "Share Online", "Anonymize", "Continue"]
             )
         if anon is not None and "Anonymize" in actions:  # swap Anonymize → Adjust + Revert while masked
             i = actions.index("Anonymize")
@@ -4233,6 +4359,25 @@ def _run_team_analysis_results(
                         examples=examples,
                         sprint_names=sprint_names,
                     )
+            elif act == "Share Online":
+                from yeaboi.sharing.documents import analysis_document
+                from yeaboi.ui.shared._components import ANALYSIS_THEME, analysis_title
+
+                _run_output_share_flow(
+                    console,
+                    live,
+                    read_key,
+                    frame_time,
+                    supports_timeout,
+                    document=analysis_document(
+                        profile,
+                        examples=examples,
+                        sprint_names=sprint_names,
+                        anon=anon,
+                    ),
+                    theme=ANALYSIS_THEME,
+                    title_fn=analysis_title,
+                )
             elif act == "Anonymize":
                 logger.info("Analysis results: Anonymize pressed (view=%s)", view)
                 from yeaboi.ui.shared._components import ANALYSIS_THEME, analysis_title
@@ -4492,7 +4637,7 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
         "detail_title": "",
     }
     roster_actions = ["1:1 Prep", "1:1 Complete", "6mo Review", "Notes", "History", "Export", "Back"]
-    detail_actions = ["Export", "Anonymize", "Back"]
+    detail_actions = ["Export", "Share Online", "Anonymize", "Back"]
     # Anonymize state: None = real artifact; an AnonymizedOutput = mask the detail lines.
     anon = None
     anon_instruction = ""
@@ -4718,6 +4863,26 @@ def _run_performance_page(console: Console, live, read_key, frame_time: float, s
                         )
                     if msg is not None:
                         state["message"] = msg
+                elif label == "Share Online" and roster:
+                    engineer = roster[state["selected"]]
+                    found = _performance_latest_artifact(engineer)
+                    if found is None:
+                        state["message"] = "Nothing to share yet."
+                    else:
+                        artifact, kind = found
+                        from yeaboi.sharing.documents import performance_document
+                        from yeaboi.ui.shared._components import PERFORMANCE_THEME, performance_title
+
+                        _run_output_share_flow(
+                            console,
+                            live,
+                            read_key,
+                            frame_time,
+                            supports_timeout,
+                            document=performance_document(artifact, kind=kind, anon=anon),
+                            theme=PERFORMANCE_THEME,
+                            title_fn=performance_title,
+                        )
                 elif label == "Anonymize" and roster:
                     engineer = roster[state["selected"]]
                     logger.info("performance: Anonymize pressed in detail view for engineer=%s", engineer)
@@ -4867,7 +5032,7 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
         "sprint_checked": set(),
     }
     picker_actions = ["Generate Report", "Theme", "Back"]
-    detail_actions = ["Export", "Anonymize", "Theme", "Back"]
+    detail_actions = ["Export", "Share Online", "Anonymize", "Theme", "Back"]
     sprint_actions = ["Generate Report", "Back"]
     # Anonymize state: None = real report; an AnonymizedOutput = mask the detail lines.
     anon = None
@@ -5168,6 +5333,22 @@ def _run_reporting_page(console: Console, live, read_key, frame_time: float, sup
                     anon, anon_instruction = None, ""  # leaving the report drops the mask
                 elif label == "Export":
                     _export()
+                elif label == "Share Online":
+                    report = state.get("report")
+                    if report is not None:
+                        from yeaboi.sharing.documents import reporting_document
+                        from yeaboi.ui.shared._components import REPORTING_THEME, reporting_title
+
+                        _run_output_share_flow(
+                            console,
+                            live,
+                            read_key,
+                            frame_time,
+                            supports_timeout,
+                            document=reporting_document(report, anon=anon),
+                            theme=REPORTING_THEME,
+                            title_fn=reporting_title,
+                        )
                 elif label == "Anonymize":
                     report = state.get("report")
                     if report is None:
@@ -5403,7 +5584,7 @@ def _run_roadmap_page(
         "busy": False,  # True while the analysis worker runs (spinner-only screen)
     }
     source_actions = ["Select", "Back"]
-    results_actions = ["Plan This", "Re-analyze", "Change Source", "Anonymize", "Back"]
+    results_actions = ["Plan This", "Re-analyze", "Change Source", "Share Online", "Anonymize", "Back"]
     # Anonymize state: None = real analysis; an AnonymizedOutput = mask it in place.
     # Roadmap has no Export button normally, so anonymizing adds one (to share the masked copy).
     anon = None
@@ -5672,6 +5853,22 @@ def _run_roadmap_page(
                     anon, anon_instruction = None, ""
                     state["view"] = "source"
                     state["sel"], state["message"] = 0, ""
+                elif label == "Share Online":
+                    analysis = state.get("analysis")
+                    if analysis is not None:
+                        from yeaboi.sharing.documents import roadmap_document
+                        from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+
+                        _run_output_share_flow(
+                            console,
+                            live,
+                            read_key,
+                            frame_time,
+                            supports_timeout,
+                            document=roadmap_document(analysis, anon=anon),
+                            theme=PLANNING_THEME,
+                            title_fn=planning_title,
+                        )
                 elif label == "Anonymize":
                     if state["analysis"] is None:
                         state["message"] = "Analyze this roadmap before anonymizing."
@@ -5890,7 +6087,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
     def _start_remote() -> None:
         def _worker() -> None:
             try:
-                from yeaboi.retro.tunnel import CloudflareTunnel, ensure_cloudflared
+                from yeaboi.sharing.tunnel import CloudflareTunnel, ensure_cloudflared
 
                 remote["status"] = "Setting up remote link — fetching cloudflared (first use, ~40MB)…"
                 binary = ensure_cloudflared()
@@ -7617,7 +7814,8 @@ def select_mode(
                             exp_fade_target = 1.0  # restore Export highlight
 
                         elif focus == 2 and _is_project_row():
-                            _extra = (["Jira"] if _jira_ok else []) + (["Azure DevOps"] if _azdevops_ok else [])
+                            _extra = ["Share Online"]
+                            _extra += (["Jira"] if _jira_ok else []) + (["Azure DevOps"] if _azdevops_ok else [])
                             _dest = _pick_dest(
                                 console,
                                 live,
@@ -7649,6 +7847,26 @@ def select_mode(
                                         project.id,
                                         _dest,
                                     )
+                                elif _dest == "shareonline":
+                                    from yeaboi.persistence import load_graph_state
+                                    from yeaboi.sharing.documents import planning_document
+                                    from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+
+                                    _gs = load_graph_state(project.id)
+                                    if not _gs:
+                                        path = "No saved state for this project"
+                                    else:
+                                        _run_output_share_flow(
+                                            console,
+                                            live,
+                                            read_key,
+                                            _FRAME_TIME,
+                                            _supports_timeout,
+                                            document=planning_document(_gs),
+                                            theme=PLANNING_THEME,
+                                            title_fn=planning_title,
+                                        )
+                                        path = "Online share closed."
                                 elif _dest == "copy":
                                     from yeaboi.clipboard import copy_markdown_status
                                     from yeaboi.persistence import load_graph_state

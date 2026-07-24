@@ -1254,6 +1254,23 @@ Self-contained single-file HTML report with embedded CSS, collapsible sections, 
 yeaboi --non-interactive --description "Build a todo app" --output html
 ```
 
+### Temporary online sharing
+
+Generated Planning, Analysis, Standup, Performance, Reporting, Roadmap, and saved-run
+outputs can be opened from their result screen with **Share Online**. yeaboi serves the
+same self-contained HTML from your machine and exposes it through a Cloudflare quick
+tunnel—no Cloudflare account or token required.
+
+- The public URL shows an access-code gate; share the displayed `XXXX-XXXX` code separately.
+- The link exists only while the sharing screen is open. **Back** or **Stop Sharing**
+  terminates both the tunnel and local server.
+- Sharing publishes the version currently under review. Run **Anonymize** first when
+  you want the masked version online.
+- The first share may download the pinned, checksum-verified `cloudflared` binary
+  (about 40 MB). Set `CLOUDFLARED_PATH` to use an existing installation.
+- The output is internet-reachable while active. Treat the URL and access code as
+  temporary credentials and avoid sharing sensitive Performance outputs unnecessarily.
+
 ### Notion & Confluence
 
 Every Export button can publish straight to Notion or Confluence with **native, first-class formatting** — not a markdown dump:
@@ -2345,6 +2362,7 @@ src/yeaboi/
 | `NOTION_ROOT_PAGE_ID` | No | Default parent for created Notion pages; enables the Notion standup source; Notion exports fall back here |
 | `NOTION_EXPORT_PARENT_PAGE_ID` | No | Optional dedicated page the Export buttons publish under (blank = grouped under an auto-created 🤙 yeaboi page in `NOTION_ROOT_PAGE_ID`) |
 | `ANONYMIZE_MASK_TERMS` | No | Comma-separated company terms the Anonymize action always masks (e.g. `YouLend,YL`); redacted even without an AI provider |
+| `CLOUDFLARED_PATH` | No | Path to an existing `cloudflared` binary used by Retro and temporary output sharing (otherwise a pinned copy is downloaded and cached) |
 | `YEABOI_HOME` | No | Data home for everything yeaboi writes — exports, logs, sessions DB (default: `~/.yeaboi`; `.env` always stays at `~/.yeaboi/.env`; editable in Settings → Data Dir) |
 | `LANGSMITH_TRACING` | No | Enable LangSmith tracing (`true`) |
 | `LANGSMITH_API_KEY` | No | LangSmith API key |

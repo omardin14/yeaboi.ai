@@ -1250,6 +1250,7 @@ def _phase_pipeline(
             # so offer Anonymize there — a masked copy for public sharing. While masked,
             # swap it for Adjust (refine) + Revert (restore real names).
             if is_sprint_stage:
+                acts.append("Share Online")
                 acts.extend(["Adjust", "Revert"] if anon is not None else ["Anonymize"])
             if _active_trackers and (is_story_stage or is_task_stage or is_sprint_stage):
                 for _trk in _active_trackers:
@@ -1587,6 +1588,22 @@ def _phase_pipeline(
                             warning_text=_anon_banner(),
                             scroll_meta=_scroll_meta,
                         )
+                    )
+                elif action == "Share Online":
+                    logger.info("Review decision: Share Online for %s", pending)
+                    from yeaboi.sharing.documents import planning_document
+                    from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+                    from yeaboi.ui.shared._output_share import run_output_share
+
+                    run_output_share(
+                        console,
+                        live,
+                        _key,
+                        0.05,
+                        True,
+                        document=planning_document(graph_state, stage=pending, anon=anon),
+                        theme=PLANNING_THEME,
+                        title_fn=planning_title,
                     )
                 elif action in ("Anonymize", "Adjust"):
                     # In-place mask (or refine): re-render the SAME pipeline with only the

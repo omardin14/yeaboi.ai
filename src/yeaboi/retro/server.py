@@ -43,12 +43,23 @@ from urllib.parse import parse_qs, urlparse
 
 from yeaboi.retro.board import RetroBoard
 from yeaboi.retro.page import build_board_html
+from yeaboi.sharing.access import JoinLimiter as _SharedJoinLimiter
+from yeaboi.sharing.access import make_join_code, make_token
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PORT = 5173
 _PORT_WALK = 20  # try _DEFAULT_PORT .. _DEFAULT_PORT + _PORT_WALK on conflict
 _MAX_BODY = 4096  # POST body cap (bytes) — blunt DoS
+
+
+class JoinLimiter(_SharedJoinLimiter):
+    """Retro-compatible wrapper over the shared failed-code limiter."""
+
+    def __init__(self) -> None:
+        # Keep the clock lookup late so existing tests and callers can replace
+        # ``retro.server.time.monotonic`` deterministically.
+        super().__init__(clock=lambda: time.monotonic())
 
 
 # ---------------------------------------------------------------------------
@@ -72,69 +83,6 @@ def get_lan_ip() -> str:
         return "127.0.0.1"
     finally:
         s.close()
-
-
-def make_token() -> str:
-    """Return a fresh ~128-bit url-safe access token for one retro session."""
-    return secrets.token_urlsafe(16)
-
-
-# Human-typable join code: unambiguous alphabet (no 0/O/1/I) grouped XXXX-XXXX.
-_JOIN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-
-def make_join_code() -> str:
-    """Return a short, human-typable join code (e.g. ``A3F9-1B2C``).
-
-    This is a LAN-trust convenience credential the server resolves to the strong
-    token (see ``/api/join``); the 128-bit token still guards direct URLs/QR.
-    """
-    raw = "".join(secrets.choice(_JOIN_ALPHABET) for _ in range(8))
-    return f"{raw[:4]}-{raw[4:]}"
-
-
-class JoinLimiter:
-    """Thread-safe failed-``/api/join`` throttle to stop brute-forcing the join code.
-
-    The join code is a ~40-bit LAN convenience credential; once the Cloudflare
-    tunnel is up, ``/api/join`` is internet-reachable, so unlimited guessing must
-    be stopped. After ``_MAX_FAILS`` wrong codes a source IP is locked out for
-    ``_LOCKOUT_S`` seconds (``429``); a correct code clears that IP's counter.
-    Uses the same ``threading.Lock`` discipline as the board — the background HTTP
-    threads mutate it concurrently.
-    """
-
-    _MAX_FAILS = 8
-    _LOCKOUT_S = 300.0
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        # ip -> (fail_count, window_start_monotonic)
-        self._fails: dict[str, tuple[int, float]] = {}
-
-    def blocked(self, ip: str) -> bool:
-        with self._lock:
-            entry = self._fails.get(ip)
-            if entry is None:
-                return False
-            count, first = entry
-            if count < self._MAX_FAILS:
-                return False
-            if time.monotonic() - first < self._LOCKOUT_S:
-                return True
-            del self._fails[ip]  # lockout window elapsed — forgive
-            return False
-
-    def record_failure(self, ip: str) -> None:
-        with self._lock:
-            count, first = self._fails.get(ip, (0, time.monotonic()))
-            if time.monotonic() - first >= self._LOCKOUT_S:
-                count, first = 0, time.monotonic()  # stale window — restart
-            self._fails[ip] = (count + 1, first)
-
-    def record_success(self, ip: str) -> None:
-        with self._lock:
-            self._fails.pop(ip, None)
 
 
 def encode_share_code(ip: str, port: int, token: str) -> str:
