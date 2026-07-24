@@ -2,6 +2,18 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.32.0",
+      "date": "2026-07-24",
+      "summary": "Share your yeaboi output publicly without exposing anything private. Every mode's result screen — planning, analysis, standups, retros, performance, reporting, and roadmaps — now has a Share Online button: press it and a local artifact server starts up, exchanges a short access code for a strong token with rate limiting, and opens a public Cloudflare tunnel URL you can send to teammates or stakeholders. The browser displays your rich output in full fidelity (cards, tables, meters, grids, all styled exactly as you see it in the app), and the link stays active only while the sharing screen is open. Security is baked in: the local server binds to loopback only, tokens carry no-store headers, and logs never expose URLs, codes, or artifact content.",
+      "highlights": [
+        {"text": "Share Online button on every mode's result screen — planning, analysis, standup, retro, performance, reporting, roadmap", "areas": ["planning", "analysis", "standup", "retro", "performance", "reporting"]},
+        {"text": "Cloudflare tunnel with rate-limited token exchange and secure access codes — no long-lived URLs", "areas": ["general"]},
+        {"text": "Rich rendering in the browser: same cards, tables, and grids you see in the app, fully styled", "areas": ["general"]},
+        {"text": "Local artifact server bound to loopback only; link stays active only while sharing screen is open", "areas": ["general"]},
+        {"text": "Works with both raw and anonymized documents, retro's interactive sharing flow preserved", "areas": ["retro", "general"]}
+      ]
+    },
+    {
       "version": "2.31.1",
       "date": "2026-07-24",
       "summary": "The All Tips screen now displays better, with tips grouped into logical sections (Modes, More Workflows, and Shortcuts & Setup), improved spacing and text wrapping, colored metadata badges, and scrollbar gutters that prevent layout fragmentation. The gallery preserves emoji in copied tip text while avoiding terminal-unsafe characters in the displayed view.",
