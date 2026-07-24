@@ -1,6 +1,6 @@
 """Confluence Cloud tools — 3 read-only + 2 write (with user-confirmation guard in docstrings).
 
-# See README: "Tools" — tool types, @tool decorator, risk levels
+# See docs: "Tools" — tool types, @tool decorator, risk levels
 #
 # All read tools are low-risk — they fetch page content from the Confluence REST
 # API and return it as plain text for the LLM to reason about during project
@@ -47,7 +47,7 @@ _MISSING_CONFIG_MSG = (
 )
 
 # Truncate page content at this many characters to avoid flooding the LLM context.
-# See README: "Tools" — scoping tool output for LLM relevance
+# See docs: "Tools" — scoping tool output for LLM relevance
 _MAX_CONTENT_CHARS = 8_000
 
 
@@ -127,7 +127,7 @@ def confluence_search_docs(query: str, space_key: str = "", limit: int = 10) -> 
     CONFLUENCE_SPACE_KEY env var when space_key is not provided.
     Returns title, excerpt, page ID, and URL for each result.
     """
-    # See README: "The ReAct Loop" — this is the Action step; the result is the Observation
+    # See docs: "The ReAct Loop" — this is the Action step; the result is the Observation
     logger.debug("confluence_search_docs called: query=%r, space=%r", query, space_key)
     conf = _make_confluence_client()
     if conf is None:
@@ -397,7 +397,7 @@ def confluence_update_page(
 # ---------------------------------------------------------------------------
 # Plain function (not @tool) the standup collector calls directly. Returns
 # structured data and degrades gracefully to [] on error/missing config.
-# See README: "Daily Standup" — recent-activity collection
+# See docs: "Daily Standup" — recent-activity collection
 
 
 # Cap on per-page version-history lookups (1 extra API call each) so a busy

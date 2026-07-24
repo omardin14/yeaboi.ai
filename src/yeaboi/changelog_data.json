@@ -2,6 +2,17 @@
   "schema_version": 1,
   "entries": [
     {
+      "version": "2.35.0",
+      "date": "2026-07-24",
+      "summary": "yeaboi has a new public home. A comprehensive docs site launched under yeaboi.ai/docs with 16 pages covering getting started, CLI reference, all seven modes, integrations, session management, tools, architecture, Scrum standards, deployment, and development. The landing page redesigned around an interactive faithful TUI demo—the app's real startup sequence rendered in the browser: the splash wordmark, the mode-select screen with all eight modes in order, real accent colors, a traveling white shimmer on the title, the rotating tips block, and the music status bar. The demo pins while scrollable walkthrough text explains each mode, with collapses to mobile. Along the way, two rendering bugs fixed: `.tui-menu[hidden]` now properly hides, and `.hero overflow:hidden` switching to `clip` keeps the pinned terminal stable.",
+      "highlights": [
+        {"text": "Comprehensive docs site at yeaboi.ai/docs — 16 new pages covering all modes, CLI, integrations, architecture, and development", "areas": ["general"]},
+        {"text": "Landing page redesigned with an interactive faithful TUI demo: real startup splash, mode-select screen, traveling shimmer, tips, music bar", "areas": ["general"]},
+        {"text": "Scroll-driven walkthrough pins the terminal while side text explains each mode; responsive collapse on mobile", "areas": ["general"]},
+        {"text": "Fixed `.tui-menu[hidden]` rendering and `.hero overflow` sticky behavior for pixel-stable load and smooth scrolling", "areas": ["general"]}
+      ]
+    },
+    {
       "version": "2.34.0",
       "date": "2026-07-24",
       "summary": "Team analysis now offers two speed tiers. Quick mode runs instantly with deterministic summaries and no LLM calls—perfect for fast iterations during planning sessions. Deep mode activates AI-enriched analysis with larger ticket batches and parallel processing of all three analysis components (delivery, code, and documentation) for comprehensive insights. The Quick/Deep choice appears right before analysis starts in both the TUI workflow and CLI, with mode details and stage timings visible throughout the run. All three components now run concurrently instead of serially, cutting analysis wall-clock time significantly. The choice is exposed through CLI flags and MCP tools so teammates and AI agents can pick the right depth for their workflow.",
