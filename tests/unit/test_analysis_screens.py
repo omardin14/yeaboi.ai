@@ -1061,6 +1061,81 @@ class TestDeliveryOffScreen:
         assert "AI Adoption" in out
         assert "45%" in out  # footprint rendered from the global code_signal
 
+    def test_ai_adoption_dashboard_breakdowns_evidence_and_actions(self):
+        from yeaboi.team_profile import AiAdoptionSignal
+
+        signal = AiAdoptionSignal(
+            scanned_commits=40,
+            scanned_prs=10,
+            ai_commits=18,
+            ai_prs=3,
+            footprint_pct=42.0,
+            per_tool=(("claude", 14), ("copilot", 7)),
+            per_author=(("Ava", 12), ("Sam", 9)),
+            per_activity=(("code", 17), ("pr", 4)),
+            per_source=(("github", 21),),
+            sources_scanned=("github",),
+            repos_scanned=("acme/api",),
+        )
+        examples = {
+            "ai_adoption": {
+                "samples": [
+                    {
+                        "tool": "claude",
+                        "title": "Improve authentication flow",
+                        "url": "https://example.test/pr/42",
+                    }
+                ],
+                "insights": {
+                    "start": [
+                        {
+                            "title": "Share effective prompts",
+                            "detail": "Turn individual wins into team practice.",
+                            "evidence": "Two active adopters",
+                        }
+                    ],
+                    "stop": [],
+                    "keep": [],
+                    "try": [],
+                },
+            }
+        }
+        top = _render(
+            _build_team_analysis_screen(
+                None,
+                examples=examples,
+                view="ai-adoption",
+                code_signal=signal,
+                width=100,
+                height=50,
+            ),
+            width=100,
+        )
+        bottom = _render(
+            _build_team_analysis_screen(
+                None,
+                examples=examples,
+                view="ai-adoption",
+                code_signal=signal,
+                scroll_offset=9999,
+                width=100,
+                height=50,
+            ),
+            width=100,
+        )
+        combined = top + bottom
+        for expected in (
+            "LOWER BOUND SIGNAL",
+            "DETECTABLE FOOTPRINT",
+            "Tools detected",
+            "Contributors",
+            "Evidence",
+            "Improve authentication flow",
+            "Recommended actions",
+            "Share effective prompts",
+        ):
+            assert expected in combined
+
     def test_visible_card_order_code_only(self):
         from yeaboi.ui.mode_select.screens._analysis_sections import visible_card_order
 
@@ -1130,11 +1205,13 @@ class TestMemberSelectScreen:
     def test_roster_render(self):
         out = _render(_build_member_select_screen(["Alice", "Bob"], {0}, 0, width=100, height=30), width=100)
         assert "Alice" in out and "Bob" in out
-        assert "1 selected" in out
+        assert "1 of 2 selected" in out
+        assert "A select/deselect all" in out
 
-    def test_empty_selection_shows_whole_team(self):
+    def test_empty_selection_is_explicit(self):
         out = _render(_build_member_select_screen(["Alice"], set(), 0, width=100, height=30), width=100)
-        assert "whole team" in out
+        assert "0 of 1 selected" in out
+        assert "whole team" not in out
 
     def test_empty_roster(self):
         out = _render(_build_member_select_screen([], set(), 0, width=100, height=30), width=100)
@@ -1216,11 +1293,20 @@ class TestComponentAndMemberLoops:
     def test_cancel(self):
         assert self._components(["esc"]) == "cancel"
 
-    def test_member_select_returns_names(self):
-        assert self._members(["down", " ", "enter"], ["Alice", "Bob"]) == ["Bob"]
+    def test_member_select_starts_with_everyone_selected(self):
+        assert self._members(["enter"], ["Alice", "Bob"]) == ["Alice", "Bob"]
 
-    def test_member_select_empty_is_none(self):
-        assert self._members(["enter"], ["Alice"]) is None
+    def test_member_select_can_exclude_a_name(self):
+        assert self._members([" ", "enter"], ["Alice", "Bob"]) == ["Bob"]
+
+    def test_member_select_toggle_all(self):
+        assert self._members(["a", "down", " ", "enter"], ["Alice", "Bob"]) == ["Bob"]
+
+    def test_member_select_cannot_confirm_nobody(self):
+        assert self._members(["a", "enter", " ", "enter"], ["Alice"]) == ["Alice"]
+
+    def test_member_select_empty_roster_is_none(self):
+        assert self._members(["enter"], []) is None
 
     def test_member_cancel(self):
         assert self._members(["esc"], ["Alice"]) == "cancel"
@@ -1476,6 +1562,7 @@ class TestAnalysisOverview:
             "Team Insights",
         ):
             assert title in combined, title
+        assert "AI-POWERED INSIGHTS" in combined
 
     def test_teaser_stats_render(self):
         output = self._render_view(examples=_NARRATIVE_EXAMPLES)
@@ -1703,14 +1790,25 @@ class TestDocumentationCard:
         }
         panel = _build_team_analysis_screen(self._profile(sig), examples=ex, view="documentation", width=100, height=60)
         output = _render(panel, width=100)
+        bottom = _render(
+            _build_team_analysis_screen(
+                self._profile(sig),
+                examples=ex,
+                view="documentation",
+                scroll_offset=9999,
+                width=100,
+                height=60,
+            ),
+            width=100,
+        )
         assert "Documentation" in output
         assert "52/100" in output  # clarity score
         assert "estimate" in output.lower()  # AI-likelihood is framed as an estimate
         assert "lower bound" in output.lower()  # explicit-marker framing
         assert "Onboarding guide" in output  # flagged page
-        assert "Tighten the least-clear pages" in output  # coaching
-        assert "Examples" in output  # examples section
-        assert "https://wiki/onboarding" in output  # page link on example + coaching item
+        assert "Tighten the least-clear pages" in bottom  # coaching
+        assert "Page evidence" in output  # evidence table
+        assert "https://wiki/onboarding" in output + bottom  # page link on example + coaching item
 
     def test_empty_state_and_coverage(self):
         from yeaboi.team_profile import TeamProfile
@@ -1750,11 +1848,16 @@ class TestBuildTeamInsightsScreen:
         output = self._render_screen(examples=_NARRATIVE_EXAMPLES)
         assert "How to improve this team" in output
 
-    def test_all_category_headers_render(self):
-        # Tall screen so all four categories fit the viewport at once.
-        output = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=60)
-        for header in ("START DOING", "STOP DOING", "KEEP DOING", "WORTH TRYING"):
-            assert header in output, header
+    def test_action_groups_and_badges_render(self):
+        # The dashboard replaces raw Start/Stop/Keep/Try sections with three
+        # action-oriented groups; badges retain each item's original intent.
+        top = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=60)
+        bottom = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=60, scroll_offset=9999)
+        output = top + bottom
+        for heading in ("Focus now", "Keep working", "Experiments"):
+            assert heading in output, heading
+        for badge in ("START", "AVOID", "KEEP", "TRY"):
+            assert badge in output, badge
 
     def test_item_title_detail_evidence_render(self):
         output = self._render_screen(examples=_NARRATIVE_EXAMPLES, height=60)
@@ -1824,7 +1927,9 @@ class TestBuildTeamInsightsScreen:
             height=50,
         )
         output = _render(panel, width=100)
-        assert "START DOING" in output
+        assert "Team coaching plan" in output
+        assert "Focus now" in output
+        assert "START" in output
         assert "Link PRs to tickets" in output
 
 
