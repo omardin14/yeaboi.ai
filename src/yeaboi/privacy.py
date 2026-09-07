@@ -86,7 +86,7 @@ EGRESS_DISCLOSURES: tuple[dict, ...] = (
         "where": "GitHub Releases",
         "when": "Desktop app launch (packaged builds)",
         "default": "on",
-        "off_switch": "None yet — nothing downloads or installs until you click Update",
+        "off_switch": "The switch beside this row, in the desktop app — and nothing downloads or installs until you click Update",
     },
     {
         "key": "tunnel",

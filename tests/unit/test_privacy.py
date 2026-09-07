@@ -18,9 +18,10 @@ _SWITCH_OWNERS = {
     "CLOUDFLARED_PATH": "retro/tunnel.py",
 }
 
-# The one disclosure whose off-switch honestly does not exist yet: the desktop
-# shell's update check (yeaboi-desktop's updater.ts has no gate today).
-_NO_SWITCH_KEYS = {"desktop-update"}
+# Disclosures whose off-switch honestly does not exist yet. Empty: the desktop
+# shell's update check gained one (yeaboi-desktop settings.json ``updateCheck``,
+# read by its main process before every automatic check).
+_NO_SWITCH_KEYS: set[str] = set()
 
 
 class TestStatement:
