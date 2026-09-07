@@ -78,10 +78,13 @@ src/yeaboi/
     store.py            — PerformanceStore (one_on_ones/reviews/notes tables, schema v8)
     references/         — bundled default competency_framework.md (overridable via env)
   agentwatch/           — the Agents family: what the AI coding agents did, cost, and exposed
-    __init__.py         — public API (run_agent_usage, run_agent_standup, run_agent_security, AgentWatchStore)
-    collector.py        — refresh(): ingest local Claude Code/OpenClaw session JSONL → rollups + in-stream security signals (requestId-deduped, cursor-skipped, never stores transcript text)
+    __init__.py         — public API (run_agent_usage, run_agent_security, AgentWatchStore)
+    collector.py        — refresh(): ingest local Claude Code/OpenClaw session JSONL → rollups + in-stream security signals with the context each match sat in and a ≤120-char redacted snippet (requestId-deduped, cursor-skipped, never stores a secret)
     engine.py           — the 3 pipelines (deterministic numbers → one LLM call for prose → artifact)
     security_checks.py  — deterministic scans of agent settings/MCP config; findings are (pattern, file, line) only
+    security_verdict.py — what a match means: needs-decision / unsure / test-data / handled / info, from where it sat
+    security_fixes.py   — the fix catalogue (why + buttons per pattern) and apply_fix(): guard hook, settings edit, PR, rotate
+    replay.py           — the redacted transcript turns around one signal (the security page's replay)
     render.py           — the 3 artifacts → Rich (CLI + TUI)
     export.py           — the 3 artifacts → Markdown (no HTML yet — see the beta notice)
     store.py            — AgentWatchStore (agent_sessions keyed on source_path, findings, 3 report tables, schema v27)
@@ -248,13 +251,17 @@ The `src/yeaboi/mcp/` package exposes yeaboi to AI coding agents (Claude Code, C
 - `STANDUP_SMTP_HOST` / `STANDUP_SMTP_PORT` / `STANDUP_SMTP_USER` / `STANDUP_SMTP_PASSWORD` / `STANDUP_SMTP_SENDER` / `STANDUP_EMAIL_RECIPIENTS` — optional, SMTP email delivery for Daily Standup
 - `YEABOI_WEB_STATIC` — optional, a directory of built front-end bundles that overrides the ones Python would otherwise serve (`web/assets.py`, `_static_dir`). For developing **yeaboi-frontend** against a running board: point it at that checkout's `yeaboi_web_assets/static`. Read once at import, so a rebuild needs a restart, and a path that is not a directory raises rather than silently falling back. Unset, the bundles come from the installed `yeaboi-web-assets` wheel — a hard dependency, so a missing one raises rather than degrading.
 - `YEABOI_FRONTEND` — optional, a yeaboi-frontend checkout for the generators that write into it (`gen_duck_sprites.py`); defaults to a sibling of the main checkout. See `scripts/_sibling_repos.py`.
+- `YEABOI_DESKTOP` — optional, a yeaboi-desktop checkout with the persona brand art, read by `gen_mascot_sprites.py` for the costume traces; defaults to a sibling of the main checkout. Same resolver.
 - `RETRO_PORT` — optional, base loopback port for the Retro collaboration server, which the tunnel forwards to (default 5173; walks upward if busy)
 - `POKER_PORT` — same for the Poker board (default 5273; clear of retro's 5173..5193 walk range)
 - `SHIP_PORT` — same for the Ship board (default 5473), the live view over a supervised ship run
+- `YEABOI_OAUTH_PORT` — optional, the loopback port the music sign-in's callback listener binds (default 8643). **Fixed, never walked**: Spotify matches the registered Redirect URI exactly, so changing it means updating the URI in your own Spotify app too
 - `YEABOI_SHIP_BOARD` — optional, `1`/`true`/`yes` opts the Ship board in (`config.get_ship_board_enabled()`, default off). Read-only: guests watch; approval stays in the TUI
 - `YEABOI_NO_TUNNEL` — optional, `1`/`true`/`yes` stops the live boards opening a Cloudflare tunnel (`config.tunnels_disabled()`). The board still runs for the host on `127.0.0.1` but has nothing to share. Needed because the tunnel now auto-starts: without it `make run-dry` would download ~40 MB and publish a public URL
 - `CLOUDFLARED_PATH` — optional, path to an existing `cloudflared` binary for Retro remote tunnels (else the app auto-downloads one to `~/.yeaboi/bin/`)
 - `TUNNEL_TIMEOUT_MINUTES` — auto-expiry for every Cloudflare share tunnel (Retro, Poker, and the generic Share Online flow), in minutes (default: 60, 0 = disabled). Enforced once inside `CloudflareTunnel` itself (`retro/tunnel.py`), so all three call sites inherit it uniformly. On the Settings page (System tab, next to Session Prune Days).
+- `YEABOI_LAST_CATEGORY` — **state, not configuration.** The landing split's last world (`solo`/`team`/`agents`), written on every pick and *preselected* next launch — never auto-skipped (`config.get_last_category`).
+- `YEABOI_LAST_DOOR` — **state, not configuration.** The door's last choice after the split (`projects`/`sessions`, default `sessions`), written on every pick and preselected next launch (`config.get_last_door`). The active project itself is never persisted — it is process-local (`projects/active.py`).
 - `YEABOI_UPDATE_CHECK` — optional, `0`/`false`/`off`/`no` disables the background PyPI update check (`update_check.start_background_check`). Used by `make demo` recordings so the version row can never repaint mid-capture; also the opt-out for air-gapped installs
 - `PERFORMANCE_FRAMEWORK_PATH` — optional, path to a custom competency framework / review template for Performance mode's 6-month review (else the bundled `performance/references/competency_framework.md` default is used). 1:1 summary emails reuse the standup `STANDUP_SMTP_*` / `STANDUP_EMAIL_RECIPIENTS` settings.
 - `BETA_NOTICES_ENABLED` — default on; `false` silences the one-line beta caveat the CLI prints to stderr before a beta subcommand runs (`yeaboi perf …`). Does **not** affect the TUI's one-time notice.

@@ -7,6 +7,11 @@
       "title": "Home"
     },
     {
+      "path": "/sessions",
+      "capability": "sessions",
+      "title": "Sessions"
+    },
+    {
       "path": "/whats-new",
       "capability": null,
       "title": "What's New"
@@ -147,14 +152,19 @@
       "title": "Agent Advisor"
     },
     {
-      "path": "/agents/standup",
-      "capability": "agent-standup",
-      "title": "Agent Standup"
-    },
-    {
       "path": "/agents/security",
       "capability": "agent-security",
       "title": "Agent Security"
+    },
+    {
+      "path": "/agents/projects",
+      "capability": "projects",
+      "title": "Agent projects"
+    },
+    {
+      "path": "/agents/projects/:id",
+      "capability": "projects",
+      "title": "Agent project"
     },
     {
       "path": "/ceremonies",
@@ -287,14 +297,29 @@
       "title": "Settings"
     },
     {
+      "path": "/music",
+      "capability": null,
+      "title": "Music"
+    },
+    {
       "path": "/settings/appearance",
       "capability": null,
       "title": "Settings · Appearance"
     },
     {
+      "path": "/settings/music",
+      "capability": null,
+      "title": "Settings · Player"
+    },
+    {
       "path": "/settings/duck",
       "capability": null,
       "title": "Settings · Duck"
+    },
+    {
+      "path": "/settings/news",
+      "capability": null,
+      "title": "Settings · Front page"
     },
     {
       "path": "/settings/themes",

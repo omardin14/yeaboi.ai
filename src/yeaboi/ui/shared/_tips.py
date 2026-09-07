@@ -82,7 +82,7 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
     # the desktop opens a project from the Projects page.
     FeatureTip(
         "projects",
-        "\U0001f5c2️ Tip: Press P to pick a project — scoped runs feed each other's context",
+        "\U0001f5c2️ Tip: Projects — describe what you're building, and every run inside reads what the others left (P switches)",  # noqa: E501
         is_new=True,
         surfaces=("tui",),
     ),
@@ -202,6 +202,12 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
         "\U0001f5c2️ Tip: every plan is saved — resume any past session with --resume",
         surfaces=("tui",),
     ),
+    # The other door, on both surfaces: the desktop's Sessions page is the same room.
+    FeatureTip(
+        "sessions",
+        "\U0001f5c2️ Tip: Sessions are one-off runs — a standalone standup or analysis that carries nothing over",
+        is_new=True,
+    ),
     # No desktop route (CAPABILITIES marks it exempt there), so no desktop tip.
     FeatureTip(
         "team-learning",
@@ -263,12 +269,6 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
         "agent-advisor",
         "\U0001f916 Tip: Agents → Advisor estimates how much of your agent spend is recoverable — and why",
         mode_key="agent-advisor",
-        is_beta=True,
-    ),
-    FeatureTip(
-        "agent-standup",
-        "\U0001f916 Tip: Agents → Standup digests what your AI agents did yesterday — sessions, commits, PRs",
-        mode_key="agent-standup",
         is_beta=True,
     ),
     FeatureTip(
@@ -358,8 +358,14 @@ _META_TIPS: tuple[FeatureTip, ...] = (
 # what TestDesktopOnlyTips checks against the desktop's own route manifest.
 _DESKTOP_TIPS: tuple[FeatureTip, ...] = (
     FeatureTip(
+        "desktop:music",
+        "\U0001f3b5 Tip: Music lives in the rail's pocket — radio shared with the terminal, "
+        "or Spotify, Apple Music and YouTube Music once they are on in the catalog",
+        surfaces=("desktop",),
+    ),
+    FeatureTip(
         "desktop:projects",
-        "\U0001f4c1 Tip: Projects holds every blueprint session, diagram and deliverable you've made",
+        "\U0001f4c1 Tip: Projects is the durable door — every run you start inside one shares its context",
         surfaces=("desktop",),
     ),
     FeatureTip(
@@ -421,8 +427,8 @@ def get_tips() -> tuple[FeatureTip, ...]:
     }[state]
     desktop_voice_tip = FeatureTip("voice", desktop_voice_text, surfaces=("desktop",))
     music_available, _music_reason = is_music_available()
-    # Terminal-only: focus music is a pair of keybindings there, and the desktop
-    # app ships no control for it.
+    # Terminal-only because the text names the terminal's keys; the desktop has
+    # its own Music page, menu chords and a `desktop:music` tip.
     music_tip = FeatureTip(
         "music",
         "\U0001f3b5 Tip: press Ctrl+P for focus music · Ctrl+O to switch channel"

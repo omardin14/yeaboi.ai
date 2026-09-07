@@ -833,7 +833,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ── project ───────────────────────────────────────────────────────────
     project_p = subparsers.add_parser("project", help="Manage projects — the identity that links sessions across modes")
     project_sub = project_p.add_subparsers(
-        dest="project_command", metavar="{create,list,show,link,set-defaults}", required=True
+        dest="project_command", metavar="{create,list,show,link,set-defaults,set-status,draft}", required=True
     )
     project_create_p = project_sub.add_parser("create", help="Create a project")
     project_create_p.add_argument("name", help="Short human project name")
@@ -847,6 +847,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     project_link_p.add_argument("project_id", metavar="PROJ_ID", help="Project id")
     project_link_p.add_argument("--session", default="", metavar="ID", help="Session to link (default: most recent)")
+    project_status_p = project_sub.add_parser("set-status", help="Mark a project done, or reopen it")
+    project_status_p.add_argument("project_id", metavar="PROJ_ID", help="Project id")
+    project_status_p.add_argument("status", choices=("active", "done"), help="done = complete; active = in progress")
+    project_draft_p = project_sub.add_parser(
+        "draft", help="Turn a rough description into a project name and pitch (the New project AI rewrite)"
+    )
+    project_draft_p.add_argument("description", metavar="TEXT", help="What you are building, in your own words")
     project_defaults_p = project_sub.add_parser("set-defaults", help="Set a project's default settings")
     project_defaults_p.add_argument("project_id", metavar="PROJ_ID", help="Project id")
     project_defaults_p.add_argument(
@@ -861,6 +868,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_context_spec,
         metavar="SPEC",
         help="Cross-mode sources a scoped run reads by default ('all', 'none', or a csv)",
+    )
+    project_defaults_p.add_argument(
+        "--repo",
+        default="",
+        metavar="PATH",
+        help="The project's repository — Agents reports scope to sessions under it (worktrees included)",
     )
 
     perf_p = subparsers.add_parser(
@@ -1273,12 +1286,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     agents_p = subparsers.add_parser(
         "agents",
-        help=f"Agents mode {BETA_TAG}: monitor your AI coding agents (cost, recoverable spend, activity, security)",
+        help=f"Agents mode {BETA_TAG}: your AI-native SDLC teammate (cost, recoverable spend, security posture)",
         description=AGENTWATCH_BETA_NOTICE,
     )
-    agents_sub = agents_p.add_subparsers(
-        dest="agents_command", metavar="{cost,advisor,standup,security}", required=True
-    )
+    agents_sub = agents_p.add_subparsers(dest="agents_command", metavar="{cost,advisor,security}", required=True)
     # Every child carries the same description — `yeaboi agents cost --help` is
     # a perfectly normal place to arrive without ever seeing the parent's help.
     cost_p = agents_sub.add_parser(
@@ -1288,6 +1299,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cost_p.add_argument("--window-days", type=int, default=30, metavar="N", help="Days to look back (default 30)")
     cost_p.add_argument("--project", default="", metavar="NAME", help="Filter by project directory name (substring)")
+    cost_p.add_argument("--repo", default="", metavar="PATH", help="Only sessions under this repository path")
     cost_p.add_argument("--source", default="", choices=["", "claude_code"], help="Filter by telemetry source")
     cost_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     cost_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
@@ -1297,57 +1309,32 @@ def build_parser() -> argparse.ArgumentParser:
         description=AGENTWATCH_BETA_NOTICE,
     )
     advisor_p.add_argument("--window-days", type=int, default=30, metavar="N", help="Days to look back (default 30)")
+    advisor_p.add_argument("--repo", default="", metavar="PATH", help="Only sessions under this repository path")
     advisor_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     advisor_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
-    astandup_p = agents_sub.add_parser(
-        "standup",
-        help="Daily digest of what your agents did (sessions + agent-authored commits/PRs)",
-        description=AGENTWATCH_BETA_NOTICE,
-    )
-    astandup_p.add_argument(
-        "--days",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Days to look back (default: since the previous working day)",
-    )
-    astandup_p.add_argument(
-        "--tracker-sources",
-        nargs="*",
-        default=None,
-        choices=["github", "azdo"],
-        metavar="SRC",
-        help="Trackers to scan for agent-authored work (default both; pass none for local-only)",
-    )
-    astandup_p.add_argument(
-        "--github-owners",
-        nargs="+",
-        default=None,
-        metavar="OWNER",
-        help="GitHub owners/orgs to scan (default configured)",
-    )
-    astandup_p.add_argument(
-        "--azdo-projects",
-        nargs="+",
-        default=None,
-        metavar="NAME",
-        help="Azure DevOps projects to scan (default configured)",
-    )
-    astandup_p.add_argument(
-        "--no-local-sessions",
-        dest="include_local_sessions",
-        action="store_false",
-        help="Skip local session logs for a tracker-only digest (use off this machine)",
-    )
-    astandup_p.add_argument("--deliver", action="store_true", help="Post the digest to the configured Slack webhook")
-    astandup_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
-    astandup_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     asec_p = agents_sub.add_parser(
         "security",
         help="Audit your agent setup: permissions, MCP servers, secrets exposure, risky commands",
         description=AGENTWATCH_BETA_NOTICE,
     )
     asec_p.add_argument("--deep", action="store_true", help="Re-scan every transcript, not just new/changed ones")
+    asec_p.add_argument("--show-info", dest="include_info", action="store_true", help="List informational findings too")
+    asec_p.add_argument(
+        "--dismiss", default="", metavar="KEY", help="Dismiss one finding by its key (needs --reason); no scan runs"
+    )
+    asec_p.add_argument("--reason", default="", metavar="TEXT", help="Why the dismissed finding is expected")
+    asec_p.add_argument("--undismiss", default="", metavar="KEY", help="Restore a dismissed finding; no scan runs")
+    asec_p.add_argument("--list-dismissed", action="store_true", help="Print the dismissals on file; no scan runs")
+    asec_p.add_argument("--replay", default="", metavar="KEY", help="Print the transcript turns around one finding")
+    asec_p.add_argument("--line", type=int, default=0, metavar="N", help="With --replay: a specific matching line")
+    asec_p.add_argument("--signals", default="", metavar="KEY", help="List every matching line behind one finding")
+    asec_p.add_argument("--fix", default="", metavar="KEY", help="Apply a fix to one finding (needs --fix-id)")
+    asec_p.add_argument("--fix-id", default="", metavar="ID", help="Which fix: one of the finding's fixes[].id")
+    asec_p.add_argument("--repo", default="", metavar="PATH", help="With --fix: the repository a PR fix targets")
+    asec_p.add_argument(
+        "--mark-test-data", nargs="*", default=[], metavar="KEY", help="Set findings aside as test data; no scan runs"
+    )
+    asec_p.add_argument("--list-fixes", action="store_true", help="Print the fixes applied so far; no scan runs")
     asec_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     asec_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
 
@@ -2589,6 +2576,8 @@ def _cmd_project(args: argparse.Namespace, console: Console) -> int:
             return 0
         for project in rows:
             suffix = " [dim](archived)[/dim]" if project["archived"] else ""
+            if project.get("status") == "done":
+                suffix = " [green]done[/green]" + suffix
             console.print(
                 f"  {project['project_id']}  [bold]{project['name']}[/bold]"
                 f"  {project['session_count']} session(s){suffix}"
@@ -2606,6 +2595,23 @@ def _cmd_project(args: argparse.Namespace, console: Console) -> int:
         console.print(f"Sessions: {', '.join(project['session_ids']) or '—'}")
         return 0
 
+    if args.project_command == "set-status":
+        from yeaboi.projects.engine import set_project_status
+
+        project = set_project_status(args.project_id, args.status)
+        word = "done" if project["status"] == "done" else "in progress"
+        console.print(f"[bold]{project['name']}[/bold] is {word}.")
+        return 0
+
+    if args.project_command == "draft":
+        from yeaboi.projects.engine import draft_project_idea
+
+        result = draft_project_idea(args.description)
+        console.print(f"[bold]{result['name']}[/bold]")
+        console.print(result["description"])
+        console.print(f"[dim]{result['note']}[/dim]")
+        return 0
+
     if args.project_command == "link":
         from yeaboi.projects.engine import link_session
 
@@ -2621,10 +2627,14 @@ def _cmd_project(args: argparse.Namespace, console: Console) -> int:
         defaults["default_analysis_profile_id"] = args.analysis_profile
     if args.context is not None:
         defaults["default_context_deps"] = args.context
+    if args.repo:
+        from pathlib import Path
+
+        defaults["repo_path"] = str(Path(args.repo).expanduser().resolve())
     if not defaults:
         # Nothing to merge — say so rather than printing a success line for a
         # call that changed nothing.
-        console.print("[yellow]Nothing to set — pass --analysis-profile and/or --context.[/yellow]")
+        console.print("[yellow]Nothing to set — pass --analysis-profile, --context and/or --repo.[/yellow]")
         return 2
     result = set_project_defaults(args.project_id, defaults)
     console.print(f"Defaults for {args.project_id}: {result['settings'] or '—'}")
@@ -2972,6 +2982,11 @@ def _cmd_connections(args: argparse.Namespace, console: Console) -> int:
 
         for field in connector.fields_for(method.key) if method else connector.fields:
             if connector.auth_env and field.env == connector.auth_env:
+                continue
+            # A sign-in's fields are minted by the flow, never typed.
+            if field.action == "signin":
+                if field.secret:
+                    console.print(f"[dim]{field.label}: sign in from the desktop's Music page[/dim]")
                 continue
             # An external ID is yeaboi's to mint, not the user's to invent: it
             # is what stops a confused deputy assuming the role, so it has to be
@@ -3377,6 +3392,8 @@ def _cmd_ceremonies(args: argparse.Namespace, console: Console) -> int:
 
     with CeremonyStore() as store:
         if command == "list":
+            for gone in scheduler.reap_dead_jobs():
+                print(f"⚠ removed a scheduled job that could never run again: {gone}", file=sys.stderr)
             declared = store.list(session_id)
             # The store and the operating system are two different things, and
             # the gap between them is invisible until something does not fire.
@@ -3800,6 +3817,116 @@ def _ship_report(args: argparse.Namespace, console: Console, run, *, batch: list
     return 0
 
 
+def _cmd_agents_security_actions(args: argparse.Namespace, console: Console) -> int:
+    """The security verbs that act on the last scan — replay, signals, fixes — never a new one."""
+    import json
+    from dataclasses import asdict
+
+    from yeaboi.agentwatch import security_fixes
+    from yeaboi.agentwatch.engine import rebuild_security_report
+
+    if args.list_fixes:
+        from yeaboi.agentwatch.store import AgentWatchStore
+        from yeaboi.paths import get_db_path
+
+        with AgentWatchStore(get_db_path()) as store:
+            rows = store.list_fixes()
+        if args.format == "json":
+            print(json.dumps(rows, indent=2))
+        elif not rows:
+            console.print("No fixes applied yet.")
+        else:
+            for row in rows:
+                console.print(f"{row['applied_at'][:19]}  {row['fix_id']:<14} {row['pattern']:<26} {row['outcome']}")
+        return 0
+    if args.mark_test_data:
+        from yeaboi.agentwatch import dismissals
+
+        for key in args.mark_test_data:
+            dismissals.dismiss(key, reason="test data: fixture or example text", by=os.environ.get("USER", ""))
+            console.print(f"[green]✓[/green] {key} marked as test data")
+        return 0
+    if args.fix:
+        outcome = security_fixes.apply_fix(args.fix, args.fix_id, reason=args.reason, repo=args.repo)
+        if args.format == "json":
+            print(json.dumps(asdict(outcome), indent=2))
+        elif outcome.ok:
+            console.print(f"[green]✓[/green] {outcome.detail}" + (f"\n  {outcome.pr_url}" if outcome.pr_url else ""))
+        else:
+            print(f"✗ {outcome.detail}", file=sys.stderr)
+        return 0 if outcome.ok else 1
+    report = rebuild_security_report(include_info=True, record=False)
+    key = args.replay or args.signals
+    finding = next((f for f in report.findings if f.key == key), None)
+    if finding is None:
+        print(f"✗ no finding {key!r} in the latest scan — run `yeaboi agents security` first", file=sys.stderr)
+        return 1
+    if args.signals:
+        from yeaboi.agentwatch.store import AgentWatchStore
+        from yeaboi.paths import get_db_path
+
+        with AgentWatchStore(get_db_path()) as store:
+            rows = store.list_findings_for_key(
+                category=finding.category,
+                pattern=finding.pattern,
+                source_path=finding.location,
+                context=finding.context,
+            )
+        if args.format == "json":
+            print(json.dumps(rows, indent=2))
+        else:
+            for row in rows:
+                console.print(
+                    f"line {row['line_no']:<7} {str(row.get('at') or '')[:19]:<20} {row.get('snippet') or ''}"
+                )
+        return 0
+    from yeaboi.agentwatch import replay as replay_mod
+    from yeaboi.agentwatch.render import format_replay_rich
+
+    try:
+        result = replay_mod.replay(finding.location, args.line or finding.line_no, pattern=finding.pattern)
+    except replay_mod.ReplayError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 1
+    if args.format == "json":
+        print(json.dumps(asdict(result), indent=2))
+    else:
+        console.print(format_replay_rich(result))
+    return 0
+
+
+def _cmd_agents_dismissals(args: argparse.Namespace, console: Console) -> int:
+    """The security dismissal verbs: a hand-kept allowlist, never a scan."""
+    import json
+
+    from yeaboi.agentwatch import dismissals
+
+    if args.dismiss:
+        try:
+            entry = dismissals.dismiss(args.dismiss, reason=args.reason, by=os.environ.get("USER", ""))
+        except ValueError as exc:
+            print(f"✗ {exc}", file=sys.stderr)
+            return 2
+        console.print(f"[green]✓[/green] dismissed {entry.key} — {entry.reason}")
+        return 0
+    if args.undismiss:
+        if dismissals.undismiss(args.undismiss):
+            console.print(f"[green]✓[/green] restored {args.undismiss}")
+            return 0
+        print(f"✗ no dismissal on file for {args.undismiss}", file=sys.stderr)
+        return 1
+    rows = dismissals.load()
+    if args.format == "json":
+        print(json.dumps([r.__dict__ for r in rows], indent=2))
+    elif not rows:
+        console.print("No dismissed findings.")
+    else:
+        for row in rows:
+            expiry = f" (until {row.expires})" if row.expires else ""
+            console.print(f"• {row.key}{expiry} — {row.reason}")
+    return 0
+
+
 def _cmd_agents(args: argparse.Namespace, console: Console) -> int:
     """The Agents family headless: same engines the TUI cards and MCP tools use
     (CLAUDE.md "REQUIRED: Surface Parity")."""
@@ -3813,7 +3940,9 @@ def _cmd_agents(args: argparse.Namespace, console: Console) -> int:
         from yeaboi.agentwatch.engine import run_agent_usage
         from yeaboi.agentwatch.render import format_usage_rich
 
-        report = run_agent_usage(window_days=args.window_days, project=args.project, source=args.source)
+        report = run_agent_usage(
+            window_days=args.window_days, project=args.project, source=args.source, project_path=args.repo
+        )
         for warning in report.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         if args.format == "json":
@@ -3829,7 +3958,7 @@ def _cmd_agents(args: argparse.Namespace, console: Console) -> int:
         from yeaboi.agentwatch.advisor import run_agent_advisor
         from yeaboi.agentwatch.render import format_advisor_rich
 
-        report = run_agent_advisor(window_days=args.window_days)
+        report = run_agent_advisor(window_days=args.window_days, project_path=args.repo)
         for warning in report.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         if args.format == "json":
@@ -3838,30 +3967,6 @@ def _cmd_agents(args: argparse.Namespace, console: Console) -> int:
             console.print(format_advisor_rich(report))
         return _strict_exit(args.strict, report.warnings, empty=report.session_count == 0)
 
-    if args.agents_command == "standup":
-        import json
-        from dataclasses import asdict
-
-        from yeaboi.agentwatch.engine import run_agent_standup
-        from yeaboi.agentwatch.render import format_standup_rich
-
-        digest = run_agent_standup(
-            days=args.days,
-            tracker_sources=args.tracker_sources,
-            github_owners=args.github_owners,
-            azdo_projects=args.azdo_projects,
-            include_local_sessions=args.include_local_sessions,
-            deliver=args.deliver,
-        )
-        for warning in digest.warnings:
-            print(f"⚠ {warning}", file=sys.stderr)
-        if args.format == "json":
-            print(json.dumps(asdict(digest), indent=2))
-        else:
-            console.print(format_standup_rich(digest))
-        empty = digest.sessions_worked == 0 and not digest.repo_activity
-        return _strict_exit(args.strict, digest.warnings, empty=empty)
-
     if args.agents_command == "security":
         import json
         from dataclasses import asdict
@@ -3869,13 +3974,17 @@ def _cmd_agents(args: argparse.Namespace, console: Console) -> int:
         from yeaboi.agentwatch.engine import run_agent_security
         from yeaboi.agentwatch.render import format_security_rich
 
-        report = run_agent_security(deep=args.deep)
+        if args.list_dismissed or args.dismiss or args.undismiss:
+            return _cmd_agents_dismissals(args, console)
+        if args.replay or args.signals or args.fix or args.mark_test_data or args.list_fixes:
+            return _cmd_agents_security_actions(args, console)
+        report = run_agent_security(deep=args.deep, include_info=args.include_info)
         for warning in report.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
         if args.format == "json":
             print(json.dumps(asdict(report), indent=2))
         else:
-            console.print(format_security_rich(report))
+            console.print(format_security_rich(report, expanded=("needs-decision", "unsure", "test-data", "handled")))
         return _strict_exit(args.strict, report.warnings)
 
     return 1

@@ -112,6 +112,8 @@ CAPABILITIES: dict[str, dict] = {
             ("yeaboi.projects.engine", "get_project"),
             ("yeaboi.projects.engine", "link_session"),
             ("yeaboi.projects.engine", "set_project_defaults"),
+            ("yeaboi.projects.engine", "set_project_status"),
+            ("yeaboi.projects.engine", "draft_project_idea"),
         },
         "mcp_tools": {
             "project_create",
@@ -119,9 +121,11 @@ CAPABILITIES: dict[str, dict] = {
             "project_get",
             "project_link_session",
             "project_set_defaults",
+            "project_set_status",
+            "project_draft",
         },
         "tui_mode": Exempt(
-            "a welcome-screen keycap (P) opening the project switcher, not a card — "
+            "the Projects door after the landing split (and the P keycap on the menu), not a card — "
             "an eleventh card breaks the 84x40 layout, the ceremonies/niko argument"
         ),
         "cli": {"project"},
@@ -129,18 +133,18 @@ CAPABILITIES: dict[str, dict] = {
             "a scoping primitive, not a guided workflow — modes gain --project/project_id, "
             "and agents call the project_* tools directly"
         ),
-        "desktop": {"/projects", "/projects/:id"},
+        "desktop": {"/projects", "/projects/:id", "/agents/projects", "/agents/projects/:id"},
     },
     "sessions": {
         "engines": Exempt("thin SessionStore reads — no pipeline to extract"),
         "mcp_tools": {"sessions_list", "session_get", "session_delete"},
-        "tui_mode": Exempt("sessions are surfaced inside the planning-mode screens, no dedicated card"),
+        "tui_mode": Exempt(
+            "the Sessions door after the landing split plus each project's sessions page, not a card — "
+            "a one-off run of any mode starts from that mode's own card"
+        ),
         "cli": {"--list-sessions", "--resume", "--clear-sessions"},
         "skill": Exempt("agents call the session tools directly — no guided workflow needed"),
-        "desktop": Exempt(
-            "saved plans surface through each project's plan panel (the iteration carries its "
-            "session id) — a raw session browser would be a second door to the same room"
-        ),
+        "desktop": {"/sessions"},
     },
     "standup": {
         "engines": {
@@ -451,17 +455,20 @@ CAPABILITIES: dict[str, dict] = {
         "skill": "agents-advisor",
         "desktop": {"/agents/advisor"},
     },
-    "agent-standup": {
-        "engines": {("yeaboi.agentwatch.engine", "run_agent_standup")},
-        "mcp_tools": {"agents_standup_run", "agents_standup_history"},
-        "tui_mode": "agent-standup",
-        "cli": {"agents"},
-        "skill": "agents-standup",
-        "desktop": {"/agents/standup"},
-    },
     "agent-security": {
-        "engines": {("yeaboi.agentwatch.engine", "run_agent_security")},
-        "mcp_tools": {"agents_security_scan", "agents_security_history"},
+        "engines": {
+            ("yeaboi.agentwatch.engine", "run_agent_security"),
+            ("yeaboi.agentwatch.engine", "rebuild_security_report"),
+        },
+        "mcp_tools": {
+            "agents_security_scan",
+            "agents_security_history",
+            "agents_security_dismiss",
+            "agents_security_replay",
+            "agents_security_signals",
+            "agents_security_fix",
+            "agents_security_verdict",
+        },
         "tui_mode": "agent-security",
         "cli": {"agents"},
         "skill": "agents-security",
@@ -558,7 +565,6 @@ PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "anonymize_text": ("yeaboi.anonymize.engine", "run_anonymize"),
     "agents_usage": ("yeaboi.agentwatch.engine", "run_agent_usage"),
     "agents_advisor_run": ("yeaboi.agentwatch.advisor", "run_agent_advisor"),
-    "agents_standup_run": ("yeaboi.agentwatch.engine", "run_agent_standup"),
     "agents_security_scan": ("yeaboi.agentwatch.engine", "run_agent_security"),
     "provenance_audit": ("yeaboi.provenance.engine", "run_provenance_audit"),
     "provenance_trace": ("yeaboi.provenance.engine", "trace_entity"),
@@ -568,6 +574,8 @@ PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "project_get": ("yeaboi.projects.engine", "get_project"),
     "project_link_session": ("yeaboi.projects.engine", "link_session"),
     "project_set_defaults": ("yeaboi.projects.engine", "set_project_defaults"),
+    "project_set_status": ("yeaboi.projects.engine", "set_project_status"),
+    "project_draft": ("yeaboi.projects.engine", "draft_project_idea"),
 }
 
 # Injection/test seams that are never exposed on any wire surface.
@@ -635,7 +643,6 @@ CLI_PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "perf review": ("yeaboi.performance.engine", "run_six_month_review"),
     "analyze": ("yeaboi.analysis.engine", "run_team_analysis"),
     "agents cost": ("yeaboi.agentwatch.engine", "run_agent_usage"),
-    "agents standup": ("yeaboi.agentwatch.engine", "run_agent_standup"),
     "agents security": ("yeaboi.agentwatch.engine", "run_agent_security"),
     "ship run": ("yeaboi.ship.engine", "run_ship"),
     "ship resume": ("yeaboi.ship.engine", "resume_ship"),
@@ -644,6 +651,8 @@ CLI_PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "project show": ("yeaboi.projects.engine", "get_project"),
     "project link": ("yeaboi.projects.engine", "link_session"),
     "project set-defaults": ("yeaboi.projects.engine", "set_project_defaults"),
+    "project set-status": ("yeaboi.projects.engine", "set_project_status"),
+    "project draft": ("yeaboi.projects.engine", "draft_project_idea"),
 }
 
 # CLI dest → engine param renames (the CLI keeps short ergonomic flag names).
@@ -670,6 +679,9 @@ CLI_RENAMES: dict[str, dict[str, str]] = {
     "ship run": {"session": "session_id", "check": "check_command"},
     "ship resume": {"check": "check_command"},
     "project link": {"session": "session_id"},
+    # --repo is the repository path the Agents reports scope to (exact-or-prefix
+    # on the session's project directory, never a basename substring).
+    "agents cost": {"repo": "project_path"},
     "analyze": {
         # NOT project_id: analysis's --project is the tracker key (Jira/AzDO),
         # a different id space from the projects table's proj-<8hex> ids.
@@ -708,8 +720,23 @@ CLI_ONLY_DESTS: dict[str, set[str]] = {
     "perf complete": {"strict"},
     "perf review": {"strict", "incognito"},
     "agents cost": {"format", "strict"},
-    "agents standup": {"format", "strict"},
-    "agents security": {"format", "strict"},
+    # The dismissal verbs edit a hand-kept allowlist instead of running the scan.
+    "agents security": {
+        "format",
+        "strict",
+        "dismiss",
+        "reason",
+        "undismiss",
+        "list_dismissed",
+        "replay",
+        "line",
+        "signals",
+        "fix",
+        "fix_id",
+        "repo",
+        "mark_test_data",
+        "list_fixes",
+    },
     # --split picks the entry point (run_ship_batch) rather than a run_ship param.
     "ship run": {"format", "strict", "split"},
     "ship resume": {"format", "strict"},
@@ -717,8 +744,10 @@ CLI_ONLY_DESTS: dict[str, set[str]] = {
     "project list": set(),
     "project show": set(),
     "project link": set(),
-    # --analysis-profile and --context are each one key of the engine's `defaults` dict.
-    "project set-defaults": {"analysis_profile", "context"},
+    # --analysis-profile, --context and --repo are each one key of the engine's `defaults` dict.
+    "project set-defaults": {"analysis_profile", "context", "repo"},
+    "project set-status": set(),
+    "project draft": set(),
     # delivery/code/docs/ops are assembled into the engine's `components` dict (component
     # → sub-source map); each flag names a component's sub-sources, not an engine param.
     "analyze": {
@@ -766,7 +795,7 @@ CLI_HIDDEN: dict[str, dict[str, str]] = {
         "driver": "AgentDriver injection seam for tests; every wire surface runs the real Claude Code driver",
     },
     "project set-defaults": {
-        "defaults": "assembled from the per-key flags (--analysis-profile, --context); a raw dict flag invites typos",
+        "defaults": "assembled from the per-key flags (--analysis-profile, --context, --repo); a raw dict flag invites typos",  # noqa: E501
     },
 }
 
@@ -1071,8 +1100,6 @@ SAVED_SESSIONS_EXEMPT: dict[str, str] = {
     "agent-usage": "opens instantly on the last saved report (AgentWatchStore.latest_report); "
     "list_reports exists and a browsable hub is queued follow-up work",
     "agent-advisor": "opens instantly on the last saved report (AgentWatchStore.latest_report); "
-    "list_reports exists and a browsable hub is queued follow-up work",
-    "agent-standup": "opens instantly on the last saved report (AgentWatchStore.latest_report); "
     "list_reports exists and a browsable hub is queued follow-up work",
     "agent-security": "opens instantly on the last saved report (AgentWatchStore.latest_report); "
     "list_reports exists and a browsable hub is queued follow-up work",

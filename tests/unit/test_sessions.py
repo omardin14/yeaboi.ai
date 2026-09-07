@@ -283,6 +283,18 @@ class TestSessionProjectLink:
         with SessionStore(tmp_path / "sessions.db") as store:
             assert store.session_project_id("nope") == ""
 
+    def test_session_project_ids_maps_every_row(self, tmp_path):
+        with SessionStore(tmp_path / "sessions.db") as store:
+            assert store.session_project_ids() == {}
+            store.create_session("plan-a", project_id="proj-11112222")
+            store.create_session("analysis-a", mode="analysis", project_id="proj-33334444")
+            store.create_session("plan-unscoped")
+            assert store.session_project_ids() == {
+                "plan-a": "proj-11112222",
+                "analysis-a": "proj-33334444",
+                "plan-unscoped": "",
+            }
+
     def test_session_ids_for_project_filters_and_orders(self, tmp_path):
         with SessionStore(tmp_path / "sessions.db") as store:
             store.create_session("plan-a", project_id="proj-11112222")
@@ -339,3 +351,94 @@ class TestContextDepsStateRoundTrip:
             store.save_state("s1", {"messages": [], "context_deps": '["retro", "plan"]'})
             loaded = store.load_state("s1")
         assert loaded["context_deps"] == '["retro", "plan"]'
+
+
+class TestListSessionsFilters:
+    """The additive kwargs the cross-mode recent list reads through."""
+
+    def _seed(self, path):
+        with SessionStore(path) as store:
+            store.create_session("p1", "Apollo", project_id="proj-11112222")
+            store.create_session("a1", "Apollo", mode="analysis")
+            store.create_session("p2", "Borealis")
+        return path
+
+    def test_rows_carry_mode_and_project(self, tmp_path):
+        with SessionStore(self._seed(tmp_path / "s.db")) as store:
+            rows = {r["session_id"]: r for r in store.list_sessions()}
+        assert rows["p1"]["session_mode"] == "planning" and rows["p1"]["project_id"] == "proj-11112222"
+        assert rows["a1"]["session_mode"] == "analysis" and rows["a1"]["project_id"] == ""
+
+    def test_project_and_mode_filters(self, tmp_path):
+        with SessionStore(self._seed(tmp_path / "s.db")) as store:
+            assert [r["session_id"] for r in store.list_sessions(project_id="proj-11112222")] == ["p1"]
+            assert [r["session_id"] for r in store.list_sessions(mode="analysis")] == ["a1"]
+            assert store.list_sessions(project_id="proj-11112222", mode="analysis") == []
+
+    def test_limit_caps_and_zero_means_all(self, tmp_path):
+        with SessionStore(self._seed(tmp_path / "s.db")) as store:
+            assert len(store.list_sessions(limit=2)) == 2
+            assert len(store.list_sessions(limit=0)) == 3
+
+
+class TestProjectStatusMigration:
+    """Migration v33 — projects.status, added to a table that predates it."""
+
+    def _v32_db(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript(
+            """CREATE TABLE sessions_meta (
+                   session_id          TEXT PRIMARY KEY,
+                   project_name        TEXT NOT NULL DEFAULT '',
+                   created_at          TEXT NOT NULL,
+                   last_modified       TEXT NOT NULL,
+                   last_node_completed TEXT NOT NULL DEFAULT '',
+                   session_state       TEXT NOT NULL DEFAULT '',
+                   session_mode        TEXT NOT NULL DEFAULT 'planning',
+                   project_id          TEXT NOT NULL DEFAULT ''
+               );
+               CREATE TABLE projects (
+                   project_id    TEXT PRIMARY KEY,
+                   name          TEXT NOT NULL,
+                   description   TEXT NOT NULL DEFAULT '',
+                   settings_json TEXT NOT NULL DEFAULT '{}',
+                   created_at    TEXT NOT NULL,
+                   last_active   TEXT NOT NULL,
+                   archived      INTEGER NOT NULL DEFAULT 0
+               );
+               INSERT INTO projects VALUES ('proj-0000aaaa', 'Old', '', '{}', '2026-01-01', '2026-01-01', 0);
+               CREATE TABLE schema_info (schema_version INT NOT NULL);"""
+        )
+        conn.execute("INSERT INTO schema_info VALUES (32)")
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_v32_db_gains_the_column_with_active_as_the_default(self, tmp_path):
+        from yeaboi.projects.store import ProjectStore
+
+        db = self._v32_db(tmp_path)
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+        with ProjectStore(db) as projects:
+            assert projects.get("proj-0000aaaa")["status"] == "active"
+        conn = sqlite3.connect(str(db))
+        try:
+            (version,) = conn.execute("SELECT schema_version FROM schema_info").fetchone()
+            assert version == CURRENT_SCHEMA_VERSION
+        finally:
+            conn.close()
+
+    def test_fresh_db_has_the_column_once(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+        conn = sqlite3.connect(str(db))
+        try:
+            columns = [r[1] for r in conn.execute("PRAGMA table_info(projects)")]
+            assert columns.count("status") == 1
+        finally:
+            conn.close()

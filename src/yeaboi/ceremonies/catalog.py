@@ -177,17 +177,6 @@ CATALOG: tuple[CeremonyMode, ...] = (
         default_at="08:35",
     ),
     CeremonyMode(
-        key="agents-standup",
-        label="Agent standup",
-        blurb="What the agents did yesterday, in the same shape as the human one.",
-        engine=("yeaboi.agentwatch.engine", "run_agent_standup"),
-        renderer=("yeaboi.ceremonies.renderers", "agent_standup_dispatch"),
-        params=(CeremonyParam(name="days", kind="int", label="Look-back (days)"),),
-        fixed_flags=(("deliver", False),),
-        est_cost_usd=0.12,
-        default_at="09:05",
-    ),
-    CeremonyMode(
         key="agents-security",
         label="Agent security",
         blurb="Posture of the local agent setup: settings, MCP servers, secrets.",
@@ -245,6 +234,12 @@ CATALOG: tuple[CeremonyMode, ...] = (
 # "what can I schedule", and a reason that lives only in a review comment is one
 # nobody finds.
 UNSCHEDULABLE: dict[str, str] = {
+    # Withdrawn, not refused: the Agent Standup digest never told anyone
+    # anything the cost and security pages did not, and a job still installed
+    # for it must be reaped (scheduler.reap_dead_jobs) rather than fail daily.
+    "agents-standup": "the Agent Standup mode was withdrawn — the cost and security modes cover it",
+    # Retro and poker are scheduled now: the ceremony opens the board and hands
+    # round the link, which is the part a schedule can do.
     "performance": "1:1 prep needs a named engineer and lands in a human conversation, not a channel",
     "ship": "launches a coding agent behind an approval gate a human answers at a terminal",
     "planning": "an intake conversation, not a recurring readout",

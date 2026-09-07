@@ -88,9 +88,18 @@ AREAS: tuple[Area, ...] = (
         src=("contracts/site.json", "scripts/gen_site_contract.py"),
     ),
     Area(
+        # First-class projects, and the cross-mode recent-sessions list the
+        # project pages and /api/sessions/recent read through.
         "projects",
-        src=("src/yeaboi/projects/", "src/yeaboi/mcp/tools_projects.py"),
-        tests=("tests/unit/test_mcp_server.py", "tests/unit/test_projects_*.py"),
+        src=("src/yeaboi/projects/", "src/yeaboi/mcp/tools_projects.py", "src/yeaboi/sessions_recent.py"),
+        tests=(
+            "tests/unit/test_mcp_server.py",
+            "tests/unit/test_projects_*.py",
+            "tests/unit/test_sessions_recent.py",
+            "tests/unit/test_app_projects_routes.py",
+            # The Projects page's Plan fact rides projects.json.
+            "tests/unit/test_persistence_projects.py",
+        ),
     ),
     Area(
         # The Solo world's own modules: the welcome's Today snapshot and the
@@ -350,6 +359,8 @@ AREAS: tuple[Area, ...] = (
             "tests/unit/test_performance_rows.py",
             "tests/unit/test_llm_gate.py",
             "tests/unit/test_mascot*.py",
+            "tests/unit/test_scene_backdrops.py",
+            "tests/unit/test_sibling_repos.py",
             "tests/unit/test_ansi_font.py",
             "tests/unit/test_ascii_font.py",
             "tests/unit/test_animations.py",
@@ -399,6 +410,14 @@ AREAS: tuple[Area, ...] = (
             "tests/unit/test_charts.py",
             "tests/unit/test_export_picker.py",
         ),
+    ),
+    Area(
+        # The desktop home's front page: the outlet registry, the parsers and
+        # the paper, plus the one route that serves it. Named before platform,
+        # which claims src/yeaboi/app/ as a whole.
+        "news",
+        src=("src/yeaboi/news/", "src/yeaboi/app/routes_news.py"),
+        tests=("tests/unit/test_news_*.py", "tests/unit/test_app_news_routes.py"),
     ),
     Area(
         "platform",
@@ -555,6 +574,7 @@ ALWAYS: tuple[str, ...] = (
     # repo + CI metadata
     "tests/unit/test_workflow_schema.py",
     "tests/unit/test_workflow_concurrency.py",
+    "tests/unit/test_auto_version_fallback.py",
     "tests/unit/test_publish_workflows.py",
     "tests/unit/test_codeql_triage.py",
     "tests/unit/test_claude_workflow.py",

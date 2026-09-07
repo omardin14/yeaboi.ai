@@ -165,12 +165,19 @@ class TestDemoScript:
         assert awaited.count(record_demo.MODE_SCREEN_MARKERS) >= 2, "only one of the two mode menus is shown"
 
     def test_marker_sets_are_disjoint(self):
-        """Each await must be able to tell the two screens apart.
+        """Each await must be able to tell the three screens apart.
 
-        If a fragment appeared on both screens, an await would match the screen
+        If a fragment appeared on two screens, an await would match the screen
         it was leaving and the recording would race ahead of the transition.
         """
-        assert not set(record_demo.CATEGORY_SCREEN_MARKERS) & set(record_demo.MODE_SCREEN_MARKERS)
+        sets = (record_demo.CATEGORY_SCREEN_MARKERS, record_demo.DOOR_SCREEN_MARKERS, record_demo.MODE_SCREEN_MARKERS)
+        for i, a in enumerate(sets):
+            for b in sets[i + 1 :]:
+                assert not set(a) & set(b)
+
+    def test_tours_the_door_both_ways(self):
+        awaited = [step[1] for step in record_demo.DEMO_SCRIPT if step[0] == "await"]
+        assert awaited.count(record_demo.DOOR_SCREEN_MARKERS) >= 3, "the door is not shown on the way in and out"
 
     def test_markers_are_disjoint_on_the_rendered_screens(self):
         """The real guard: neither set may appear on the other's screen.
@@ -185,6 +192,7 @@ class TestDemoScript:
 
         from yeaboi.ui.mode_select.screens._screens import _build_mode_screen
         from yeaboi.ui.mode_select.screens._screens_category import _build_category_screen
+        from yeaboi.ui.mode_select.screens._screens_door import _build_door_screen
 
         w, h = 140, 40
 
@@ -198,14 +206,39 @@ class TestDemoScript:
             return record_demo._strip_ansi(cap.get().encode("utf-8"))
 
         category = plain(_build_category_screen(0, width=w, height=h))
-        for marker in record_demo.MODE_SCREEN_MARKERS:
-            assert marker not in category, f"mode marker {marker!r} renders on the landing split"
+        for marker in record_demo.MODE_SCREEN_MARKERS + record_demo.DOOR_SCREEN_MARKERS:
+            assert marker not in category, f"marker {marker!r} renders on the landing split"
+
+        # With the informer's bubble printed too: the recorder runs with news off,
+        # so only a release note and the bubble's own controls can be on screen.
+        from yeaboi.news.edition import Page
+        from yeaboi.news.parse import NewsItem
+
+        story = Page(
+            item=NewsItem(id="r", title="yeaboi 4.2.0: Faster standups", url="https://pypi.org/p/", kind="release"),
+            kicker="From yeaboi",
+            counter="1 of 12",
+            byline="yeaboi, yesterday",
+            read="Read the release notes",
+            persona="wizard",
+            scene="dock",
+            caption="The wizard, at the dock, with the crates.",
+        )
+        for tall in (h, 60):  # too short for the duck, and tall enough
+            printed = plain(_build_category_screen(0, width=w, height=tall, page=story, edition="Refreshing."))
+            for marker in record_demo.MODE_SCREEN_MARKERS + record_demo.DOOR_SCREEN_MARKERS:
+                assert marker not in printed, f"marker {marker!r} renders on the landing split's informer"
+
+        for world in ("solo", "team", "agents"):
+            door = plain(_build_door_screen(1, world=world, width=w, height=h, active_name="Apollo"))
+            for marker in record_demo.MODE_SCREEN_MARKERS + record_demo.CATEGORY_SCREEN_MARKERS:
+                assert marker not in door, f"marker {marker!r} renders on the door ({world})"
 
         # Tips rotate, so one screen is not one string — sweep the offsets.
         for tip_index in range(24):
-            menu = plain(_build_mode_screen(0, width=w, height=h, tip_offset=tip_index))
-            for marker in record_demo.CATEGORY_SCREEN_MARKERS:
-                assert marker not in menu, f"category marker {marker!r} renders on the mode menu (tip {tip_index})"
+            menu = plain(_build_mode_screen(0, width=w, height=h, tip_offset=tip_index, scope="Session · one-off"))
+            for marker in record_demo.CATEGORY_SCREEN_MARKERS + record_demo.DOOR_SCREEN_MARKERS:
+                assert marker not in menu, f"marker {marker!r} renders on the mode menu (tip {tip_index})"
 
     def test_starts_by_awaiting_the_landing_split(self):
         assert record_demo.DEMO_SCRIPT[0][0] == "await"
@@ -321,6 +354,7 @@ class TestRecordingEnv:
         assert env["YEABOI_UPDATE_CHECK"] == "0"
         assert env["YEABOI_NO_TUNNEL"] == "1"
         assert env["YEABOI_TELEMETRY"] == "off"
+        assert env["YEABOI_NEWS"] == "off"
         assert env["HOME"] == str(tmp_path)
         assert env["TERM"] == "xterm-256color"
         assert env["ANTHROPIC_API_KEY"] == "test-key-dry-run-only"

@@ -91,7 +91,7 @@ over this wire. Writes are allowlisted to the engine's field registry
 | POST | `/api/settings/provider/verify` | body `{provider, credential, model?}` → `{ok, message}` (network, up to ~8s) |
 | POST | `/api/settings/provider/models` | body `{provider, credential}` → `{models, default, hints}` (discovered-first merge) |
 | POST | `/api/settings/connection/verify` | body `{kind, …fields}` → `{ok, message}`. `kind` is any `verify_kind` the `/api/connections` rows report — the legacy literals (`github`, `jira`, `confluence`, `notion`, `elevenlabs`, `tavus`) plus every descriptor-verified connector key (`datadog`, `grafana`, `sentry`, `gitlab`, `custom_*`, …), and the accepted field names are that kind's declared verify fields (e.g. `token`, `app_key`, `base_url`, `email`, `space_key`). Omitted fields fall back to saved values, so a stored credential can be re-checked without echoing it — but a stored secret only travels to the stored host: a caller-supplied `base_url`/`email` requires **every** secret verify field of that kind in the same request (Datadog: `token` and `app_key`), and a supplied `base_url` must be https (400 otherwise; network, up to ~10s) |
-| GET | `/api/connections` | the integration catalog: `{connectors: [{key, label, summary, detail, family, family_label, section, connected, read_only, managed_by, kind, docs_url, glyph, icon, accent, verify_kind, auth_env, auth_methods: [{key, label, summary, recommended, warning, setup_url, envs}], fields: [{env, label, secret, required, is_set, choices, default, placeholder, hint, help_url, help_scope, auth_method}]}], families, connected}`. `?all=1` is the browse view: every connector that could be added, plus the built-in integrations (GitHub, Jira, Azure DevOps Boards, Confluence, Notion, Slack, ElevenLabs, Tavus) as `managed_by: "credentials"` rows; the default lists only connected connector-layer rows — the view a Credentials-side "your integrations" panel renders. `kind` is a custom connection's kind (`api`/`webhook`/`mcp`); built-in and legacy rows send `""`. `icon` is a custom connection's uploaded icon — a server-validated `data:image/(png\|jpeg\|webp);base64,` URI, never SVG, decoded size ≤ 64KB; `""` everywhere else (built-in marks ship with the client). `managed_by` says where configuring happens — `"connections"` rows carry their own add flow (write the fields via `/api/settings/set`, then probe `verify_kind`), `"credentials"` rows deep-link to Settings ▸ Credentials/setup and their `verify_kind` is `""` when no probe exists (Slack, Azure DevOps). **Never carries a field value** — a field reports only whether it is set. `auth_methods` is empty for a connector with one way in, and a field's `auth_method` is empty when every method needs it; a client that ignores both keys renders exactly as it did before they existed. Exactly one method carries `recommended: true`, and every other carries a non-empty `warning` — a method yeaboi cannot bound says so on itself |
+| GET | `/api/connections` | the integration catalog: `{connectors: [{key, label, summary, detail, family, family_label, section, connected, read_only, managed_by, kind, docs_url, glyph, icon, accent, verify_kind, auth_env, signin, auth_methods: [{key, label, summary, recommended, warning, setup_url, envs}], fields: [{env, label, secret, required, is_set, choices, default, placeholder, hint, help_url, help_scope, auth_method, action}]}], families, connected}`. `signin` is `{signed_in, account}` for a connector with an OAuth sign-in (Spotify, YouTube Music) and `null` otherwise; `account` is the display name the sign-in was minted for — the one field value this payload ever carries, and not a credential. A field's `action` is `"signin"` when the sign-in flow writes it (the refresh token, the display name): no surface prompts for it, and the desktop renders it as a status row with Sign in / Sign out (see *Music* below). `?all=1` is the browse view: every connector that could be added, plus the built-in integrations (GitHub, Jira, Azure DevOps Boards, Confluence, Notion, Slack, ElevenLabs, Tavus) as `managed_by: "credentials"` rows; the default lists only connected connector-layer rows — the view a Credentials-side "your integrations" panel renders. `kind` is a custom connection's kind (`api`/`webhook`/`mcp`); built-in and legacy rows send `""`. `icon` is a custom connection's uploaded icon — a server-validated `data:image/(png\|jpeg\|webp);base64,` URI, never SVG, decoded size ≤ 64KB; `""` everywhere else (built-in marks ship with the client). `managed_by` says where configuring happens — `"connections"` rows carry their own add flow (write the fields via `/api/settings/set`, then probe `verify_kind`), `"credentials"` rows deep-link to Settings ▸ Credentials/setup and their `verify_kind` is `""` when no probe exists (Slack, Azure DevOps). **Never carries a field value** — a field reports only whether it is set. `auth_methods` is empty for a connector with one way in, and a field's `auth_method` is empty when every method needs it; a client that ignores both keys renders exactly as it did before they existed. Exactly one method carries `recommended: true`, and every other carries a non-empty `warning` — a method yeaboi cannot bound says so on itself |
 | POST | `/api/connections/custom` | save one user-created connection. Body: descriptor JSON — `{key: "custom_…", label, family, summary, detail?, docs_url?, glyph, accent, kind: api\|webhook\|mcp, auth_scheme: bearer\|basic\|header, header_name?, probe_path, probe_ok_status, webhook_verify?: token\|hmac, events?: {path, items_key, kind, title_path, ref_path?, severity_path?, status_path?, url_path?, started_at_path?, service_path?}, extra_fields?: [{label, env_suffix, secret?, header_name?, hint?}], icon_data?}` — **never a credential** (values are typed afterwards through `/api/settings/set`, exactly like a built-in connector's fields). An `mcp` kind stores a streamable-HTTP MCP server URL and optional bearer token (derived envs, values typed afterwards via `/api/settings/set`), verifies with the MCP initialize + tools/list handshake, and gathers nothing. A `webhook` kind requires the events mapping, ignores the HTTP-shape fields, and mints its delivery secret server-side — returned once as `webhook_secret` on the created row (`/api/webhooks/{key}/url` can show it again). `extra_fields` (`api` kind only, ≤ 4) declares extra credentials/config beyond the auth scheme — a Datadog-style app key beside the api key: `env_suffix` is UPPER_SNAKE and derives the env (`YEABOI_CUSTOM_<KEY>_<SUFFIX>`), `secret` defaults true, and a `header_name` sends the value as that request header on probe and fetch. `icon_data` is an optional icon in the `icon` row key's data-URI shape (png/jpeg/webp only, never SVG, ≤ 64KB decoded — the validator refuses the rest). The runtime validator is the gate: every problem comes back joined in a 400 `{"error": …}`. Success returns the new catalog row in the `/api/connections` row shape (`managed_by: "connections"`) |
 | POST | `/api/connections/custom/draft` | body `{description}` → `{ok, draft, problems}`: one LLM pass from a plain-language service description to a candidate descriptor (same shape as the create body). Never saves — a draft with problems pre-fills the create form. The model proposes identity, look and shape only — any kind, `extra_fields` included; never a credential value, an env name, verify wiring or `icon_data` (network + one LLM call) |
 | POST | `/api/connections/custom/{key}/delete` | remove one user-created connection — the descriptor AND its stored env values in the same act (a definition-less credential is an orphan). `{deleted: key}`; 404 for a key that is not a custom connection |
@@ -250,7 +250,7 @@ The two run-and-read modes. Their read-only pieces are MCP tools already
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/standup/dashboard` | query `session_id?` (blank = the most recent session), `run_id?` (open one past run instead of the latest) → the whole dashboard in one read |
-| POST | `/api/standup/run` | body `{session_id, deliver?: false, solo?: false}` → a chunked NDJSON run. `deliver: false` builds the report without posting it anywhere. `solo: true` is a one-person run (the Solo world): self-only roster, no tracker roster discovery, first-person summary; the stored report carries `solo` so the dashboard drops its team card |
+| POST | `/api/standup/run` | body `{session_id, deliver?: false, solo?: false, project_id?}` → a chunked NDJSON run. `deliver: false` builds the report without posting it anywhere. `project_id` (a `proj-<8hex>` projects-table row id) scopes the run to that project; blank inherits the session's own link, an unknown id is a 400. `solo: true` is a one-person run (the Solo world): self-only roster, no tracker roster discovery, first-person summary; the stored report carries `solo` so the dashboard drops its team card |
 | POST | `/api/standup/runs/{run_id}/delete` | drop one run from the saved-runs hub; 404 when unknown |
 | GET | `/api/standup/schedule` | query `session_id` → the saved schedule plus the installed reminder offset |
 | POST | `/api/standup/schedule` | body `{session_id, enabled, time, weekdays, lead_minutes, delivery_channels, remind_after, solo?: false}` → `{message, schedule}`; saves the config **and** installs or removes the OS jobs. `solo` is not saved — it rides on the installed job's command line, so the scheduled run is a one-person standup |
@@ -258,7 +258,7 @@ The two run-and-read modes. Their read-only pieces are MCP tools already
 | POST | `/api/analysis/steps` | a partial selection → `{steps, grid, run}`: which steps still apply, the component rows they may offer, and the payload the answers would run. `solo: true` in the answers marks a Solo-world wizard: the `members` step never applies and stale member picks coerce out of `run` |
 | GET | `/api/analysis/profiles` | the saved team profiles |
 | GET | `/api/analysis/result/{team_id}` | one stored profile plus the cards it earned; 404 when unknown. `?solo=1` drops the Team Members card from `cards` |
-| POST | `/api/analysis/run` | the setup wizard's payload → a chunked NDJSON run |
+| POST | `/api/analysis/run` | the setup wizard's payload (plus an optional `project_id`) → a chunked NDJSON run |
 
 The **standup dashboard** is
 `{session_id, session_name, my_name, run_id, history, cards: [{key, title, member}], report, config, schedule, review, nudge, gap_issues, active: [name]}`.
@@ -293,7 +293,12 @@ feature unselectable rather than merely disappointing. Its result is team-wide
 counts and a per-30-day rate, never anything attributable to a person.
 The run body is the wizard's answers:
 `{source?, project_key?, team_name?, sprint_count?, features?, components?,
-members_map?, analysis_scope?, depth?, window_days?, model?}`.
+members_map?, analysis_scope?, depth?, window_days?, model?, project_id?}`.
+`project_id` (a `proj-<8hex>` projects-table row id) is the edge the terminal
+draws after an analysis: on `done` the run has created an analysis session
+linked to that project and recorded the profile it produced as the project's
+`default_analysis_profile_id`, so the next scoped plan seeds it. Blank creates
+no session, exactly as before; an unknown id is a 400.
 
 A **run** streams: `op` first, then `progress` (and, for standup, `run_id`
 once its history row exists), terminated by `done`, `cancelled` or `error`.
@@ -303,7 +308,7 @@ once its history row exists), terminated by `done`, `cancelled` or `error`.
 | `op` | `{type, op_id}` |
 | `progress` | `{type, phase}` — one pipeline phase, as user-facing text |
 | `run_id` | `{type, run_id}` — standup only; the history row this run writes |
-| `done` | `{type, report}` (standup) or `{type, result}` (analysis) |
+| `done` | `{type, report}` (standup) or `{type, result, session_id?}` (analysis — `session_id` only on a run with a `project_id`: the session it created and linked) |
 | `cancelled` | `{type}` — analysis only; nothing was persisted |
 | `error` | `{type, message}` — a classified, one-line failure |
 
@@ -443,9 +448,10 @@ that project's latest sprint plan; blank inherits the session's own link. It
 also takes an optional `context_deps` (a list drawn from retro, standup, plan,
 performance, analysis): the run's context-source toggles — omitted/null
 inherits the project default, `[]` is an incognito run (no cross-mode
-context). The standup run needs neither field — its session is the scope (an
-unlinked session runs team-wide, exactly as before projects existed), and its
-toggles live in the session's saved standup config (`standup_config_set`'s
+context). The standup run takes the same optional `project_id` (blank inherits
+the session's own link, so an unlinked session runs team-wide exactly as before
+projects existed; an unknown id is a 400) but no `context_deps` — its toggles
+live in the session's saved standup config (`standup_config_set`'s
 `context_deps`).
 
 A delivery report carries `production`: one row per ops roll-up over the
@@ -589,18 +595,49 @@ already running) is not a failure.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/agents/modes` | the four modes and how fresh each saved report is |
-| GET | `/api/agents/{kind}/latest` | the last saved report, for an instant open |
-| POST | `/api/agents/{kind}/run` | one fresh pass, streamed as NDJSON |
+| GET | `/api/agents/modes` | the modes and how fresh each saved report is; `fresh_minutes` is the re-run threshold |
+| GET | `/api/agents/{kind}/latest` | the last saved report, for an instant open, with `fresh: bool`; `?project_id=` scopes it (see below) |
+| POST | `/api/agents/{kind}/run` | one fresh pass, streamed as NDJSON; body `{project_id?, window_days?, include_info?}` |
 | POST | `/api/agents/{kind}/export` | write the report, or hand back its Markdown |
+| POST | `/api/agents/security/dismiss` | body `{key, reason, expires?, undo?, include_info?}` — set one finding aside with the reason (400 without one), or restore it; answers with the re-derived `report` |
+| GET | `/api/agents/security/dismissed` | `{dismissed: [{key, reason, by, at, expires}]}` |
+| POST | `/api/agents/security/verdict` | body `{keys, verdict: "test-data" \| "dismiss" \| "undo", reason?, include_info?}` — many findings at once; `test-data` fills the reason in; answers `{ok, handled \| restored, report}` |
+| POST | `/api/agents/security/fix` | body `{key, fix_id, keys?, reason?, repo?, include_info?}` — apply one of the finding's `fixes`; answers `{ok, fix_id, detail, pr_url, paths, handled, report?}`; a sandbox refusal is a 403 naming the path (allow it and retry) |
+| GET | `/api/agents/security/replay` `?key=&line=` | the transcript turns around one signal: `{session_id, project_path, started_at, line_no, pattern, focus, turns: [{index, line_no, at, role, kind, tool, text, truncated, flagged}]}`; 400 for a non-transcript finding or a path outside the scanned roots |
+| GET | `/api/agents/security/signals` `?key=` | `{key, signals: [{line_no, at, session_id, context, snippet}]}` — every stored line behind one grouped finding |
 
-`kind` is one of `usage`, `advisor`, `standup`, `security`. Every mode's run and
-history is an MCP tool already; what is native is the shape of the page. A pass
-scans every session log on the machine, so a surface opens on the last saved
-report and refreshes behind it — which needs the last artifact on its own and
-the fresh one as a stream. Export is native because these four artifacts write
-through `agentwatch/export.py` rather than the shared exporter, so `/api/export`
-cannot reach them; `copy` is answered as data, never performed.
+`kind` is one of `usage`, `advisor`, `security`. Every mode's run and history is
+an MCP tool already; what is native is the shape of the page. A pass scans every
+session log on the machine, so a surface opens on the last saved report and
+**re-runs only when `latest` answers `fresh: false`** — the same threshold the
+terminal uses (`YEABOI_AGENTWATCH_FRESH_MINUTES`, default 60), decided by the
+backend so the two cannot drift; the Re-run button always runs. `window_days`
+(7/30/90 in the window's own control) reaches the usage and advisor engines;
+`include_info` lists the security report's informational findings, which are
+otherwise only counted in `hidden_info_count`. Export is native because these
+artifacts write through `agentwatch/export.py` rather than the shared exporter,
+so `/api/export` cannot reach them; `copy` is answered as data, never performed.
+
+A security report's `findings` are grouped per (pattern, file, context) with
+`occurrences`, a `key` (`category:pattern:location[:context]`, what `dismiss`,
+`verdict`, `fix`, `replay` and `signals` take) and, for MCP findings, `scopes`.
+Each finding carries a `verdict` (`needs-decision` | `unsure` | `test-data` |
+`handled` | `info`) with its `verdict_reason`, the `context` the match sat in
+(`command` | `heredoc` | `inline-script` | `write-input` | `tool-result` |
+`prose` | `user-prompt`), the `target` file that context pointed at, a ≤120-char
+redacted `snippet` with the matched span masked, `at`, `session_id`,
+`project_label` and its `fixes` (`[{id, kind: write | pr | link | dismiss |
+manual, label, target, detail, scope}]`). The report carries `issues` — one row
+per (category, pattern): `{id, category, pattern, title, why, verdict, severity,
+signals, sessions, files, last_seen, finding_keys, fixes}`, worst verdict first —
+`verdict_counts` (`[[verdict, findings]]`), `verdict_line` (the one-sentence
+answer a page opens with), `new_findings` / `resolved_findings` (keys, relative
+to the previous saved report), `dismissed_count`, `hidden_info_count`,
+`posture_reason` and `pattern_totals`. `latest?include_info=1` re-derives the
+saved report with the informational rows listed, without a scan. A usage report
+carries `billing_kind` (`subscription` | `api` | `""`), which decides the
+qualifier a surface prints beside the total, `cache_cost_share` and
+`window_days`.
 
 A run answers `component` lines — the `analysis_component` dicts the phase
 checklist draws, which is every phase these engines emit today — then `done:
@@ -608,6 +645,18 @@ checklist draws, which is every phase these engines emit today — then `done:
 a plain phase, so a mode that grows a bare-string step still reaches the
 surface. No `op` line — the agentwatch engines take no cancel event, and backing
 out is free: the pass finishes and stores its report either way.
+
+**Scoping to a project.** `usage` and `advisor` take a `project_id`
+(the `proj-<8hex>` id of *Projects and sessions* below) and resolve it to the
+project's `repo_path` setting: only sessions whose project directory is that
+absolute path or sits under it (a worktree counts — never a basename match)
+are read. `security` ignores it and stays machine-wide. Saved reports carry
+no project, so a scoped `latest` answers `{report: null, as_of: "",
+scoped_to: <repo_path>}` and the surface runs fresh; `run` echoes the same
+`scoped_to` on its `done` line. Both answer `scoped_to: ""` when unscoped. An
+unknown project is a 404; a project with no `repo_path` yet is a 400 naming
+`yeaboi project set-defaults <id> --repo <path>` (the same key
+`/api/projects/{project_id}/defaults` takes).
 
 Provenance has no routes here. `provenance_audit` and `provenance_trace` are
 request/response reads with no progress, no cancel and no page-shaped gap, so
@@ -638,9 +687,71 @@ their behalf.
 `/api/ambience` serves music as a **catalogue and a preference only**. The
 terminal hands a station URL to `ffplay`; the desktop hands the same URL to an
 `<audio>` element and needs no binary, so playback state lives in the renderer
-and never round-trips. A bad channel index is refused rather than clamped, and
-`true` is not accepted as an index — `bool` is an `int` in Python, and silently
-selecting station 1 is worse than a 400.
+and never round-trips. The desktop writes `music_enabled` and `music_channel`
+back when the user presses play or picks a station, so both surfaces agree on
+what is on. A bad channel index is refused rather than clamped, and `true` is
+not accepted as an index — `bool` is an `int` in Python, and silently selecting
+station 1 is worse than a 400.
+
+`music.services` lists the streaming services the desktop can also play —
+`[{key, label, connected, playback, can_sign_in, signed_in, account, client}]` for
+Spotify, Apple Music and YouTube Music. Each is a connector in the integrations
+catalogue: `connected` is whether its "where it plays" choice has been saved
+(through `POST /api/settings/set`, like every connector field), and `playback`
+is that choice. Signing in is a separate, optional step: `can_sign_in` is false
+for Apple Music (the desktop browses the Music app on the Mac itself),
+`signed_in` says whether a token is held, `account` is the display name it
+was minted for, and `client` says which OAuth app a sign-in would use —
+`own` (the user's `*_CLIENT_ID`), `builtin` (yeaboi's), or `none`, in which
+case the desktop asks for one before offering Sign in. A desktop that finds no `signed_in` key is talking to an older
+backend and hides Sign in and Browse. Playback itself happens in the desktop's
+embedded player or the vendor's own app and never touches this API; the
+terminal ignores the block.
+
+## Music
+
+The Browse behind the desktop's Music page: sign in to Spotify or YouTube
+Music, then read the library. Chrome like ambience — no capability, no MCP
+tool — and every route below needs the bearer.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/connections/{key}/signin` | start a sign-in → `{started, url, message}`. The desktop opens `url` in the system browser. 404 for a connector with no sign-in (`apple_music`). `started: false` carries the reason in `message` — no client configured (paste your own client ID), or the callback port busy |
+| GET | `/api/connections/{key}/signin` | poll → `{active, done?, ok?, saved?, account?, message?}`; `{active: false}` when no sign-in for that key is running. On the poll that first sees the token it is persisted before `saved: true` is reported — the token itself is never in any body |
+| POST | `/api/connections/{key}/signin/cancel` | stop and discard the session → `{ok: true}` |
+| POST | `/api/connections/{key}/signout` | forget the token and the display name → `{ok: true, signed_in: false}` |
+| GET | `/api/music/{key}/library` | `?shelf=&cursor=&limit=` — one shelf of the signed-in library → `{items, next_cursor}`. `shelf` ∈ `playlists`, `liked`, `albums`, `recent` (YouTube: the first two; the rest 400). `next_cursor` is opaque; `""` ends the list. Apple has no library here (404): the desktop browses the Music app itself |
+| GET | `/api/music/{key}/playlist/{playlist_id}/items` | `?cursor=&limit=` — the tracks of one playlist, same shape |
+| GET | `/api/music/{key}/search` | `?q=&limit=` — catalogue search, same shape with an empty `next_cursor`. Spotify caps a page at 10. `apple_music` needs no sign-in: Apple's public iTunes Search API, `?country=` (two letters, default `us`), and each row carries `preview_url` |
+| POST | `/api/music/spotify/play` | body `{uri, device_id?}` → `{ok: true}`: play a Spotify URI on the active device. Premium only — see the codes below |
+| GET | `/api/music/spotify/player` | `{playing, progress_ms, item, device: {id, name}}`; `item`/`device` null when nothing plays |
+| GET | `/api/music/spotify/devices` | `{devices: [{id, name, type, active}]}` |
+
+A row is `{id, kind, title, subtitle, artwork_url, duration_ms, url, uri,
+preview_url, count}` — `kind` ∈ `track`, `album`, `playlist`, `video`, `song`;
+`url` is always a share link the desktop's own link grammar accepts
+(`https://open.spotify.com/<kind>/<id>`, `https://www.youtube.com/watch?v=`
+or `playlist?list=`, `https://music.apple.com/<cc>/album/<slug>/<id>?i=<track>`),
+so a row plays through exactly the path a pasted link does.
+
+A vendor's refusal comes back as `{error, code, retry_after?}` with the status
+the code implies: `signed_out` (**409**, never 401 — the desktop's bearer
+handling must not read it as its own failure; offer Sign in), `premium_required`
+(403) and `no_active_device` (409) — the desktop hands the track to the
+Spotify app instead — `not_allowlisted` (403: an unapproved app allows only a
+few sign-ins; paste your own client ID), `quota_exceeded` (429),
+`rate_limited` (429, `retry_after` seconds), `unsupported_shelf` / `bad_uri`
+(400), `unavailable` (502).
+
+The sign-in is Authorization Code + PKCE. The vendor sends the browser back
+to a loopback listener of the backend's own, never the app wire: it binds
+`127.0.0.1` on a **fixed** port (8643, `YEABOI_OAUTH_PORT` overrides — Spotify
+matches the registered Redirect URI exactly, so a busy port is an error, not a
+walk) and serves `/callback/{key}` for one sign-in. The refresh token is
+written to `~/.yeaboi/.env` as `SPOTIFY_REFRESH_TOKEN` / `YOUTUBE_MUSIC_REFRESH_TOKEN`
+(masked everywhere), the display name beside it. yeaboi's registered apps are
+built in; a `SPOTIFY_CLIENT_ID` or `YOUTUBE_MUSIC_CLIENT_ID` (+ `_CLIENT_SECRET`)
+saved through `/api/settings/set` takes precedence.
 
 `saver` is the same shape for the same reason: `idle_seconds`, the `styles`
 catalogue (key → display name) and the chosen `style`, set with `saver_style`.
@@ -704,6 +815,47 @@ path, whose 6 KB pre-filled URL cannot carry a log, where they are named instead
 The inlined text is redacted and home-relativized first — it is the one thing a
 report publishes that the reporter did not type — and the whole inline share is
 capped well under GitHub's 65 536-character body limit.
+
+## The front page
+
+The desktop home draws a newspaper: the yeaboi column (release notes, and the
+posts and videos yeaboi.ai lists), then AI and engineering headlines
+from a curated set of outlets. The backend does every fetch, so the desktop
+stays loopback-only; the desktop draws a headline, its source and a link, and
+never article text. `summary` is the outlet's own teaser, at most 240 characters.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/news` | `?refresh=1` forces a fetch. `{enabled, refreshing, schema, generated_at, stale, lead: item \| null, sections: [{column, title, items: [item]}], sources: [{id, name, home_url, column, ok, fetched_at, error, item_count}]}` — `item` is `{id, title, url, source_id, source_name, published, summary, image_url, kind, topic, persona, column}` |
+| GET | `/api/news/sources` | The Settings list: `{sources: [{id, name, home_url, url, column, kind, builtin, enabled, ok: bool \| null, fetched_at, error, item_count}], max_custom, columns}` — health is the last refresh's status by id; `ok: null` means not read yet. The yeaboi release notes are not an outlet and cannot be turned off |
+| POST | `/api/news/sources/probe` | Body `{url}` → `{ok, url, feed_url, kind: rss \| atom \| json_feed \| "", name, home_url, item_count, sample_titles: [str], error}`. One guarded https GET (public hosts only, every redirect re-checked, the refresh's 6 s / 2 MB caps); never saves. A web page that advertises a feed answers `ok: false` with `feed_url` set |
+| POST | `/api/news/sources` | Body `{url, column, name?}` — add an outlet. Probes first (its error is the 400), then validates: https, public host, name 1–60 characters, `column` one of the three, not a built-in feed, not already added, at most 20 added outlets. `{source: row, refreshing}`; the id is `custom-` + 8 hex derived from the URL |
+| POST | `/api/news/sources/{source_id}/enabled` | Body `{enabled: bool}` — built-in or added. Off hides the outlet on the very next `GET /api/news`; on starts a background refresh. `{source: row, refreshing}`; 404 for an unknown id |
+| POST | `/api/news/sources/{source_id}/delete` | Remove an added outlet; its cached headlines go on the next refresh. `{deleted, refreshing}`; 400 for a built-in (turn it off instead), 404 for an unknown id |
+
+- `column` is one of `yeaboi`, `ai`, `engineering`; `kind` one of
+  `article`, `video`, `release`, `post`; `topic` one of `security`, `policy`,
+  `compute`, `media`, `models`, `research`, `tooling`, `howto`, `general`;
+  `persona` one of the desktop's eight duck ids (`engineer`, `teacher`,
+  `martial`, `chef`, `astronaut`, `dj`, `detective`, `wizard`). `published` is
+  ISO 8601 with an offset, or `""` when the outlet gave none. `image_url` is
+  the outlet's own picture URL or `null`; the desktop does not draw it.
+- `lead` is the story the engine put at the top (the newest yeaboi post or
+  video under a week old, else the newest AI headline) and is not repeated in
+  its section.
+- **Stale-while-revalidate.** The cached paper (30-minute TTL) is answered at
+  once. `stale: true` means it has expired and a refresh is running
+  (`refreshing: true`) — ask again in a few seconds. A refresh that fails
+  keeps the last paper; an outlet that fails keeps its last headlines and
+  reports `ok: false` with an `error`.
+- `enabled: false` (`YEABOI_NEWS=off`, Settings ▸ Privacy) answers the yeaboi
+  column from the bundled changelog alone and nothing leaves the machine. Every
+  outlet is named in `GET /api/meta/privacy` under the `news` row.
+- **The roster** lives in `~/.yeaboi/data/news_roster.json`: the ids switched
+  off and the outlets the user added. An outlet that is off is neither fetched
+  nor shown — `GET /api/news` filters a cached paper on the way out, so its
+  `sources` lists only the outlets that are on. An added outlet's URL is
+  checked against private and loopback addresses on every request.
 
 ## Consent
 
@@ -816,3 +968,44 @@ week (went well, to change, on track against the plan, actions carried forward)
 over the user's own standups, delivered tickets and sprint plan. The desktop
 renders it at `/solo/review` (hub) and `/solo/review/report?id=` (one saved
 run). Export stays on the MCP tool (`/api/tool/weekly_review_export`).
+
+## Projects and sessions
+
+A project is the durable way to work: every run inside it shares context
+through `ProjectScope`. A session is the other way — one run of one mode,
+unscoped. These routes are the projects engine's verbs on the wire, plus the
+one read no engine owns: the union of every mode's saved runs.
+
+`{project_id}` here is the engine's `proj-<8hex>` id from the `projects` table
+in sessions.db. It is **unrelated** to the `{project_id}` segment of
+`/api/chat/sessions/{project_id}`, which is the planning chat's own handle.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/projects` | `?include_archived=` (`1`/`true`/`yes`/`on`; default off). `{projects: [row]}`, most recently active first. A row is `{project_id, name, description, settings, created_at, last_active, archived, status, session_count}`; `status` is `active` (in progress) or `done` (the owner marked it complete) — archive is separate and hides a row whatever its status |
+| POST | `/api/projects` | body `{name, description?}` → the new row (no `session_count`). A blank name is a 400 |
+| POST | `/api/projects/draft` | body `{description}` → `{name, description, source, note}` — the name and pitch for a project that does not exist yet, the AI rewrite behind the New project dialog. `source` is `ai` when the LLM rewrote the draft, `original` when it could not (unconfigured, failed, or answered nothing usable) and `description` is the draft as sent with a name made from its first words; `note` says which in one sentence. A blank description is a 400. Never a 502: the fallback is the reader's own words |
+| GET | `/api/projects/suggestions` | `?refresh=1` forces a recompute. `{refreshing, suggestions: [{id, text, source, source_label, subject, facts, url, repo_path, wording}], sources, warnings, computed_at, stale, connected}` — up to three recommended projects computed from what this machine is connected to: the trackers (Jira, Azure DevOps, Linear), the GitHub repos of the configured owners, the local repos the coding agents worked in lately (the last agentwatch ingest, never a fresh scan) and the Confluence and Notion pages edited lately. `text` is the description in the composer's voice; `wording` is `ai` when the model wrote it and `facts` when it is the facts alone (no provider, or the call failed). `facts` is one line of numbers for the row (`14 open issues, milestone 4.2 due 12 Sep`), `sources` names what was read (labels: `GitHub`, `Jira`, `Your agents`…) — a source that failed is in `warnings` (`GitHub could not be read`) and not in `sources`; the empty stale first sheet names the sources being read instead, so the client can say so. Stale-while-revalidate like `/api/news`: a request answers at once from the cache (`stale: true` while a background refresh runs, `refreshing` says whether one is) and the first call on a fresh install is an empty stale sheet. `connected` is false only when nothing at all can be read — the desktop shows its connect line then. Never a 502 |
+| GET | `/api/projects/references` | `?source=&q=&limit=` (source ∈ `jira` \| `github` \| `azdevops` \| `linear` \| `confluence` \| `notion`; limit 1–25, default 8) → `{source, source_label, items: [{id, subject, label, detail, url}], warning}` — the live picker behind `@` in the desktop's project composer: one row per concrete thing (a Jira issue or the Jira project itself, a GitHub repo, a Linear issue, an Azure DevOps work item, a Confluence or Notion page). An empty `q` lists the open or recent items; the trackers are listed once and filtered here (every token of `q` must appear in subject, label or detail), the doc platforms take `q` to their own search. `subject` is the identifier the desktop stores on the project in its own backend (`PROJ-123`, `owner/repo`, a page id) — this server keeps no reference of its own; `label` is the words a chip shows; `url` may be blank when the base URL is unconfigured. A source that cannot be read answers 200 with `warning` (`Jira could not be read`) and no items, never a 502; a tracker whose credentials are dead may answer an empty list instead (its reader swallows the failure). Each read is cached for a minute per source (per query for the doc platforms), so typing costs one fetch. An unknown source, or a `limit` that is not a number, is a 400 |
+| POST | `/api/projects/{project_id}/status` | body `{status}` (`active` \| `done`) → the row. Anything else is a 400; an unknown project a 404 |
+| GET | `/api/projects/{project_id}` | the row plus `session_ids` (the linked planning/analysis sessions, newest first); 404 when unknown |
+| GET | `/api/projects/{project_id}/sessions` | `?mode=&limit=` → `{sessions: [row]}` — the project's runs across every mode (see the row shape below); 404 when the project is unknown |
+| POST | `/api/projects/{project_id}/defaults` | body `{defaults: {…}}` → `{project_id, settings}` (the merged settings). Accepted keys: `default_analysis_profile_id`, `default_context_deps`, `repo_path` (an absolute path — the repo the Agents world scopes to). An unknown key, an empty object, or a `repo_path` that is not an absolute path (or is the filesystem root) is a 400; an unknown project a 404 |
+| GET | `/api/sessions/recent` | `?limit=&mode=&project_id=` → `{sessions: [row]}` — the newest runs across every mode, machine-wide or one project's |
+
+A **sessions row** is `{session_id, run_id, mode, title, created_at, last_modified, project_id}`:
+
+- `mode` is one of `planning`, `analysis`, `standup`, `retro`, `reporting`,
+  `ship`, `review`. Planning and analysis rows are `sessions_meta` sessions and
+  carry `run_id: ""`; every other row is one saved run of that mode's store,
+  and `run_id` is that store's own id (the standup/retro/reporting/review
+  history row as a string, the ship run id).
+- `title` is the same label the terminal lists — the planning session's
+  display name, `Standup — <date>`, `Retro — <date>`, `Report — <period>`,
+  `Ship — <item> · <status>`, `Week <label>`.
+- `project_id` is the project the run's planning session is linked to, `""`
+  when unscoped.
+- Newest `last_modified` first; `limit` defaults to 20 and `0` means every
+  row. A mode with no saved runs is simply absent — nothing is invented. An
+  unknown `mode` is a 400; an unknown `project_id` on `/api/sessions/recent`
+  is an empty list.

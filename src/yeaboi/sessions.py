@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See docs: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 32  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review  # noqa: E501
+CURRENT_SCHEMA_VERSION = 33  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review, v33=project status  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -918,6 +918,15 @@ class SessionStore:
             self._conn.executescript(_WEEKLY_REVIEW_SCHEMA)
             logger.info("Migration v32: created weekly_review_history table")
 
+        if from_version < 33:
+            # v33: the owner's verdict on a project (active | done). A fresh
+            # database already has the column from PROJECTS_SCHEMA above.
+            try:
+                self._conn.execute("ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+                logger.info("Migration v33: added projects.status")
+            except sqlite3.OperationalError:
+                pass
+
     def _apply_edit_provenance(self) -> None:
         """The v21 migration body — idempotent, so v26 re-runs it verbatim.
 
@@ -1154,16 +1163,32 @@ class SessionStore:
         )
         return dict(zip(keys, row))
 
-    def list_sessions(self) -> list[dict]:
-        """Return all sessions ordered by last_modified descending.
+    def list_sessions(self, *, project_id: str = "", mode: str = "", limit: int = 0) -> list[dict]:
+        """Return sessions ordered by last_modified descending.
 
-        Used by the interactive session picker (--resume) and --list-sessions.
+        Used by the interactive session picker (--resume), --list-sessions and
+        the cross-mode recent list. ``project_id`` and ``mode`` narrow the rows
+        (blank = all); ``limit`` caps them (0 = every row). Each row carries
+        ``session_mode`` and ``project_id`` beside the legacy keys.
         """
-        logger.debug("Listing sessions")
+        logger.debug("Listing sessions (project=%s mode=%s limit=%d)", project_id or "-", mode or "-", limit)
+        clauses: list[str] = []
+        params: list[object] = []
+        if project_id:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        if mode:
+            clauses.append("session_mode = ?")
+            params.append(mode)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        tail = " LIMIT ?" if limit > 0 else ""
+        if limit > 0:
+            params.append(limit)
         rows = self._conn.execute(
-            "SELECT session_id, project_name, created_at, last_modified, "
-            "last_node_completed, session_state "
-            "FROM sessions_meta ORDER BY last_modified DESC"
+            "SELECT session_id, project_name, created_at, last_modified, "  # noqa: S608 — placeholders, not values
+            "last_node_completed, session_state, session_mode, project_id "
+            f"FROM sessions_meta{where} ORDER BY last_modified DESC{tail}",
+            params,
         ).fetchall()
         keys = (
             "session_id",
@@ -1172,6 +1197,8 @@ class SessionStore:
             "last_modified",
             "last_node_completed",
             "session_state_raw",
+            "session_mode",
+            "project_id",
         )
         result = [dict(zip(keys, row)) for row in rows]
         logger.debug("Found %d session(s)", len(result))
@@ -1223,6 +1250,11 @@ class SessionStore:
             (session_id,),
         ).fetchone()
         return row[0] if row else ""
+
+    def session_project_ids(self) -> dict[str, str]:
+        """Every session's project id ('' = unscoped) — ids only, never the state blob."""
+        rows = self._conn.execute("SELECT session_id, project_id FROM sessions_meta").fetchall()
+        return {row[0]: row[1] for row in rows}
 
     def session_ids_for_project(self, project_id: str, *, mode: str = "") -> list[str]:
         """Session ids linked to a project, newest first, optionally one mode.

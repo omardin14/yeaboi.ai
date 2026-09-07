@@ -27,8 +27,11 @@ from yeaboi.app import (
     routes_consent,
     routes_feedback,
     routes_meta,
+    routes_music,
+    routes_news,
     routes_niko,
     routes_performance,
+    routes_projects,
     routes_reporting,
     routes_roadmap,
     routes_settings,
@@ -61,6 +64,15 @@ ROUTES: tuple[AppRoute, ...] = (
     AppRoute("GET", "/api/meta/capabilities", routes_meta.capabilities),
     AppRoute("GET", "/api/meta/tips", routes_meta.tips),
     AppRoute("GET", "/api/meta/changelog", routes_meta.changelog),
+    # Chrome like the changelog: the desktop home draws the front page, and no
+    # capability owns it.
+    AppRoute("GET", "/api/news", routes_news.news),
+    # The outlet roster behind it: what is on, what the user added, how each read last.
+    AppRoute("GET", "/api/news/sources", routes_news.sources),
+    AppRoute("POST", "/api/news/sources/probe", routes_news.source_probe),
+    AppRoute("POST", "/api/news/sources", routes_news.source_add),
+    AppRoute("POST", "/api/news/sources/{source_id}/enabled", routes_news.source_enabled),
+    AppRoute("POST", "/api/news/sources/{source_id}/delete", routes_news.source_delete),
     # Chrome like tips/changelog: no capability owns disclosure, and it is
     # deliberately never gated behind one — the privacy page must always answer.
     AppRoute("GET", "/api/meta/privacy", routes_meta.privacy),
@@ -72,6 +84,20 @@ ROUTES: tuple[AppRoute, ...] = (
     AppRoute("POST", "/api/solo/review/run", routes_solo.review_run, "weekly-review"),
     AppRoute("GET", "/api/solo/review/runs/{run_id}", routes_solo.review_run_get, "weekly-review"),
     AppRoute("POST", "/api/solo/review/runs/{run_id}/delete", routes_solo.review_delete, "weekly-review"),
+    # -- projects and the cross-mode sessions list ---------------------------
+    # The projects engine's five verbs on the wire, plus the one read no engine
+    # owns: every mode's saved runs in one list. `{project_id}` is the engine's
+    # proj-<8hex> id, not the planning chat's handle of the same name.
+    AppRoute("GET", "/api/projects", routes_projects.projects, "projects"),
+    AppRoute("POST", "/api/projects", routes_projects.create, "projects"),
+    AppRoute("POST", "/api/projects/draft", routes_projects.draft, "projects"),
+    AppRoute("GET", "/api/projects/suggestions", routes_projects.suggestions, "projects"),
+    AppRoute("GET", "/api/projects/references", routes_projects.references, "projects"),
+    AppRoute("GET", "/api/projects/{project_id}", routes_projects.get, "projects"),
+    AppRoute("POST", "/api/projects/{project_id}/status", routes_projects.status, "projects"),
+    AppRoute("GET", "/api/projects/{project_id}/sessions", routes_projects.sessions, "projects"),
+    AppRoute("POST", "/api/projects/{project_id}/defaults", routes_projects.defaults, "projects"),
+    AppRoute("GET", "/api/sessions/recent", routes_projects.recent, "sessions"),
     AppRoute("GET", "/api/tools", routes_meta.tools),
     AppRoute("POST", "/api/tool/{name}", routes_meta.call_tool),
     AppRoute("GET", "/api/events", routes_meta.events),
@@ -197,12 +223,18 @@ ROUTES: tuple[AppRoute, ...] = (
     AppRoute("POST", "/api/slack/link", routes_ceremonies.link, "slack-inbound"),
     AppRoute("POST", "/api/slack/poll", routes_ceremonies.poll, "slack-inbound"),
     # -- the Agents family (the M9 surface) ----------------------------------
-    # One set of routes over four modes, addressed by kind. Registered against
+    # One set of routes over every mode, addressed by kind. Registered against
     # agent-usage, the row whose engine the other three sit beside.
     AppRoute("GET", "/api/agents/modes", routes_agents.modes, "agent-usage"),
     AppRoute("GET", "/api/agents/{kind}/latest", routes_agents.latest, "agent-usage"),
     AppRoute("POST", "/api/agents/{kind}/run", routes_agents.run, "agent-usage"),
     AppRoute("POST", "/api/agents/{kind}/export", routes_agents.export, "agent-usage"),
+    AppRoute("POST", "/api/agents/security/dismiss", routes_agents.dismiss, "agent-security"),
+    AppRoute("GET", "/api/agents/security/dismissed", routes_agents.dismissed, "agent-security"),
+    AppRoute("POST", "/api/agents/security/verdict", routes_agents.verdict, "agent-security"),
+    AppRoute("POST", "/api/agents/security/fix", routes_agents.fix, "agent-security"),
+    AppRoute("GET", "/api/agents/security/replay", routes_agents.replay, "agent-security"),
+    AppRoute("GET", "/api/agents/security/signals", routes_agents.signals, "agent-security"),
     # -- the shell's own furniture (the M10 surface) --------------------------
     # No capability owns these: ambience, the beta gate, the feedback form and
     # the sandbox consent modal are things the shell needs to draw itself, not
@@ -215,6 +247,19 @@ ROUTES: tuple[AppRoute, ...] = (
     AppRoute("POST", "/api/feedback", routes_feedback.submit),
     AppRoute("POST", "/api/feedback/polish", routes_feedback.polish),
     AppRoute("POST", "/api/feedback/attachments", routes_feedback.attach),
+    # The music services' sign-in and library: the Browse behind the desktop's
+    # Music page. Chrome like ambience — playback is the desktop's, and a
+    # library read is a UI affordance, not work an agent would be asked to do.
+    AppRoute("POST", "/api/connections/{key}/signin", routes_music.signin_start),
+    AppRoute("GET", "/api/connections/{key}/signin", routes_music.signin_status),
+    AppRoute("POST", "/api/connections/{key}/signin/cancel", routes_music.signin_cancel),
+    AppRoute("POST", "/api/connections/{key}/signout", routes_music.signout),
+    AppRoute("GET", "/api/music/{key}/library", routes_music.library),
+    AppRoute("GET", "/api/music/{key}/playlist/{playlist_id}/items", routes_music.playlist),
+    AppRoute("GET", "/api/music/{key}/search", routes_music.search),
+    AppRoute("POST", "/api/music/spotify/play", routes_music.spotify_play),
+    AppRoute("GET", "/api/music/spotify/player", routes_music.spotify_player),
+    AppRoute("GET", "/api/music/spotify/devices", routes_music.spotify_devices),
     AppRoute("GET", "/api/consent", routes_consent.pending),
     AppRoute("POST", "/api/consent/{req_id}", routes_consent.resolve),
     # -- dictation (the M11 surface) ------------------------------------------

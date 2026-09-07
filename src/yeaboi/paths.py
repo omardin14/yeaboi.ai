@@ -120,6 +120,9 @@ REPORTING_THEMES_FILE = DATA_DIR / "reporting_themes.json"  # user-defined Repor
 REPORTING_PREFS_FILE = DATA_DIR / "reporting_prefs.json"  # persisted Reporting deck-style preferences
 VOICE_INSTALL_FILE = DATA_DIR / "voice_install.json"  # sticky "this machine cannot run dictation" verdicts
 CHANGELOG_SEEN_FILE = DATA_DIR / "changelog_seen.json"  # newest release the user has already read on the Changelog page
+NEWS_CACHE_FILE = DATA_DIR / "news_cache.json"  # the desktop front page's last paper, refreshed every half hour
+NEWS_ROSTER_FILE = DATA_DIR / "news_roster.json"  # which front-page outlets are on, plus the user's own feeds
+PROJECT_SUGGESTIONS_CACHE_FILE = DATA_DIR / "project_suggestions.json"  # the Projects door's recommended projects
 CUSTOM_CONNECTORS_FILE = DATA_DIR / "custom_connectors.json"  # user-created connection descriptors (never credentials)
 
 # Legacy paths (for backward compatibility / migration)
@@ -143,7 +146,8 @@ NIKO_EXPORTS_DIR = EXPORTS_DIR / "niko"
 REPORTING_EXPORTS_DIR = EXPORTS_DIR / "reporting"
 ROADMAP_EXPORTS_DIR = EXPORTS_DIR / "roadmap"
 ANONYMIZE_EXPORTS_DIR = EXPORTS_DIR / "anonymize"  # privacy-masked, shareable copies of any mode's output
-AGENTWATCH_EXPORTS_DIR = EXPORTS_DIR / "agentwatch"  # the Agents family: usage / standup / security reports
+AGENTWATCH_EXPORTS_DIR = EXPORTS_DIR / "agentwatch"  # the Agents family: usage / advisor / security reports
+AGENTWATCH_DATA_DIR = DATA_DIR / "agentwatch"  # dismissals and other hand-kept agentwatch state
 SOLO_EXPORTS_DIR = EXPORTS_DIR / "solo"  # the Solo world's own modes: weekly reviews
 
 # ---------------------------------------------------------------------------
@@ -184,6 +188,7 @@ CEREMONIES_LOGS_DIR = LOGS_DIR / "ceremonies"
 SLACK_LOGS_DIR = LOGS_DIR / "slack"
 NIKO_LOGS_DIR = LOGS_DIR / "niko"
 SOLO_LOGS_DIR = LOGS_DIR / "solo"
+NEWS_LOGS_DIR = LOGS_DIR / "news"
 
 # Legacy log paths
 LEGACY_TUI_LOG = ROOT_DIR / "scrum-agent.log"
@@ -320,6 +325,24 @@ def get_changelog_seen_path() -> Path:
     return CHANGELOG_SEEN_FILE
 
 
+def get_news_cache_path() -> Path:
+    """Return the path of the front page's cached paper (may not exist yet)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return NEWS_CACHE_FILE
+
+
+def get_project_suggestions_cache_path() -> Path:
+    """Return the path of the cached recommended-projects sheet (may not exist yet)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return PROJECT_SUGGESTIONS_CACHE_FILE
+
+
+def get_news_roster_path() -> Path:
+    """Return the path of the front page's outlet roster (may not exist yet)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return NEWS_ROSTER_FILE
+
+
 def _safe_key(key: str, fallback: str) -> str:
     """Normalize a project/engineer key into a single safe directory name.
 
@@ -432,12 +455,18 @@ def get_solo_export_dir(project_key: str) -> Path:
 def get_agentwatch_export_dir(kind_key: str) -> Path:
     """Return the agentwatch export directory for a report kind, creating it if needed.
 
-    ``kind_key`` is the report kind ("usage", "advisor", "standup", "security"),
-    so the agent modes' exports stay separated the way per-project modes are.
+    ``kind_key`` is the report kind ("usage", "advisor", "security"), so the
+    agent modes' exports stay separated the way per-project modes are.
     """
     d = AGENTWATCH_EXPORTS_DIR / _safe_key(kind_key, "report")
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def get_agentwatch_data_dir() -> Path:
+    """Return the agentwatch data directory (dismissals live here), creating it if needed."""
+    AGENTWATCH_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return AGENTWATCH_DATA_DIR
 
 
 def move_data_tree(new_root: Path) -> tuple[bool, str]:
@@ -558,6 +587,12 @@ def get_solo_log_dir() -> Path:
     """Return the Solo world's logs directory (weekly reviews), creating it if needed."""
     SOLO_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     return SOLO_LOGS_DIR
+
+
+def get_news_log_dir() -> Path:
+    """Return the front page's logs directory (feed refreshes), creating it if needed."""
+    NEWS_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    return NEWS_LOGS_DIR
 
 
 def get_ceremonies_log_dir() -> Path:
