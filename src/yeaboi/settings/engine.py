@@ -355,6 +355,8 @@ class SettingsSnapshot:
     sections: tuple[str, ...]
     config_path: str
     voice: dict
+    #: ``{kind: {outcome, message, checked_at}}`` — what the last live probe said.
+    connections: dict
 
 
 @dataclass(frozen=True)
@@ -420,8 +422,14 @@ def get_settings() -> SettingsSnapshot:
             )
         )
     logger.info("settings: snapshot served (%d fields)", len(values))
+    from yeaboi.connectors import verify_status
+
     return SettingsSnapshot(
-        fields=tuple(values), sections=SECTIONS, config_path=str(get_config_file()), voice=_voice_status()
+        fields=tuple(values),
+        sections=SECTIONS,
+        config_path=str(get_config_file()),
+        voice=_voice_status(),
+        connections={kind: verify_status.to_row(kind) for kind in _connection_kinds()},
     )
 
 
@@ -455,6 +463,9 @@ def set_setting(key: str, value: str) -> SettingWrite:
         config.apply_config_value(key, value)
     # Key names only — the value may be a credential.
     logger.info("settings: %s %s", key, "updated" if value else "cleared")
+    from yeaboi.connectors import verify_status
+
+    verify_status.forget_for_env(key)
     if key == "YEABOI_TELEMETRY":
         # telemetry.TELEMETRY_ENABLED is baked at import — the flip is
         # persisted now but only read at the next launch.
@@ -608,6 +619,7 @@ def verify_connection(kind: str, fields: dict[str, str]) -> dict:
     result or the log.
     """
     from yeaboi import provider_verification
+    from yeaboi.connectors import verify_status
 
     spec = _connection_kinds().get(kind)
     if spec is None:
@@ -655,6 +667,11 @@ def verify_connection(kind: str, fields: dict[str, str]) -> dict:
     else:
         ok, message = provider_verification._verify_tavus(resolved["token"])
     logger.info("settings: connection verify %s → ok=%s", kind, ok)
+    if not supplied:
+        # Only a probe of the STORED credentials describes the stored connection.
+        # A check of typed-but-unsaved values answers the caller without becoming
+        # the saved row's status.
+        verify_status.record(kind, ok, message, [env for _, env in spec])
     return {"ok": ok, "message": message}
 
 

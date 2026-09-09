@@ -79,6 +79,11 @@ class TestShape:
         assert row["read_only"] is True
         assert row["verify_kind"] == "datadog"
 
+    def test_a_row_reports_an_unprobed_connection_as_untested(self, _connected):
+        """Present credentials are not a verdict — the chip needs both facts."""
+        row = next(r for r in list_connections()["connectors"] if r["key"] == "datadog")
+        assert row["status"] == {"outcome": "untested", "message": "", "checked_at": ""}
+
     def test_families_only_name_families_present_in_the_rows(self, _connected):
         payload = list_connections()
         assert [f["key"] for f in payload["families"]] == ["observability"]

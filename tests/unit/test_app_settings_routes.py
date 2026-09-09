@@ -40,10 +40,17 @@ class TestSettingsRead:
         assert resp.code == 200
         assert secret not in resp.body.decode()
         payload = json.loads(resp.body)
-        assert {"fields", "sections", "config_path", "voice"} == set(payload)
+        assert {"fields", "sections", "config_path", "voice", "connections"} == set(payload)
         github = next(f for f in payload["fields"] if f["env"] == "GITHUB_TOKEN")
         assert github["secret"] and github["is_set"]
         assert github["value"].startswith("ghp_") and "•" in github["value"]
+
+    def test_a_present_credential_is_not_reported_as_verified(self, app, monkeypatch):
+        """A key that is merely set reads untested — presence is not health."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_never-probed")
+        payload = json.loads(request(app, "GET", "/api/settings").body)
+        assert payload["connections"]["github"]["outcome"] == "untested"
+        assert set(payload["connections"]["github"]) == {"outcome", "message", "checked_at"}
 
     def test_providers_catalog(self, app):
         payload = json.loads(request(app, "GET", "/api/settings/providers").body)

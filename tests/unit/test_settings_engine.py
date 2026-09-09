@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from yeaboi.connectors import verify_status
 from yeaboi.settings import engine
 
 SCREENS_SECONDARY = (
@@ -301,6 +302,40 @@ class TestConnectionVerify:
         result = engine.verify_connection("tavus", {})
         assert result == {"ok": False, "message": "Invalid Tavus API key"}
         assert seen["token"] == "tv-stored"
+
+
+class TestVerifyIsRemembered:
+    """A probe of the SAVED credentials becomes the connection's status; a probe
+    of typed values answers the caller and nothing more."""
+
+    def test_a_stored_credential_probe_is_recorded(self, monkeypatch):
+        monkeypatch.setenv("TAVUS_API_KEY", "tv-stored")
+        monkeypatch.setattr(
+            "yeaboi.provider_verification._verify_tavus", lambda token: (False, "Invalid Tavus API key")
+        )
+        engine.verify_connection("tavus", {})
+        status = verify_status.status_for("tavus")
+        assert status.outcome == verify_status.OUTCOME_FAILED
+        assert status.message == "Invalid Tavus API key"
+
+    def test_a_typed_credential_probe_is_not_recorded(self, monkeypatch):
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "xi-stored")
+        monkeypatch.setattr("yeaboi.provider_verification._verify_elevenlabs", lambda token: (True, "verified"))
+        engine.verify_connection("elevenlabs", {"token": "xi-typed"})
+        assert verify_status.status_for("elevenlabs").outcome == verify_status.OUTCOME_UNTESTED
+
+    def test_changing_the_credential_drops_the_verdict(self, monkeypatch):
+        monkeypatch.setenv("NOTION_TOKEN", "secret_stored")
+        monkeypatch.setattr("yeaboi.provider_verification._verify_notion", lambda token: (True, "Notion verified"))
+        engine.verify_connection("notion", {})
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_OK
+        engine.set_setting("NOTION_TOKEN", "secret_other")
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_UNTESTED
+
+    def test_the_snapshot_carries_a_row_for_every_kind(self):
+        snapshot = engine.get_settings()
+        assert set(snapshot.connections) >= {"github", "jira", "notion", "elevenlabs", "tavus"}
+        assert all(set(row) == {"outcome", "message", "checked_at"} for row in snapshot.connections.values())
 
 
 class TestTuiParity:
