@@ -370,7 +370,7 @@ _DISABLED_BADGE_RGB = (90, 90, 100)
 
 def mode_title_widths(cards: list[dict[str, Any]] | None = None) -> list[int]:
     """Block-font column width of every mode title, index-aligned to ``cards``
-    (default ``_MODE_CARDS`` — pass ``_AGENT_CARDS`` for the Agents menu).
+    (default ``_MODE_CARDS`` — pass ``_SOLO_MENU_CARDS`` for the Solo menu).
 
     The staggered intro reveal uses these to know when each title is fully wiped
     in (see the reveal loop in :mod:`yeaboi.ui.mode_select`).
@@ -904,7 +904,7 @@ def _build_mode_screen(
     sweep_skip: index of one title to leave fully shown while the sweep reveals the
     rest — used by the return transition (the mode you came from is already home).
     cards / mascot: the card list this menu shows (default ``_MODE_CARDS``) and the
-    companion sprite beside it ("duck" for Solo/Team, "robo" for Agents). Only the
+    companion sprite beside it ("duck" for Solo/Team, "flock" for Team). Only the
     *source* of the rows changes — every layout constant stays identical, and
     ``mode_at_row``/``selected_title_offset`` must be passed the same ``cards``.
     today: the Solo welcome's snapshot; when given, the Today strip sits above
@@ -1070,7 +1070,7 @@ def _build_mode_screen(
     panel = build_page_panel(body_renderable, height=height, padding=(1, 2, 0, 2), **title_kwargs)
     # The menu draws its own companion in-panel, but the stamp still matters:
     # MusicLive reads it into the chrome-mascot global, which the screensaver
-    # uses — idling on the Agents menu must save with the robo, not the duck.
+    # uses — a menu must idle into the screensaver wearing its own mascot.
     panel._duck_mascot = mascot
     if not is_welcome:
         panel._no_back_hint = True  # the main menu's Esc isn't "go back" → no back tab
@@ -1179,10 +1179,10 @@ def selected_title_offset(
     body_h += strip_rows
     mid_top = max(0, (body_area - body_h) // 2)
 
-    # Every mode before the selected one contributes title(2) + separator(1) = 3
-    # rows (none of them is selected, so no description block); the Today strip
-    # sits above them all.
-    return mid_top + strip_rows + 3 * selected
+    # Every mode before the selected one contributes title(2) + the separator
+    # (none of them is selected, so no description block); the Today strip sits
+    # above them all.
+    return mid_top + strip_rows + (2 + gap) * selected
 
 
 _COMPANION_CAPTION_ROWS = 1  # the "n  ask niko" line under the mascot

@@ -56,10 +56,10 @@ def capabilities(app, request: Request) -> Response:
     is the Team menu (the key predates the Solo world and the desktop reads
     it); ``solo`` is the Solo menu, additive.
 
-    ``solo_enabled`` is the desktop's gate on the Solo world. It has to be its
-    own field: ``solo`` and the ``solo`` category are both already optional with
-    a meaning ("a sidecar older than the Solo world"), so neither can carry it
-    unambiguously. Anything but an explicit true means hidden.
+    ``solo_enabled`` is the desktop's gate on the Solo world: anything but an
+    explicit true means hidden, so an older sidecar reads as hidden too. It is
+    its own field because ``solo`` and the ``solo`` category are both already
+    optional with a meaning of their own.
     """
     from yeaboi.config import solo_world_enabled
     from yeaboi.ui.mode_select.screens._screens import (

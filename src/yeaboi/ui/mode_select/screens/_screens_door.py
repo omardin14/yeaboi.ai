@@ -143,13 +143,15 @@ def _build_door_screen(
     intro: float = 1.0,
     active_name: str = "",
     back: bool = True,
+    paper: bool = False,
 ) -> Panel:
     """Build the full-screen door: two cards in the world's accent.
 
     ``active_name`` names a project that is already active — shown under the
     cards so picking Sessions is visibly what clears it. ``back`` is False when
     the door is the first screen (no landing split behind it), which makes Esc
-    quit and the hint say so.
+    quit and the hint say so; ``paper`` adds the front page's keycap, which the
+    split carries when there is one.
     """
     theme = world_theme(world)
     bounds = _door_bounds(width)
@@ -171,7 +173,10 @@ def _build_door_screen(
 
     hint = Text(justify="center")
     esc = ("esc", "back") if back else ("esc", "quit")
-    for key, label in (("←/→", "switch"), ("enter", "choose"), esc, ("q", "quit")):
+    # The door is the first screen when there is no split, so it carries the
+    # split's way in to the front page.
+    paper = (("i", "front page"),) if paper else ()
+    for key, label in (("←/→", "switch"), ("enter", "choose"), *paper, esc, ("q", "quit")):
         if hint.plain:
             hint.append("   ")
         hint.append(key, style="bold rgb(210,210,220)")

@@ -65,8 +65,8 @@ def _guard(what: str, fn: Callable, /, *args, **kwargs) -> dict:
 
 @tool
 def list_capabilities() -> dict:
-    """List everything yeaboi can do: the Solo and Team menus, the Agents family, and the
-    three categories they sit under. Use this when the user asks what yeaboi is,
+    """List everything yeaboi can do: the menus this build offers, and the
+    categories they sit under. Use this when the user asks what yeaboi is,
     what it can do, where a feature lives, or what they should try next.
     ``modes`` is the Team menu; ``solo`` is the Solo menu.
     """
@@ -81,18 +81,19 @@ def list_capabilities() -> dict:
         )
         from yeaboi.ui.mode_select.screens._screens_category import _CATEGORY_CARDS
 
-        # Mirrors GET /api/meta/capabilities, so Niko never offers a world the
-        # user cannot open.
+        # Niko must never name a mode the user cannot open, so a hidden Solo
+        # takes its cards with it. The HTTP route keeps `agents` unconditionally
+        # for the desktop's type; nothing here needs that.
         solo_on = solo_world_enabled()
         cards: dict = {
             "solo_enabled": solo_on,
             "categories": [card for card in _CATEGORY_CARDS if solo_on or card["key"] != "solo"],
             "modes": _MODE_CARDS,
-            "agents": _AGENT_CARDS,
             "intake": _INTAKE_CARDS,
         }
         if solo_on:
             cards["solo"] = _SOLO_MENU_CARDS
+            cards["agents"] = _AGENT_CARDS
         return cards
 
     return _guard("list_capabilities", _cards)
@@ -325,7 +326,7 @@ def provenance_trace(entity_id: str, depth: int = 2) -> dict:
 @tool
 def navigate(route: str) -> dict:
     """Take the user to a screen. Call this when the answer is "that lives over there"
-    — e.g. `/team/retro` for a retro, `/agents/usage` for agent spend. The route
+    — e.g. `/team/retro` for a retro, `/team/standup` for a standup. The route
     must be one `list_routes` returned. This only moves the user; it starts nothing.
     """
     known = {row.get("path", "") for row in known_routes()}

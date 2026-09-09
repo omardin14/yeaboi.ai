@@ -183,15 +183,16 @@ def set_tips_enabled(enabled: bool) -> None:
 
 # The Solo world's off switch. Read here and nowhere else: the CLI, the MCP
 # tools, the engines and the app's HTTP routes ignore it — only what a user can
-# see and click is gated. The mirror image of :func:`yeaboi.news.desk.enabled`,
-# which defaults *on*; this one defaults off, so the test is "in", not "not in".
+# see and click is gated.
 SOLO_WORLD_ENV = "YEABOI_SOLO"
-_SOLO_ON = ("1", "true", "on", "yes")
 
 
 def solo_world_enabled() -> bool:
-    """Whether the UI offers the Solo world, and with it the landing split."""
-    return os.getenv(SOLO_WORLD_ENV, "").strip().lower() in _SOLO_ON
+    """Whether the UI offers the Solo world, and with it the landing split.
+
+    Opt-in: an unset or unrecognised value hides the world.
+    """
+    return _env_truthy(SOLO_WORLD_ENV)
 
 
 # The landing split's categories. Persisted so the next launch preselects

@@ -96,6 +96,8 @@ CATEGORY_SCREEN_MARKERS = ("working with",)
 # Chrome of the door (Projects vs Sessions) — the first screen after the splash.
 # One fragment of its heading, for the same disjointness reason.
 DOOR_SCREEN_MARKERS = ("work today",)
+# Chrome of the project list, which the door's Projects card opens.
+PROJECTS_SCREEN_MARKERS = ("the others left behind",)
 _ANSI_RE = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]"
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
@@ -147,12 +149,11 @@ DEMO_SCRIPT: list[tuple] = [
     ("key", KEY_ESC),  # esc from a menu returns to the door (q would quit)
     ("await", DOOR_SCREEN_MARKERS, 15.0),
     ("pause", 1.0),
-    ("key", KEY_DOWN),
+    ("key", KEY_LEFT),  # and in again through Projects this time
     ("pause", 0.8),
-    ("key", KEY_DOWN),
-    ("pause", 1.2),  # back on a card, description revealed
-    ("key", KEY_DOWN),
-    ("pause", 1.5),  # rest on a card so the last frame is a real screen
+    ("key", KEY_ENTER),
+    ("await", PROJECTS_SCREEN_MARKERS, 15.0),
+    ("pause", 2.0),  # rest on the project list so the last frame is a real screen
     ("key", b"q"),
 ]
 
@@ -303,8 +304,11 @@ def _recording_env(home: Path) -> dict[str, str]:
         "YEABOI_UPDATE_CHECK": "0",
         "YEABOI_NO_TUNNEL": "1",
         "YEABOI_TELEMETRY": "off",
-        # The landing split's front page would otherwise start a fetch thread.
+        # The front page would otherwise start a fetch thread.
         "YEABOI_NEWS": "off",
+        # The demo films what ships, so a developer's exported YEABOI_SOLO must
+        # not put the landing split in front of a script that no longer awaits it.
+        "YEABOI_SOLO": "",
     }
     # Set, not popped: unset now falls through to the worktree's
     # .worktree.env marker, which would land this run in the shared

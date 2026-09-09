@@ -127,6 +127,8 @@ def _flow_strip(*, world: str, width: int, inside: dict[str, str] | None = None)
     """
     theme = PROJECTS_THEME
     steps = _flow_steps(world)
+    if not steps:
+        return []  # a menu with no flow keys has no strip to draw
     accent = world_theme(world).accent
     colors = _card_colors(world)
     inner = max(20, width - 6 - len(PAD))

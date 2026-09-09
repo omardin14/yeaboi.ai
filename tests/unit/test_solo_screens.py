@@ -240,6 +240,22 @@ class TestReviewCard:
             for row in range(1, 41)
         )
 
+    def test_row_gap_closes_only_past_the_ten_card_budget(self):
+        from yeaboi.ui.mode_select.screens._screens import _row_gap
+
+        assert _row_gap(8) == 1
+        assert _row_gap(10) == 1, "every menu shipping today must render unchanged"
+        assert _row_gap(11) == 0
+
+    def test_the_slide_target_agrees_with_the_hit_test_on_every_card(self):
+        # selected_title_offset and mode_at_row walk the same block; a gap
+        # threaded into one and not the other lands the slide on the wrong row.
+        for w, h in ((84, 40), (120, 40), (140, 44)):
+            for sel in range(len(_SOLO_MENU_CARDS)):
+                offset = selected_title_offset(sel, width=w, height=h, cards=_SOLO_MENU_CARDS)
+                hit = mode_at_row(sel, width=w, height=h, row=3 + offset, col=10, cards=_SOLO_MENU_CARDS)
+                assert hit == sel, (w, h, sel, offset, hit)
+
     def test_solo_rows_stay_contiguous_across_the_whole_menu(self):
         w, h = 120, 40
         hit_order = []

@@ -16,11 +16,15 @@ is the whole reason the answers read differently on ``/agents/usage`` than on
 
 from __future__ import annotations
 
-NIKO_IDENTITY = """\
+NIKO_HEAD = """\
 You are Niko, the duck's assistant for yeaboi — an AI Scrum Master that runs in a
 terminal and a desktop window. You help people find their way around yeaboi and
 understand their own delivery data.
+"""
 
+#: The Solo world's half of the identity. Only added when the world is on offer
+#: — Niko must never describe a mode the user has no way to open.
+NIKO_SOLO = """\
 yeaboi serves two audiences behind one split:
 
 - **Solo** — running your own delivery, no team required, and watching the AI
@@ -36,11 +40,29 @@ yeaboi serves two audiences behind one split:
 - **Team** — running your team's scrum. Everything Solo has, analysed across
   the whole roster, plus Retro boards, Planning Poker, and Performance (1:1
   prep and six-month reviews).
+"""
 
-Alongside all three: Ceremonies (the schedule the modes run on), Provenance
+NIKO_TEAM = """\
+yeaboi runs your team's scrum: Planning (decompose a project into epics, user
+stories, tasks and a sprint plan), Roadmap intake, Analysis (velocity and
+estimation patterns, learned from your board history), Daily Standup, Retro
+boards, Planning Poker, Performance (1:1 prep and six-month reviews), Reporting
+(delivery decks) and Ship (a supervised story-to-PR pipeline).
+"""
+
+NIKO_TAIL = """\
+Alongside the modes: Ceremonies (the schedule they run on), Provenance
 (the tamper-evident record of what was decided and why), and Usage (yeaboi's
 own LLM spend).
 """
+
+
+def niko_identity() -> str:
+    """The identity block, naming only the worlds this build offers."""
+    from yeaboi.config import solo_world_enabled
+
+    return NIKO_HEAD + "\n" + (NIKO_SOLO if solo_world_enabled() else NIKO_TEAM) + "\n" + NIKO_TAIL
+
 
 NIKO_PERSONALITY = """\
 ## Personality
@@ -94,7 +116,7 @@ def get_niko_system_prompt(
             computed. Never LLM-written, and never numbers the model may reuse
             elsewhere without a tool call.
     """
-    parts = [NIKO_IDENTITY, NIKO_PERSONALITY, NIKO_RULES]
+    parts = [niko_identity(), NIKO_PERSONALITY, NIKO_RULES]
 
     context = ["## Right now"]
     if user_name:

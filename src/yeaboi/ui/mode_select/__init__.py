@@ -61,6 +61,7 @@ from yeaboi.ui.mode_select.screens._screens import (  # noqa: F401
     _build_slide_frame,
     _build_too_small_screen,
     _build_update_screen,
+    _row_gap,
     duck_hit,
     mode_at_row,
     mode_title_widths,
@@ -12677,9 +12678,10 @@ def _sweep_menu_in(
         # the sweep runs until the largest of these.
         _front_max = 0.0
         _rb = 0
+        _gap = _row_gap(n)
         for _i in range(n):
             _front_max = max(_front_max, (_rb + 1) * _SWEEP_ROW_WEIGHT + _widths[_i])
-            _rb += (2 + (3 if _i == selected else 0)) + (1 if _i < n - 1 else 0)
+            _rb += (2 + (3 if _i == selected else 0)) + (_gap if _i < n - 1 else 0)
         _front_max += 2
         _intro_start = time.monotonic()
         while True:
@@ -13075,6 +13077,8 @@ def _run_door_screen(
     auto-skipped). Esc steps back one screen; q quits; n opens Niko. ``back`` is
     False when the door is the first screen, and then Esc quits like the split's.
     """
+    paper_on = _landing_desk().enabled()
+
     from yeaboi.ui.mode_select.screens._screens_door import (
         _DOOR_CARDS,
         _build_door_screen,
@@ -13105,6 +13109,7 @@ def _run_door_screen(
                 intro=min(1.0, elapsed / 0.4),
                 active_name=active_name,
                 back=back,
+                paper=paper_on and not back,
             )
         )
         key = read_key(timeout=_FRAME_TIME) if supports_timeout else read_key()
@@ -13117,13 +13122,19 @@ def _run_door_screen(
             logger.info("door chosen: %s", chosen)
             return chosen
         elif key == "esc":
-            logger.info("esc from the door — back to the split")
+            logger.info("esc from the door — %s", "back to the split" if back else "quit")
             return None
         elif key == "q":
             logger.info("quit from the door")
             return "quit"
         elif key == "n":
             _open_niko(console, live, read_key, _FRAME_TIME, supports_timeout)
+        elif key == "i" and paper_on and not back:
+            # The door is the first screen when there is no split, so it carries
+            # the split's way in to the front page.
+            _run_front_page_page(
+                console, live, read_key, _FRAME_TIME, supports_timeout, desk=_landing_desk(), card=None
+            )
         elif isinstance(key, str) and key.startswith("click:"):
             try:
                 cx, cy = (int(p) for p in key.split(":")[1:3])
@@ -13854,9 +13865,9 @@ def select_mode(
     set_solo_mode(category == "solo")
     cards, mascot = _CATEGORY_MENUS[category]
     _category_pending = split  # show the split on the first pass through the loop
-    # The door (Phase 0b): Projects or Sessions, shown after every split pick.
-    # Preselected from the last choice, never auto-skipped; Esc from a menu
-    # steps back here, and from here back to the split.
+    # The door (Phase 0b): Projects or Sessions. Preselected from the last
+    # choice, never auto-skipped; Esc from a menu steps back here, and from here
+    # back to the split — or quits, when there is no split.
     door = get_last_door()
     _door_pending = True
     _back_to_door = False
@@ -16570,10 +16581,10 @@ def select_mode(
 
                         w, h = console.size
                         inner_h = h - 4
-                        # Target: where Planning sits in the full 3-item mode screen.
-                        # body_h for 3 items with Planning selected (no desc during slide):
-                        # Planning(2) + blank(1) + CodeReview(2) + blank(1) + Sprint(2) = 8
-                        body_h_no_desc = 2 * n + (n - 1)
+                        # Target: where Planning sits in the full mode screen.
+                        # body_h with no description during the slide: two rows a
+                        # card plus the menu's own separator between them.
+                        body_h_no_desc = 2 * n + _row_gap(n) * (n - 1)
                         target_offset = max(0, (inner_h - body_h_no_desc) // 2)
                         start_offset = 1  # current position (top of project list)
 

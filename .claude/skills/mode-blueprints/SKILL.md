@@ -165,9 +165,9 @@ stale is sized but never summed into the recoverable headline), the second struc
 volatile-shaped content (UUID/ISO-8601/JWT-shape/hex-hash — counts only, no samples) in
 prompt-prefix files (CLAUDE.md). Waste is priced at the window's input-token-weighted blended
 rate via `pricing.lookup_price`. The TUI pages share one threaded-engine loop in
-`ui/mode_select/_agents.py`; the landing split lives in `screens/_screens_category.py` and the
-Agents card list is `_AGENT_CARDS` (never merged into `_MODE_CARDS` — welcome tests pin exact
-renders and indices).
+`ui/mode_select/_agents.py`. The three cards live in `_AGENT_CARDS`, spliced into the Solo menu by
+`_SOLO_MENU_CARDS` and never merged into `_MODE_CARDS` (welcome tests pin exact renders and
+indices). The Solo world — and so these pages — is hidden unless `$YEABOI_SOLO` is set.
 
 ## Roadmap Intake
 

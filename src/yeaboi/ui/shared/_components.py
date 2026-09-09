@@ -92,20 +92,17 @@ FEEDBACK_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220
 # App chrome like the changelog: neutral silver, no mode owns these pages.
 PRIVACY_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
 SYSTEM_CHECK_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
-# The two worlds of the landing split. TEAM_THEME is the Theme default
-# palette named, so the existing modes are unchanged; SOLO_THEME is a warm
-# amber for the one-duck world (distinct from Niko's duck gold and Usage's
-# ochre); AGENTS_THEME opens the family's "machine" palette, distinct per mode
-# like the team modes: steel blue for the category card, cyan/mint/rose per
-# mode below it. The landing split reads its card accents from these three — a
-# card that hardcoded the same rgb() triples would drift the moment a palette
-# moved.
+# The two worlds of the landing split. TEAM_THEME is the Theme default palette
+# named, so the existing modes are unchanged; SOLO_THEME is a warm amber for the
+# one-duck world (distinct from Niko's duck gold and Usage's ochre). The split
+# and the door read their card accents from these two — a card that hardcoded
+# the same rgb() triples would drift the moment a palette moved. The Agents
+# family keeps its own per-mode palette below (cyan/rose/amber).
 # The pre-mode credential gate. Alert rose, shared with Agent Security by
 # coincidence of meaning ("something is wrong here"), not by ownership.
 LLM_GATE_THEME = Theme(accent="rgb(230,90,120)", accent_bright="rgb(255,130,160)")
 SOLO_THEME = Theme(accent="rgb(210,168,80)", accent_bright="rgb(245,200,110)")
 TEAM_THEME = Theme()
-AGENTS_THEME = Theme(accent="rgb(90,160,210)", accent_bright="rgb(130,200,255)")
 AGENT_USAGE_THEME = Theme(accent="rgb(70,190,230)", accent_bright="rgb(110,225,255)")
 AGENT_SECURITY_THEME = Theme(accent="rgb(230,90,120)", accent_bright="rgb(255,130,160)")
 AGENT_ADVISOR_THEME = Theme(accent="rgb(240,180,70)", accent_bright="rgb(255,210,110)")

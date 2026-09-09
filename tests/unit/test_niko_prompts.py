@@ -12,19 +12,31 @@ from yeaboi.prompts.niko import get_niko_system_prompt, get_niko_title_prompt
 
 
 class TestIdentity:
-    def test_it_names_both_audiences(self):
+    def test_it_names_both_audiences_when_both_are_on_offer(self, monkeypatch):
+        monkeypatch.setenv("YEABOI_SOLO", "1")
         prompt = get_niko_system_prompt()
         assert "Solo" in prompt and "Team" in prompt
+
+    def test_it_never_names_a_world_the_build_hides(self, monkeypatch):
+        # Niko is reachable with `n` from the door and the menu, so a Team user
+        # asking what yeaboi does must not be told about a world they cannot open.
+        monkeypatch.delenv("YEABOI_SOLO", raising=False)
+        prompt = get_niko_system_prompt()
+        assert "Solo" not in prompt
+        assert "Weekly Review" not in prompt
+        assert "Agent Usage" not in prompt
 
     def test_it_names_the_modes_a_user_would_ask_about(self):
         prompt = get_niko_system_prompt().lower()
         for mode in ("planning", "standup", "retro", "poker", "performance", "reporting", "ship"):
             assert mode in prompt
 
-    def test_it_names_the_solo_worlds_own_mode(self):
+    def test_it_names_the_solo_worlds_own_mode(self, monkeypatch):
+        monkeypatch.setenv("YEABOI_SOLO", "1")
         assert "Weekly Review" in get_niko_system_prompt()
 
-    def test_it_names_the_agents_family(self):
+    def test_it_names_the_agents_family(self, monkeypatch):
+        monkeypatch.setenv("YEABOI_SOLO", "1")
         prompt = get_niko_system_prompt().lower()
         for member in ("usage", "advisor", "security"):
             assert member in prompt

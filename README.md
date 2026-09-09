@@ -20,9 +20,9 @@
 ---
 
 <div align="center">
-<img src="https://yeaboi.ai/demo.gif" alt="yeaboi.ai demo — the landing split asks who you're working with today, then tours the Humans menu (analysis, planning, standup, retro, poker, performance, reporting) and the Agents menu (usage, advisor, security)" width="800"/>
+<img src="https://yeaboi.ai/demo.gif" alt="yeaboi.ai demo — the door asks whether the work belongs to a project or is a one-off, then tours the modes (analysis, planning, standup, retro, poker, performance, reporting)" width="800"/>
 
-*Two worlds, one command: scrum for your team, and cost, recoverable spend & security posture for your agents.*
+*One command: your team's whole scrum, from the plan to the report.*
 </div>
 
 ---
@@ -122,7 +122,6 @@ yeaboi --non-interactive --description @project-brief.txt --output html --team-s
 🖥️ **Full-screen TUI** — Animated splash, mode selection, pipeline progress, dark/light themes
 🧠 **Smart Intake** — Extracts answers from your project description, asks only what's missing — or feed it a whole quarterly roadmap with Roadmap Intake
 🔄 **Seven modes, one command** — Planning, Daily Standup, Retro, Planning Poker, Performance _(beta)_, Reporting, Team Analysis
-🤖 **Agents too, not just humans** _(beta)_ — a robotic-duck landing split opens the Agents family: what your AI coding agents cost (API-equivalent, per day and per repo), how much of that spend is recoverable, and a security audit of your agent setup with grouped findings you can dismiss with a reason — computed locally from Claude Code session logs, transcripts never leave your machine
 🔌 **37 tools** — GitHub, Azure DevOps, Jira, Confluence, Notion, local codebase scanning, and more
 📤 **5 export formats** — Markdown, HTML, JSON, Jira sync, Azure DevOps Boards sync
 🤖 **11 LLM providers** — Claude (default), GPT, Gemini, Grok, DeepSeek, Kimi, Mistral, Qwen, GLM, AWS Bedrock, or fully local & keyless with Ollama

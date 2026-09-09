@@ -38,6 +38,6 @@ FLOW: tuple[FlowStep, ...] = (
 
 
 def flow_for(world: str, available: Iterable[str]) -> tuple[FlowStep, ...]:
-    """The steps a world's menu can run, in ``FLOW`` order."""
+    """The steps a world's menu can run, in ``FLOW`` order; empty for none."""
     keys = set(available)
     return tuple(step for step in FLOW if step.key in keys)
