@@ -17,7 +17,7 @@ from yeaboi.ui.mode_select.screens._screens_door import (
     door_index,
     world_theme,
 )
-from yeaboi.ui.shared._components import AGENTS_THEME, SOLO_THEME, TEAM_THEME
+from yeaboi.ui.shared._components import SOLO_THEME, TEAM_THEME
 
 
 def _plain(width=110, height=40, selected=0, **kwargs) -> str:
@@ -45,8 +45,13 @@ class TestCards:
     def test_world_theme(self):
         assert world_theme("solo") is SOLO_THEME
         assert world_theme("team") is TEAM_THEME
-        assert world_theme("agents") is AGENTS_THEME
         assert world_theme("") is TEAM_THEME
+
+    def test_esc_says_quit_when_there_is_nothing_behind_the_door(self):
+        # With Solo off the door is the first screen, so Esc quits.
+        assert "esc quit" in _plain(back=False)
+        assert "esc back" in _plain()
+        assert getattr(_build_door_screen(0, back=False), "_no_back_hint", False) is True
 
     def test_card_height_matches_the_layout_constant(self):
         from yeaboi.ui.mode_select.screens._screens_door import _card
@@ -79,7 +84,7 @@ class TestRender:
         for word in ("working with", "changelog", "Tip:", "channel"):
             assert word not in out
 
-    @pytest.mark.parametrize(("world", "theme"), [("solo", SOLO_THEME), ("team", TEAM_THEME), ("agents", AGENTS_THEME)])
+    @pytest.mark.parametrize(("world", "theme"), [("solo", SOLO_THEME), ("team", TEAM_THEME)])
     def test_selected_title_wears_the_worlds_accent(self, world, theme):
         out = _styled(84, 40, world=world)
         r, g, b = (int(v) for v in theme.accent_bright[4:-1].split(","))
@@ -243,11 +248,8 @@ class TestScopeLine:
         pid = create_project("Apollo", db_path=db)["project_id"]
         active.set_active_project(pid)
         assert ms._scope_line("projects", "team") == "Apollo · every run here shares context"
-        assert ms._scope_line("projects", "agents") == (
-            "Apollo · no repo path yet — yeaboi project set-defaults --repo <path>"
-        )
         set_project_defaults(pid, {"repo_path": "/srv/apollo"}, db_path=db)
-        assert ms._scope_line("projects", "agents") == "Apollo · agents in /srv/apollo"
+        assert ms._scope_line("projects", "solo") == "Apollo · every run here shares context"
 
     @pytest.fixture(autouse=True)
     def _still_chrome(self, monkeypatch):

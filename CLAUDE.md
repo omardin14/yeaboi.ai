@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Terminal-based AI Scrum Master agent built with LangGraph, LangChain, and Anthropic Claude (with OpenAI, Google, AWS Bedrock, and local Ollama as alternative providers). Two audiences behind one landing split: **Humans** (decomposes projects into epics, user stories, tasks, and sprint plans; standups, retros, poker, performance, reporting) and **Agents** (the `agentwatch` family — cost, recoverable spend, and security posture of the AI coding agents working across the SDLC, computed locally from Claude Code session logs).
+Terminal-based AI Scrum Master agent built with LangGraph, LangChain, and Anthropic Claude (with OpenAI, Google, AWS Bedrock, and local Ollama as alternative providers). Two audiences behind one landing split: **Team** (decomposes projects into epics, user stories, tasks, and sprint plans; standups, retros, poker, performance, reporting) and **Solo** (the same, run for one person, plus Weekly Review and the `agentwatch` family — cost, recoverable spend, and security posture of the AI coding agents working across the SDLC, computed locally from Claude Code session logs).
+
+**Solo is hidden in the UI at launch.** `config.solo_world_enabled()` reads `$YEABOI_SOLO` (default off) and is the only thing that gates it: with Solo off there is one world, so the landing split does not render and the desktop shows no world chooser. Nothing else is gated — the CLI, the MCP tools, the engines and the app's HTTP routes all keep working. `YEABOI_SOLO=1 make run-dry` (or `YEABOI_SOLO=1 make dev` in yeaboi-desktop, which passes it to the sidecar) brings the whole world back.
 
 ## Commands
 

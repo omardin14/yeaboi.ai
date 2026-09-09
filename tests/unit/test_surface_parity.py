@@ -929,15 +929,15 @@ class TestMcpTools:
 
 class TestTuiModes:
     def test_mode_cards_registered(self):
-        # The union of every category menu — Solo (_SOLO_CARDS), Team
-        # (_MODE_CARDS) and Agents (_AGENT_CARDS) — must equal the registered
+        # The union of both category menus — Solo (_SOLO_MENU_CARDS, which holds
+        # the Agents family) and Team (_MODE_CARDS) — must equal the registered
         # tui_mode column.
-        from yeaboi.ui.mode_select.screens._screens import _AGENT_CARDS, _MODE_CARDS, _SOLO_CARDS
+        from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_MENU_CARDS
 
-        actual = {card["key"] for card in (*_SOLO_CARDS, *_MODE_CARDS, *_AGENT_CARDS)}
+        actual = {card["key"] for card in (*_SOLO_MENU_CARDS, *_MODE_CARDS)}
         registered = set(_non_exempt("tui_mode").values())
         assert actual == registered, (
-            f"_SOLO_CARDS/_MODE_CARDS/_AGENT_CARDS keys vs CAPABILITIES differ.\n"
+            f"_SOLO_MENU_CARDS/_MODE_CARDS keys vs CAPABILITIES differ.\n"
             f"  new unregistered cards: {sorted(actual - registered)}\n"
             f"  registered but card removed: {sorted(registered - actual)}\n{_HOW_TO}"
         )
@@ -945,14 +945,23 @@ class TestTuiModes:
     def test_solo_and_team_menus_differ_by_exactly_the_world_only_modes(self):
         # Every shared card keeps one key (dispatch, hubs, tips and this
         # registry all key on it). The difference is exactly the modes each
-        # world owns: Team's three room-shaped modes, and Solo's Weekly Review —
-        # a self-review has no roster to review, so it never appears on Team.
-        from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_CARDS
+        # world owns: Team's three room-shaped modes, and Solo's Weekly Review
+        # plus the Agents family — a self-review has no roster to review, and a
+        # solo engineer is who watches their own agents.
+        from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_MENU_CARDS
 
-        solo = {card["key"] for card in _SOLO_CARDS}
+        solo = {card["key"] for card in _SOLO_MENU_CARDS}
         team = {card["key"] for card in _MODE_CARDS}
-        assert solo - team == {"weekly-review"}, sorted(solo - team)
+        assert solo - team == {"weekly-review", "agent-usage", "agent-advisor", "agent-security"}, sorted(solo - team)
         assert team - solo == {"retro", "poker", "performance"}
+
+    def test_settings_is_the_last_card_on_both_menus(self):
+        # The Agents family is spliced into the Solo menu, and Settings is last
+        # on every menu — the splice must never put a card after it.
+        from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_MENU_CARDS
+
+        assert _SOLO_MENU_CARDS[-1]["key"] == "settings"
+        assert _MODE_CARDS[-1]["key"] == "settings"
 
 
 # ---------------------------------------------------------------------------
@@ -1065,10 +1074,10 @@ class TestTips:
         # Every capability that owns a mode card must have a tip whose mode_key
         # points at that exact card, so the jump-into-feature key can't rot.
         # Cards span every category menu (the `g` jump switches category).
-        from yeaboi.ui.mode_select.screens._screens import _AGENT_CARDS, _MODE_CARDS, _SOLO_CARDS
+        from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_MENU_CARDS
         from yeaboi.ui.shared._tips import _FEATURE_TIPS
 
-        card_keys = {card["key"] for card in (*_SOLO_CARDS, *_MODE_CARDS, *_AGENT_CARDS)}
+        card_keys = {card["key"] for card in (*_SOLO_MENU_CARDS, *_MODE_CARDS)}
         for cap, tui_mode in _non_exempt("tui_mode").items():
             # "some tip", not "the tip": several capabilities carry more than one.
             tips = [t for t in _FEATURE_TIPS if t.key == cap and "tui" in t.surfaces]

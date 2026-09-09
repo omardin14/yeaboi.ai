@@ -50,18 +50,18 @@ from yeaboi.ui.mode_select.screens._project_list_screen import (  # noqa: F401
 
 # Re-exports for backwards compatibility and test imports.
 from yeaboi.ui.mode_select.screens._screens import (  # noqa: F401
-    _AGENT_CARDS,
     _INTAKE_CARDS,
     _MIN_HEIGHT,
     _MIN_WIDTH,
     _MODE_CARDS,
     _OFFLINE_CARDS,
-    _SOLO_CARDS,
+    _SOLO_MENU_CARDS,
     _SWEEP_ROW_WEIGHT,
     _build_mode_screen,
     _build_slide_frame,
     _build_too_small_screen,
     _build_update_screen,
+    _row_gap,
     duck_hit,
     mode_at_row,
     mode_title_widths,
@@ -5697,12 +5697,14 @@ def _run_changelog_page(console: Console, live, read_key, frame_time: float, sup
     logger.info("changelog: page closed (marked read=%s)", marked or "-")
 
 
-def _run_all_tips_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
+def _run_all_tips_page(
+    console: Console, live, read_key, frame_time: float, supports_timeout: bool, *, world: str = ""
+) -> None:
     """Event loop for the All Tips page (opened with `a` from mode select).
 
     Read-only gallery of every tip: Up/Down scrolls, Enter/Esc/q returns to mode
     select. Mirrors ``_run_changelog_page`` — including having no actions of its
-    own; content comes live from ``tips_for_surface("tui")``.
+    own; content comes live from ``tips_for_surface("tui", world=world)``.
     """
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_all_tips_screen
 
@@ -5724,6 +5726,7 @@ def _run_all_tips_page(console: Console, live, read_key, frame_time: float, supp
                 # loader on a page that opens instantly (see the changelog).
                 shimmer_tick=None,
                 sub_reveal=elapsed * _HEADER_SUB_SPEED,
+                world=world,
             )
         )
 
@@ -12675,9 +12678,10 @@ def _sweep_menu_in(
         # the sweep runs until the largest of these.
         _front_max = 0.0
         _rb = 0
+        _gap = _row_gap(n)
         for _i in range(n):
             _front_max = max(_front_max, (_rb + 1) * _SWEEP_ROW_WEIGHT + _widths[_i])
-            _rb += (2 + (3 if _i == selected else 0)) + (1 if _i < n - 1 else 0)
+            _rb += (2 + (3 if _i == selected else 0)) + (_gap if _i < n - 1 else 0)
         _front_max += 2
         _intro_start = time.monotonic()
         while True:
@@ -13064,13 +13068,17 @@ def _run_door_screen(
     *,
     world: str,
     preselected: str = "sessions",
+    back: bool = True,
 ) -> str | None:
     """Phase 0b — the door. Returns "projects"/"sessions", None to go back
     to the split, or "quit".
 
     Always shown after the split (the last door is *preselected*, never
-    auto-skipped). Esc steps back one screen; q quits; n opens Niko.
+    auto-skipped). Esc steps back one screen; q quits; n opens Niko. ``back`` is
+    False when the door is the first screen, and then Esc quits like the split's.
     """
+    paper_on = _landing_desk().enabled()
+
     from yeaboi.ui.mode_select.screens._screens_door import (
         _DOOR_CARDS,
         _build_door_screen,
@@ -13100,6 +13108,8 @@ def _run_door_screen(
                 shimmer_tick=elapsed,
                 intro=min(1.0, elapsed / 0.4),
                 active_name=active_name,
+                back=back,
+                paper=paper_on and not back,
             )
         )
         key = read_key(timeout=_FRAME_TIME) if supports_timeout else read_key()
@@ -13112,13 +13122,19 @@ def _run_door_screen(
             logger.info("door chosen: %s", chosen)
             return chosen
         elif key == "esc":
-            logger.info("esc from the door — back to the split")
+            logger.info("esc from the door — %s", "back to the split" if back else "quit")
             return None
         elif key == "q":
             logger.info("quit from the door")
             return "quit"
         elif key == "n":
             _open_niko(console, live, read_key, _FRAME_TIME, supports_timeout)
+        elif key == "i" and paper_on and not back:
+            # The door is the first screen when there is no split, so it carries
+            # the split's way in to the front page.
+            _run_front_page_page(
+                console, live, read_key, _FRAME_TIME, supports_timeout, desk=_landing_desk(), card=None
+            )
         elif isinstance(key, str) and key.startswith("click:"):
             try:
                 cx, cy = (int(p) for p in key.split(":")[1:3])
@@ -13176,11 +13192,6 @@ def _scope_line(door: str, world: str) -> str:
     if row is None:
         return "Session · one-off, unscoped"
     name = row["name"]
-    if world == "agents":
-        repo = str(row["settings"].get("repo_path") or "")
-        if repo:
-            return f"{name} · agents in {repo}"
-        return f"{name} · no repo path yet — yeaboi project set-defaults --repo <path>"
     return f"{name} · every run here shares context"
 
 
@@ -13205,14 +13216,27 @@ def _hub_subtitle(base: str, *, scoped: bool) -> str:
     return f"{base} — {name}" if scoped else f"{base} — all runs"
 
 
-def _landing_first_frame(category: str, *, width: int, height: int):
+def _landing_first_frame(category: str, door: str, *, width: int, height: int, split: bool = True):
     """The frame ``select_mode``'s Live is seeded with.
 
     Rich paints the seed on entry, before any loop body runs, so it has to be the
-    opening frame of whatever the loop shows first — Phase 0, the landing split,
-    at intro 0. Seed the *menu* instead and its hint row and music pocket flash
-    over the tail of the splash for a frame.
+    opening frame of whatever the loop shows first — the landing split at intro
+    0, or the door when there is no split. Seed the *menu* instead and its hint
+    row and music pocket flash over the tail of the splash for a frame.
     """
+    if not split:
+        from yeaboi.ui.mode_select.screens._screens_door import _build_door_screen, door_index
+
+        return _build_door_screen(
+            door_index(door),
+            world=category,
+            width=width,
+            height=height,
+            shimmer_tick=0.0,
+            intro=0.0,
+            back=False,
+        )
+
     from yeaboi.ui.mode_select.screens._screens_category import _build_category_screen, category_index
 
     return _build_category_screen(
@@ -13769,21 +13793,23 @@ SAVED_SESSION_HUBS = {
 #: The one place the category key picks a menu — the Phase-0/Phase-1 loop and
 #: the tip jump all read this instead of hand-rolling ternaries.
 _CATEGORY_MENUS: dict[str, tuple[list[dict], str]] = {
-    "solo": (_SOLO_CARDS, "duck"),
+    "solo": (_SOLO_MENU_CARDS, "duck"),
     "team": (_MODE_CARDS, "duck"),
-    "agents": (_AGENT_CARDS, "robo"),
 }
 
 
-def _tip_jump_target(mode_key: str, cards: list[dict]) -> tuple[str, int] | None:
+def _tip_jump_target(
+    mode_key: str, cards: list[dict], worlds: tuple[str, ...] = ("team", "solo")
+) -> tuple[str, int] | None:
     """Where a cross-category tip jump lands: ``(category, card index)`` or None.
 
-    Team is searched first: every Solo key but Review is also a Team key, so a
-    shared key jumped from any other menu lands on the Team menu — and a
-    retro/poker tip fired while browsing Solo correctly jumps to the world that
-    has the card. Solo comes last, so only its own Review card lands there.
+    Team is searched first: every Solo key but Review and the Agents family is
+    also a Team key, so a shared key jumped from the other menu lands on Team —
+    and a retro/poker tip fired while browsing Solo correctly jumps to the world
+    that has the card. ``worlds`` is the worlds on offer, so a tip can never
+    jump into one the launch hides.
     """
-    for cat in ("team", "agents", "solo"):
+    for cat in worlds:
         other, _mascot = _CATEGORY_MENUS[cat]
         if other is cards:
             continue
@@ -13813,7 +13839,13 @@ def select_mode(
     # The landing split (Phase 0). `category` picks which card list Phase 1
     # shows; the last choice is persisted and *preselected* on the next launch
     # (never auto-skipped). Esc from a menu returns here; q quits.
-    from yeaboi.config import get_last_category, get_last_door, set_last_category, set_last_door
+    from yeaboi.config import (
+        get_last_category,
+        get_last_door,
+        set_last_category,
+        set_last_door,
+        solo_world_enabled,
+    )
 
     if not dry_run:
         from yeaboi.ceremonies import scheduler as _scheduler
@@ -13825,13 +13857,17 @@ def select_mode(
             logger.warning("mode select: reap_dead_jobs failed", exc_info=True)
     from yeaboi.projects.active import get_active_project, set_active_project, set_solo_mode
 
+    # One world is not a choice: with Solo off there is no split, and the loop
+    # opens on the door. Every Phase-0 branch below hangs off this one local.
+    split = solo_world_enabled()
+    worlds = ("team", "solo") if split else ("team",)
     category = get_last_category()
     set_solo_mode(category == "solo")
     cards, mascot = _CATEGORY_MENUS[category]
-    _category_pending = True  # show the split on the first pass through the loop
-    # The door (Phase 0b): Projects or Sessions, shown after every split pick.
-    # Preselected from the last choice, never auto-skipped; Esc from a menu
-    # steps back here, and from here back to the split.
+    _category_pending = split  # show the split on the first pass through the loop
+    # The door (Phase 0b): Projects or Sessions. Preselected from the last
+    # choice, never auto-skipped; Esc from a menu steps back here, and from here
+    # back to the split — or quits, when there is no split.
     door = get_last_door()
     _door_pending = True
     _back_to_door = False
@@ -13910,7 +13946,7 @@ def select_mode(
     # never flickers.
     #
     with make_live(
-        _landing_first_frame(category, width=w, height=h),
+        _landing_first_frame(category, door, width=w, height=h, split=split),
         console=console,
         refresh_per_second=60,
         screen=True,
@@ -13963,11 +13999,13 @@ def select_mode(
                 _door_pick = None
                 while _door_pick is None:
                     _door_pick = _run_door_screen(
-                        console, live, read_key, _supports_timeout, world=category, preselected=door
+                        console, live, read_key, _supports_timeout, world=category, preselected=door, back=split
                     )
                     if _door_pick == "quit":
                         return None
                     if _door_pick is None:
+                        if not split:
+                            return None  # nothing behind the door — esc is quit
                         _category_pending = True
                         break
                     if _door_pick == "sessions":
@@ -14167,7 +14205,7 @@ def select_mode(
                             logger.info("tip jump to mode: %s", _tip.mode_key)
                             selected = _j
                             break
-                        _target = _tip_jump_target(_tip.mode_key, cards)
+                        _target = _tip_jump_target(_tip.mode_key, cards, worlds)
                         if _target is not None:
                             category, _j = _target
                             set_solo_mode(category == "solo")
@@ -14335,7 +14373,7 @@ def select_mode(
                     # pattern as the Changelog/Feedback pages above.
                     # No wordmark intro here either (see the changelog above).
                     logger.info("all tips opened from mode select")
-                    _run_all_tips_page(console, live, read_key, _FRAME_TIME, _supports_timeout)
+                    _run_all_tips_page(console, live, read_key, _FRAME_TIME, _supports_timeout, world=category)
                     _slide_menu_in(
                         console,
                         live,
@@ -16543,10 +16581,10 @@ def select_mode(
 
                         w, h = console.size
                         inner_h = h - 4
-                        # Target: where Planning sits in the full 3-item mode screen.
-                        # body_h for 3 items with Planning selected (no desc during slide):
-                        # Planning(2) + blank(1) + CodeReview(2) + blank(1) + Sprint(2) = 8
-                        body_h_no_desc = 2 * n + (n - 1)
+                        # Target: where Planning sits in the full mode screen.
+                        # body_h with no description during the slide: two rows a
+                        # card plus the menu's own separator between them.
+                        body_h_no_desc = 2 * n + _row_gap(n) * (n - 1)
                         target_offset = max(0, (inner_h - body_h_no_desc) // 2)
                         start_offset = 1  # current position (top of project list)
 

@@ -2,6 +2,32 @@
   "schema_version": 2,
   "entries": [
     {
+      "version": "3.45.1",
+      "date": "2026-09-09",
+      "headline": "yeaboi opens straight into your modes",
+      "summary": "The terminal now opens on the door \u2014 a project, or a one-off session \u2014 rather than asking which world you are in first. Longer menus also keep their footer on screen, and a card opens the one you clicked.",
+      "highlights": [
+        {
+          "text": "Opens on the door instead of a world chooser",
+          "areas": [
+            "general"
+          ]
+        },
+        {
+          "text": "Longer menus keep their footer and their spacing on screen",
+          "areas": [
+            "general"
+          ]
+        },
+        {
+          "text": "Clicking a card opens that card, on every menu length",
+          "areas": [
+            "general"
+          ]
+        }
+      ]
+    },
+    {
       "version": "3.45.0",
       "date": "2026-09-06",
       "headline": "Projects track status and show what you've run in them",

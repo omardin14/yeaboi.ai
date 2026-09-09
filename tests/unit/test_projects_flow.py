@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from yeaboi.projects.flow import AGENTS_FLOW_LINE, FLOW, flow_for
+from yeaboi.projects.flow import FLOW, flow_for
 from yeaboi.projects.scope import CONTEXT_DEP_TOKENS
 from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_CARDS
 
@@ -21,10 +21,10 @@ class TestFacts:
         assert {step.key for step in FLOW} <= _TEAM_KEYS
 
     def test_fragments_follow_the_door_rules(self):
-        for text in [step.leaves for step in FLOW] + [AGENTS_FLOW_LINE]:
+        for text in [step.leaves for step in FLOW]:
             assert "→" not in text and "·" not in text
             assert not re.search(r"\b[A-Z]{2,}\b", text), text
-            assert text[0].islower() or text == AGENTS_FLOW_LINE
+            assert text[0].islower()
 
     def test_plan_comes_first(self):
         assert FLOW[0].key == "project-planning"
@@ -38,9 +38,6 @@ class TestFlowFor:
         keys = [s.key for s in flow_for("solo", _SOLO_KEYS)]
         assert "retro" not in keys and "poker" not in keys
         assert keys[0] == "project-planning" and "daily-standup" in keys
-
-    def test_agents_has_no_flow(self):
-        assert flow_for("agents", _TEAM_KEYS) == ()
 
     def test_unknown_keys_are_ignored(self):
         assert flow_for("team", {"nope"}) == ()

@@ -154,15 +154,16 @@ class TestDemoScript:
             if step[0] == "key" and step[1] in transitions:
                 assert steps[i + 1][0] == "await", f"step {i} changes screen but step {i + 1} is {steps[i + 1]!r}"
 
-    def test_tours_both_families(self):
-        """The demo must show the split, the Humans menu, and the Agents menu.
+    def test_never_films_a_screen_the_shipped_build_hides(self):
+        """The launch ships one world, so the split does not render.
 
-        The whole point of the re-record: a take that never leaves one family
-        sells half the product.
+        A take that waits on it would hang for its whole timeout and then film
+        the wrong screen — and a GIF showing a chooser the user never sees is
+        worse than no GIF.
         """
         awaited = [step[1] for step in record_demo.DEMO_SCRIPT if step[0] == "await"]
-        assert awaited.count(record_demo.CATEGORY_SCREEN_MARKERS) >= 2, "never returns to the landing split"
-        assert awaited.count(record_demo.MODE_SCREEN_MARKERS) >= 2, "only one of the two mode menus is shown"
+        assert record_demo.CATEGORY_SCREEN_MARKERS not in awaited
+        assert awaited.count(record_demo.MODE_SCREEN_MARKERS) >= 1, "the mode menu is never shown"
 
     def test_marker_sets_are_disjoint(self):
         """Each await must be able to tell the three screens apart.
@@ -177,7 +178,7 @@ class TestDemoScript:
 
     def test_tours_the_door_both_ways(self):
         awaited = [step[1] for step in record_demo.DEMO_SCRIPT if step[0] == "await"]
-        assert awaited.count(record_demo.DOOR_SCREEN_MARKERS) >= 3, "the door is not shown on the way in and out"
+        assert awaited.count(record_demo.DOOR_SCREEN_MARKERS) >= 2, "the door is not shown on the way in and out"
 
     def test_markers_are_disjoint_on_the_rendered_screens(self):
         """The real guard: neither set may appear on the other's screen.
@@ -240,9 +241,10 @@ class TestDemoScript:
             for marker in record_demo.CATEGORY_SCREEN_MARKERS + record_demo.DOOR_SCREEN_MARKERS:
                 assert marker not in menu, f"marker {marker!r} renders on the mode menu (tip {tip_index})"
 
-    def test_starts_by_awaiting_the_landing_split(self):
+    def test_starts_by_awaiting_the_door(self):
+        # The first screen after the splash, now that there is no split.
         assert record_demo.DEMO_SCRIPT[0][0] == "await"
-        assert record_demo.DEMO_SCRIPT[0][1] == record_demo.CATEGORY_SCREEN_MARKERS
+        assert record_demo.DEMO_SCRIPT[0][1] == record_demo.DOOR_SCREEN_MARKERS
 
     def test_ends_with_quit(self):
         assert record_demo.DEMO_SCRIPT[-1] == ("key", b"q")

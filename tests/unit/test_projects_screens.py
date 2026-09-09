@@ -11,7 +11,7 @@ import io
 import pytest
 from rich.console import Console
 
-from yeaboi.projects.flow import AGENTS_FLOW_LINE, FLOW
+from yeaboi.projects.flow import FLOW
 from yeaboi.sessions_recent import RecentSession
 from yeaboi.ui.mode_select.screens._screens_projects import (
     ACTIONS,
@@ -86,10 +86,6 @@ class TestTheFlowStrip:
     def test_solo_has_no_retro_or_poker(self):
         out = _render(projects=[], world="solo")
         assert "● Retro" not in out and "● Poker" not in out and "● Plan" in out
-
-    def test_agents_states_its_own_fact(self):
-        out = _render(projects=[], world="agents")
-        assert AGENTS_FLOW_LINE in out and "● Plan" not in out
 
     def test_never_wider_than_the_frame(self):
         for width in (84, 100, 140):

@@ -18,8 +18,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from yeaboi.projects.flow import AGENTS_FLOW_LINE, FlowStep, flow_for
-from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_CARDS
+from yeaboi.projects.flow import FlowStep, flow_for
+from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS, _SOLO_MENU_CARDS
 from yeaboi.ui.mode_select.screens._screens_door import world_theme
 from yeaboi.ui.shared._components import (
     PAD,
@@ -100,7 +100,7 @@ def ordered_projects(projects: list[dict]) -> list[dict]:
 
 
 def _cards_for(world: str) -> list[dict]:
-    return _SOLO_CARDS if world == "solo" else _MODE_CARDS
+    return _SOLO_MENU_CARDS if world == "solo" else _MODE_CARDS
 
 
 def _flow_steps(world: str) -> tuple[FlowStep, ...]:
@@ -128,7 +128,7 @@ def _flow_strip(*, world: str, width: int, inside: dict[str, str] | None = None)
     theme = PROJECTS_THEME
     steps = _flow_steps(world)
     if not steps:
-        return [Text(f"{PAD}{AGENTS_FLOW_LINE}", style=theme.desc)]
+        return []  # a menu with no flow keys has no strip to draw
     accent = world_theme(world).accent
     colors = _card_colors(world)
     inner = max(20, width - 6 - len(PAD))

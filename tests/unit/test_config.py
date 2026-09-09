@@ -1034,19 +1034,38 @@ class TestLastCategory:
         from yeaboi import config as cfg
 
         monkeypatch.setenv("YEABOI_LAST_CATEGORY", "team")
+        monkeypatch.setenv("YEABOI_SOLO", "1")
         monkeypatch.setattr(cfg, "get_config_file", lambda: tmp_path / ".env")
-        cfg.set_last_category("agents")
-        assert os.environ["YEABOI_LAST_CATEGORY"] == "agents"
-        assert cfg.get_last_category() == "agents"
+        cfg.set_last_category("solo")
+        assert os.environ["YEABOI_LAST_CATEGORY"] == "solo"
+        assert cfg.get_last_category() == "solo"
         assert "YEABOI_LAST_CATEGORY" in (tmp_path / ".env").read_text()
 
     def test_solo_round_trips(self, monkeypatch, tmp_path):
         from yeaboi import config as cfg
 
         monkeypatch.setenv("YEABOI_LAST_CATEGORY", "team")
+        monkeypatch.setenv("YEABOI_SOLO", "1")
         monkeypatch.setattr(cfg, "get_config_file", lambda: tmp_path / ".env")
         cfg.set_last_category("solo")
         assert cfg.get_last_category() == "solo"
+
+    def test_solo_reads_as_team_while_the_world_is_off(self, monkeypatch):
+        # The launch build hides Solo, so a persisted "solo" must not open a
+        # world the user has no way back out of.
+        monkeypatch.setenv("YEABOI_LAST_CATEGORY", "solo")
+        monkeypatch.delenv("YEABOI_SOLO", raising=False)
+        from yeaboi.config import get_last_category
+
+        assert get_last_category() == "team"
+
+    def test_legacy_agents_maps_to_solo(self, monkeypatch):
+        # The Agents world merged into Solo; older releases persisted "agents".
+        monkeypatch.setenv("YEABOI_LAST_CATEGORY", "agents")
+        monkeypatch.setenv("YEABOI_SOLO", "1")
+        from yeaboi.config import get_last_category
+
+        assert get_last_category() == "solo"
 
     def test_legacy_humans_maps_to_team(self, monkeypatch):
         # Older releases persisted "humans"; it must read as "team", not fall
@@ -1070,6 +1089,30 @@ class TestLastCategory:
         cfg.set_last_category("nonsense")
         assert cfg.get_last_category() == "team"
         assert not (tmp_path / ".env").exists()
+
+
+class TestSoloWorldFlag:
+    """YEABOI_SOLO — the Solo world's UI gate. Off unless explicitly asked for."""
+
+    def test_unset_is_off(self, monkeypatch):
+        monkeypatch.delenv("YEABOI_SOLO", raising=False)
+        from yeaboi.config import solo_world_enabled
+
+        assert solo_world_enabled() is False
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "on", "yes", " Yes "])
+    def test_truthy_values_turn_it_on(self, monkeypatch, value):
+        monkeypatch.setenv("YEABOI_SOLO", value)
+        from yeaboi.config import solo_world_enabled
+
+        assert solo_world_enabled() is True
+
+    @pytest.mark.parametrize("value", ["0", "", "false", "off", "no", "maybe"])
+    def test_everything_else_stays_off(self, monkeypatch, value):
+        monkeypatch.setenv("YEABOI_SOLO", value)
+        from yeaboi.config import solo_world_enabled
+
+        assert solo_world_enabled() is False
 
 
 class TestGetAcFormat:

@@ -4132,6 +4132,7 @@ def _build_all_tips_screen(
     shimmer_tick: float | None = None,
     sub_reveal: float | None = None,
     message: str = "",
+    world: str = "",
 ) -> Panel:
     """Build the All Tips gallery page: every discoverability tip in one scroll.
 
@@ -4174,7 +4175,9 @@ def _build_all_tips_screen(
     tip_wrap_w = max(16, viewport_body_w - len(bullet_prefix) - 1)
     separator_w = max(8, min(viewport_body_w - len(_PAD) - 2, 40))
 
-    tips = tips_for_surface("tui")
+    # Narrowed to the landing world in play: the gallery is the one page that
+    # would otherwise name every world's features to every world.
+    tips = tips_for_surface("tui", world=world)
     grouped_tips = (
         ("Modes", [tip for tip in tips if tip.mode_key]),
         (

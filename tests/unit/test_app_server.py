@@ -39,14 +39,27 @@ class TestMetaRoutes:
         payload = json.loads(request(app, "GET", "/api/meta/version").body)
         assert set(payload) == {"version", "schema_version", "python", "platform"}
 
-    def test_capabilities_serves_the_card_inventory(self, app):
-        from yeaboi.ui.mode_select.screens._screens import _AGENT_CARDS, _MODE_CARDS, _SOLO_CARDS
+    def test_capabilities_serves_the_card_inventory(self, app, monkeypatch):
+        from yeaboi.ui.mode_select.screens._screens import _AGENT_CARDS, _MODE_CARDS, _SOLO_MENU_CARDS
 
+        monkeypatch.setenv("YEABOI_SOLO", "1")
         payload = json.loads(request(app, "GET", "/api/meta/capabilities").body)
-        assert set(payload) == {"categories", "solo", "modes", "agents", "intake"}
-        assert [card["key"] for card in payload["solo"]] == [card["key"] for card in _SOLO_CARDS]
+        assert set(payload) == {"solo_enabled", "categories", "solo", "modes", "agents", "intake"}
+        assert payload["solo_enabled"] is True
+        assert [card["key"] for card in payload["solo"]] == [card["key"] for card in _SOLO_MENU_CARDS]
         assert [card["key"] for card in payload["modes"]] == [card["key"] for card in _MODE_CARDS]
         assert [card["key"] for card in payload["agents"]] == [card["key"] for card in _AGENT_CARDS]
+        assert {card["key"] for card in payload["categories"]} == {"solo", "team"}
+
+    def test_capabilities_hides_the_solo_world_by_default(self, app, monkeypatch):
+        # The desktop gates on solo_enabled; `agents` stays on the wire because
+        # its Capabilities type has that key non-optional.
+        monkeypatch.delenv("YEABOI_SOLO", raising=False)
+        payload = json.loads(request(app, "GET", "/api/meta/capabilities").body)
+        assert payload["solo_enabled"] is False
+        assert "solo" not in payload
+        assert "agents" in payload
+        assert [card["key"] for card in payload["categories"]] == ["team"]
 
     def test_tips_serves_the_desktop_rotation(self, app):
         # The registry holds both surfaces' tips; this endpoint is the desktop

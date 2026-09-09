@@ -257,25 +257,28 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
         is_new=True,
         worlds=("team",),
     ),
-    # The Agents family — cards live on the Agents menu (_AGENT_CARDS); the `g`
-    # jump switches category when the tip fires from another menu.
+    # The Agents family — cards live on the Solo menu, so the tips are Solo-only:
+    # a Team user must never be told about a world their launch does not have.
     FeatureTip(
         "agent-usage",
-        "\U0001f916 Tip: Agents → Usage shows what your AI agents cost — per model, project and day",
+        "\U0001f916 Tip: Agent Usage shows what your AI agents cost — per model, project and day",
         mode_key="agent-usage",
         is_beta=True,
+        worlds=("solo",),
     ),
     FeatureTip(
         "agent-advisor",
-        "\U0001f916 Tip: Agents → Advisor estimates how much of your agent spend is recoverable — and why",
+        "\U0001f916 Tip: Agent Advisor estimates how much of your agent spend is recoverable — and why",
         mode_key="agent-advisor",
         is_beta=True,
+        worlds=("solo",),
     ),
     FeatureTip(
         "agent-security",
-        "\U0001f916 Tip: Agents → Security audits agent permissions, MCP servers and secrets exposure",
+        "\U0001f916 Tip: Agent Security audits agent permissions, MCP servers and secrets exposure",
         mode_key="agent-security",
         is_beta=True,
+        worlds=("solo",),
     ),
     FeatureTip(
         "provenance",
@@ -466,21 +469,22 @@ def tips_for_surface(surface: str, *, world: str = "") -> tuple[FeatureTip, ...]
     return tuple(tip for tip in get_tips() if surface in tip.surfaces and (not world or world in tip.worlds))
 
 
-def build_tips_text() -> str:
+def build_tips_text(*, world: str = "") -> str:
     """Render every tip as a copy-pasteable Markdown list.
 
     Powers the "Copy all" action on the terminal's All Tips page, mirroring
     ``build_changelog_text``. Pure — :func:`get_tips` already resolves
     voice/music availability. Carded tips note the mode they open (by its
     friendly ``_MODE_CARDS`` title), freshly-shipped ones are marked ``(NEW)``
-    and unverified ones ``(BETA)``.
+    and unverified ones ``(BETA)``. ``world`` narrows it to one landing world,
+    so the page cannot name a feature that world does not have.
     """
     # Lazy import to avoid a UI import cycle (screens import from this module).
     from yeaboi.ui.mode_select.screens._screens import _MODE_CARDS
 
     titles = {card["key"]: card["title"] for card in _MODE_CARDS}
     lines = ["# yeaboi — Tips", ""]
-    for tip in tips_for_surface("tui"):
+    for tip in tips_for_surface("tui", world=world):
         line = f"- {tip.text}"
         # BETA outranks NEW: a maturity caveat matters more than a freshness cue,
         # and a copied tip list that says both reads as neither.

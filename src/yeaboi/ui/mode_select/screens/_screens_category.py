@@ -1,7 +1,10 @@
-"""The landing split — Solo vs Team vs Agents — shown between the splash and a menu.
+"""The landing split — Solo vs Team — shown between the splash and a menu.
+
+Only built when the Solo world is on (:func:`yeaboi.config.solo_world_enabled`);
+one world is not a choice, so the loop opens on the door instead.
 
 Rounded world-cards side by side, each carrying its mascot (the OG duck for
-Solo, the duck trio for Team, the robotic duck for Agents), a solid-accent block title, a
+Solo, the duck trio for Team), a solid-accent block title, a
 verb line, and an accent-middot capability list. The page's one question lives
 in the outer frame's border, not floating in space. Under the cards, when the
 terminal is tall enough, the welcome's duck waits in the corner with the front
@@ -37,7 +40,6 @@ from yeaboi.beta import BETA_LABEL
 from yeaboi.ui.mode_select.screens._screens import _COMPANION_COLS, _QUACK_HZ, _QUACK_SECONDS, _build_companion
 from yeaboi.ui.shared._ascii_font import render_ascii_text
 from yeaboi.ui.shared._components import (
-    AGENTS_THEME,
     LANDING_DETAIL_RESTING,
     LANDING_DETAIL_SELECTED,
     LANDING_HEADING_STYLE,
@@ -59,7 +61,7 @@ _CATEGORY_CARDS: list[dict[str, Any]] = [
         "key": "solo",
         "title": "Solo",
         "verb": "Run your own show",
-        "capabilities": ["planning", "standups", "analysis", "reports"],
+        "capabilities": ["planning", "standups", "reports", "your AI agents"],
         "color": SOLO_THEME.accent,
         "bright": SOLO_THEME.accent_bright,
         "dim": "rgb(95,80,45)",  # the resting shade — no theme slot for it
@@ -78,18 +80,6 @@ _CATEGORY_CARDS: list[dict[str, Any]] = [
         "dim": "rgb(55,95,58)",
         "tint": "rgb(17,28,20)",
         "mascot": "flock",
-    },
-    {
-        "key": "agents",
-        "title": "Agents",
-        "verb": "Watch your AI agents work",
-        "capabilities": ["cost", "recoverable spend", "security posture"],
-        "color": AGENTS_THEME.accent,
-        "bright": AGENTS_THEME.accent_bright,
-        "dim": "rgb(50,88,115)",
-        "tint": "rgb(15,24,32)",
-        "mascot": "robo",
-        "badge": BETA_LABEL,
     },
 ]
 
@@ -492,7 +482,7 @@ def _build_category_screen(
 
 
 def category_at_pos(width: int, height: int, *, row: int, col: int) -> int | None:
-    """Map a 1-based terminal click to a category index (0=solo, 1=team, 2=agents).
+    """Map a 1-based terminal click to a category index (0=solo, 1=team).
 
     Any click inside the content band counts for the card region it lands in —
     the cards are the whole screen, so precision clicking isn't required: a
