@@ -2,6 +2,32 @@
   "schema_version": 2,
   "entries": [
     {
+      "version": "3.45.1",
+      "date": "2026-09-09",
+      "headline": "Menus navigate reliably and keep up with more cards",
+      "summary": "Terminal menus now handle larger card lists without layout breakage, and card selection responds precisely. Three bugs from the menu redesign are fixed: the selection cursor no longer jumps when navigating cards, screen layouts stay intact up to 11 items, and hidden features no longer appear in feature tips.",
+      "highlights": [
+        {
+          "text": "Card selection now responds precisely without unexpected jumps",
+          "areas": [
+            "planning"
+          ]
+        },
+        {
+          "text": "Terminal menus support more cards without layout breakage",
+          "areas": [
+            "general"
+          ]
+        },
+        {
+          "text": "Niko and tips no longer reference unreleased features",
+          "areas": [
+            "general"
+          ]
+        }
+      ]
+    },
+    {
       "version": "3.45.0",
       "date": "2026-09-06",
       "headline": "Projects track status and show what you've run in them",
