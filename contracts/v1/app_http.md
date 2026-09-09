@@ -112,8 +112,9 @@ not live health, so a client words the age rather than treating `ok` as
 current. A probe carrying typed values answers `{ok, message}` without becoming
 the saved connection's status — only a probe of the *stored* credentials
 describes the stored connection. A row whose `verify_kind` is `""` (Slack,
-Azure DevOps) has no probe and can never leave `untested`: render no status
-chip there rather than a grey one that reads as failure. The store behind this
+Azure DevOps) has no probe and can never leave `untested`, so a client should
+word that row as presence alone rather than as an untested verdict — "not
+tested" about a thing nothing can test reads as a fault. The store behind this
 holds no credential and no digest of one — it records which envs a check ran
 against and whether each was set, nothing more.
 
