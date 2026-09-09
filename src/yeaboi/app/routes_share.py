@@ -45,12 +45,27 @@ _END = object()
 
 
 def destinations(app, request: Request) -> Response:
-    """``GET /api/export/destinations`` — the menu, for one mode."""
+    """``GET /api/export/destinations`` — the menu, for one mode.
+
+    ``?all=1`` is the settings view: every destination, including the ones no
+    credential reaches yet, each saying what it needs. ``exports_dir`` is where
+    the Files destination writes — a fact, not a setting; it moves with the
+    data home.
+    """
     from yeaboi.exporting import destination_options
 
     mode = str(request.query.get("mode", "planning"))
     extras = [e for e in str(request.query.get("extras", "")).split(",") if e]
-    return json_response({"mode": mode, "destinations": destination_options(mode=mode, extras=extras)})
+    show_all = str(request.query.get("all", "")).strip().lower() in ("1", "true", "yes")
+    from yeaboi import paths
+
+    return json_response(
+        {
+            "mode": mode,
+            "destinations": destination_options(mode=mode, extras=extras, include_unavailable=show_all),
+            "exports_dir": str(paths.EXPORTS_DIR),
+        }
+    )
 
 
 def export(app, request: Request) -> Response:

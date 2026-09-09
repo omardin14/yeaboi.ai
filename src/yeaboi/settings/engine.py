@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -78,6 +79,13 @@ class SettingField:
     # 'signin' (subscription sign-in), 'data-dir' (set_data_dir), 'allowed-paths'
     # (set_allowed_paths), 'voice-device' (picker over the snapshot's device list).
     action: str = ""
+    # The value's SHAPE, which is a different question from which flow writes it:
+    # 'list' is separator-joined and edited as rows, 'text' is one value.
+    kind: str = "text"
+    # What one item of a list is, so a surface can validate and pick rather than
+    # accept free text: 'email', 'path', or '' for a plain string.
+    item_kind: str = ""
+    separator: str = ","
 
 
 def _provider_tables() -> tuple[tuple[str, ...], dict[str, str], dict[str, str]]:
@@ -146,7 +154,7 @@ def _build_fields() -> tuple[SettingField, ...]:
         # -- slack ---------------------------------------------------------
         SettingField("SLACK_WEBHOOK_URL", "Webhook URL", "slack", secret=True),
         SettingField("SLACK_BOT_TOKEN", "Bot Token", "slack", secret=True),
-        SettingField("SLACK_CHANNEL_ID", "Channel ID", "slack"),
+        SettingField("SLACK_CHANNEL_ID", "Channel ID", "slack", action="slack-channel"),
         SettingField("SLACK_ALLOWED_MEMBER_IDS", "Who may act", "slack"),
         # -- sharing -------------------------------------------------------
         SettingField("TUNNEL_TIMEOUT_MINUTES", "Tunnel Timeout (min)", "sharing", default="60"),
@@ -166,13 +174,20 @@ def _build_fields() -> tuple[SettingField, ...]:
         SettingField("CLOUDFLARE_ACCESS_ADMIN_EMAILS", "Access Admins", "sharing"),
         # -- storage -------------------------------------------------------
         SettingField("YEABOI_HOME", "Data Directory", "storage", action="data-dir"),
-        SettingField("YEABOI_ALLOWED_PATHS", "Allowed Paths", "storage", action="allowed-paths"),
+        SettingField(
+            "YEABOI_ALLOWED_PATHS",
+            "Allowed Paths",
+            "storage",
+            action="allowed-paths",
+            kind="list",
+            item_kind="path",
+        ),
         # -- standup -------------------------------------------------------
         SettingField("STANDUP_GITHUB_REPO", "GitHub Repo", "standup"),
         SettingField("STANDUP_SMTP_HOST", "SMTP Host", "standup"),
         SettingField("STANDUP_SMTP_USER", "SMTP User", "standup"),
         SettingField("STANDUP_SMTP_PASSWORD", "SMTP Password", "standup", secret=True),
-        SettingField("STANDUP_EMAIL_RECIPIENTS", "Email Recipients", "standup"),
+        SettingField("STANDUP_EMAIL_RECIPIENTS", "Email Recipients", "standup", kind="list", item_kind="email"),
         # -- voice ---------------------------------------------------------
         SettingField("VOICE_INSTALL_OFFER", "Install Offer", "voice"),
         SettingField("VOICE_DEVICE", "Input Device", "voice", action="voice-device"),
@@ -345,6 +360,10 @@ class SettingValue:
     action: str
     help_url: str
     help_scope: str
+    kind: str = "text"
+    item_kind: str = ""
+    #: A list field's parsed entries; always empty for a text field.
+    items: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -419,6 +438,9 @@ def get_settings() -> SettingsSnapshot:
                 action=fld.action,
                 help_url=help_entry.get("url", ""),
                 help_scope=help_entry.get("scope", ""),
+                kind=fld.kind,
+                item_kind=fld.item_kind,
+                items=_split_items(fld, raw) if fld.kind == "list" else (),
             )
         )
     logger.info("settings: snapshot served (%d fields)", len(values))
@@ -476,6 +498,56 @@ def set_setting(key: str, value: str) -> SettingWrite:
             restart_required=True,
         )
     return SettingWrite(ok=True, key=key, message=f"{fld.label} {'updated' if value else 'cleared'}")
+
+
+#: What one item of each ``item_kind`` may be. Deliberately loose for email —
+#: a strict RFC-5322 pattern refuses addresses that deliver.
+_EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
+
+
+def _split_items(fld: SettingField, raw: str) -> tuple[str, ...]:
+    """A stored separator-joined value as its entries, blanks dropped."""
+    return tuple(part.strip() for part in raw.split(fld.separator) if part.strip())
+
+
+def _check_item(fld: SettingField, item: str) -> None:
+    """Raise if ``item`` cannot be one entry of ``fld``."""
+    if fld.separator in item:
+        raise ValueError(f"{fld.label} entries cannot contain {fld.separator!r}")
+    if fld.item_kind == "email" and not _EMAIL_RE.match(item):
+        raise ValueError(f"{item!r} is not an email address")
+
+
+def set_list_setting(key: str, items: list[str] | tuple[str, ...]) -> SettingWrite:
+    """Replace one list-valued setting's entries (deduplicated, order-preserving).
+
+    The generic half of what ``set_allowed_paths`` does for one key: a surface
+    that renders rows writes rows, instead of asking a person to type a
+    comma-separated string and get the commas right. A field with a dedicated
+    writer still goes through it, so the sandbox whitelist lands where
+    ``fs_policy`` reads it.
+
+    ``set_setting`` remains legal on the same field and means "replace the whole
+    list from a joined string" — which is what lets a surface without a list
+    editor stay correct.
+    """
+    fld = next((f for f in _fields() if f.env == key), None)
+    if fld is None:
+        raise ValueError(f"unknown setting: {key}")
+    if fld.kind != "list":
+        raise ValueError(f"{key} is not a list setting")
+    if not isinstance(items, (list, tuple)) or not all(isinstance(i, str) for i in items):
+        raise ValueError("items must be a list of strings")
+    cleaned: list[str] = []
+    for item in items:
+        item = item.strip()
+        if not item or item in cleaned:
+            continue
+        _check_item(fld, item)
+        cleaned.append(item)
+    if fld.env == "YEABOI_ALLOWED_PATHS":
+        return set_allowed_paths(cleaned)
+    return set_setting(key, fld.separator.join(cleaned))
 
 
 def set_allowed_paths(paths: list[str] | tuple[str, ...]) -> SettingWrite:

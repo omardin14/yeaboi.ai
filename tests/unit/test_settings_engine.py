@@ -304,6 +304,53 @@ class TestConnectionVerify:
         assert seen["token"] == "tv-stored"
 
 
+class TestListSettings:
+    """A list setting is edited as rows; the joined string stays the storage."""
+
+    def test_the_snapshot_parses_a_list_field(self, monkeypatch):
+        monkeypatch.setenv("STANDUP_EMAIL_RECIPIENTS", "a@x.com, b@y.com")
+        field = next(f for f in engine.get_settings().fields if f.env == "STANDUP_EMAIL_RECIPIENTS")
+        assert field.kind == "list" and field.item_kind == "email"
+        assert field.items == ("a@x.com", "b@y.com")
+
+    def test_a_text_field_never_carries_items(self):
+        field = next(f for f in engine.get_settings().fields if f.env == "LOG_LEVEL")
+        assert field.kind == "text" and field.items == ()
+
+    def test_writing_rows_joins_them(self, monkeypatch):
+        written: dict[str, str] = {}
+        monkeypatch.setattr("yeaboi.config.apply_config_value", lambda k, v: written.__setitem__(k, v))
+        result = engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["a@x.com", "b@y.com"])
+        assert result.ok
+        assert written["STANDUP_EMAIL_RECIPIENTS"] == "a@x.com,b@y.com"
+
+    def test_duplicates_and_blanks_are_dropped_in_order(self, monkeypatch):
+        written: dict[str, str] = {}
+        monkeypatch.setattr("yeaboi.config.apply_config_value", lambda k, v: written.__setitem__(k, v))
+        engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["b@y.com", " ", "a@x.com", "b@y.com"])
+        assert written["STANDUP_EMAIL_RECIPIENTS"] == "b@y.com,a@x.com"
+
+    def test_a_bad_email_is_refused(self):
+        with pytest.raises(ValueError, match="not an email address"):
+            engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["not-an-address"])
+
+    def test_an_entry_carrying_the_separator_is_refused(self):
+        with pytest.raises(ValueError, match="cannot contain"):
+            engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["a@x.com,b@y.com"])
+
+    def test_a_text_field_is_not_a_list(self):
+        with pytest.raises(ValueError, match="not a list setting"):
+            engine.set_list_setting("LOG_LEVEL", ["INFO"])
+
+    def test_allowed_paths_still_lands_through_its_own_writer(self, monkeypatch):
+        seen: dict[str, list] = {}
+        monkeypatch.setattr("yeaboi.config.set_allowed_paths", lambda paths: seen.__setitem__("paths", list(paths)))
+        monkeypatch.setattr("yeaboi.config.get_allowed_paths", lambda: tuple(seen.get("paths", [])))
+        result = engine.set_list_setting("YEABOI_ALLOWED_PATHS", ["/one", "/two", "/one"])
+        assert result.key == "YEABOI_ALLOWED_PATHS"
+        assert seen["paths"] == ["/one", "/two"]
+
+
 class TestVerifyIsRemembered:
     """A probe of the SAVED credentials becomes the connection's status; a probe
     of typed values answers the caller and nothing more."""

@@ -52,6 +52,24 @@ def allowed_paths(app, request: Request) -> Response:
     return json_response(to_jsonable(engine.set_allowed_paths(payload.get("paths", []))))
 
 
+def list_setting(app, request: Request) -> Response:
+    """``POST /api/settings/list`` — replace one list-valued setting's entries."""
+    payload = request.json()
+    from yeaboi.settings import engine
+
+    key = payload.get("key", "")
+    if not isinstance(key, str) or not key:
+        raise ValueError("key must be a non-empty string")
+    return json_response(to_jsonable(engine.set_list_setting(key, payload.get("items", []))))
+
+
+def slack_channels(app, request: Request) -> Response:
+    """``GET /api/settings/slack/channels`` — the roster the channel picker offers."""
+    from yeaboi.slack import channels
+
+    return json_response(channels.list_channels())
+
+
 def data_dir(app, request: Request) -> Response:
     """``POST /api/settings/data-dir`` — set YEABOI_HOME, optionally moving the tree."""
     payload = request.json()

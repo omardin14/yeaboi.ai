@@ -348,6 +348,7 @@ CAPABILITIES: dict[str, dict] = {
             ("yeaboi.settings.engine", "get_settings"),
             ("yeaboi.settings.engine", "set_setting"),
             ("yeaboi.settings.engine", "set_allowed_paths"),
+            ("yeaboi.settings.engine", "set_list_setting"),
             ("yeaboi.settings.engine", "set_data_dir"),
             ("yeaboi.settings.engine", "provider_catalog"),
             ("yeaboi.settings.engine", "verify_provider"),

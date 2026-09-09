@@ -105,6 +105,18 @@ class TestSettingsWrites:
         assert resp.code == 200 and saved == [["/a"]]
         assert request(app, "POST", "/api/settings/allowed-paths", {"paths": "nope"}).code == 400
 
+    def test_list_setting_writes_rows(self, app, monkeypatch):
+        written: dict[str, str] = {}
+        monkeypatch.setattr("yeaboi.config.apply_config_value", lambda k, v: written.__setitem__(k, v))
+        body = {"key": "STANDUP_EMAIL_RECIPIENTS", "items": ["a@x.com", "b@y.com"]}
+        assert request(app, "POST", "/api/settings/list", body).code == 200
+        assert written["STANDUP_EMAIL_RECIPIENTS"] == "a@x.com,b@y.com"
+
+    def test_list_setting_refuses_a_missing_key_and_a_bad_entry(self, app):
+        assert request(app, "POST", "/api/settings/list", {"items": []}).code == 400
+        bad = {"key": "STANDUP_EMAIL_RECIPIENTS", "items": ["nope"]}
+        assert request(app, "POST", "/api/settings/list", bad).code == 400
+
     def test_data_dir_reports_restart(self, app, monkeypatch):
         monkeypatch.setattr("yeaboi.config.set_data_dir", lambda v: None)
         resp = request(app, "POST", "/api/settings/data-dir", {"value": "/tmp/x"})

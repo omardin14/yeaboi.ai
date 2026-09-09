@@ -108,6 +108,8 @@ ROUTES: tuple[AppRoute, ...] = (
     AppRoute("GET", "/api/settings/providers", routes_settings.providers, "settings"),
     AppRoute("POST", "/api/settings/set", routes_settings.set_setting, "settings"),
     AppRoute("POST", "/api/settings/allowed-paths", routes_settings.allowed_paths, "settings"),
+    AppRoute("POST", "/api/settings/list", routes_settings.list_setting, "settings"),
+    AppRoute("GET", "/api/settings/slack/channels", routes_settings.slack_channels, "settings"),
     AppRoute("POST", "/api/settings/data-dir", routes_settings.data_dir, "settings"),
     AppRoute("POST", "/api/settings/provider/verify", routes_settings.provider_verify, "settings"),
     AppRoute("POST", "/api/settings/provider/models", routes_settings.provider_models, "settings"),
