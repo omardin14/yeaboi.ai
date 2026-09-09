@@ -4,23 +4,23 @@
     {
       "version": "3.45.1",
       "date": "2026-09-09",
-      "headline": "Menus navigate reliably and keep up with more cards",
-      "summary": "Terminal menus now handle larger card lists without layout breakage, and card selection responds precisely. Three bugs from the menu redesign are fixed: the selection cursor no longer jumps when navigating cards, screen layouts stay intact up to 11 items, and hidden features no longer appear in feature tips.",
+      "headline": "yeaboi opens straight into your modes",
+      "summary": "The terminal now opens on the door \u2014 a project, or a one-off session \u2014 rather than asking which world you are in first. Longer menus also keep their footer on screen, and a card opens the one you clicked.",
       "highlights": [
         {
-          "text": "Card selection now responds precisely without unexpected jumps",
-          "areas": [
-            "planning"
-          ]
-        },
-        {
-          "text": "Terminal menus support more cards without layout breakage",
+          "text": "Opens on the door instead of a world chooser",
           "areas": [
             "general"
           ]
         },
         {
-          "text": "Niko and tips no longer reference unreleased features",
+          "text": "Longer menus keep their footer and their spacing on screen",
+          "areas": [
+            "general"
+          ]
+        },
+        {
+          "text": "Clicking a card opens that card, on every menu length",
           "areas": [
             "general"
           ]
