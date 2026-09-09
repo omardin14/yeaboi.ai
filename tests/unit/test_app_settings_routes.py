@@ -117,6 +117,16 @@ class TestSettingsWrites:
         bad = {"key": "STANDUP_EMAIL_RECIPIENTS", "items": ["nope"]}
         assert request(app, "POST", "/api/settings/list", bad).code == 400
 
+    def test_slack_channels_answers_without_a_token(self, app, monkeypatch):
+        """The picker's roster never 500s: a settings page that offers a text
+        box and says why is useful, one that errors is not."""
+        monkeypatch.setattr("yeaboi.tools.slack._token", lambda: "")
+        resp = request(app, "GET", "/api/settings/slack/channels")
+        assert resp.code == 200
+        payload = json.loads(resp.body)
+        assert payload["channels"] == []
+        assert "SLACK_BOT_TOKEN" in payload["reason"]
+
     def test_data_dir_reports_restart(self, app, monkeypatch):
         monkeypatch.setattr("yeaboi.config.set_data_dir", lambda v: None)
         resp = request(app, "POST", "/api/settings/data-dir", {"value": "/tmp/x"})

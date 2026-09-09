@@ -47,9 +47,11 @@ KNOWN_DESTINATIONS: tuple[str, ...] = (DEST_FILES, DEST_COPY, DEST_NOTION, DEST_
 #: a ``/api/connections`` row carries, so one vocabulary spans both.
 _DESTINATION_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
     DEST_NOTION: (("NOTION_TOKEN", "NOTION_EXPORT_PARENT_PAGE_ID"), "notion"),
+    # Confluence is configured on the Jira card — it shares the Atlassian
+    # account, and legacy.py declares it section="jira" for the same reason.
     DEST_CONFLUENCE: (
         ("CONFLUENCE_BASE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_API_TOKEN", "CONFLUENCE_SPACE_KEY"),
-        "confluence",
+        "jira",
     ),
 }
 

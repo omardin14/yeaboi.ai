@@ -93,7 +93,25 @@ class TestListChannels:
         )
         assert [c["name"] for c in channels.list_channels()["channels"]] == ["live"]
 
-    def test_a_missing_scope_is_a_reason_not_a_crash(self, monkeypatch):
+    def test_a_missing_scope_retries_for_the_public_channels(self, monkeypatch):
+        """Slack fails the WHOLE call without groups:read, so asking for
+        private channels costs the public ones too. Most beats nothing."""
+        asked: list[str] = []
+
+        def fake(req, timeout=None):
+            asked.append(req.full_url)
+            if len(asked) == 1:
+                return _Resp({"ok": False, "error": "missing_scope"})
+            return _page([{"id": "C1", "name": "general"}])
+
+        monkeypatch.setattr(slack.urllib.request, "urlopen", fake)
+        result = channels.list_channels()
+        assert [c["name"] for c in result["channels"]] == ["general"]
+        assert result["reason"] == ""
+        assert "private_channel" in asked[0]
+        assert "private_channel" not in asked[1]
+
+    def test_a_missing_scope_on_both_tries_is_a_reason_not_a_crash(self, monkeypatch):
         _serve(monkeypatch, _Resp({"ok": False, "error": "missing_scope"}))
         result = channels.list_channels()
         assert result["channels"] == []
@@ -123,4 +141,5 @@ class TestConversationsList:
         slack.conversations_list()
         assert "conversations.list" in seen[0]
         assert "public_channel" in seen[0] and "private_channel" in seen[0]
-        assert "exclude_archived=True" in seen[0]
+        # "true", not Python's "True": this goes onto a vendor's query string.
+        assert "exclude_archived=true" in seen[0]

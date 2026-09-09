@@ -288,7 +288,8 @@ def conversations_list(
     budget: RetryBudget | None = None,
 ):
     """A page of workspace channels, for picking one instead of typing its id."""
-    params: dict = {"limit": limit, "types": types, "exclude_archived": exclude_archived}
+    # "true", not Python's "True": this goes onto a vendor's query string.
+    params: dict = {"limit": limit, "types": types, "exclude_archived": "true" if exclude_archived else "false"}
     if cursor:
         params["cursor"] = cursor
     return call("conversations.list", params, token=token, budget=budget)

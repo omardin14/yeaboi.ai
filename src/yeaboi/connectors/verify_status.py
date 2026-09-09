@@ -11,9 +11,11 @@ Two rules keep it honest:
 - **No credential, and no digest of one.** A row records which envs the check
   ran against and whether each was non-empty at the time — never a value.
 - **A stored outcome expires on change, not on age.** Editing a credential
-  drops its row back to ``untested`` (:func:`forget_for_env` on every write,
-  and the recorded presence map catches a hand-edited ``.env``). Elapsed time
-  alone changes nothing: the row carries ``checked_at`` and the surface words it.
+  drops its row back to ``untested``: :func:`forget_for_env` runs from
+  ``config.apply_config_value``, the one call every credential writer goes
+  through, and the recorded presence map additionally catches a ``.env`` edited
+  by hand to add or remove one. Elapsed time alone changes nothing: the row
+  carries ``checked_at`` and the surface words it.
 """
 
 from __future__ import annotations
@@ -58,11 +60,14 @@ def _store_path():
 
 
 def invalidate() -> None:
-    """Drop the read cache. For tests and for a data-dir move."""
+    """Drop the read cache."""
     _cache.update({"mtime": None, "rows": {}})
 
 
-def _presence(envs) -> dict[str, bool]:
+def presence(envs) -> dict[str, bool]:
+    """Which of ``envs`` are set right now. The caller snapshots this BEFORE a
+    probe: the probe takes seconds, and a credential written during it would
+    otherwise be recorded as the presence behind an older credential's verdict."""
     return {env: bool(os.environ.get(env, "").strip()) for env in envs}
 
 
@@ -82,11 +87,15 @@ def _load() -> dict[str, VerifyStatus]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        # Cached like any other read: this runs once per row on every catalog
+        # render, and an uncached failure is one warning per connector forever.
         logger.warning("connection status: %s is unreadable — ignoring it", path.name)
-        return {}
+        _cache.update({"mtime": mtime, "rows": {}})
+        return _cache["rows"]
     if not isinstance(raw, dict) or raw.get("version") != FILE_VERSION:
         logger.warning("connection status: %s has an unknown shape — ignoring it", path.name)
-        return {}
+        _cache.update({"mtime": mtime, "rows": {}})
+        return _cache["rows"]
     rows: dict[str, VerifyStatus] = {}
     for key, entry in (raw.get("connections") or {}).items():
         if not isinstance(entry, dict) or entry.get("outcome") not in (OUTCOME_OK, OUTCOME_FAILED):
@@ -103,6 +112,16 @@ def _load() -> dict[str, VerifyStatus]:
 
 
 def _write(rows: dict[str, VerifyStatus]) -> None:
+    """Persist the store. A failure is logged, never raised: the probe or the
+    settings write that got us here has already succeeded, and losing the note
+    about it must not turn that into an error."""
+    try:
+        _write_or_raise(rows)
+    except OSError as exc:
+        logger.warning("connection status: could not be saved (%s)", exc)
+
+
+def _write_or_raise(rows: dict[str, VerifyStatus]) -> None:
     path = _store_path()
     payload = {
         "version": FILE_VERSION,
@@ -132,7 +151,7 @@ def status_for(key: str) -> VerifyStatus:
     row = _load().get(key)
     if row is None:
         return UNTESTED
-    if row.envs_present and _presence(row.envs_present) != row.envs_present:
+    if row.envs_present and presence(row.envs_present) != row.envs_present:
         return UNTESTED
     return row
 
@@ -148,13 +167,14 @@ def to_row(key: str) -> dict:
     return {"outcome": status.outcome, "message": status.message, "checked_at": status.checked_at}
 
 
-def record(key: str, ok: bool, message: str, envs) -> VerifyStatus:
-    """Save the outcome of one probe, against the envs it resolved."""
+def record(key: str, ok: bool, message: str, envs_present: dict[str, bool]) -> VerifyStatus:
+    """Save the outcome of one probe against the presence the caller snapshotted
+    before it ran. See :func:`presence`."""
     row = VerifyStatus(
         outcome=OUTCOME_OK if ok else OUTCOME_FAILED,
         message=message,
         checked_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        envs_present=_presence(envs),
+        envs_present=dict(envs_present),
     )
     rows = dict(_load())
     rows[key] = row

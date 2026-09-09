@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 #: than following a cursor forever on a settings-page render.
 MAX_PAGES = 10
 
+#: Everything the bot can see, and the fallback when it cannot see private ones.
+PRIVATE_TYPES = "public_channel,private_channel"
+PUBLIC_TYPES = "public_channel"
+
 
 def list_channels() -> dict:
     """``{"channels": [{id, name, is_private}], "reason": str}``.
@@ -38,11 +42,20 @@ def list_channels() -> dict:
         }
 
     budget = slack.RetryBudget()
-    items, error = slack.paginate(
-        lambda cursor: slack.conversations_list(cursor=cursor, budget=budget),
-        "channels",
-        max_pages=MAX_PAGES,
-    )
+
+    def _list(types: str):
+        return slack.paginate(
+            lambda cursor: slack.conversations_list(cursor=cursor, types=types, budget=budget),
+            "channels",
+            max_pages=MAX_PAGES,
+        )
+
+    items, error = _list(PRIVATE_TYPES)
+    if error == "missing_scope":
+        # Slack fails the WHOLE call when the token lacks groups:read, so asking
+        # for private channels costs the public ones too. Most of what they
+        # wanted beats nothing, which is this module's whole posture.
+        items, error = _list(PUBLIC_TYPES)
     channels = [
         {
             "id": str(item.get("id", "")),

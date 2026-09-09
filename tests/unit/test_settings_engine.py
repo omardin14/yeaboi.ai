@@ -379,6 +379,21 @@ class TestVerifyIsRemembered:
         engine.set_setting("NOTION_TOKEN", "secret_other")
         assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_UNTESTED
 
+    def test_a_write_from_any_other_surface_drops_the_verdict(self, monkeypatch, tmp_path):
+        """The TUI catalog, `yeaboi connect` and OAuth rotation never touch
+        set_setting — they all write through config.apply_config_value, which
+        is where the invalidation lives."""
+        from yeaboi import config
+
+        monkeypatch.setattr(config, "set_config_value", lambda _k, _v: tmp_path / ".env")
+        monkeypatch.setenv("NOTION_TOKEN", "secret_stored")
+        monkeypatch.setattr("yeaboi.provider_verification._verify_notion", lambda token: (True, "Notion verified"))
+        engine.verify_connection("notion", {})
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_OK
+
+        config.apply_config_value("NOTION_TOKEN", "secret_rotated_elsewhere")
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_UNTESTED
+
     def test_the_snapshot_carries_a_row_for_every_kind(self):
         snapshot = engine.get_settings()
         assert set(snapshot.connections) >= {"github", "jira", "notion", "elevenlabs", "tavus"}

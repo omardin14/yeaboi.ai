@@ -485,9 +485,6 @@ def set_setting(key: str, value: str) -> SettingWrite:
         config.apply_config_value(key, value)
     # Key names only — the value may be a credential.
     logger.info("settings: %s %s", key, "updated" if value else "cleared")
-    from yeaboi.connectors import verify_status
-
-    verify_status.forget_for_env(key)
     if key == "YEABOI_TELEMETRY":
         # telemetry.TELEMETRY_ENABLED is baked at import — the flip is
         # persisted now but only read at the next launch.
@@ -696,6 +693,9 @@ def verify_connection(kind: str, fields: dict[str, str]) -> dict:
     spec = _connection_kinds().get(kind)
     if spec is None:
         raise ValueError(f"unknown connection kind: {kind}")
+    # Before the probe, which takes seconds: a credential written while it runs
+    # must not be recorded as the presence behind the old credential's verdict.
+    envs_present = verify_status.presence([env for _, env in spec])
     resolved: dict[str, str] = {}
     supplied: set[str] = set()
     for name, env in spec:
@@ -743,7 +743,7 @@ def verify_connection(kind: str, fields: dict[str, str]) -> dict:
         # Only a probe of the STORED credentials describes the stored connection.
         # A check of typed-but-unsaved values answers the caller without becoming
         # the saved row's status.
-        verify_status.record(kind, ok, message, [env for _, env in spec])
+        verify_status.record(kind, ok, message, envs_present)
     return {"ok": ok, "message": message}
 
 
