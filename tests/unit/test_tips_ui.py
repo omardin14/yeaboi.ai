@@ -211,13 +211,13 @@ def test_tip_offset_shifts_the_shown_tip(monkeypatch):
 # --- All Tips gallery page (opened with `a`) ---------------------------------
 
 
-def _all_tips_rendered(**kwargs) -> str:
+def _all_tips_rendered(height: int = 30, **kwargs) -> str:
     import io
 
     from rich.console import Console
 
     buf = io.StringIO()
-    Console(file=buf, width=100, height=30).print(_build_all_tips_screen(**kwargs))
+    Console(file=buf, width=100, height=height).print(_build_all_tips_screen(height=height, **kwargs))
     return buf.getvalue()
 
 
@@ -228,6 +228,25 @@ def test_all_tips_screen_renders_panel(monkeypatch):
     # the app-wide back tab (the "Copy all" button was dropped with the button row).
     result = _build_all_tips_screen(shimmer_tick=0.0, sub_reveal=99)
     assert isinstance(result, Panel)
+    _tips.get_tips.cache_clear()
+
+
+def test_all_tips_screen_never_names_a_world_the_reader_is_not_in(monkeypatch):
+    # The gallery is the one page that lists every tip at once, so it is where a
+    # hidden world leaks if it is not narrowed like the rotation is.
+    monkeypatch.setattr("yeaboi.voice.is_voice_available", lambda: (True, ""))
+    _tips.get_tips.cache_clear()
+
+    # Tall enough that the whole list is on screen — the gallery scrolls, and a
+    # tip below the fold would pass a "not in" check for the wrong reason.
+    def render(world: str) -> str:
+        return _all_tips_rendered(shimmer_tick=0.0, sub_reveal=99, world=world, height=120)
+
+    team = render("team")
+    assert "Weekly Review" not in team
+    assert "Agent Usage" not in team and "Agent Security" not in team
+    solo = render("solo")
+    assert "Agent Usage" in solo and "Weekly Review" in solo
     _tips.get_tips.cache_clear()
 
 

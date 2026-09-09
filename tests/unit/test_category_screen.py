@@ -57,18 +57,18 @@ def _render(width=110, height=40, selected=0, **kwargs) -> str:
 
 
 class TestCards:
-    def test_three_categories_in_order(self):
-        assert [c["key"] for c in _CATEGORY_CARDS] == ["solo", "team", "agents"]
+    def test_two_categories_in_order(self):
+        assert [c["key"] for c in _CATEGORY_CARDS] == ["solo", "team"]
 
     def test_core_keys_present(self):
         for card in _CATEGORY_CARDS:
             assert {"key", "title", "verb", "capabilities", "color", "bright", "dim", "tint", "mascot"} <= set(card)
 
-    def test_solo_and_agents_are_the_beta_worlds(self):
+    def test_solo_is_the_beta_world(self):
         from yeaboi.beta import BETA_LABEL
 
         badged = {card["key"] for card in _CATEGORY_CARDS if card.get("badge") == BETA_LABEL}
-        assert badged == {"solo", "agents"}
+        assert badged == {"solo"}
 
 
 class TestRender:
@@ -82,13 +82,15 @@ class TestRender:
         # not the steel that reads at the back.
         from yeaboi.ui.mode_select.screens._screens_category import _MASCOT_SHADE, _SHADE_TOWARD
 
-        steel = (140, 160, 178)
-        shaded = ",".join(
-            str(round(c * _MASCOT_SHADE + t * (1.0 - _MASCOT_SHADE))) for c, t in zip(steel, _SHADE_TOWARD, strict=True)
+        green = (34, 158, 122)
+        shaded = ";".join(
+            str(round(c * _MASCOT_SHADE + t * (1.0 - _MASCOT_SHADE))) for c, t in zip(green, _SHADE_TOWARD, strict=True)
         )
-        resting = _render(selected=0)  # solo live, so the robo is at the back
-        assert "140;160;178" not in resting
-        assert shaded.replace(",", ";") in resting, shaded
+        resting = _render(selected=0)  # solo live, so Team's flock is at the back
+        # Both worlds are ducks now, so the front one keeps the plain green and
+        # only the one at the back carries the mixed-down shade.
+        assert "34;158;122" in resting
+        assert shaded in resting, shaded
 
     def test_exact_height(self):
         out = _render(width=100, height=30)
@@ -204,10 +206,10 @@ class TestRender:
 
         def right_half(styled):
             plain = re.sub(r"\x1b\[[0-9;]*m", "", styled)
-            return "\n".join(row[2 * len(row) // 3 :] for row in plain.splitlines())
+            return "\n".join(row[len(row) // 2 :] for row in plain.splitlines())
 
-        # Solo selected → the agents third keeps its own, slower clock: it has
-        # an idle hop, but it does not flap frame for frame the way the live one
+        # Solo selected → the Team half keeps its own, slower clock: it has an
+        # idle hop, but it does not flap frame for frame the way the live one
         # does. Ticks a quarter apart land in the same beat of it.
         a = _settled(selected=0, shimmer_tick=0.0)
         b = _render(selected=0, shimmer_tick=0.25)
@@ -270,9 +272,8 @@ class TestRender:
         plain = re.sub(r"\x1b\[[0-9;]*m", "", _render(width=110))
         chip_rows = [line for line in plain.splitlines() if "BETA" in line]
         assert chip_rows, "no BETA chip rendered"
-        # Two chips on one row — solo's and agents'; the team card carries none
-        # (its column between them stays blank).
-        assert chip_rows[0].count("BETA") == 2
+        # One chip on the row — Solo's; the Team card carries none.
+        assert chip_rows[0].count("BETA") == 1
 
     def test_the_chip_enters_with_the_wordmark(self):
         import re
@@ -316,14 +317,11 @@ class TestRender:
 
 
 class TestHitTest:
-    def test_left_third_is_solo(self):
+    def test_left_half_is_solo(self):
         assert category_at_pos(100, 30, row=15, col=10) == 0
 
-    def test_middle_third_is_team(self):
-        assert category_at_pos(100, 30, row=15, col=50) == 1
-
-    def test_right_third_is_agents(self):
-        assert category_at_pos(100, 30, row=15, col=90) == 2
+    def test_right_half_is_team(self):
+        assert category_at_pos(100, 30, row=15, col=90) == 1
 
     def test_region_boundaries_match_the_shared_bounds(self):
         # The hit test and the builder read the same _category_bounds, so the
@@ -337,20 +335,20 @@ class TestHitTest:
 
     def test_the_far_edges_count_for_the_outer_cards(self):
         assert category_at_pos(100, 30, row=15, col=1) == 0
-        assert category_at_pos(100, 30, row=15, col=100) == 2
+        assert category_at_pos(100, 30, row=15, col=100) == 1
 
     def test_border_and_hint_rows_are_dead(self):
         assert category_at_pos(100, 30, row=1, col=50) is None
         assert category_at_pos(100, 30, row=30, col=50) is None
 
     def test_the_blank_rows_under_the_cards_still_count_when_there_is_no_informer(self):
-        assert category_at_pos(110, 40, row=36, col=50) == 1
+        assert category_at_pos(110, 40, row=36, col=90) == 1
 
     def test_the_informer_band_is_dead_for_cards_and_live_for_the_paper(self):
         from yeaboi.ui.mode_select.screens._screens_category import informer_hit
 
-        assert category_at_pos(110, 53, row=30, col=50) == 1  # the cards span rows 5–32
-        assert category_at_pos(110, 53, row=33, col=50) is None
+        assert category_at_pos(110, 53, row=30, col=90) == 1  # the cards span rows 5–32
+        assert category_at_pos(110, 53, row=33, col=90) is None
         assert informer_hit(110, 53, row=45, col=100)
         assert not informer_hit(110, 53, row=45, col=40)  # the blank left of the lane
         assert not informer_hit(110, 53, row=30, col=100)  # a card
@@ -376,10 +374,22 @@ class TestSeedFrame:
     the tail of the splash — the flicker at the splash → landing-split boundary.
     """
 
-    def _seed(self, category="team", width=110, height=40):
+    def _seed(self, category="team", door="sessions", width=110, height=40, split=True):
         from yeaboi.ui.mode_select import _landing_first_frame
 
-        return _landing_first_frame(category, width=width, height=height)
+        return _landing_first_frame(category, door, width=width, height=height, split=split)
+
+    def _flat(self, renderable, width=110, height=40):
+        console = Console(width=width, height=height, force_terminal=False)
+        rows = console.render_lines(renderable, console.options.update(height=height), pad=True)
+        return "\n".join("".join(seg.text for seg in row) for row in rows)
+
+    def test_it_is_the_door_when_there_is_no_split(self):
+        # With the Solo world off there is one world, so the loop opens on the
+        # door and that is what the Live has to be seeded with.
+        text = self._flat(self._seed(split=False))
+        assert "work today" in text and "working with" not in text
+        assert "esc quit" in text
 
     def test_it_is_the_landing_split(self):
         console = Console(width=110, height=40, force_terminal=False)
@@ -428,7 +438,6 @@ class TestSeedFrame:
 
         assert category_index("solo") == 0
         assert category_index("team") == 1
-        assert category_index("agents") == 2
         # An unknown key must not raise — a hand-edited config lands on Solo.
         # (get_last_category sanitises before the key gets here.)
         assert category_index("nonsense") == 0
@@ -481,32 +490,33 @@ class TestTipJumpTarget:
     """The cross-category jump rule: shared keys land on Team, never Solo."""
 
     def test_a_retro_tip_from_solo_lands_on_team(self):
-        from yeaboi.ui.mode_select import _MODE_CARDS, _SOLO_CARDS, _tip_jump_target
+        from yeaboi.ui.mode_select import _MODE_CARDS, _SOLO_MENU_CARDS, _tip_jump_target
 
-        cat, j = _tip_jump_target("retro", _SOLO_CARDS)
+        cat, j = _tip_jump_target("retro", _SOLO_MENU_CARDS)
         assert cat == "team"
         assert _MODE_CARDS[j]["key"] == "retro"
 
     def test_the_solo_only_review_key_lands_on_solo(self):
-        from yeaboi.ui.mode_select import _MODE_CARDS, _SOLO_CARDS, _tip_jump_target
+        from yeaboi.ui.mode_select import _MODE_CARDS, _SOLO_MENU_CARDS, _tip_jump_target
 
         cat, j = _tip_jump_target("weekly-review", _MODE_CARDS)
         assert cat == "solo"
-        assert _SOLO_CARDS[j]["key"] == "weekly-review"
+        assert _SOLO_MENU_CARDS[j]["key"] == "weekly-review"
 
-    def test_a_shared_key_from_agents_lands_on_team(self):
-        from yeaboi.ui.mode_select import _AGENT_CARDS, _MODE_CARDS, _tip_jump_target
-
-        cat, j = _tip_jump_target("daily-standup", _AGENT_CARDS)
-        assert cat == "team"
-        assert _MODE_CARDS[j]["key"] == "daily-standup"
-
-    def test_an_agent_tip_from_team_lands_on_agents(self):
-        from yeaboi.ui.mode_select import _AGENT_CARDS, _MODE_CARDS, _tip_jump_target
+    def test_an_agent_tip_from_team_lands_on_solo(self):
+        from yeaboi.ui.mode_select import _MODE_CARDS, _SOLO_MENU_CARDS, _tip_jump_target
 
         cat, j = _tip_jump_target("agent-security", _MODE_CARDS)
-        assert cat == "agents"
-        assert _AGENT_CARDS[j]["key"] == "agent-security"
+        assert cat == "solo"
+        assert _SOLO_MENU_CARDS[j]["key"] == "agent-security"
+
+    def test_no_tip_jumps_into_a_world_that_is_not_on_offer(self):
+        # With Solo hidden the `g` jump is Team-only, so a solo-only key has
+        # nowhere to land rather than teleporting into an invisible world.
+        from yeaboi.ui.mode_select import _MODE_CARDS, _tip_jump_target
+
+        assert _tip_jump_target("agent-security", _MODE_CARDS, ("team",)) is None
+        assert _tip_jump_target("weekly-review", _MODE_CARDS, ("team",)) is None
 
     def test_an_unknown_key_jumps_nowhere(self):
         from yeaboi.ui.mode_select import _MODE_CARDS, _tip_jump_target
@@ -567,15 +577,15 @@ class TestInformer:
         cards_end = max(i for i, row in enumerate(rows) if "standups" in row)
         assert cards_end < rows.index(headline_row)
 
-    def test_the_duck_is_green_and_the_agents_robo_is_steel(self):
+    def test_the_informer_duck_is_green_in_either_world(self):
         def _sgr(selected):
             console = Console(width=110, height=53, force_terminal=True, color_system="truecolor")
             with console.capture() as cap:
                 console.print(_build_category_screen(selected, width=110, height=53, page=_story(), edition="x"))
             return cap.get()
 
+        assert "34;158;122" in _sgr(0)
         assert "34;158;122" in _sgr(1)
-        assert "140;160;178" in _sgr(2)
 
     def test_a_long_headline_is_cut_to_two_lines(self):
         rows = _rows(height=53, page=_story("word " * 40), edition="x")
@@ -594,7 +604,7 @@ class TestInformer:
         from yeaboi.ui.mode_select import _landing_first_frame
 
         console = Console(width=110, height=53, force_terminal=False)
-        seed = _landing_first_frame("team", width=110, height=53)
+        seed = _landing_first_frame("team", "sessions", width=110, height=53)
         rows = [
             "".join(seg.text for seg in row)
             for row in console.render_lines(seed, console.options.update(height=53), pad=True)
@@ -712,14 +722,14 @@ class TestCategoryLoop:
 
     def test_enter_picks_the_preselected_world(self):
         assert _run("enter")[0] == "team"
-        assert _run("enter", preselected="agents")[0] == "agents"
+        assert _run("enter", preselected="solo")[0] == "solo"
 
     @pytest.mark.parametrize("key", ["right", "down", "tab"])
     def test_arrows_and_tab_move_on(self, key):
         assert _run(key, "enter", preselected="solo")[0] == "team"
 
     def test_left_wraps(self):
-        assert _run("left", "enter", preselected="solo")[0] == "agents"
+        assert _run("left", "enter", preselected="solo")[0] == "team"
 
     @pytest.mark.parametrize("key", ["q", "esc"])
     def test_q_and_esc_quit(self, key):
@@ -739,8 +749,8 @@ class TestCategoryLoop:
 
         seen = []
         monkeypatch.setattr(ms, "_run_front_page_page", lambda *a, **k: seen.append(k["card"]["key"]))
-        assert _run("click:70:45", "enter", preselected="agents")[0] == "agents"
-        assert seen == ["agents"]
+        assert _run("click:70:45", "enter", preselected="team")[0] == "team"
+        assert seen == ["team"]
         # A click in the blank left of the lane is nothing.
         assert _run("click:10:45", "enter", preselected="solo")[0] == "solo"
 

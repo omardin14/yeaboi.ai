@@ -14,5 +14,8 @@ ALL_SURFACES: tuple[str, ...] = ("tui", "desktop", "web")
 
 # The landing worlds a piece of copy can be true in — the same keys as the
 # landing split's cards. A tip that names a room full of teammates is Team-only.
-VALID_WORLDS = frozenset({"solo", "team", "agents"})
-ALL_WORLDS: tuple[str, ...] = ("solo", "team", "agents")
+# Static: whether the terminal *offers* Solo is a visibility question
+# (:func:`yeaboi.config.solo_world_enabled`), not a vocabulary one, and tips are
+# tagged against this tuple at import time.
+VALID_WORLDS = frozenset({"solo", "team"})
+ALL_WORLDS: tuple[str, ...] = ("solo", "team")

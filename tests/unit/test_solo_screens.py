@@ -9,6 +9,7 @@ from yeaboi.solo.today import TodaySnapshot
 from yeaboi.ui.mode_select.screens._screens import (
     _MODE_CARDS,
     _SOLO_CARDS,
+    _SOLO_MENU_CARDS,
     _TODAY_COMPACT_ROWS,
     _TODAY_FULL_ROWS,
     _build_mode_screen,
@@ -220,21 +221,33 @@ class TestReviewCard:
         assert keys.index("weekly-review") == keys.index("daily-standup") + 1
         assert "weekly-review" not in {c["key"] for c in _MODE_CARDS}
 
-    def test_eight_cards_and_the_full_strip_fit_the_floor(self):
-        # 8 cards (26 rows) + the 7-row strip must still leave the hints on screen at 84×40.
-        out = _render(84, 40, cards=_SOLO_CARDS, today=FULL, world="solo", shimmer_tick=30.0, plain=True)
+    def test_the_agents_family_sits_before_settings(self):
+        keys = [c["key"] for c in _SOLO_MENU_CARDS]
+        assert keys[-4:] == ["agent-usage", "agent-advisor", "agent-security", "settings"]
+        assert not {"agent-usage", "agent-advisor", "agent-security"} & {c["key"] for c in _MODE_CARDS}
+
+    def test_the_whole_menu_and_the_full_strip_fit_the_floor(self):
+        # 11 cards close their gaps (25 rows), so the 7-row strip and the hints
+        # both still fit at 84×40 — the reason _row_gap exists.
+        out = _render(84, 40, cards=_SOLO_MENU_CARDS, today=FULL, world="solo", shimmer_tick=30.0, plain=True)
         assert "Yesterday" in out
         assert "REVIEW" in out.replace(" ", "").replace("░", "").upper() or "BETA" in out
-        assert _today_rows(FULL, body_area=34, cards_h=26) == _TODAY_FULL_ROWS
+        assert _today_rows(FULL, body_area=34, cards_h=25) == _TODAY_FULL_ROWS
+        # The last card is still on screen, so nothing fell off the bottom.
+        last = len(_SOLO_MENU_CARDS) - 1
+        assert any(
+            mode_at_row(0, width=84, height=40, row=row, col=10, cards=_SOLO_MENU_CARDS, today=FULL) == last
+            for row in range(1, 41)
+        )
 
-    def test_solo_rows_stay_contiguous_with_eight_cards(self):
+    def test_solo_rows_stay_contiguous_across_the_whole_menu(self):
         w, h = 120, 40
         hit_order = []
         for row in range(1, h + 1):
-            idx = mode_at_row(3, width=w, height=h, row=row, col=10, cards=_SOLO_CARDS, today=FULL)
+            idx = mode_at_row(3, width=w, height=h, row=row, col=10, cards=_SOLO_MENU_CARDS, today=FULL)
             if idx is not None and (not hit_order or hit_order[-1] != idx):
                 hit_order.append(idx)
-        assert hit_order == list(range(len(_SOLO_CARDS)))
+        assert hit_order == list(range(len(_SOLO_MENU_CARDS)))
 
 
 class TestReviewDetailView:

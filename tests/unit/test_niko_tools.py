@@ -174,10 +174,19 @@ class TestReadsReachTheRealHelpers:
 
 
 class TestCapabilities:
-    def test_list_capabilities_serves_the_real_cards(self):
+    def test_list_capabilities_serves_the_real_cards(self, monkeypatch):
+        monkeypatch.setenv("YEABOI_SOLO", "1")
         result = niko_tools.call("list_capabilities", {})
-        assert {"categories", "modes", "agents", "intake"} <= set(result)
-        assert {"solo", "team", "agents"} <= {row["key"] for row in result["categories"]}
+        assert {"categories", "solo", "modes", "agents", "intake"} <= set(result)
+        assert {"solo", "team"} == {row["key"] for row in result["categories"]}
+
+    def test_list_capabilities_hides_the_solo_world_by_default(self, monkeypatch):
+        # Niko must never offer a world the user has no way to open.
+        monkeypatch.delenv("YEABOI_SOLO", raising=False)
+        result = niko_tools.call("list_capabilities", {})
+        assert result["solo_enabled"] is False
+        assert "solo" not in result
+        assert [row["key"] for row in result["categories"]] == ["team"]
 
     def test_list_routes_names_the_capability_each_screen_belongs_to(self):
         rows = {row["path"]: row for row in niko_tools.call("list_routes", {})["routes"]}

@@ -26,7 +26,6 @@ from rich.text import Text
 
 from yeaboi.ui.shared._ascii_font import render_ascii_text
 from yeaboi.ui.shared._components import (
-    AGENTS_THEME,
     LANDING_DETAIL_RESTING,
     LANDING_DETAIL_SELECTED,
     LANDING_HEADING_STYLE,
@@ -53,7 +52,7 @@ _DOOR_CARDS: list[dict[str, Any]] = [
     },
 ]
 
-_WORLD_THEMES: dict[str, Theme] = {"solo": SOLO_THEME, "team": TEAM_THEME, "agents": AGENTS_THEME}
+_WORLD_THEMES: dict[str, Theme] = {"solo": SOLO_THEME, "team": TEAM_THEME}
 
 # Card interior rows: blank(1) + wordmark(2) + rule(1) + blank(1) + verb(1) +
 # detail(1) = 7; +2 for the vertical padding = 9. Read only by this page's
@@ -143,11 +142,14 @@ def _build_door_screen(
     shimmer_tick: float = 0.0,
     intro: float = 1.0,
     active_name: str = "",
+    back: bool = True,
 ) -> Panel:
     """Build the full-screen door: two cards in the world's accent.
 
     ``active_name`` names a project that is already active — shown under the
-    cards so picking Sessions is visibly what clears it.
+    cards so picking Sessions is visibly what clears it. ``back`` is False when
+    the door is the first screen (no landing split behind it), which makes Esc
+    quit and the hint say so.
     """
     theme = world_theme(world)
     bounds = _door_bounds(width)
@@ -168,7 +170,8 @@ def _build_door_screen(
     grid.add_row(*cells)
 
     hint = Text(justify="center")
-    for key, label in (("←/→", "switch"), ("enter", "choose"), ("esc", "back"), ("q", "quit")):
+    esc = ("esc", "back") if back else ("esc", "quit")
+    for key, label in (("←/→", "switch"), ("enter", "choose"), esc, ("q", "quit")):
         if hint.plain:
             hint.append("   ")
         hint.append(key, style="bold rgb(210,210,220)")
@@ -201,11 +204,12 @@ def _build_door_screen(
         title=Text(f" {_HEADING} ", style=LANDING_HEADING_STYLE),
         title_align="center",
     )
-    # Esc goes back to the split, so the back tab stays. No corner duck — the
-    # page is two words and a rule — and no music bar, for the same reason the
-    # split has none: nobody settles here.
+    # No corner duck — the page is two words and a rule — and no music bar, for
+    # the same reason the split has none: nobody settles here.
     panel._no_companion_duck = True
     panel._no_music = True
+    if not back:
+        panel._no_back_hint = True
     return panel
 
 

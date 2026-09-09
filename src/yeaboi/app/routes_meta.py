@@ -55,21 +55,33 @@ def capabilities(app, request: Request) -> Response:
     from ``_MODE_CARDS`` — the same dicts the welcome screen renders. ``modes``
     is the Team menu (the key predates the Solo world and the desktop reads
     it); ``solo`` is the Solo menu, additive.
+
+    ``solo_enabled`` is the desktop's gate on the Solo world. It has to be its
+    own field: ``solo`` and the ``solo`` category are both already optional with
+    a meaning ("a sidecar older than the Solo world"), so neither can carry it
+    unambiguously. Anything but an explicit true means hidden.
     """
-    from yeaboi.ui.mode_select.screens._screens import _AGENT_CARDS, _INTAKE_CARDS, _MODE_CARDS, _SOLO_CARDS
+    from yeaboi.config import solo_world_enabled
+    from yeaboi.ui.mode_select.screens._screens import (
+        _AGENT_CARDS,
+        _INTAKE_CARDS,
+        _MODE_CARDS,
+        _SOLO_MENU_CARDS,
+    )
     from yeaboi.ui.mode_select.screens._screens_category import _CATEGORY_CARDS
 
-    return json_response(
-        to_jsonable(
-            {
-                "categories": _CATEGORY_CARDS,
-                "solo": _SOLO_CARDS,
-                "modes": _MODE_CARDS,
-                "agents": _AGENT_CARDS,
-                "intake": _INTAKE_CARDS,
-            }
-        )
-    )
+    solo_on = solo_world_enabled()
+    payload = {
+        "solo_enabled": solo_on,
+        "categories": [card for card in _CATEGORY_CARDS if solo_on or card["key"] != "solo"],
+        "modes": _MODE_CARDS,
+        # Always present: the desktop's Capabilities type has it non-optional.
+        "agents": _AGENT_CARDS,
+        "intake": _INTAKE_CARDS,
+    }
+    if solo_on:
+        payload["solo"] = _SOLO_MENU_CARDS
+    return json_response(to_jsonable(payload))
 
 
 def tips(app, request: Request) -> Response:

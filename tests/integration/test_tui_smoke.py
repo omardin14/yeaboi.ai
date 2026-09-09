@@ -56,7 +56,7 @@ def _strip_ansi(raw: bytes) -> str:
     return _ANSI_RE.sub("", raw.decode("utf-8", errors="replace"))
 
 
-def _spawn_tui_in_pty(tmp_path: Path) -> tuple[subprocess.Popen, int]:
+def _spawn_tui_in_pty(tmp_path: Path, *, solo: bool = False) -> tuple[subprocess.Popen, int]:
     """Launch ``yeaboi --dry-run`` attached to a new pty; return (proc, master_fd)."""
     # Isolate the whole ~/.yeaboi tree in tmp and pre-seed .env so
     # is_first_run() is False and the setup wizard never opens.
@@ -74,6 +74,8 @@ def _spawn_tui_in_pty(tmp_path: Path) -> tuple[subprocess.Popen, int]:
         "ANTHROPIC_API_KEY": "test-key-dry-run-only",
         # The landing split's front page must not start a fetch thread here.
         "YEABOI_NEWS": "off",
+        # The Solo world, and with it the landing split, is off unless asked for.
+        "YEABOI_SOLO": "1" if solo else "",
     }
     # Set, not popped: unset now falls through to the worktree's
     # .worktree.env marker, which would land this run in the shared
@@ -125,28 +127,37 @@ def _read_until(master_fd: int, proc: subprocess.Popen, predicate, timeout: floa
 
 
 class TestTuiLiveSmoke:
-    def test_dry_run_boots_to_mode_select_and_quits_cleanly(self, tmp_path):
-        """The real TUI reaches the landing split, then mode-select, and exits 0 on 'q'."""
-        proc, master_fd = _spawn_tui_in_pty(tmp_path)
+    @pytest.mark.parametrize("solo", [False, True], ids=["one-world", "solo-on"])
+    def test_dry_run_boots_to_mode_select_and_quits_cleanly(self, tmp_path, solo):
+        """The real TUI reaches mode-select and exits 0 on 'q'.
+
+        With the Solo world off there is one world, so the split never renders
+        and the door is the first screen — the strongest proof the launch build
+        cannot show it. ``YEABOI_SOLO=1`` restores the three-screen path.
+        """
+        proc, master_fd = _spawn_tui_in_pty(tmp_path, solo=solo)
         try:
             # Strip only a bounded tail: the markers repaint on EVERY frame, and
             # re-stripping the whole multi-MB buffer each poll throttles the pty
             # drain quadratically (the child blocks on a full pty buffer) —
             # since the full-screen background tint landed, that pushed the
             # match past the deadline. 256 KiB spans several full frames.
-            landed = _read_until(
-                master_fd,
-                proc,
-                lambda b: any(m in _strip_ansi(b[-262_144:]) for m in _CATEGORY_SCREEN_MARKERS),
-                timeout=30.0,
-            )
-            text = _strip_ansi(landed[-262_144:])
-            assert any(m in text for m in _CATEGORY_SCREEN_MARKERS), (
-                f"category screen never rendered; exit={proc.poll()}; last output:\n{text[-2000:]}"
-            )
+            if solo:
+                landed = _read_until(
+                    master_fd,
+                    proc,
+                    lambda b: any(m in _strip_ansi(b[-262_144:]) for m in _CATEGORY_SCREEN_MARKERS),
+                    timeout=30.0,
+                )
+                text = _strip_ansi(landed[-262_144:])
+                assert any(m in text for m in _CATEGORY_SCREEN_MARKERS), (
+                    f"category screen never rendered; exit={proc.poll()}; last output:\n{text[-2000:]}"
+                )
+                # Enter picks the preselected category (Team) → the door.
+                os.write(master_fd, b"\r")
+            else:
+                landed = b""
 
-            # Enter picks the preselected category (Team) → the door.
-            os.write(master_fd, b"\r")
             door = _read_until(
                 master_fd,
                 proc,
@@ -157,6 +168,12 @@ class TestTuiLiveSmoke:
             assert any(m in text for m in _DOOR_SCREEN_MARKERS), (
                 f"door screen never rendered; exit={proc.poll()}; last output:\n{text[-2000:]}"
             )
+            if not solo:
+                # The split is not merely skipped — it is never drawn at all.
+                whole = _strip_ansi(door)
+                assert not any(m in whole for m in _CATEGORY_SCREEN_MARKERS), (
+                    "the landing split rendered even though the Solo world is off"
+                )
 
             # Enter picks the preselected door (Sessions) → the mode menu.
             os.write(master_fd, b"\r")

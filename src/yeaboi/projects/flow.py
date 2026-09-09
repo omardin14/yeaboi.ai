@@ -36,13 +36,8 @@ FLOW: tuple[FlowStep, ...] = (
     FlowStep("reporting", "Report", ("plan",), "a report about this project alone"),
 )
 
-# The Agents world's projects scope reports to a repo, not to each other.
-AGENTS_FLOW_LINE = "Agents projects scope their reports to one repository."
-
 
 def flow_for(world: str, available: Iterable[str]) -> tuple[FlowStep, ...]:
-    """The steps a world's menu can run, in ``FLOW`` order; none for Agents."""
-    if world == "agents":
-        return ()
+    """The steps a world's menu can run, in ``FLOW`` order."""
     keys = set(available)
     return tuple(step for step in FLOW if step.key in keys)

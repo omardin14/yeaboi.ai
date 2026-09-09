@@ -12,9 +12,9 @@ from yeaboi.prompts.niko import get_niko_system_prompt, get_niko_title_prompt
 
 
 class TestIdentity:
-    def test_it_names_all_three_audiences(self):
+    def test_it_names_both_audiences(self):
         prompt = get_niko_system_prompt()
-        assert "Solo" in prompt and "Team" in prompt and "Agents" in prompt
+        assert "Solo" in prompt and "Team" in prompt
 
     def test_it_names_the_modes_a_user_would_ask_about(self):
         prompt = get_niko_system_prompt().lower()

@@ -362,6 +362,7 @@ def test_tips_for_an_unknown_surface_raise():
 
 class TestWorlds:
     TEAM_ONLY = {"retro-board", "scrum-poker", "performance", "slack-inbound", "artifact-editing"}
+    SOLO_ONLY = {"weekly-review", "agent-usage", "agent-advisor", "agent-security"}
 
     def test_untagged_tips_reach_every_world(self):
         from yeaboi.surfaces import ALL_WORLDS
@@ -374,29 +375,42 @@ class TestWorlds:
         solo = tips_for_surface("tui", world="solo")
         assert solo, "the Solo rotation must never be empty"
         assert not {t.key for t in solo} & self.TEAM_ONLY
-        # Everything else — including the Agents tips, which jump worlds — stays.
+        # Everything else — including the Agents family, which Solo now holds.
         assert {"planning", "standup", "reporting", "agent-usage"} <= {t.key for t in solo}
         _clear_cache()
 
     def test_team_rotation_is_the_terminal_list_minus_solo_only_tips(self, monkeypatch):
-        # Team sees everything but the one Solo-only tip (Weekly Review).
+        # Team sees everything but Solo's own: Weekly Review and the Agents family.
         _clear_cache()
         monkeypatch.setattr("yeaboi.voice.voice_state", lambda: "ready")
         expected = tuple(t for t in tips_for_surface("tui") if "team" in t.worlds)
         assert tips_for_surface("tui", world="team") == expected
-        assert {t.key for t in tips_for_surface("tui")} - {t.key for t in expected} == {"weekly-review"}
+        assert {t.key for t in tips_for_surface("tui")} - {t.key for t in expected} == self.SOLO_ONLY
         _clear_cache()
 
     def test_the_review_tip_rotates_only_in_solo(self, monkeypatch):
         _clear_cache()
         monkeypatch.setattr("yeaboi.voice.voice_state", lambda: "ready")
         assert "weekly-review" in {t.key for t in tips_for_surface("tui", world="solo")}
-        assert "weekly-review" not in {t.key for t in tips_for_surface("tui", world="agents")}
+        assert "weekly-review" not in {t.key for t in tips_for_surface("tui", world="team")}
+        _clear_cache()
+
+    def test_the_agents_family_never_reaches_team(self, monkeypatch):
+        # The launch hides Solo, so a Team welcome must never advertise a mode
+        # it cannot open.
+        _clear_cache()
+        monkeypatch.setattr("yeaboi.voice.voice_state", lambda: "ready")
+        team = {t.key for t in tips_for_surface("tui", world="team")}
+        assert not team & {"agent-usage", "agent-advisor", "agent-security"}
         _clear_cache()
 
     def test_the_team_only_tips_are_tagged(self):
         tagged = {t.key for t in _tips._FEATURE_TIPS if t.worlds == ("team",)}
         assert tagged == self.TEAM_ONLY
+
+    def test_the_solo_only_tips_are_tagged(self):
+        tagged = {t.key for t in _tips._FEATURE_TIPS if t.worlds == ("solo",)}
+        assert tagged == self.SOLO_ONLY
 
     def test_every_world_has_a_rotation(self, monkeypatch):
         from yeaboi.surfaces import ALL_WORLDS
@@ -407,9 +421,11 @@ class TestWorlds:
             assert tip_count(world=world) > 1, world
         _clear_cache()
 
-    def test_an_unknown_world_raises(self):
+    @pytest.mark.parametrize("world", ["humans", "agents"])
+    def test_an_unknown_world_raises(self, world):
+        # "agents" was a world until its family moved into Solo — a typo now.
         with pytest.raises(ValueError, match="unknown world"):
-            tips_for_surface("tui", world="humans")
+            tips_for_surface("tui", world=world)
 
     def test_index_and_tip_agree_within_a_world(self, monkeypatch):
         # The `g` handler resolves the index and reads the tip with one world;

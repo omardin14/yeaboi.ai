@@ -181,23 +181,40 @@ def set_tips_enabled(enabled: bool) -> None:
     logger.info("Tips %s (persisted to %s)", "enabled" if enabled else "disabled", config_file)
 
 
-# The landing split's three categories. Persisted so the next launch preselects
+# The Solo world's off switch. Read here and nowhere else: the CLI, the MCP
+# tools, the engines and the app's HTTP routes ignore it — only what a user can
+# see and click is gated. The mirror image of :func:`yeaboi.news.desk.enabled`,
+# which defaults *on*; this one defaults off, so the test is "in", not "not in".
+SOLO_WORLD_ENV = "YEABOI_SOLO"
+_SOLO_ON = ("1", "true", "on", "yes")
+
+
+def solo_world_enabled() -> bool:
+    """Whether the UI offers the Solo world, and with it the landing split."""
+    return os.getenv(SOLO_WORLD_ENV, "").strip().lower() in _SOLO_ON
+
+
+# The landing split's categories. Persisted so the next launch preselects
 # (never auto-skips) the category the user worked in last.
 LAST_CATEGORY_KEY = "YEABOI_LAST_CATEGORY"
-_VALID_CATEGORIES = ("solo", "team", "agents")
+_VALID_CATEGORIES = ("solo", "team")
 # Values written by older releases, mapped on read; rewritten on the next set.
-_LEGACY_CATEGORIES = {"humans": "team"}
+# "agents" was its own world before the Agents family moved into Solo.
+_LEGACY_CATEGORIES = {"humans": "team", "agents": "solo"}
 
 
 def get_last_category() -> str:
-    """Return the last-chosen landing category ("solo"/"team"/"agents", default team).
+    """Return the last-chosen landing category ("solo"/"team", default team).
 
     Preselection only — the category screen always shows. Unknown values fall
-    back to "team" so a hand-edited .env can't wedge the landing screen.
+    back to "team" so a hand-edited .env can't wedge the landing screen, and so
+    does "solo" while the Solo world is off: there is one world, and it is Team.
     """
     value = os.getenv(LAST_CATEGORY_KEY, "team").strip().lower()
     value = _LEGACY_CATEGORIES.get(value, value)
-    return value if value in _VALID_CATEGORIES else "team"
+    if value not in _VALID_CATEGORIES:
+        return "team"
+    return value if value == "team" or solo_world_enabled() else "team"
 
 
 def set_last_category(category: str) -> None:

@@ -72,16 +72,28 @@ def list_capabilities() -> dict:
     """
 
     def _cards() -> dict:
-        from yeaboi.ui.mode_select.screens._screens import _AGENT_CARDS, _INTAKE_CARDS, _MODE_CARDS, _SOLO_CARDS
+        from yeaboi.config import solo_world_enabled
+        from yeaboi.ui.mode_select.screens._screens import (
+            _AGENT_CARDS,
+            _INTAKE_CARDS,
+            _MODE_CARDS,
+            _SOLO_MENU_CARDS,
+        )
         from yeaboi.ui.mode_select.screens._screens_category import _CATEGORY_CARDS
 
-        return {
-            "categories": _CATEGORY_CARDS,
-            "solo": _SOLO_CARDS,
+        # Mirrors GET /api/meta/capabilities, so Niko never offers a world the
+        # user cannot open.
+        solo_on = solo_world_enabled()
+        cards: dict = {
+            "solo_enabled": solo_on,
+            "categories": [card for card in _CATEGORY_CARDS if solo_on or card["key"] != "solo"],
             "modes": _MODE_CARDS,
             "agents": _AGENT_CARDS,
             "intake": _INTAKE_CARDS,
         }
+        if solo_on:
+            cards["solo"] = _SOLO_MENU_CARDS
+        return cards
 
     return _guard("list_capabilities", _cards)
 

@@ -92,7 +92,7 @@ FEEDBACK_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220
 # App chrome like the changelog: neutral silver, no mode owns these pages.
 PRIVACY_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
 SYSTEM_CHECK_THEME = Theme(accent="rgb(160,160,180)", accent_bright="rgb(200,200,220)")
-# The three worlds of the landing split. TEAM_THEME is the Theme default
+# The two worlds of the landing split. TEAM_THEME is the Theme default
 # palette named, so the existing modes are unchanged; SOLO_THEME is a warm
 # amber for the one-duck world (distinct from Niko's duck gold and Usage's
 # ochre); AGENTS_THEME opens the family's "machine" palette, distinct per mode

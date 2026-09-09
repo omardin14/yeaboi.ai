@@ -82,17 +82,19 @@ COLS, ROWS = 140, 40
 # chrome that appears once mode-select has rendered, matched after stripping.
 MODE_SCREEN_MARKERS = ("changelog", "Tip:", "channel")
 
-# Chrome of the Humans/Agents landing split (Phase 0), which renders BEFORE any
-# mode menu. Deliberately ONE fragment, from the heading, and not the key hints
-# the smoke test also matches on: the two sets must be disjoint on the *rendered
-# screens*, not merely as literals. The mode menu's rotating tip bar carries
-# tips containing "switch" and "choose", so matching those would let the
-# post-Esc `await` resolve against the menu it is leaving and race the
-# transition — and would hide a swallowed Esc instead of failing loudly.
+# Chrome of the landing split (Phase 0). The shipped build hides the Solo world
+# and with it the split, so nothing in DEMO_SCRIPT waits on this any more — it
+# stays because the disjointness check still renders the screen, and because
+# YEABOI_SOLO=1 brings it back.
+# Deliberately ONE fragment, from the heading, and not the key hints the smoke
+# test also matches on: the two sets must be disjoint on the *rendered screens*,
+# not merely as literals. The mode menu's rotating tip bar carries tips
+# containing "switch" and "choose", so matching those would let a post-Esc
+# `await` resolve against the menu it is leaving and race the transition.
 # test_record_demo.py renders both screens and asserts the disjointness.
 CATEGORY_SCREEN_MARKERS = ("working with",)
-# Chrome of the door (Projects vs Sessions), which renders between the split
-# and a menu. One fragment of its heading, for the same disjointness reason.
+# Chrome of the door (Projects vs Sessions) — the first screen after the splash.
+# One fragment of its heading, for the same disjointness reason.
 DOOR_SCREEN_MARKERS = ("work today",)
 _ANSI_RE = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]"
@@ -107,8 +109,10 @@ _ALT_SCREEN_EXIT = "\x1b[?1049l"
 KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT = b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D"
 KEY_ENTER, KEY_ESC = b"\r", b"\x1b"
 
-# The demo choreography — the whole product in one take: the landing split, the
-# door, the Humans menu, back out, then the Agents family.
+# The demo choreography — the whole product in one take: the door, the Team
+# menu, back out to the door, then in through Projects. There is no landing
+# split to film: the launch ships one world (see config.solo_world_enabled),
+# and a demo has to show what a viewer will actually get.
 #
 # Two rules hold this together, both load-bearing:
 #
@@ -123,17 +127,14 @@ KEY_ENTER, KEY_ESC = b"\r", b"\x1b"
 #    here is an `await`, i.e. a drained read far longer than 100ms.
 #    tests/unit/test_record_demo.py pins this.
 DEMO_SCRIPT: list[tuple] = [
-    ("await", CATEGORY_SCREEN_MARKERS, 30.0),  # splash plays through; sync on the split
-    ("pause", 2.5),  # both world-cards settle: duck left, robo-duck right
-    ("key", KEY_RIGHT),
-    ("pause", 1.2),  # Agents wakes — accent border, tinted interior, wing flap
+    ("await", DOOR_SCREEN_MARKERS, 30.0),  # splash plays through; sync on the door
+    ("pause", 2.5),  # both door-cards settle: Projects left, Sessions right
     ("key", KEY_LEFT),
-    ("pause", 1.0),  # back on Humans
+    ("pause", 1.2),  # Projects wakes — accent border, tinted interior
+    ("key", KEY_RIGHT),
+    ("pause", 1.0),  # back on Sessions, which is preselected
     ("key", KEY_ENTER),
-    ("await", DOOR_SCREEN_MARKERS, 15.0),  # the door: Projects or Sessions
-    ("pause", 0.8),
-    ("key", KEY_ENTER),  # Sessions is preselected
-    ("await", MODE_SCREEN_MARKERS, 15.0),  # the nine Humans cards sweep in
+    ("await", MODE_SCREEN_MARKERS, 15.0),  # the Team cards sweep in
     ("pause", 1.2),
     ("key", KEY_DOWN),
     ("pause", 0.8),
@@ -145,21 +146,13 @@ DEMO_SCRIPT: list[tuple] = [
     ("pause", 1.2),  # settle on a card, let the description reveal finish
     ("key", KEY_ESC),  # esc from a menu returns to the door (q would quit)
     ("await", DOOR_SCREEN_MARKERS, 15.0),
-    ("key", KEY_ESC),  # and esc from the door returns to the split
-    ("await", CATEGORY_SCREEN_MARKERS, 15.0),
-    ("pause", 0.8),
-    ("key", KEY_RIGHT),
-    ("pause", 0.6),
-    ("key", KEY_ENTER),
-    ("await", DOOR_SCREEN_MARKERS, 15.0),
-    ("pause", 0.8),
-    ("key", KEY_ENTER),
-    ("await", MODE_SCREEN_MARKERS, 15.0),  # Agents: same builder, three cards
-    ("pause", 1.2),
-    ("key", KEY_DOWN),
     ("pause", 1.0),
     ("key", KEY_DOWN),
-    ("pause", 1.5),  # rest on Security so the last frame is a real screen
+    ("pause", 0.8),
+    ("key", KEY_DOWN),
+    ("pause", 1.2),  # back on a card, description revealed
+    ("key", KEY_DOWN),
+    ("pause", 1.5),  # rest on a card so the last frame is a real screen
     ("key", b"q"),
 ]
 
