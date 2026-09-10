@@ -37,6 +37,35 @@ DEST_LABELS: dict[str, str] = {
     DEST_CONFLUENCE: "Confluence",
 }
 
+#: Every destination that exists, in menu order — including the ones this
+#: configuration cannot reach. ``available_destinations`` is the reachable
+#: subset; a settings surface wants both, so it can offer the way in.
+KNOWN_DESTINATIONS: tuple[str, ...] = (DEST_FILES, DEST_COPY, DEST_NOTION, DEST_CONFLUENCE)
+
+#: What each destination needs before it can publish, and where that is typed.
+#: The section is the settings section a surface deep-links to — the same string
+#: a ``/api/connections`` row carries, so one vocabulary spans both.
+_DESTINATION_NEEDS: dict[str, tuple[tuple[str, ...], str]] = {
+    DEST_NOTION: (("NOTION_TOKEN", "NOTION_EXPORT_PARENT_PAGE_ID"), "notion"),
+    # Confluence is configured on the Jira card — it shares the Atlassian
+    # account, and legacy.py declares it section="jira" for the same reason.
+    DEST_CONFLUENCE: (
+        ("CONFLUENCE_BASE_URL", "CONFLUENCE_EMAIL", "CONFLUENCE_API_TOKEN", "CONFLUENCE_SPACE_KEY"),
+        "jira",
+    ),
+}
+
+
+def destination_requirements(key: str) -> tuple[str, ...]:
+    """The envs that unblock ``key``. Empty for a destination that needs none."""
+    return _DESTINATION_NEEDS.get(key, ((), ""))[0]
+
+
+def destination_section(key: str) -> str:
+    """The settings section that configures ``key``, or ``""`` when none does."""
+    return _DESTINATION_NEEDS.get(key, ((), ""))[1]
+
+
 #: Destinations the *client* completes rather than the backend: nothing leaves
 #: the machine and no publishing call is made, so a surface handles them with
 #: whatever clipboard it has rather than posting the document anywhere.
@@ -103,23 +132,37 @@ def destination_blocker(key: str) -> str:
     return ""
 
 
-def destination_options(*, mode: str, extras: list[str] | None = None) -> list[dict]:
+def destination_options(*, mode: str, extras: list[str] | None = None, include_unavailable: bool = False) -> list[dict]:
     """The whole menu for one mode, as data.
 
     ``extras`` are mode-specific destinations the caller adds (``"jira"``,
     ``"powerpoint"``, ``"shareonline"``); they are described but never blocked
     here, because what makes them possible is the caller's own state.
+
+    ``include_unavailable`` is the settings view: every known destination,
+    including the ones no credential reaches yet, each carrying what it needs.
+    An export picker leaves it off and sees exactly the reachable menu.
     """
-    options = [
-        {
-            "key": key,
-            "label": DEST_LABELS[key],
-            "description": destination_description(key, mode=mode),
-            "blocked": destination_blocker(key),
-            "local": key in LOCAL_DESTINATIONS,
-        }
-        for key in available_destinations()
-    ]
+    reachable = available_destinations()
+    keys = list(KNOWN_DESTINATIONS) if include_unavailable else reachable
+    options = []
+    for key in keys:
+        available = key in reachable
+        blocked = destination_blocker(key) if available else ""
+        options.append(
+            {
+                "key": key,
+                "label": DEST_LABELS[key],
+                "description": destination_description(key, mode=mode),
+                "blocked": blocked,
+                "local": key in LOCAL_DESTINATIONS,
+                "available": available,
+                "requires": list(destination_requirements(key)),
+                "section": destination_section(key),
+                # What a surface should offer: publish, or go and set it up.
+                "action": "ready" if available and not blocked else "configure",
+            }
+        )
     for extra in extras or []:
         options.append(
             {
@@ -128,6 +171,10 @@ def destination_options(*, mode: str, extras: list[str] | None = None) -> list[d
                 "description": destination_description(extra, mode=mode, label=extra),
                 "blocked": "",
                 "local": extra in LOCAL_DESTINATIONS,
+                "available": True,
+                "requires": [],
+                "section": "",
+                "action": "ready",
             }
         )
     return options

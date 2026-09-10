@@ -78,6 +78,13 @@ class TestAmbienceWire:
         assert "off" in ambience.SAVER_STYLES
         assert ambience.DEFAULT_SAVER_STYLE in ambience.SAVER_STYLES
 
+    def test_the_front_page_style_is_named_on_both_sides(self):
+        # The desktop draws this one in React rather than on the canvas, and
+        # keys its own catalogue by this exact string.
+        from yeaboi import ambience
+
+        assert ambience.SAVER_STYLES["front-page"] == "Front Page"
+
 
 class TestContractDoc:
     def test_every_route_is_documented(self):

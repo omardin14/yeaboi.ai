@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from yeaboi.connectors import verify_status
 from yeaboi.settings import engine
 
 SCREENS_SECONDARY = (
@@ -301,6 +302,102 @@ class TestConnectionVerify:
         result = engine.verify_connection("tavus", {})
         assert result == {"ok": False, "message": "Invalid Tavus API key"}
         assert seen["token"] == "tv-stored"
+
+
+class TestListSettings:
+    """A list setting is edited as rows; the joined string stays the storage."""
+
+    def test_the_snapshot_parses_a_list_field(self, monkeypatch):
+        monkeypatch.setenv("STANDUP_EMAIL_RECIPIENTS", "a@x.com, b@y.com")
+        field = next(f for f in engine.get_settings().fields if f.env == "STANDUP_EMAIL_RECIPIENTS")
+        assert field.kind == "list" and field.item_kind == "email"
+        assert field.items == ("a@x.com", "b@y.com")
+
+    def test_a_text_field_never_carries_items(self):
+        field = next(f for f in engine.get_settings().fields if f.env == "LOG_LEVEL")
+        assert field.kind == "text" and field.items == ()
+
+    def test_writing_rows_joins_them(self, monkeypatch):
+        written: dict[str, str] = {}
+        monkeypatch.setattr("yeaboi.config.apply_config_value", lambda k, v: written.__setitem__(k, v))
+        result = engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["a@x.com", "b@y.com"])
+        assert result.ok
+        assert written["STANDUP_EMAIL_RECIPIENTS"] == "a@x.com,b@y.com"
+
+    def test_duplicates_and_blanks_are_dropped_in_order(self, monkeypatch):
+        written: dict[str, str] = {}
+        monkeypatch.setattr("yeaboi.config.apply_config_value", lambda k, v: written.__setitem__(k, v))
+        engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["b@y.com", " ", "a@x.com", "b@y.com"])
+        assert written["STANDUP_EMAIL_RECIPIENTS"] == "b@y.com,a@x.com"
+
+    def test_a_bad_email_is_refused(self):
+        with pytest.raises(ValueError, match="not an email address"):
+            engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["not-an-address"])
+
+    def test_an_entry_carrying_the_separator_is_refused(self):
+        with pytest.raises(ValueError, match="cannot contain"):
+            engine.set_list_setting("STANDUP_EMAIL_RECIPIENTS", ["a@x.com,b@y.com"])
+
+    def test_a_text_field_is_not_a_list(self):
+        with pytest.raises(ValueError, match="not a list setting"):
+            engine.set_list_setting("LOG_LEVEL", ["INFO"])
+
+    def test_allowed_paths_still_lands_through_its_own_writer(self, monkeypatch):
+        seen: dict[str, list] = {}
+        monkeypatch.setattr("yeaboi.config.set_allowed_paths", lambda paths: seen.__setitem__("paths", list(paths)))
+        monkeypatch.setattr("yeaboi.config.get_allowed_paths", lambda: tuple(seen.get("paths", [])))
+        result = engine.set_list_setting("YEABOI_ALLOWED_PATHS", ["/one", "/two", "/one"])
+        assert result.key == "YEABOI_ALLOWED_PATHS"
+        assert seen["paths"] == ["/one", "/two"]
+
+
+class TestVerifyIsRemembered:
+    """A probe of the SAVED credentials becomes the connection's status; a probe
+    of typed values answers the caller and nothing more."""
+
+    def test_a_stored_credential_probe_is_recorded(self, monkeypatch):
+        monkeypatch.setenv("TAVUS_API_KEY", "tv-stored")
+        monkeypatch.setattr(
+            "yeaboi.provider_verification._verify_tavus", lambda token: (False, "Invalid Tavus API key")
+        )
+        engine.verify_connection("tavus", {})
+        status = verify_status.status_for("tavus")
+        assert status.outcome == verify_status.OUTCOME_FAILED
+        assert status.message == "Invalid Tavus API key"
+
+    def test_a_typed_credential_probe_is_not_recorded(self, monkeypatch):
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "xi-stored")
+        monkeypatch.setattr("yeaboi.provider_verification._verify_elevenlabs", lambda token: (True, "verified"))
+        engine.verify_connection("elevenlabs", {"token": "xi-typed"})
+        assert verify_status.status_for("elevenlabs").outcome == verify_status.OUTCOME_UNTESTED
+
+    def test_changing_the_credential_drops_the_verdict(self, monkeypatch):
+        monkeypatch.setenv("NOTION_TOKEN", "secret_stored")
+        monkeypatch.setattr("yeaboi.provider_verification._verify_notion", lambda token: (True, "Notion verified"))
+        engine.verify_connection("notion", {})
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_OK
+        engine.set_setting("NOTION_TOKEN", "secret_other")
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_UNTESTED
+
+    def test_a_write_from_any_other_surface_drops_the_verdict(self, monkeypatch, tmp_path):
+        """The TUI catalog, `yeaboi connect` and OAuth rotation never touch
+        set_setting — they all write through config.apply_config_value, which
+        is where the invalidation lives."""
+        from yeaboi import config
+
+        monkeypatch.setattr(config, "set_config_value", lambda _k, _v: tmp_path / ".env")
+        monkeypatch.setenv("NOTION_TOKEN", "secret_stored")
+        monkeypatch.setattr("yeaboi.provider_verification._verify_notion", lambda token: (True, "Notion verified"))
+        engine.verify_connection("notion", {})
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_OK
+
+        config.apply_config_value("NOTION_TOKEN", "secret_rotated_elsewhere")
+        assert verify_status.status_for("notion").outcome == verify_status.OUTCOME_UNTESTED
+
+    def test_the_snapshot_carries_a_row_for_every_kind(self):
+        snapshot = engine.get_settings()
+        assert set(snapshot.connections) >= {"github", "jira", "notion", "elevenlabs", "tavus"}
+        assert all(set(row) == {"outcome", "message", "checked_at"} for row in snapshot.connections.values())
 
 
 class TestTuiParity:

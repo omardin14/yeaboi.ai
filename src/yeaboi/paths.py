@@ -124,6 +124,7 @@ NEWS_CACHE_FILE = DATA_DIR / "news_cache.json"  # the desktop front page's last 
 NEWS_ROSTER_FILE = DATA_DIR / "news_roster.json"  # which front-page outlets are on, plus the user's own feeds
 PROJECT_SUGGESTIONS_CACHE_FILE = DATA_DIR / "project_suggestions.json"  # the Projects door's recommended projects
 CUSTOM_CONNECTORS_FILE = DATA_DIR / "custom_connectors.json"  # user-created connection descriptors (never credentials)
+CONNECTION_STATUS_FILE = DATA_DIR / "connection_status.json"  # last verify outcome per connection (never a value)
 
 # Legacy paths (for backward compatibility / migration)
 LEGACY_DB_PATH = ROOT_DIR / "sessions.db"
@@ -290,6 +291,16 @@ def get_custom_connectors_path() -> Path:
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return CUSTOM_CONNECTORS_FILE
+
+
+def get_connection_status_path() -> Path:
+    """Return the path of the per-connection verify outcomes (may not exist yet).
+
+    Outcomes only — no credential and no digest of one; the file records which
+    envs a check ran against, not what they held.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return CONNECTION_STATUS_FILE
 
 
 def get_reporting_themes_path() -> Path:

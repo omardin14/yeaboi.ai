@@ -366,3 +366,12 @@ class TestRunDir:
         bin_dir = paths.get_bin_dir()
         assert bin_dir.is_dir()
         assert stat.S_IMODE(bin_dir.stat().st_mode) == 0o700
+
+
+class TestConnectionStatusPath:
+    def test_it_sits_in_the_data_dir_and_creates_it(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(paths, "DATA_DIR", tmp_path / "data")
+        monkeypatch.setattr(paths, "CONNECTION_STATUS_FILE", tmp_path / "data" / "connection_status.json")
+        got = paths.get_connection_status_path()
+        assert got.name == "connection_status.json"
+        assert got.parent.is_dir()

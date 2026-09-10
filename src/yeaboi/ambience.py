@@ -48,6 +48,7 @@ IDLE_SECONDS = 5 * 60
 # the terminal draws its ducks for any of them and honours "off".
 SAVER_STYLES: dict[str, str] = {
     "duck-yard": "Duck Yard",
+    "front-page": "Front Page",
     "constellation": "Constellation",
     "ricochet": "Ricochet",
     "aurora": "Aurora",

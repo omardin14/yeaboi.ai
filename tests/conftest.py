@@ -222,6 +222,23 @@ class RealPackageInstallBlocked(BaseException):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_connection_status(tmp_path, monkeypatch):
+    """Each test gets its own connection-status store.
+
+    ``verify_connection`` records a probe of the stored credentials, so without
+    this one test's recorded outcome is the next one's starting state — and the
+    presence check that normally expires a row cannot tell the two apart when
+    both set the same env.
+    """
+    from yeaboi.connectors import verify_status
+
+    monkeypatch.setattr(verify_status, "_store_path", lambda: tmp_path / "connection_status.json")
+    verify_status.invalidate()
+    yield
+    verify_status.invalidate()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_package_install(monkeypatch):
     """No test may spawn a real package manager or model download.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from yeaboi import exporting
 from yeaboi.exporting import LOCAL_DESTINATIONS, destination_blocker, destination_options
 
 
@@ -85,3 +86,31 @@ class TestMaskedNote:
 
         note = masked_note(AnonymizedOutput(replacements=[("Acme", "Company A"), ("Ada", "Engineer 1")]))
         assert "2 masked" in note and "review before sharing" in note
+
+
+class TestDestinationsForSettings:
+    """The settings view: every destination, including the ones not reachable yet."""
+
+    def test_the_default_menu_is_only_what_is_reachable(self, monkeypatch):
+        monkeypatch.setattr(exporting, "get_notion_token", lambda: "")
+        monkeypatch.setattr(exporting, "get_confluence_base_url", lambda: "")
+        keys = [o["key"] for o in exporting.destination_options(mode="planning")]
+        assert keys == [exporting.DEST_FILES, exporting.DEST_COPY]
+
+    def test_the_settings_view_lists_the_unreachable_with_what_they_need(self, monkeypatch):
+        monkeypatch.setattr(exporting, "get_notion_token", lambda: "")
+        monkeypatch.setattr(exporting, "get_confluence_base_url", lambda: "")
+        rows = exporting.destination_options(mode="planning", include_unavailable=True)
+        assert [o["key"] for o in rows] == list(exporting.KNOWN_DESTINATIONS)
+        notion = next(o for o in rows if o["key"] == exporting.DEST_NOTION)
+        assert notion["available"] is False
+        assert notion["action"] == "configure"
+        assert notion["section"] == "notion"
+        assert "NOTION_TOKEN" in notion["requires"]
+
+    def test_a_reachable_destination_is_ready(self, monkeypatch):
+        monkeypatch.setattr(exporting, "get_notion_token", lambda: "")
+        monkeypatch.setattr(exporting, "get_confluence_base_url", lambda: "")
+        rows = exporting.destination_options(mode="planning", include_unavailable=True)
+        files = next(o for o in rows if o["key"] == exporting.DEST_FILES)
+        assert files["available"] is True and files["action"] == "ready" and files["requires"] == []

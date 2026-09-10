@@ -76,6 +76,13 @@ def apply_config_value(key: str, value: str) -> Path:
         os.environ[key] = value
     else:
         os.environ.pop(key, None)
+    # A credential that changed invalidates whatever the last probe of it said.
+    # Here rather than in settings.engine because the TUI catalog, `yeaboi
+    # connect`, Access setup and OAuth rotation all write through this call and
+    # none of them go near that one.
+    from yeaboi.connectors import verify_status
+
+    verify_status.forget_for_env(key)
     return config_file
 
 

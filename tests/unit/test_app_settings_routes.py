@@ -40,10 +40,17 @@ class TestSettingsRead:
         assert resp.code == 200
         assert secret not in resp.body.decode()
         payload = json.loads(resp.body)
-        assert {"fields", "sections", "config_path", "voice"} == set(payload)
+        assert {"fields", "sections", "config_path", "voice", "connections"} == set(payload)
         github = next(f for f in payload["fields"] if f["env"] == "GITHUB_TOKEN")
         assert github["secret"] and github["is_set"]
         assert github["value"].startswith("ghp_") and "•" in github["value"]
+
+    def test_a_present_credential_is_not_reported_as_verified(self, app, monkeypatch):
+        """A key that is merely set reads untested — presence is not health."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_never-probed")
+        payload = json.loads(request(app, "GET", "/api/settings").body)
+        assert payload["connections"]["github"]["outcome"] == "untested"
+        assert set(payload["connections"]["github"]) == {"outcome", "message", "checked_at"}
 
     def test_providers_catalog(self, app):
         payload = json.loads(request(app, "GET", "/api/settings/providers").body)
@@ -97,6 +104,28 @@ class TestSettingsWrites:
         resp = request(app, "POST", "/api/settings/allowed-paths", {"paths": ["/a"]})
         assert resp.code == 200 and saved == [["/a"]]
         assert request(app, "POST", "/api/settings/allowed-paths", {"paths": "nope"}).code == 400
+
+    def test_list_setting_writes_rows(self, app, monkeypatch):
+        written: dict[str, str] = {}
+        monkeypatch.setattr("yeaboi.config.apply_config_value", lambda k, v: written.__setitem__(k, v))
+        body = {"key": "STANDUP_EMAIL_RECIPIENTS", "items": ["a@x.com", "b@y.com"]}
+        assert request(app, "POST", "/api/settings/list", body).code == 200
+        assert written["STANDUP_EMAIL_RECIPIENTS"] == "a@x.com,b@y.com"
+
+    def test_list_setting_refuses_a_missing_key_and_a_bad_entry(self, app):
+        assert request(app, "POST", "/api/settings/list", {"items": []}).code == 400
+        bad = {"key": "STANDUP_EMAIL_RECIPIENTS", "items": ["nope"]}
+        assert request(app, "POST", "/api/settings/list", bad).code == 400
+
+    def test_slack_channels_answers_without_a_token(self, app, monkeypatch):
+        """The picker's roster never 500s: a settings page that offers a text
+        box and says why is useful, one that errors is not."""
+        monkeypatch.setattr("yeaboi.tools.slack._token", lambda: "")
+        resp = request(app, "GET", "/api/settings/slack/channels")
+        assert resp.code == 200
+        payload = json.loads(resp.body)
+        assert payload["channels"] == []
+        assert "SLACK_BOT_TOKEN" in payload["reason"]
 
     def test_data_dir_reports_restart(self, app, monkeypatch):
         monkeypatch.setattr("yeaboi.config.set_data_dir", lambda v: None)

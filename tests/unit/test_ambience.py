@@ -155,6 +155,9 @@ class TestApply:
     def test_writes_the_saver_style(self, env):
         assert ambience.apply({"saver_style": "aurora"})["saver"]["style"] == "aurora"
 
+    def test_the_front_page_is_a_saver_style(self, env):
+        assert ambience.apply({"saver_style": "front-page"})["saver"]["style"] == "front-page"
+
     def test_an_unknown_style_is_refused_rather_than_defaulted(self, env):
         # Silently storing "duck-yard" would tell the caller its pick had landed.
         with pytest.raises(ValueError, match="unknown saver_style"):

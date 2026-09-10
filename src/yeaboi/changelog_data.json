@@ -2,6 +2,38 @@
   "schema_version": 2,
   "entries": [
     {
+      "version": "3.46.0",
+      "date": "2026-09-09",
+      "headline": "Credentials show whether they actually work",
+      "summary": "Your saved credentials now show whether they actually work, with updated status whenever you change them. Settings fields guide you with lists and choices, so entries are validated and correct.",
+      "highlights": [
+        {
+          "text": "Credentials show whether they actually work, not just whether they exist",
+          "areas": [
+            "settings"
+          ]
+        },
+        {
+          "text": "Settings fields guide entries with lists and validation",
+          "areas": [
+            "settings"
+          ]
+        },
+        {
+          "text": "Pick Slack channels from your workspace during setup",
+          "areas": [
+            "settings"
+          ]
+        },
+        {
+          "text": "See which environment variables unlock each destination",
+          "areas": [
+            "settings"
+          ]
+        }
+      ]
+    },
+    {
       "version": "3.45.1",
       "date": "2026-09-09",
       "headline": "yeaboi opens straight into your modes",

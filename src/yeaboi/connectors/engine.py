@@ -20,7 +20,7 @@ import os
 from dataclasses import asdict
 from datetime import datetime
 
-from yeaboi.connectors import registry
+from yeaboi.connectors import registry, verify_status
 from yeaboi.connectors.spec import FAMILY_LABELS, FAMILY_ORDER
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,9 @@ def list_connections(*, family: str = "", connected_only: bool = True, include_l
                 "icon": custom_icons.get(connector.key, ""),
                 "accent": connector.accent,
                 "verify_kind": _verify_kind(connector, is_legacy),
+                # What the last live probe said, so a surface can tell a key
+                # that is merely present from one that has been checked.
+                "status": verify_status.to_row(connector.key),
                 # The ways in, and which one is in force. A connector with one
                 # way sends an empty list and no selector, so a surface that
                 # ignores these keys renders exactly as it did before.
@@ -202,6 +205,7 @@ def delete_custom_connection(key: str) -> dict:
         apply_config_value(env, "")
         os.environ.pop(env, None)
     delete_custom(spec.key)
+    verify_status.forget(spec.key)
     logger.info("connectors: custom connection %s deleted", spec.key)
     return {"deleted": spec.key}
 

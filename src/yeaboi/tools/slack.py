@@ -278,6 +278,23 @@ def users_list(*, cursor: str = "", limit: int = 200, token: str = "", budget: R
     return call("users.list", params, token=token, budget=budget)
 
 
+def conversations_list(
+    *,
+    cursor: str = "",
+    limit: int = 200,
+    types: str = "public_channel,private_channel",
+    exclude_archived: bool = True,
+    token: str = "",
+    budget: RetryBudget | None = None,
+):
+    """A page of workspace channels, for picking one instead of typing its id."""
+    # "true", not Python's "True": this goes onto a vendor's query string.
+    params: dict = {"limit": limit, "types": types, "exclude_archived": "true" if exclude_archived else "false"}
+    if cursor:
+        params["cursor"] = cursor
+    return call("conversations.list", params, token=token, budget=budget)
+
+
 def paginate(fetch, key: str, *, max_pages: int = 10) -> tuple[list[dict], str]:
     """Walk a cursor-paginated method. Returns (items, error).
 
