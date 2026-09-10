@@ -97,6 +97,16 @@ def _dict_to_retro_report(d: dict) -> RetroReport:
 # ---------------------------------------------------------------------------
 
 
+def _action_count(report_json: str | None) -> int:
+    """How many action items a stored report holds. 0 for anything unreadable."""
+    if not report_json:
+        return 0
+    try:
+        cards = json.loads(report_json).get("cards") or []
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return 0
+    return sum(1 for card in cards if isinstance(card, dict) and card.get("grid") == "action_items")
+
 class RetroStore:
     """SQLite-backed store for completed retrospectives.
 
@@ -194,15 +204,25 @@ class RetroStore:
         """Return recent retro run metadata (newest first) for a session.
 
         Each row carries its ``id`` so the saved-runs hub can reopen or delete a
-        specific run via ``get_run_by_id`` / ``delete_run``.
+        specific run via ``get_run_by_id`` / ``delete_run``, and its
+        ``action_count`` — what a retro produced, which is the figure a list of
+        past retros is read for.
         """
         rows = self._conn.execute(
-            "SELECT id, run_at, retro_date, project_name, card_count FROM retro_history "
+            "SELECT id, run_at, retro_date, project_name, card_count, report_json FROM retro_history "
             "WHERE session_id = ? ORDER BY run_at DESC LIMIT ?",
             (session_id, limit),
         ).fetchall()
         return [
-            {"id": r[0], "run_at": r[1], "retro_date": r[2], "project_name": r[3], "card_count": r[4]} for r in rows
+            {
+                "id": r[0],
+                "run_at": r[1],
+                "retro_date": r[2],
+                "project_name": r[3],
+                "card_count": r[4],
+                "action_count": _action_count(r[5]),
+            }
+            for r in rows
         ]
 
     def get_run_by_id(self, run_id: int) -> RetroReport | None:

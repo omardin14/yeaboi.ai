@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from yeaboi.mcp.runtime import run_readonly
+from yeaboi.mcp.runtime import run_readonly, to_jsonable
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,13 @@ def _retro_history(session_id: str, limit: int) -> dict:
     with RetroStore(get_db_path()) as store:
         history = store.get_history(resolved, limit=limit)
         latest = store.get_latest_report(resolved)
-    return {"session_id": resolved, "history": history, "latest_report": latest}
+    return {
+        "session_id": resolved,
+        "history": history,
+        # A dataclass reaches a caller as its repr() unless it is converted;
+        # every other tool that returns one goes through here.
+        "latest_report": to_jsonable(latest) if latest is not None else None,
+    }
 
 
 def _retro_export(session_id: str) -> dict:
