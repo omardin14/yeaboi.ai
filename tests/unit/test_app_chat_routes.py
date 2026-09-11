@@ -15,7 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from yeaboi.agent.state import QuestionnaireState
-from yeaboi.app.chats import ChatSupervisor
+from yeaboi.app.chats import ChatSupervisor, UnknownChatError
 from yeaboi.app.router import parse_request
 from yeaboi.app.server import AppServer
 
@@ -130,12 +130,14 @@ class TestTurnStream:
         assert lines[0]["type"] == "op" and lines[0]["op_id"]
         assert lines[-1] == {"stage": "intake", "type": "done"}
 
-    def test_the_reply_streams_as_tokens_then_a_question(self, app):
+    def test_a_deterministic_reply_lands_once_as_the_question_line(self, app):
+        # No typewriter over the wire: the text is on the question line, not
+        # paced out as tokens first.
         open_chat(app)
         lines = turn(app)
-        assert "".join(line["text"] for line in lines if line["type"] == "token") == "How many of you?"
+        assert [line for line in lines if line["type"] == "token"] == []
         question = next(line for line in lines if line["type"] == "question")
-        assert question["number"] == 2
+        assert question["number"] == 2 and "How many of you?" in question["text"]
 
     def test_the_text_reaches_the_graph_and_the_state_is_saved(self, app, graph):
         open_chat(app)
@@ -340,3 +342,73 @@ class TestSoloConversations:
     def test_the_default_is_a_team_conversation(self, app):
         open_chat(app)
         assert "solo" not in app.saved["proj-1"]
+
+
+class TestSupervisorOnSessionStore:
+    """The default loader/saver/recorder — the session store, not the file store."""
+
+    @pytest.fixture
+    def db(self, tmp_path, monkeypatch):
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+        return db
+
+    def _supervisor(self, graph):
+        return ChatSupervisor(graph_factory=lambda: graph, id_factory=lambda: "new-aaaa1111-2026-09-11")
+
+    def test_create_and_save_write_one_planning_row_with_its_title(self, db, graph):
+        from yeaboi.sessions import SessionStore
+
+        chats = self._supervisor(graph)
+        chat = chats.create("a booking app", intake_mode="smart", title="Barbers", project_label="apollo")
+        assert chat.session.state["project_label"] == "apollo"
+        chats.save(chat)
+        with SessionStore(db) as store:
+            (row,) = store.list_sessions(mode="planning")
+            assert row["session_id"] == chat.session_id and row["title"] == "Barbers"
+            assert store.load_state(chat.session_id)["_chat_opening"] == "a booking app"
+
+    def test_a_closed_conversation_reopens_from_the_store(self, db, graph):
+        chats = self._supervisor(graph)
+        chat = chats.create("a booking app", intake_mode="smart")
+        chat.session.state["solo"] = True
+        chats.save(chat)
+        chats.close(chat.session_id)
+        again = chats.open(chat.session_id)
+        assert again is not chat and again.session.state["solo"] is True
+
+    def test_an_accepted_section_lands_in_plan_versions(self, db, graph):
+        from yeaboi.sessions import SessionStore
+
+        chats = self._supervisor(graph)
+        chat = chats.create("a booking app", intake_mode="smart")
+        chats.save(chat)
+        chat.session.state.update(pending_review="story_writer", stories=[])
+        chat.session.reply("accept", lambda _e: None)
+        with SessionStore(db) as store:
+            assert [v["section"] for v in store.list_plan_versions(chat.session_id)] == ["stories"]
+
+    def test_a_file_store_conversation_still_opens(self, db, graph, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.persistence.load_graph_state", lambda pid: {"messages": [], "_intake_mode": "smart"}
+        )
+        chat = self._supervisor(graph).open("uuid-from-before")
+        assert chat.session.state["_intake_mode"] == "smart"
+
+    def test_an_unknown_id_is_unknown_everywhere(self, db, graph, monkeypatch):
+        monkeypatch.setattr("yeaboi.persistence.load_graph_state", lambda pid: None)
+        with pytest.raises(UnknownChatError):
+            self._supervisor(graph).open("nope")
+
+    def test_the_project_name_and_last_node_follow_the_state(self, db, graph):
+        from tests._node_helpers import make_dummy_analysis
+        from yeaboi.sessions import SessionStore
+
+        chats = self._supervisor(graph)
+        chat = chats.create("a booking app", intake_mode="smart")
+        chat.session.state["project_analysis"] = make_dummy_analysis()
+        chats.save(chat)
+        with SessionStore(db) as store:
+            row = store.get_session(chat.session_id)
+        assert row["project_name"] == make_dummy_analysis().project_name
+        assert row["last_node_completed"] == "project_analyzer"

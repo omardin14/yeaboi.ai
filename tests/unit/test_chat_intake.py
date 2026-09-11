@@ -106,3 +106,38 @@ class TestScriptedTexts:
         assert "[2]" in SIZE_QUESTION_TEXT
         assert "Small" in SIZE_QUESTION_TEXT
         assert "Large" in SIZE_QUESTION_TEXT
+
+
+class TestSeedAnalysisProfile:
+    def test_an_empty_id_seeds_nothing(self):
+        from yeaboi.agent.chat_intake import seed_analysis_profile
+
+        state: dict = {}
+        seed_analysis_profile(state, "")
+        assert state == {}
+
+    def test_the_profile_and_its_practised_dod_are_seeded(self):
+        from yeaboi.agent.chat_intake import seed_analysis_profile
+
+        examples = {
+            "proposed_dod": {
+                "items": [
+                    {"practice": "Tests pass", "status": "established"},
+                    {"practice": "Docs updated", "status": "emerging"},
+                    {"practice": "Perf budget", "status": "aspirational"},
+                ]
+            }
+        }
+        with patch("yeaboi.agent.nodes._load_profile_by_id", return_value=(object(), examples)):
+            state: dict = {}
+            seed_analysis_profile(state, "jira-PROJ")
+        assert state["analysis_profile_id"] == "jira-PROJ"
+        assert state["custom_dod_items"] == ("Tests pass", "Docs updated")
+
+    def test_an_unreadable_profile_keeps_the_id_and_the_default_dod(self):
+        from yeaboi.agent.chat_intake import seed_analysis_profile
+
+        with patch("yeaboi.agent.nodes._load_profile_by_id", side_effect=RuntimeError("db gone")):
+            state: dict = {}
+            seed_analysis_profile(state, "jira-PROJ")
+        assert state == {"analysis_profile_id": "jira-PROJ"}

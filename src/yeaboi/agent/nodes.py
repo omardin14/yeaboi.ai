@@ -94,6 +94,10 @@ from yeaboi.tools.risk import high_risk_tool_names
 
 logger = logging.getLogger(__name__)
 
+# The first line of the write-tool confirmation human_review asks for; the
+# chat surfaces route on it, so it lives in one place.
+TOOL_CONFIRM_PREFIX = "I'd like to perform the following write operation(s):"
+
 
 def _is_llm_rate_limited(exc: Exception) -> bool:
     """Check whether an exception is the provider saying "too many requests".
@@ -714,7 +718,7 @@ def human_review(state: ScrumState) -> dict[str, list[BaseMessage]]:
     last_message = state["messages"][-1]
     tool_calls = last_message.tool_calls
 
-    lines = ["I'd like to perform the following write operation(s):\n"]
+    lines = [TOOL_CONFIRM_PREFIX + "\n"]
     for tc in tool_calls:
         lines.append(f"  \u2022 **{tc['name']}**")
         for k, v in tc["args"].items():

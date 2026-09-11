@@ -226,26 +226,9 @@ def _run_session_body(
         graph_state: dict = {"messages": []}
         graph_state["_intake_mode"] = intake_mode
         graph_state.update(_scope_state_keys())
-        if analysis_profile_id:
-            graph_state["analysis_profile_id"] = analysis_profile_id
-            # Extract custom DoD items from the analysis profile
-            try:
-                from yeaboi.agent.nodes import _load_profile_by_id
+        from yeaboi.agent.chat_intake import seed_analysis_profile
 
-                _p, _ex = _load_profile_by_id(analysis_profile_id)
-                if _ex:
-                    proposed = _ex.get("proposed_dod", {})
-                    if isinstance(proposed, dict):
-                        _dod = [
-                            it["practice"]
-                            for it in proposed.get("items", [])
-                            if isinstance(it, dict) and it.get("status") in ("established", "emerging")
-                        ]
-                        if _dod:
-                            graph_state["custom_dod_items"] = tuple(_dod)
-                            logger.info("Custom DoD from analysis: %s", _dod)
-            except Exception:
-                pass
+        seed_analysis_profile(graph_state, analysis_profile_id)
 
     # Where Ctrl+V screenshots for this session are saved (~/.yeaboi/attachments/
     # <scope>/). Stashed in state so nested input loops don't need project_id

@@ -1524,3 +1524,25 @@ class TestWeeklyReviewTools:
         payload = call_tool("weekly_review_export", {"run_id": 99})
         assert payload["ok"] is False
         assert "run 99" in payload["error"]["message"]
+
+
+class TestPlanToolsOnChatSessions:
+    """A conversation the app opens is a session every plan tool can read."""
+
+    def test_plan_get_reads_a_chat_created_session(self, tmp_db):
+        from yeaboi.app.chats import ChatSupervisor
+
+        chats = ChatSupervisor(graph_factory=lambda: None, id_factory=lambda: "new-chat0001-2026-09-11")
+        chat = chats.create("a booking app", intake_mode="smart", title="Barbers")
+        chat.session.state.update(
+            questionnaire=make_completed_questionnaire(),
+            project_analysis=make_dummy_analysis(),
+            features=make_sample_features(),
+            stories=make_sample_stories(),
+            sprints=make_sample_sprints(),
+        )
+        chats.save(chat)
+        payload = call_tool("plan_get", {"session_id": chat.session_id})
+        assert payload["ok"] is True, payload
+        assert payload["data"]["session_id"] == chat.session_id
+        assert payload["data"]["stories"]

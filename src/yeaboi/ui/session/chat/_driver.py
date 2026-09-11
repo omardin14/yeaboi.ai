@@ -45,7 +45,7 @@ from yeaboi.agent.chat_session import (
     Accept,
     AwaitConfirm,
     ChatSession,
-    Done,
+    ReplyEvent,
     ShowArtifact,
     SwitchSize,
     Token,
@@ -668,7 +668,9 @@ class _ChatDriver:
         def on_event(event) -> None:
             if isinstance(event, Token):
                 buffer.append(event.text)
-            elif not isinstance(event, Done):
+            elif isinstance(event, ReplyEvent):
+                # The section/version bookkeeping is for the desktop's drawer;
+                # this transcript draws replies only.
                 replies.append(event)
 
         def worker() -> None:

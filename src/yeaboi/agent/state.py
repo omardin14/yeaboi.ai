@@ -2481,6 +2481,21 @@ class ScrumState(_RequiredState, total=False):
     # switch resets the sub-loop. Serializes harmlessly mid-browse.
     _prior_art_preview: int
 
+    # Declared so they survive an invoke: LangGraph returns only the keys the
+    # state schema names, and drops the rest of the input dict.
+    # See docs: "Memory & State" — state schema
+    #
+    # The epic reformat ran and its card was shown (both planning surfaces
+    # gate the feature stage on it).
+    _epic_reviewed: bool
+    # The capacity warning the user answered — {"text", "recommended"} — kept
+    # for the recap.
+    _capacity_warning: dict
+    # What other sessions this run may read, as a ContextScope's JSON, and the
+    # free-text project label it is filed under. Carried, not yet consumed.
+    context_scope: str
+    project_label: str
+
     # Project analysis — structured synthesis of intake answers.
     # Set once by project_analyzer node; no reducer needed (single value).
     project_analysis: ProjectAnalysis

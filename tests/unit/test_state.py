@@ -1454,3 +1454,14 @@ class TestSoloState:
         assert StandupReport().solo is False
         # A report stored before the field existed still deserialises.
         assert _dict_to_standup_report({"date": "2026-07-10"}).solo is False
+
+
+class TestDeclaredChatKeys:
+    """Keys the chat surfaces write between invokes must be declared, or
+    LangGraph drops them from the state it returns."""
+
+    @pytest.mark.parametrize("key", ["_epic_reviewed", "_capacity_warning", "context_scope", "project_label"])
+    def test_the_key_is_part_of_the_schema(self, key):
+        from yeaboi.agent.state import ScrumState
+
+        assert key in ScrumState.__annotations__

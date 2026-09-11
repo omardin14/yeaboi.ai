@@ -20,10 +20,16 @@ import threading
 from collections.abc import Iterator
 
 from yeaboi.agent.chat_session import (
+    Action,
     AskQuestion,
     Assistant,
+    AwaitChoice,
     AwaitConfirm,
+    AwaitReview,
     Done,
+    Notice,
+    Progress,
+    SectionChanged,
     ShowArtifact,
     Token,
     UserSaid,
@@ -90,7 +96,7 @@ def send(app, request: Request) -> Response:
     except Exception:
         chat.turn.release()
         raise
-    logger.info("Chat turn start: project=%s len=%d images=%d", chat.project_id, len(text), len(images))
+    logger.info("Chat turn start: project=%s len=%d images=%d", chat.session_id, len(text), len(images))
     return Response(
         content_type="application/x-ndjson",
         stream=_lines(_turn(app, chat, op, text, images)),
@@ -176,7 +182,7 @@ def size(app, request: Request) -> Response:
     # data left to render from.
     state.pop("_prior_art_preview", None)
     app.chats.save(chat)
-    logger.info("Chat size switched: project=%s mode=%s", chat.project_id, mode)
+    logger.info("Chat size switched: project=%s mode=%s", chat.session_id, mode)
     return json_response({"changed": True, "mode": mode, "reopened": True})
 
 
@@ -211,13 +217,13 @@ def attach(app, request: Request) -> Response:
         raise HTTPError(413, f"Image too large ({len(data) / (1024 * 1024):.1f} MB, max 4.5 MB)")
 
     index = int(payload.get("index", 1))
-    path = get_attachments_dir(chat.project_id) / f"img-{uuid.uuid4().hex[:8]}{_EXT_FOR_IMAGE[mime]}"
+    path = get_attachments_dir(chat.session_id) / f"img-{uuid.uuid4().hex[:8]}{_EXT_FOR_IMAGE[mime]}"
     try:
         path.write_bytes(data)
     except OSError as exc:
         logger.error("failed to save pasted image to %s: %s", path, exc)
         raise HTTPError(500, "Could not save pasted image") from None
-    logger.info("image pasted: project=%s bytes=%d mime=%s", chat.project_id, len(data), mime)
+    logger.info("image pasted: project=%s bytes=%d mime=%s", chat.session_id, len(data), mime)
     return json_response({"path": str(path), "chip": chip_text(index)})
 
 
@@ -287,6 +293,25 @@ def _wire(event, chat: LiveChat) -> dict:
         return {"type": "await_confirm", "kind": event.kind, "prompt": event.prompt}
     if isinstance(event, ShowArtifact):
         return {"type": "artifact", "kind": event.kind}
+    if isinstance(event, AwaitReview):
+        return {"type": "await_review", "node": event.node, "kind": event.kind, "prompt": event.prompt}
+    if isinstance(event, AwaitChoice):
+        options = [{"key": key, "label": label} for key, label in event.options]
+        return {"type": "await_choice", "kind": event.kind, "prompt": event.prompt, "options": options}
+    if isinstance(event, Progress):
+        return {
+            "type": "progress",
+            "node": event.node,
+            "step": event.step,
+            "total": event.total,
+            "status": event.status,
+        }
+    if isinstance(event, SectionChanged):
+        return {"type": "section", "kind": event.kind, "status": event.status, "version": event.version}
+    if isinstance(event, Notice):
+        return {"type": "notice", "text": event.text}
+    if isinstance(event, Action):
+        return {"type": "action", "name": event.name, "detail": event.detail}
     if isinstance(event, Done):
         return {"type": "done", "stage": chat.session.awaiting}
     raise TypeError(f"no wire shape for chat event {type(event).__name__}")
@@ -298,7 +323,7 @@ def _view(chat: LiveChat) -> dict:
 
     state = chat.session.state
     return {
-        "project_id": chat.project_id,
+        "project_id": chat.session_id,
         "stage": chat.session.awaiting,
         "transcript": [_wire(item, chat) for item in replay(state)],
         # Non-empty only until the description has been sent as the first turn.

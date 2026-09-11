@@ -10902,6 +10902,22 @@ def _pick_analysis_profile(
     return selected_profile_id
 
 
+def _load_store_plan_state(session_id: str) -> dict | None:
+    """The saved state of a plan the app's chat holds in the session store.
+
+    The TUI's own saves still go to the file store, so a plan edited here
+    forks from the app's copy on its first save.
+    """
+    try:
+        from yeaboi.sessions import SessionStore
+
+        with SessionStore(_ana_dbp) as store:
+            return store.load_state(session_id)
+    except Exception:  # noqa: BLE001 — a missing store is "no saved state"
+        logger.warning("Session store state could not be read for %s", session_id, exc_info=True)
+        return None
+
+
 def _load_planning_rows() -> list[ProjectSummary]:
     """Merged "Your projects" rows: planning projects + saved roadmaps, newest first.
 
@@ -16140,7 +16156,7 @@ def select_mode(
                             from yeaboi.persistence import load_graph_state
                             from yeaboi.ui.session import run_session
 
-                            saved_state = load_graph_state(project.id)
+                            saved_state = load_graph_state(project.id) or _load_store_plan_state(project.id)
 
                             # Fallback: if no state file exists (project created before
                             # state persistence was added), build a minimal graph state

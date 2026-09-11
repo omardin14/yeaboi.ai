@@ -42,6 +42,8 @@ def _isolate_config_dir(monkeypatch, tmp_path):
     monkeypatch.setattr("yeaboi.persistence._CONFIG_DIR", tmp_path)
     monkeypatch.setattr("yeaboi.persistence._PROJECTS_FILE", tmp_path / "projects.json")
     monkeypatch.setattr("yeaboi.persistence._STATES_DIR", tmp_path / "states")
+    # load_projects also lists the session store's plans — keep it per-test too.
+    monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
     return tmp_path
 
 

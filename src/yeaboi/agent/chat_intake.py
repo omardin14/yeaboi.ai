@@ -114,3 +114,33 @@ def resolve_intake_mode(user_text: str) -> tuple[str | None, str]:
     if len(text.split()) >= _DESCRIPTION_MIN_WORDS:
         return classify_size_from_description(text), text
     return None, text
+
+
+def seed_analysis_profile(state: dict, profile_id: str) -> None:
+    """Seed a chosen analysis profile, and the Definition of Done it proposes.
+
+    The intake reads the id to auto-fill the team questions; the established
+    and emerging practices become the plan's custom DoD. Best-effort: a
+    profile that cannot be read leaves the defaults in place.
+    """
+    if not profile_id:
+        return
+    state["analysis_profile_id"] = profile_id
+    try:
+        from yeaboi.agent.nodes import _load_profile_by_id
+
+        _profile, examples = _load_profile_by_id(profile_id)
+    except Exception:  # noqa: BLE001 — the run must not fail on calibration data
+        logger.warning("Analysis profile %s could not be read", profile_id, exc_info=True)
+        return
+    proposed = (examples or {}).get("proposed_dod", {})
+    if not isinstance(proposed, dict):
+        return
+    dod = [
+        item["practice"]
+        for item in proposed.get("items", [])
+        if isinstance(item, dict) and item.get("status") in ("established", "emerging")
+    ]
+    if dod:
+        state["custom_dod_items"] = tuple(dod)
+        logger.info("Custom DoD from analysis: %s", dod)

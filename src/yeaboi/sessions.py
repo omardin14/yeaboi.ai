@@ -121,8 +121,23 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
     created_at          TEXT NOT NULL,
     last_modified       TEXT NOT NULL,
     last_node_completed TEXT NOT NULL DEFAULT '',
-    session_state       TEXT NOT NULL DEFAULT ''
+    session_state       TEXT NOT NULL DEFAULT '',
+    session_mode        TEXT NOT NULL DEFAULT 'planning',
+    title               TEXT NOT NULL DEFAULT ''
 );"""
+
+# One row per accepted plan section: the history a plan's blueprint shows.
+_PLAN_VERSIONS_SCHEMA = """\
+CREATE TABLE IF NOT EXISTS plan_versions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    section    TEXT NOT NULL,
+    version    INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    payload    TEXT NOT NULL,
+    UNIQUE (session_id, section, version)
+);"""
+_PLAN_VERSIONS_INDEX = "CREATE INDEX IF NOT EXISTS idx_plan_versions_session ON plan_versions(session_id)"
 
 # Phase 8C: schema version tracking — a single-row table that records which
 # schema version this database was created/migrated to. On open, the code
@@ -131,7 +146,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See docs: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 34  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review, v33=project status, v34=projects removed  # noqa: E501
+CURRENT_SCHEMA_VERSION = 35  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review, v33=project status, v34=projects removed, v35=session title + plan versions  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -143,8 +158,8 @@ CREATE TABLE IF NOT EXISTS schema_info (
 # State serialisation helpers
 # ---------------------------------------------------------------------------
 # Phase 8B: persist graph state as JSON so --resume can reconstruct it.
-# Messages are NOT serialised — pipeline nodes read from artifacts (project_analysis,
-# features, etc.), not from chat history. On resume a synthetic message is injected.
+# Messages are serialised through LangChain's message codec so a resumed
+# conversation carries its transcript; pipeline nodes still read artifacts.
 #
 # Custom handling needed for:
 # - Frozen dataclasses (Feature, UserStory, Task, Sprint, ProjectAnalysis, AcceptanceCriterion)
@@ -156,9 +171,8 @@ CREATE TABLE IF NOT EXISTS schema_info (
 # See docs: "Memory & State" — session persistence, state serialisation
 
 
-# Keys to skip during serialisation — messages are reconstructed on resume,
-# and transient UI state is not needed.
-_SKIP_KEYS = {"messages"}
+# Keys never written. Empty today; the seam stays for transient state.
+_SKIP_KEYS: set[str] = set()
 
 # ScrumState fields and the types they map to, used by the deserialiser to
 # reconstruct the correct Python objects from JSON primitives.
@@ -182,6 +196,10 @@ _SCALAR_KEYS = {
     "_chat_greeting_done",
     "_chat_preamble",
     "_chat_fast_forward",
+    "_epic_reviewed",
+    "analysis_profile_id",
+    "context_scope",
+    "project_label",
 }
 
 
@@ -204,11 +222,25 @@ class _StateEncoder(json.JSONEncoder):
         return super().default(o)
 
 
+def _messages_to_json(messages: list) -> list:
+    """LangChain messages as their dict form; anything else passes through."""
+    from langchain_core.messages import BaseMessage, messages_to_dict
+
+    if messages and isinstance(messages[0], BaseMessage):
+        return messages_to_dict(messages)
+    return list(messages)
+
+
+def _messages_from_json(value: list) -> list:
+    from langchain_core.messages import messages_from_dict
+
+    if value and isinstance(value[0], dict) and "type" in value[0]:
+        return messages_from_dict(value)
+    return list(value)
+
+
 def _serialize_state(graph_state: dict) -> str:
     """Serialize graph_state to JSON, handling dataclasses, enums, and sets.
-
-    Skips ``messages`` — not needed for resume. Pipeline nodes read from
-    artifacts (project_analysis, features, etc.), not from chat history.
 
     Returns:
         JSON string of the serialisable subset of graph_state.
@@ -217,7 +249,9 @@ def _serialize_state(graph_state: dict) -> str:
     for key, value in graph_state.items():
         if key in _SKIP_KEYS or value is None:
             continue
-        if key == "questionnaire" and isinstance(value, QuestionnaireState):
+        if key == "messages":
+            out[key] = _messages_to_json(value)
+        elif key == "questionnaire" and isinstance(value, QuestionnaireState):
             out[key] = _questionnaire_to_dict(value)
         elif key == "project_analysis" and isinstance(value, ProjectAnalysis):
             out[key] = asdict(value)
@@ -404,7 +438,9 @@ def _deserialize_state(json_str: str) -> dict:
     state: dict = {"messages": []}
 
     for key, value in raw.items():
-        if key == "questionnaire":
+        if key == "messages":
+            state[key] = _messages_from_json(value)
+        elif key == "questionnaire":
             state[key] = _dict_to_questionnaire(value)
         elif key == "project_analysis":
             state[key] = _dict_to_analysis(value)
@@ -473,6 +509,8 @@ class SessionStore:
         # Avoids manual transaction management for simple single-row writes.
         self._conn.isolation_level = None
         self._conn.execute(_SCHEMA)
+        self._conn.execute(_PLAN_VERSIONS_SCHEMA)
+        self._conn.execute(_PLAN_VERSIONS_INDEX)
         # Phase 8B: migrate existing Phase 8A databases that lack session_state.
         # ALTER TABLE ADD COLUMN is idempotent-safe with the try/except pattern:
         # if the column already exists (new schema or already migrated), SQLite
@@ -917,6 +955,18 @@ class SessionStore:
                 # INSERT names its columns.
                 logger.info("Migration v34: dropped the projects table; project_id left in place (SQLite < 3.35)")
 
+        if from_version < 35:
+            # v35: a user-given title beside the derived project_name, and the
+            # plan_versions table (also created on open, like every table a
+            # CLI or MCP path may reach first).
+            try:
+                self._conn.execute("ALTER TABLE sessions_meta ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+            self._conn.execute(_PLAN_VERSIONS_SCHEMA)
+            self._conn.execute(_PLAN_VERSIONS_INDEX)
+            logger.info("Migration v35: added sessions_meta.title and the plan_versions table")
+
     def _apply_edit_provenance(self) -> None:
         """The v21 migration body — idempotent, so v26 re-runs it verbatim.
 
@@ -1067,6 +1117,7 @@ class SessionStore:
         project_name: str = "",
         *,
         mode: str = "planning",
+        title: str = "",
     ) -> None:
         """Insert a new session row. Silently ignores duplicate session IDs."""
         logger.info("Creating session: %s (mode=%s)", session_id, mode)
@@ -1074,10 +1125,65 @@ class SessionStore:
         self._conn.execute(
             """INSERT OR IGNORE INTO sessions_meta
                (session_id, project_name, created_at, last_modified,
-                last_node_completed, session_state, session_mode)
-               VALUES (?, ?, ?, ?, '', '', ?)""",
-            (session_id, project_name, now, now, mode),
+                last_node_completed, session_state, session_mode, title)
+               VALUES (?, ?, ?, ?, '', '', ?, ?)""",
+            (session_id, project_name, now, now, mode, title),
         )
+
+    def update_session_meta(self, session_id: str, *, title: str | None = None) -> None:
+        """Change what the user may rename. ``None`` leaves a column alone."""
+        if title is None:
+            return
+        logger.info("Session %s renamed (len=%d)", session_id, len(title))
+        self._conn.execute(
+            "UPDATE sessions_meta SET title = ?, last_modified = ? WHERE session_id = ?",
+            (title, self._now(), session_id),
+        )
+
+    # ── Plan versions ─────────────────────────────────────────────────────
+
+    def record_plan_version(self, session_id: str, section: str, payload: dict) -> int:
+        """Keep an accepted plan section. Returns its version number (1-based)."""
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM plan_versions WHERE session_id = ? AND section = ?",
+            (session_id, section),
+        ).fetchone()
+        version = int(row[0]) + 1
+        self._conn.execute(
+            "INSERT INTO plan_versions (session_id, section, version, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+            (session_id, section, version, self._now(), json.dumps(payload, cls=_StateEncoder, default=str)),
+        )
+        logger.info("Plan version recorded: session=%s section=%s version=%d", session_id, section, version)
+        return version
+
+    def list_plan_versions(self, session_id: str, section: str = "") -> list[dict]:
+        """The accepted versions, oldest first, without their payloads."""
+        params: list[object] = [session_id]
+        where = ""
+        if section:
+            where = " AND section = ?"
+            params.append(section)
+        rows = self._conn.execute(
+            "SELECT section, version, created_at FROM plan_versions "  # noqa: S608 — placeholders, not values
+            f"WHERE session_id = ?{where} ORDER BY id",
+            params,
+        ).fetchall()
+        return [{"section": r[0], "version": r[1], "created_at": r[2]} for r in rows]
+
+    def get_plan_version(self, session_id: str, section: str, version: int) -> dict | None:
+        """One accepted snapshot with its payload, or None."""
+        row = self._conn.execute(
+            "SELECT created_at, payload FROM plan_versions WHERE session_id = ? AND section = ? AND version = ?",
+            (session_id, section, version),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row[1])
+        except json.JSONDecodeError:
+            logger.error("Plan version %s/%s/%d holds invalid JSON", session_id, section, version)
+            return None
+        return {"section": section, "version": version, "created_at": row[0], "payload": payload}
 
     def update_project_name(self, session_id: str, project_name: str) -> None:
         """Set the display name once the project name becomes known.
@@ -1125,7 +1231,7 @@ class SessionStore:
         """
         row = self._conn.execute(
             "SELECT session_id, project_name, created_at, last_modified, "
-            "last_node_completed, session_state "
+            "last_node_completed, session_state, session_mode, title "
             "FROM sessions_meta WHERE session_id = ?",
             (session_id,),
         ).fetchone()
@@ -1138,6 +1244,8 @@ class SessionStore:
             "last_modified",
             "last_node_completed",
             "session_state_raw",
+            "session_mode",
+            "title",
         )
         return dict(zip(keys, row))
 
@@ -1160,7 +1268,7 @@ class SessionStore:
             params.append(limit)
         rows = self._conn.execute(
             "SELECT session_id, project_name, created_at, last_modified, "  # noqa: S608 — placeholders, not values
-            "last_node_completed, session_state, session_mode "
+            "last_node_completed, session_state, session_mode, title "
             f"FROM sessions_meta{where} ORDER BY last_modified DESC{tail}",
             params,
         ).fetchall()
@@ -1172,6 +1280,7 @@ class SessionStore:
             "last_node_completed",
             "session_state_raw",
             "session_mode",
+            "title",
         )
         result = [dict(zip(keys, row)) for row in rows]
         logger.debug("Found %d session(s)", len(result))
@@ -1239,6 +1348,7 @@ class SessionStore:
         Returns True if a row was deleted, False if the session_id didn't exist.
         """
         cursor = self._conn.execute("DELETE FROM sessions_meta WHERE session_id = ?", (session_id,))
+        self._conn.execute("DELETE FROM plan_versions WHERE session_id = ?", (session_id,))
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("Deleted session %s", session_id)
@@ -1249,6 +1359,7 @@ class SessionStore:
     def delete_all_sessions(self) -> int:
         """Delete all sessions. Returns the number of rows deleted."""
         cursor = self._conn.execute("DELETE FROM sessions_meta")
+        self._conn.execute("DELETE FROM plan_versions")
         logger.info("Deleted all sessions (count=%d)", cursor.rowcount)
         return cursor.rowcount
 
