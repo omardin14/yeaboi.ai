@@ -44,8 +44,22 @@ from yeaboi.agent.state import (
     TranscriptSource,
     annotations_from,
 )
+from yeaboi.context._sql import id_filter, limit_clause
+from yeaboi.context.labels import drop_run_labels
 
 logger = logging.getLogger(__name__)
+
+
+def _scope_dict(raw: str | None) -> dict | None:
+    """A stored ``context_scope`` JSON column as a dict, ``None`` when blank or unreadable."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
 
 # ---------------------------------------------------------------------------
 # Schema — referenced by sessions.py migration v6 AND created on store open
@@ -82,6 +96,7 @@ CREATE TABLE IF NOT EXISTS standup_config (
     habit_rules       TEXT NOT NULL DEFAULT '',
     habit_ai_match    TEXT NOT NULL DEFAULT 'on',
     context_deps      TEXT NOT NULL DEFAULT '',
+    context_scope     TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL
 );
@@ -558,6 +573,11 @@ class StandupStore:
             # tokens; '' inherits the project default, '[]' is incognito.
             """ALTER TABLE standup_config
                ADD COLUMN context_deps TEXT NOT NULL DEFAULT ''""",
+            # The scope a scheduled standup reads under (context/scope.py JSON);
+            # '' means the caller's default. Kept off save_config's full upsert
+            # so a config-form save never resets it.
+            """ALTER TABLE standup_config
+               ADD COLUMN context_scope TEXT NOT NULL DEFAULT ''""",
             # Edit-provenance columns (sessions.py v21/v26): a v21 version-number
             # collision could leave a DB stamped past 21 without them, and
             # several entry points (--standup-run, the MCP tools) open this
@@ -782,7 +802,8 @@ class StandupStore:
             "code_sources, github_repositories, azdo_projects, azdo_repositories, code_scope_configured, "
             "documentation_sources, documentation_scope_configured, automation_markers, automation_handling, "
             "transcript_dir, transcript_review_enabled, "
-            "habit_detection, habit_rules, habit_ai_match, github_owners, github_excluded_repositories "
+            "habit_detection, habit_rules, habit_ai_match, github_owners, github_excluded_repositories, "
+            "context_scope "
             "FROM standup_config WHERE session_id = ?",
             (session_id,),
         ).fetchone()
@@ -857,7 +878,39 @@ class StandupStore:
             "habit_detection": row[23] or "on",
             "habit_rules": row[24] or "",
             "habit_ai_match": row[25] or "on",
+            "context_scope": _scope_dict(row[28]),
         }
+
+    def set_context_scope(self, session_id: str, scope) -> None:
+        """Persist the scope a session's standups read under (``None`` clears it).
+
+        Its own writer rather than a ``save_config`` keyword: that method is a
+        full upsert every config form must pass in full, and the scope is
+        chosen on the run page, not the config form.
+        """
+        from yeaboi.context.scope import ContextScope
+
+        payload = ""
+        if scope is not None:
+            payload = json.dumps(scope.to_dict() if isinstance(scope, ContextScope) else scope, sort_keys=True)
+        now = self._now()
+        cursor = self._conn.execute(
+            "UPDATE standup_config SET context_scope = ?, updated_at = ? WHERE session_id = ?",
+            (payload, now, session_id),
+        )
+        if (cursor.rowcount or 0) == 0:
+            self._conn.execute(
+                "INSERT INTO standup_config (session_id, context_scope, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (session_id, payload, now, now),
+            )
+        logger.info("Standup context scope %s for session=%s", "set" if payload else "cleared", session_id)
+
+    def get_context_scope(self, session_id: str) -> dict | None:
+        """The persisted scope dict for a session, or ``None``."""
+        row = self._conn.execute(
+            "SELECT context_scope FROM standup_config WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return _scope_dict(row[0]) if row else None
 
     # ── Self-reported updates ─────────────────────────────────────────────
 
@@ -1093,6 +1146,7 @@ class StandupStore:
         cursor = self._conn.execute("DELETE FROM standup_history WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "standup", run_id)
             logger.info("Deleted standup run id=%s", run_id)
         return deleted
 
@@ -1207,11 +1261,18 @@ class StandupStore:
     #    Planning / Analysis with the team's recent standups. standup_history has
     #    no project_name column, so these are recency-based (team-wide).
 
-    def get_recent_reports(self, limit: int = 10) -> list[StandupReport]:
-        """Return recent StandupReports across ALL sessions, newest first."""
+    def get_recent_reports(self, limit: int = 10, run_ids: tuple[int, ...] | None = None) -> list[StandupReport]:
+        """Return recent StandupReports across ALL sessions, newest first.
+
+        ``run_ids`` is the hard filter a resolved context scope hands over:
+        ``None`` reads every row, ``()`` none. ``limit`` 0 means no limit.
+        """
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
         rows = self._conn.execute(
-            "SELECT report_json FROM standup_history WHERE status = 'success' ORDER BY run_at DESC LIMIT ?",
-            (limit,),
+            f"SELECT report_json FROM standup_history WHERE status = 'success' AND {where} "  # noqa: S608 — placeholders only
+            f"ORDER BY run_at DESC{limit_sql}",
+            (*params, *limit_params),
         ).fetchall()
         reports: list[StandupReport] = []
         for row in rows:
@@ -1478,12 +1539,17 @@ class StandupStore:
                 out.append(entry)
         return out
 
-    def get_all_history(self, limit: int = 100) -> list[dict]:
-        """Return recent standup run metadata across ALL sessions (for cadence + the hub)."""
+    def get_all_history(self, limit: int = 100, run_ids: tuple[int, ...] | None = None) -> list[dict]:
+        """Return recent standup run metadata across ALL sessions (for cadence + the hub).
+
+        ``run_ids`` narrows to those rows (``()`` = none); ``limit`` 0 = every row.
+        """
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
         rows = self._conn.execute(
-            "SELECT id, session_id, run_at, standup_date, sprint_day, confidence_pct, status "
-            "FROM standup_history ORDER BY run_at DESC LIMIT ?",
-            (limit,),
+            "SELECT id, session_id, run_at, standup_date, sprint_day, confidence_pct, status "  # noqa: S608 — placeholders only
+            f"FROM standup_history WHERE {where} ORDER BY run_at DESC{limit_sql}",
+            (*params, *limit_params),
         ).fetchall()
         return [
             {

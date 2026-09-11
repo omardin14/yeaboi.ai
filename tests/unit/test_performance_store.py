@@ -572,3 +572,31 @@ class TestMaskingReachesEveryField:
         # A commit folded under its PR is a row a reader sees, so it masks too.
         assert row.children[0].title == "Engineer A fixes it"
         assert masked.section_states[0][2] == "Only Engineer A was covered."
+
+
+class TestContextRows:
+    """The hub rows carry the date a context window filters on, and ``limit`` 0 is every row."""
+
+    def test_on_date_and_limit_zero(self, db_path):
+        with PerformanceStore(db_path) as store:
+            store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-07-12"), session_id="s1")
+            store.record_review(SixMonthReview(engineer="Ada", period_start="2026-01-01", period_end="2026-06-30"))
+            store.add_note("Ada", "keep going")
+            rows = store.get_all_history(limit=0)
+        by_kind = {r["kind"]: r for r in rows}
+        assert by_kind["prep"]["on_date"] == "2026-07-12"
+        assert by_kind["review"]["on_date"] == "2026-06-30"
+        assert by_kind["note"]["on_date"] == by_kind["note"]["created_at"][:10]
+        assert len(rows) == 3
+
+    def test_deletes_drop_the_label_rows(self, db_path):
+        from yeaboi.context.labels import LabelStore
+
+        with PerformanceStore(db_path) as store:
+            prep_id = store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-07-12"), session_id="s1")
+        with LabelStore(db_path) as labels:
+            labels.set_labels("performance", "s1", f"1on1:{prep_id}")
+        with PerformanceStore(db_path) as store:
+            assert store.delete_one_on_one(prep_id)
+        with LabelStore(db_path) as labels:
+            assert labels.get_labels("performance", "s1", f"1on1:{prep_id}") is None

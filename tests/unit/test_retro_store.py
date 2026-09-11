@@ -165,3 +165,41 @@ class TestProvenanceSelfHeal:
             cols = {r[1] for r in store._conn.execute("PRAGMA table_info(retro_history)")}
             assert {"origin", "edited_from_id"} <= cols
             assert store.record_run(_report()) > 0  # the INSERT that names origin
+
+
+class TestScopeFilter:
+    """``run_ids`` is the hard filter a resolved context scope hands over."""
+
+    def _two(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        with RetroStore(db) as store:
+            first = store.record_run(_report("a"))
+            second = store.record_run(_report("b"))
+        return db, first, second
+
+    def test_none_reads_everything_and_empty_reads_nothing(self, tmp_path):
+        db, first, second = self._two(tmp_path)
+        with RetroStore(db) as store:
+            assert len(store.get_recent_reports(run_ids=None)) == 2
+            assert store.get_recent_reports(run_ids=()) == []
+            assert store.get_all_history(run_ids=()) == []
+            assert [r["id"] for r in store.get_all_history(run_ids=(first,))] == [first]
+
+    def test_ids_replace_the_project_bias_and_limit_zero_is_all(self, tmp_path):
+        db, first, second = self._two(tmp_path)
+        with RetroStore(db) as store:
+            only = store.get_recent_reports(project_name="x", run_ids=(second,))
+            assert [r.session_id for r in only] == ["b"]
+            assert len(store.get_recent_reports(limit=0)) == 2
+            assert len(store.get_all_history(limit=0)) == 2
+
+    def test_delete_drops_the_label_row(self, tmp_path):
+        from yeaboi.context.labels import LabelStore
+
+        db, first, _second = self._two(tmp_path)
+        with LabelStore(db) as labels:
+            labels.set_labels("retro", "a", str(first), project="Apollo")
+        with RetroStore(db) as store:
+            assert store.delete_run(first)
+        with LabelStore(db) as labels:
+            assert labels.get_labels("retro", "a", str(first)) is None

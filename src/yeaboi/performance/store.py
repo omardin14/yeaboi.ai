@@ -36,6 +36,7 @@ from yeaboi.agent.state import (
     evidence_groups_from,
     metrics_from,
 )
+from yeaboi.context.labels import drop_run_labels
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +386,7 @@ class PerformanceStore:
         cursor = self._conn.execute("DELETE FROM performance_one_on_ones WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "performance", f"1on1:{run_id}")
             logger.info("Deleted 1:1 run id=%s", run_id)
         return deleted
 
@@ -446,6 +448,7 @@ class PerformanceStore:
         cursor = self._conn.execute("DELETE FROM performance_reviews WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "performance", f"review:{run_id}")
             logger.info("Deleted review run id=%s", run_id)
         return deleted
 
@@ -474,6 +477,7 @@ class PerformanceStore:
         cursor = self._conn.execute("DELETE FROM performance_notes WHERE id = ?", (note_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "performance", f"note:{note_id}")
             logger.info("Deleted performance note id=%s", note_id)
         return deleted
 
@@ -490,7 +494,8 @@ class PerformanceStore:
         """
         # An empty :engineer matches every row, so one parameterised query serves both
         # scopes — no clause is ever built by string interpolation.
-        args = {"engineer": engineer, "limit": limit}
+        # limit 0 = every row; SQLite reads a negative LIMIT as "no limit".
+        args = {"engineer": engineer, "limit": limit if limit > 0 else -1}
         rows: list[dict] = []
         for r in self._conn.execute(
             "SELECT id, kind, on_date, created_at, engineer FROM performance_one_on_ones "
@@ -505,6 +510,7 @@ class PerformanceStore:
                     "id": r[0],
                     "engineer": r[4],
                     "created_at": r[3],
+                    "on_date": (r[2] or r[3] or "")[:10],
                     "title": f"{label} — {r[2] or r[3][:10]}",
                 }
             )
@@ -520,6 +526,7 @@ class PerformanceStore:
                     "id": r[0],
                     "engineer": r[4],
                     "created_at": r[3],
+                    "on_date": (r[2] or r[3] or "")[:10],
                     "title": f"6-Month Review — {span}",
                 }
             )
@@ -537,11 +544,12 @@ class PerformanceStore:
                     "id": r[0],
                     "engineer": r[3],
                     "created_at": r[2],
+                    "on_date": (r[2] or "")[:10],
                     "title": f"Note — {snippet or r[2][:10]}",
                 }
             )
         rows.sort(key=lambda d: d["created_at"], reverse=True)
-        return rows[:limit]
+        return rows[:limit] if limit > 0 else rows
 
     def get_engineer_history(self, engineer: str, limit: int = 100) -> list[dict]:
         """Return every saved artifact for one engineer, newest first, for the hub."""
@@ -551,7 +559,8 @@ class PerformanceStore:
         """Return every saved artifact across all engineers, newest first.
 
         Backs the Performance card's saved-artifacts landing, which names the owning
-        engineer on each row. Signature matches the other modes' stores.
+        engineer on each row. Signature matches the other modes' stores; ``limit``
+        0 returns every row, and each row carries ``on_date`` for a context window.
         """
         return self._history_rows("", limit)
 

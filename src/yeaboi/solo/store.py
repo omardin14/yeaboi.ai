@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from yeaboi.agent.state import DeliveredItem, ReviewAction, WeeklyReview, annotations_from
+from yeaboi.context._sql import id_filter, limit_clause
+from yeaboi.context.labels import drop_run_labels
 
 logger = logging.getLogger(__name__)
 
@@ -185,18 +187,22 @@ class WeeklyReviewStore:
             logger.warning("Failed to deserialize weekly review %s: %s", what, exc)
             return None
 
-    def get_latest_report(self) -> WeeklyReview | None:
-        """The newest review, or None."""
+    def get_latest_report(self, run_ids: tuple[int, ...] | None = None) -> WeeklyReview | None:
+        """The newest review (within ``run_ids`` when a scope narrows it), or None."""
+        where, params = id_filter(run_ids)
         row = self._conn.execute(
-            "SELECT report_json FROM weekly_review_history ORDER BY run_at DESC, id DESC LIMIT 1",
+            f"SELECT report_json FROM weekly_review_history WHERE {where} ORDER BY run_at DESC, id DESC LIMIT 1",  # noqa: S608
+            params,
         ).fetchone()
         return self._load(row, what="latest")
 
-    def get_recent_reports(self, limit: int = 10) -> list[WeeklyReview]:
-        """Recent reviews newest first."""
+    def get_recent_reports(self, limit: int = 10, run_ids: tuple[int, ...] | None = None) -> list[WeeklyReview]:
+        """Recent reviews newest first. ``run_ids`` narrows (``()`` = none); ``limit`` 0 = every row."""
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
         rows = self._conn.execute(
-            "SELECT report_json FROM weekly_review_history ORDER BY run_at DESC, id DESC LIMIT ?",
-            (limit,),
+            f"SELECT report_json FROM weekly_review_history WHERE {where} ORDER BY run_at DESC, id DESC{limit_sql}",  # noqa: S608
+            (*params, *limit_params),
         ).fetchall()
         reviews = [self._load(r, what="recent") for r in rows]
         return [r for r in reviews if r is not None]
@@ -231,11 +237,14 @@ class WeeklyReviewStore:
             ).fetchall()
         return self._history_rows(rows)
 
-    def get_all_history(self, limit: int = 100) -> list[dict]:
-        """Run metadata across sessions for the hub, newest first."""
+    def get_all_history(self, limit: int = 100, run_ids: tuple[int, ...] | None = None) -> list[dict]:
+        """Run metadata across sessions for the hub, newest first. ``run_ids`` narrows; ``limit`` 0 = every row."""
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
         rows = self._conn.execute(
-            f"SELECT {_HISTORY_COLUMNS} FROM weekly_review_history ORDER BY run_at DESC, id DESC LIMIT ?",  # noqa: S608
-            (limit,),
+            f"SELECT {_HISTORY_COLUMNS} FROM weekly_review_history WHERE {where} "  # noqa: S608 — placeholders only
+            f"ORDER BY run_at DESC, id DESC{limit_sql}",
+            (*params, *limit_params),
         ).fetchall()
         return self._history_rows(rows)
 
@@ -247,5 +256,6 @@ class WeeklyReviewStore:
         cursor = self._conn.execute("DELETE FROM weekly_review_history WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "review", run_id)
             logger.info("Deleted weekly review run id=%s", run_id)
         return deleted

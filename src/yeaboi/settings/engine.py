@@ -237,6 +237,9 @@ def _build_fields() -> tuple[SettingField, ...]:
         # -- advanced ------------------------------------------------------
         SettingField("LOG_LEVEL", "Log Level", "advanced", choices=VALID_LOG_LEVELS, default="WARNING"),
         SettingField("SESSION_PRUNE_DAYS", "Session Prune Days", "advanced", default="30"),
+        # The sprint grid a context window falls back to (config.get_sprint_*).
+        SettingField("YEABOI_SPRINT_LENGTH_WEEKS", "Sprint Length (weeks)", "advanced", default="2"),
+        SettingField("YEABOI_SPRINT_ANCHOR_DATE", "Sprint Anchor Date", "advanced"),
         SettingField(
             "TIPS_ENABLED", "Tips", "advanced", choices=("true", "false"), choice_labels=on_off, default="true"
         ),
@@ -474,6 +477,7 @@ def set_setting(key: str, value: str) -> SettingWrite:
         if value.lower() not in folded:
             raise ValueError(f"{key} must be one of {', '.join(fld.choices)}")
         value = folded[value.lower()]
+    _check_sprint_value(key, value)
     if key == "LOG_LEVEL" and value:
         # The one write with a live side effect beyond the env: retune the
         # attached handlers, exactly as the TUI's Log Level cycle does.
@@ -495,6 +499,25 @@ def set_setting(key: str, value: str) -> SettingWrite:
             restart_required=True,
         )
     return SettingWrite(ok=True, key=key, message=f"{fld.label} {'updated' if value else 'cleared'}")
+
+
+def _check_sprint_value(key: str, value: str) -> None:
+    """The two sprint-grid fields carry a number and a date; refuse anything else."""
+    if not value:
+        return
+    if key == "YEABOI_SPRINT_LENGTH_WEEKS":
+        if not value.isdigit() or int(value) < 1:
+            raise ValueError("Sprint Length (weeks) must be a whole number of at least 1")
+    elif key == "YEABOI_SPRINT_ANCHOR_DATE":
+        from yeaboi.timeparse import parse_date
+
+        try:
+            parse_date(value)
+        except (TypeError, ValueError):
+            raise ValueError("Sprint Anchor Date must be an ISO date (YYYY-MM-DD)") from None
+        from yeaboi.context.window import clear_calendar_memo
+
+        clear_calendar_memo()
 
 
 #: What one item of each ``item_kind`` may be. Deliberately loose for email —

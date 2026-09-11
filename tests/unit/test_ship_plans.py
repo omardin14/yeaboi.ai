@@ -134,3 +134,26 @@ class TestEngineUsesBothStores:
         assert target.id == "US-E"
         assert target.level == "story"
         assert resolved == "proj-e"
+
+
+class TestSessionIdsFilter:
+    """``session_ids`` is the hard filter a resolved context scope hands over."""
+
+    def test_empty_reads_nothing(self, tmp_path):
+        db = _session_db(tmp_path, "s1", {"stories": [_story()]})
+        assert plans.latest_plan_with_work(db_path=db, session_ids=()) is None
+
+    def test_only_the_named_sessions(self, tmp_path):
+        db = _session_db(tmp_path, "s1", {"stories": [_story()]})
+        with SessionStore(db) as store:
+            store.create_session("s2", "Other")
+            store.save_state("s2", {"stories": [_story("US-2")], "messages": []})
+        assert plans.latest_plan_with_work(db_path=db, session_ids=("s1",))[1] == "s1"
+        assert plans.latest_plan_with_work(db_path=db, session_ids=("nope",)) is None
+
+    def test_project_store_honours_the_filter_too(self, tmp_path, monkeypatch):
+        proj = SimpleNamespace(id="proj-1", name="Todo App", story_count=1)
+        monkeypatch.setattr("yeaboi.persistence.load_projects", lambda: [proj])
+        monkeypatch.setattr("yeaboi.persistence.load_graph_state", lambda _id: {"stories": [_story()]})
+        assert plans.latest_plan_with_work(db_path=tmp_path / "none.db", session_ids=("proj-1",))[1] == "proj-1"
+        assert plans.latest_plan_with_work(db_path=tmp_path / "none.db", session_ids=("other",)) is None

@@ -6891,7 +6891,7 @@ _SETTINGS_FOCUS_BG = "rgb(44,52,68)"
 # is simply left as space below the column. The balancing pass keeps the shortfall
 # small, so this is enough to land level in practice — it exists to stop a lone
 # one-row box being blown up to match a column of six-row ones.
-_SETTINGS_MAX_STRETCH = 6  # per-box leveling allowance — grew with the Advanced and Privacy boxes (news rows)
+_SETTINGS_MAX_STRETCH = 7  # per-box leveling allowance — grew with the Advanced and Privacy boxes (news, sprint rows)
 
 _TAB_NOT_READY = "rgb(74,74,90)"  # visibly present, clearly behind the ready ones
 _TAB_INDENT = 4  # left margin of the tab bar — aligned with the SETTINGS title
@@ -7555,6 +7555,13 @@ def _build_settings_screen(
         # An arbitrary integer, so it stays typed — presets would rule out every
         # number that is not one of them.
         _row("Session Prune Days", config_data.get("SESSION_PRUNE_DAYS", "30"), env="SESSION_PRUNE_DAYS")
+        # The sprint grid a "last N sprints" context window falls back to.
+        _row(
+            "Sprint Length (weeks)",
+            config_data.get("YEABOI_SPRINT_LENGTH_WEEKS", "2"),
+            env="YEABOI_SPRINT_LENGTH_WEEKS",
+        )
+        _row("Sprint Anchor Date", config_data.get("YEABOI_SPRINT_ANCHOR_DATE", ""), env="YEABOI_SPRINT_ANCHOR_DATE")
         _choice_row("Tips", "TIPS_ENABLED")
         _choice_row("Duck", "DUCK_ENABLED")
         _row("News YouTube Channel", config_data.get("NEWS_YOUTUBE_CHANNEL", ""), env="NEWS_YOUTUBE_CHANNEL")

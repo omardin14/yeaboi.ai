@@ -276,6 +276,72 @@ def set_last_door(door: str) -> None:
     logger.info("Door set to %s (persisted to %s)", door, config_file)
 
 
+# The scope a mode's runs last read under, one .env key per mode
+# (YEABOI_CONTEXT_STANDUP, …) holding the context/scope.py JSON twin. The
+# context page opens on it; a run started without an explicit scope inherits it.
+CONTEXT_SCOPE_KEY_PREFIX = "YEABOI_CONTEXT_"
+
+
+def _context_scope_key(mode: str) -> str:
+    return CONTEXT_SCOPE_KEY_PREFIX + "".join(ch if ch.isalnum() else "_" for ch in mode.strip().upper())
+
+
+def get_last_context_scope(mode: str) -> dict | None:
+    """The persisted scope dict for ``mode``, or ``None`` when unset or unreadable."""
+    import json
+
+    raw = os.getenv(_context_scope_key(mode), "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        logger.warning("Ignoring unreadable %s", _context_scope_key(mode))
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def set_last_context_scope(mode: str, scope: dict | None) -> None:
+    """Persist ``mode``'s scope dict (``None`` clears it), mirroring :func:`set_last_category`."""
+    import json
+
+    key = _context_scope_key(mode)
+    value = json.dumps(scope, sort_keys=True) if scope else ""
+    config_file = set_config_value(key, value)
+    os.environ[key] = value
+    logger.info("Context scope for %s %s (persisted to %s)", mode, "set" if value else "cleared", config_file)
+
+
+# The sprint grid a "last N sprints" window falls back to when neither a
+# tracker nor a plan defines it. Both are Settings › Advanced fields.
+SPRINT_LENGTH_KEY = "YEABOI_SPRINT_LENGTH_WEEKS"
+SPRINT_ANCHOR_KEY = "YEABOI_SPRINT_ANCHOR_DATE"
+DEFAULT_SPRINT_LENGTH_WEEKS = 2
+
+
+def get_sprint_length_weeks() -> int:
+    """Sprint length in weeks (default 2; anything unreadable or below 1 reads as the default)."""
+    raw = os.getenv(SPRINT_LENGTH_KEY, "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_SPRINT_LENGTH_WEEKS
+    except ValueError:
+        return DEFAULT_SPRINT_LENGTH_WEEKS
+    return value if value >= 1 else DEFAULT_SPRINT_LENGTH_WEEKS
+
+
+def get_sprint_anchor_date() -> str:
+    """A known sprint start as an ISO date, or ``""`` when unset or malformed."""
+    from yeaboi.timeparse import parse_date
+
+    raw = os.getenv(SPRINT_ANCHOR_KEY, "").strip()
+    if not raw:
+        return ""
+    try:
+        return parse_date(raw).isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
 def is_duck_enabled() -> bool:
     """Return True if the corner duck's speech bubble may show lines (default on).
 

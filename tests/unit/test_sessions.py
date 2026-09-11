@@ -401,3 +401,57 @@ class TestSessionTitle:
             assert (row["project_name"], row["title"], row["session_mode"]) == ("Derived", "Given", "planning")
             store.update_session_meta("new-1", title=None)
             assert store.get_session("new-1")["title"] == "Given"
+
+
+class TestSessionLabelsMigration:
+    """Migration v35 also creates ``session_labels``, and deletes clear a session's rows."""
+
+    def test_the_table_arrives_with_its_key(self, tmp_path):
+        db = TestPlanVersionsMigration()._v34_db(tmp_path)
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+        conn = sqlite3.connect(str(db))
+        try:
+            names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master").fetchall()}
+            assert "session_labels" in names and "idx_session_labels_project" in names
+            columns = [r[1] for r in conn.execute("PRAGMA table_info(session_labels)").fetchall()]
+            assert columns == [
+                "mode",
+                "session_id",
+                "run_id",
+                "project",
+                "tags_json",
+                "scope_json",
+                "created_at",
+                "updated_at",
+            ]
+        finally:
+            conn.close()
+
+    def test_reopen_is_idempotent(self, tmp_path):
+        db = TestPlanVersionsMigration()._v34_db(tmp_path)
+        SessionStore(db).close()
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+
+    def test_deleting_a_session_drops_its_label_rows_only(self, tmp_path):
+        from yeaboi.context.labels import LabelStore
+
+        db = tmp_path / "sessions.db"
+        with SessionStore(db) as store:
+            store.create_session("p1", "Apollo")
+            store.create_session("p2", "Ares")
+        with LabelStore(db) as labels:
+            labels.set_labels("planning", "p1", project="Apollo")
+            labels.set_labels("planning", "p2", project="Ares")
+            labels.set_labels("standup", "p1", "1", project="Apollo")
+        with SessionStore(db) as store:
+            assert store.delete_session("p1")
+        with LabelStore(db) as labels:
+            assert labels.get_labels("planning", "p1") is None
+            assert labels.get_labels("planning", "p2") is not None
+            assert labels.get_labels("standup", "p1", "1") is not None  # a run's row belongs to its own store
+        with SessionStore(db) as store:
+            store.delete_all_sessions()
+        with LabelStore(db) as labels:
+            assert labels.get_labels("planning", "p2") is None

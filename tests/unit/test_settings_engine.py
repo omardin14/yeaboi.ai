@@ -465,3 +465,29 @@ class TestTuiParity:
         from yeaboi.ui.provider_select._constants import _PROVIDER_CARDS
 
         assert field_by_env("LLM_PROVIDER").choices == tuple(c["provider_val"] for c in _PROVIDER_CARDS)
+
+
+class TestSprintFields:
+    @pytest.fixture(autouse=True)
+    def _no_disk(self, monkeypatch):
+        self.applied: dict[str, str] = {}
+        monkeypatch.setattr("yeaboi.config.apply_config_value", lambda k, v: self.applied.__setitem__(k, v))
+
+    def test_length_must_be_a_positive_whole_number(self):
+        with pytest.raises(ValueError, match="at least 1"):
+            engine.set_setting("YEABOI_SPRINT_LENGTH_WEEKS", "0")
+        with pytest.raises(ValueError, match="whole number"):
+            engine.set_setting("YEABOI_SPRINT_LENGTH_WEEKS", "two")
+        assert engine.set_setting("YEABOI_SPRINT_LENGTH_WEEKS", "3").ok
+        assert self.applied == {"YEABOI_SPRINT_LENGTH_WEEKS": "3"}
+
+    def test_anchor_must_be_an_iso_date(self):
+        with pytest.raises(ValueError, match="ISO date"):
+            engine.set_setting("YEABOI_SPRINT_ANCHOR_DATE", "31/08/2026")
+        assert engine.set_setting("YEABOI_SPRINT_ANCHOR_DATE", "2026-08-31").ok
+        assert engine.set_setting("YEABOI_SPRINT_ANCHOR_DATE", "").ok  # clearing is always allowed
+
+    def test_both_live_in_advanced(self):
+        sections = {f.env: f.section for f in engine._fields()}
+        assert sections["YEABOI_SPRINT_LENGTH_WEEKS"] == "advanced"
+        assert sections["YEABOI_SPRINT_ANCHOR_DATE"] == "advanced"

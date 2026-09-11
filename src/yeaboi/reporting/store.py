@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from yeaboi.agent.state import DeliveredItem, DeliveryReport, SupportingSignal, annotations_from
+from yeaboi.context._sql import id_filter, limit_clause
+from yeaboi.context.labels import drop_run_labels
 from yeaboi.ops.signals import OpsSignal
 
 logger = logging.getLogger(__name__)
@@ -209,16 +211,22 @@ class ReportingStore:
         )
         return int(cursor.lastrowid or 0)
 
-    def get_latest_report(self, session_id: str = "") -> DeliveryReport | None:
-        """Return the most recent DeliveryReport (optionally for a session), or None."""
+    def get_latest_report(self, session_id: str = "", run_ids: tuple[int, ...] | None = None) -> DeliveryReport | None:
+        """Return the most recent DeliveryReport (optionally for a session), or None.
+
+        ``run_ids`` is the hard filter a resolved context scope hands over (``()`` = none).
+        """
+        where, params = id_filter(run_ids)
         if session_id:
             row = self._conn.execute(
-                "SELECT report_json FROM reporting_history WHERE session_id = ? ORDER BY run_at DESC LIMIT 1",
-                (session_id,),
+                f"SELECT report_json FROM reporting_history WHERE session_id = ? AND {where} "  # noqa: S608
+                "ORDER BY run_at DESC LIMIT 1",
+                (session_id, *params),
             ).fetchone()
         else:
             row = self._conn.execute(
-                "SELECT report_json FROM reporting_history ORDER BY run_at DESC LIMIT 1"
+                f"SELECT report_json FROM reporting_history WHERE {where} ORDER BY run_at DESC LIMIT 1",  # noqa: S608
+                params,
             ).fetchone()
         if row is None or not row[0]:
             return None
@@ -251,16 +259,20 @@ class ReportingStore:
             for r in rows
         ]
 
-    def get_all_history(self, limit: int = 100) -> list[dict]:
+    def get_all_history(self, limit: int = 100, run_ids: tuple[int, ...] | None = None) -> list[dict]:
         """Return recent delivery-report run metadata across ALL sessions (for the hub).
+
+        ``run_ids`` narrows to those rows (``()`` = none); ``limit`` 0 = every row.
 
         Reporting piggybacks on the latest planning session, so the hub lists runs
         across every session (matching how Analysis lists all saved sessions).
         """
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
         rows = self._conn.execute(
-            "SELECT id, session_id, run_at, period, period_end, project_name, item_count FROM reporting_history "
-            "ORDER BY run_at DESC LIMIT ?",
-            (limit,),
+            "SELECT id, session_id, run_at, period, period_end, project_name, item_count FROM reporting_history "  # noqa: S608 — placeholders only
+            f"WHERE {where} ORDER BY run_at DESC{limit_sql}",
+            (*params, *limit_params),
         ).fetchall()
         return [
             {
@@ -326,5 +338,6 @@ class ReportingStore:
         cursor = self._conn.execute("DELETE FROM reporting_history WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "reporting", run_id)
             logger.info("Deleted delivery report run id=%s", run_id)
         return deleted

@@ -1494,6 +1494,8 @@ def _collect_settings_data() -> dict:
         "AWS_PROFILE",
         "LOG_LEVEL",
         "SESSION_PRUNE_DAYS",
+        "YEABOI_SPRINT_LENGTH_WEEKS",
+        "YEABOI_SPRINT_ANCHOR_DATE",
         "TUNNEL_TIMEOUT_MINUTES",
         # The share tier and its Cloudflare Access configuration. None of these
         # is a secret — the tunnel's actual credential stays in a file on disk

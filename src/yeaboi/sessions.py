@@ -41,6 +41,7 @@ from yeaboi.agent.state import (
     prior_art_from_dicts,
     prior_art_to_dicts,
 )
+from yeaboi.context.labels import SESSION_LABELS_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ _PLAN_VERSIONS_INDEX = "CREATE INDEX IF NOT EXISTS idx_plan_versions_session ON 
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See docs: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 35  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review, v33=project status, v34=projects removed, v35=session title + plan versions  # noqa: E501
+CURRENT_SCHEMA_VERSION = 35  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review, v33=project status, v34=projects removed, v35=session title + plan versions + session labels  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -511,6 +512,7 @@ class SessionStore:
         self._conn.execute(_SCHEMA)
         self._conn.execute(_PLAN_VERSIONS_SCHEMA)
         self._conn.execute(_PLAN_VERSIONS_INDEX)
+        self._conn.executescript(SESSION_LABELS_SCHEMA)
         # Phase 8B: migrate existing Phase 8A databases that lack session_state.
         # ALTER TABLE ADD COLUMN is idempotent-safe with the try/except pattern:
         # if the column already exists (new schema or already migrated), SQLite
@@ -965,7 +967,11 @@ class SessionStore:
                 pass  # column already exists
             self._conn.execute(_PLAN_VERSIONS_SCHEMA)
             self._conn.execute(_PLAN_VERSIONS_INDEX)
-            logger.info("Migration v35: added sessions_meta.title and the plan_versions table")
+            # session_labels: the project label, tags and scope every mode's run
+            # carries (context/labels.py owns the DDL; the label store also
+            # creates it for the CLI/MCP paths that never open a SessionStore).
+            self._conn.executescript(SESSION_LABELS_SCHEMA)
+            logger.info("Migration v35: added sessions_meta.title, plan_versions and session_labels")
 
     def _apply_edit_provenance(self) -> None:
         """The v21 migration body — idempotent, so v26 re-runs it verbatim.
@@ -1349,6 +1355,9 @@ class SessionStore:
         """
         cursor = self._conn.execute("DELETE FROM sessions_meta WHERE session_id = ?", (session_id,))
         self._conn.execute("DELETE FROM plan_versions WHERE session_id = ?", (session_id,))
+        self._conn.execute(
+            "DELETE FROM session_labels WHERE session_id = ? AND mode IN ('planning', 'analysis')", (session_id,)
+        )
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("Deleted session %s", session_id)
@@ -1360,6 +1369,7 @@ class SessionStore:
         """Delete all sessions. Returns the number of rows deleted."""
         cursor = self._conn.execute("DELETE FROM sessions_meta")
         self._conn.execute("DELETE FROM plan_versions")
+        self._conn.execute("DELETE FROM session_labels WHERE mode IN ('planning', 'analysis')")
         logger.info("Deleted all sessions (count=%d)", cursor.rowcount)
         return cursor.rowcount
 

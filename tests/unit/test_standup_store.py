@@ -1320,3 +1320,74 @@ class TestOpsSignalsRoundTrip:
             store._conn.execute("UPDATE standup_history SET report_json = ?", (json.dumps(d),))
             latest = store.get_latest_report("s1")
         assert latest is not None and latest.ops_signals == ()
+
+
+class TestScopeFilter:
+    """``run_ids`` is the hard filter a resolved context scope hands over."""
+
+    def test_recent_reports_and_history(self, db_path):
+        with StandupStore(db_path) as store:
+            first = store.record_run(_make_report(date="2026-07-10"))
+            second = store.record_run(_make_report(date="2026-07-11"))
+            assert [r.date for r in store.get_recent_reports(run_ids=(first,))] == ["2026-07-10"]
+            assert store.get_recent_reports(run_ids=()) == []
+            assert len(store.get_recent_reports(limit=0)) == 2
+            assert [r["id"] for r in store.get_all_history(run_ids=(second,))] == [second]
+            assert store.get_all_history(run_ids=()) == []
+            assert len(store.get_all_history(limit=0)) == 2
+
+    def test_delete_drops_the_label_row(self, db_path):
+        from yeaboi.context.labels import LabelStore
+
+        with StandupStore(db_path) as store:
+            run_id = store.record_run(_make_report())
+        with LabelStore(db_path) as labels:
+            labels.set_labels("standup", "s1", str(run_id))
+        with StandupStore(db_path) as store:
+            assert store.delete_run(run_id)
+        with LabelStore(db_path) as labels:
+            assert labels.get_labels("standup", "s1", str(run_id)) is None
+
+
+class TestContextScopeColumn:
+    """The scope a session's standups read under, kept off save_config's full upsert."""
+
+    def test_set_get_and_load_config(self, db_path):
+        from yeaboi.context.scope import ContextScope
+
+        with StandupStore(db_path) as store:
+            store.save_config("s1", enabled=True, time="09:30", weekdays="1-5", delivery_channels=["terminal"])
+            assert store.get_context_scope("s1") is None
+            assert store.load_config("s1")["context_scope"] is None
+            store.set_context_scope("s1", ContextScope(sources=frozenset({"retro"})))
+            assert store.get_context_scope("s1") == {
+                "sources": ["retro"],
+                "window": {"kind": "all"},
+                "projects": [],
+                "tags": [],
+                "limits": {},
+            }
+            assert store.load_config("s1")["context_scope"]["sources"] == ["retro"]
+            # a config-form save never resets it
+            store.save_config("s1", enabled=False, time="09:30", weekdays="1-5", delivery_channels=["terminal"])
+            assert store.get_context_scope("s1")["sources"] == ["retro"]
+            store.set_context_scope("s1", None)
+            assert store.get_context_scope("s1") is None
+
+    def test_set_without_a_config_row_creates_one(self, db_path):
+        with StandupStore(db_path) as store:
+            store.set_context_scope("fresh", {"sources": None})
+            assert store.get_context_scope("fresh") == {"sources": None}
+            assert store.get_context_scope("nobody") is None
+
+    def test_unreadable_column_reads_as_none(self, db_path):
+        import sqlite3
+
+        with StandupStore(db_path) as store:
+            store.set_context_scope("s1", {"sources": None})
+        conn = sqlite3.connect(db_path)
+        conn.execute("UPDATE standup_config SET context_scope = '{bad'")
+        conn.commit()
+        conn.close()
+        with StandupStore(db_path) as store:
+            assert store.get_context_scope("s1") is None
