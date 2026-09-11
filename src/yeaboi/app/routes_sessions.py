@@ -16,10 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def recent(app, request: Request) -> Response:
-    """``GET /api/sessions/recent?limit=&mode=`` — the newest runs across every mode."""
+    """``GET /api/sessions/recent?limit=&mode=&project_label=`` — the newest runs across every mode.
+
+    ``project_id`` is the name an older window sends for the label; it means the same thing.
+    """
     from yeaboi.sessions_recent import recent_sessions
 
     mode = str(request.query.get("mode", "")).strip()
+    project_label = " ".join(str(request.query.get("project_label") or request.query.get("project_id") or "").split())
     raw_limit = str(request.query.get("limit", "")).strip()
     try:
         limit = int(raw_limit) if raw_limit else 20
@@ -28,7 +32,7 @@ def recent(app, request: Request) -> Response:
     if limit < 0:
         raise HTTPError(400, "limit must be zero or more")
     try:
-        rows = recent_sessions(limit=limit, mode=mode)
+        rows = recent_sessions(limit=limit, mode=mode, project_label=project_label)
     except ValueError as exc:
         raise HTTPError(400, str(exc)) from None
     return json_response({"sessions": [asdict(row) for row in rows]})

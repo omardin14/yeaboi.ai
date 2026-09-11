@@ -242,3 +242,53 @@ class TestFinishCommand:
         ctx = _ctx(intake_active=lambda: False, questionnaire_exists=lambda: True)
         dispatch(ctx, "/finish")
         ctx.fast_forward.assert_called_once()
+
+
+class TestAvailabilityVocabulary:
+    """One vocabulary for the terminal's predicate and the wire."""
+
+    def test_every_command_names_a_known_availability(self):
+        from yeaboi.ui.session.chat._commands import AVAILABILITY
+
+        assert {cmd.availability for cmd in COMMANDS} <= set(AVAILABILITY)
+
+    def test_an_unknown_availability_is_refused(self):
+        import pytest
+
+        from yeaboi.ui.session.chat._commands import SlashCommand
+
+        with pytest.raises(ValueError, match="availability"):
+            SlashCommand("x", "help me", lambda ctx, args: None, "sometimes")
+
+    def test_the_predicate_follows_the_word(self):
+        by_name = {cmd.name: cmd for cmd in COMMANDS}
+        assert by_name["skip"].availability == "intake"
+        assert by_name["skip"].available(_ctx(intake_active=lambda: False)) is False
+        assert by_name["form"].availability == "intake_or_pregraph"
+        assert by_name["form"].available(_ctx(intake_active=lambda: False, questionnaire_exists=lambda: False))
+        assert by_name["finish"].available(_ctx(plan_complete=lambda: True)) is False
+        assert by_name["summary"].available(_ctx(questionnaire_exists=lambda: False)) is False
+        assert by_name["help"].available(_ctx(intake_active=lambda: False, questionnaire_exists=lambda: False))
+
+
+class TestWireCommands:
+    def test_the_window_gets_every_verb_but_the_terminal_only_ones(self):
+        from yeaboi.ui.session.chat._commands import TERMINAL_ONLY_COMMANDS, wire_commands
+
+        names = {row["name"] for row in wire_commands()}
+        assert names == {cmd.name for cmd in COMMANDS} - TERMINAL_ONLY_COMMANDS
+        assert all(set(row) == {"name", "help", "availability"} for row in wire_commands())
+
+    def test_terminal_only_matches_the_parity_ledger(self):
+        # test_tui_parity.TERMINAL_ONLY is the reviewed list of what a window
+        # does differently; the wire must hide exactly its slash entries.
+        from tests.unit.test_tui_parity import TERMINAL_ONLY
+        from yeaboi.ui.session.chat._commands import TERMINAL_ONLY_COMMANDS
+
+        ledger = {name.lstrip("/") for name in TERMINAL_ONLY if name.startswith("/")}
+        # /duck joins the ledger with the desktop's room (its Duck settings page
+        # mutes the bubble); until then it is the one verb hidden here alone.
+        assert TERMINAL_ONLY_COMMANDS - {"duck"} == ledger - {"duck"}, (
+            "the wire hides a verb the parity ledger does not name (or the other way round); "
+            "add it to TERMINAL_ONLY with a reason, or serve it"
+        )

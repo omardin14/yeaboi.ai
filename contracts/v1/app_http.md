@@ -157,20 +157,30 @@ bodies of NDJSON, one JSON object per line, terminated by a `{"type":"done"}`
 or `{"type":"error"}` line. The ambient SSE feed is never used for
 request-scoped data.
 
-## Chat routes (M5)
+## Planning room routes
 
-The planning conversation. Sessions live in the backend (one `ChatSession` per
-project id, the same project store the TUI resumes from), so a reloaded window
-rejoins the conversation it left rather than restarting it.
+The planning conversation — the desktop's planning room. Sessions live in
+the backend (one `ChatSession` per session id, in the same session store
+`plan_get`/`plan_export`/`plan_sync` and `/api/sessions/recent` read), so a
+reloaded window rejoins the conversation it left rather than restarting it,
+and a plan started here is one plan everywhere.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/chat/sessions` | body `{description, intake_mode?: "small_project"\|"smart", solo?: false}` → 201 with the session view. An absent `intake_mode` is classified from the description. `solo: true` opens a one-person intake (the Solo world): the team questions are defaulted to one developer and there is no member picker |
-| GET | `/api/chat/sessions/{project_id}` | the session view; 404 when no such conversation is open or stored |
-| POST | `/api/chat/sessions/{project_id}/send` | body `{text, images?: [..]}` → a chunked NDJSON turn; 409 while a turn is already running |
-| GET | `/api/chat/sessions/{project_id}/questions` | `{questions: [{number, label, answer, remaining, skipped}], total, completed, derived}` |
-| POST | `/api/chat/sessions/{project_id}/size` | body `{mode: "small_project"\|"smart"}` → `{changed, mode, reopened?}`; 409 in dry-run |
-| POST | `/api/chat/sessions/{project_id}/attachments` | body `{image: base64, mime: "image/png"\|"image/jpeg", index}` → `{path, chip}`; 413 over 4.5 MB |
+| POST | `/api/chat/sessions` | body `{description, intake_mode?: "small_project"\|"smart", solo?: false, analysis_profile_id?, title?, context?, project_label?, tags?}` → 201 with the session view. An absent `intake_mode` is classified from the description. `solo: true` opens a one-person intake (the Solo world). `analysis_profile_id` seeds the team calibration and must name a saved profile (400 otherwise). `context`, `project_label` and `tags` are the three keys every run body takes — see *Context scope and labels*; the plan is labelled with them plus the tags every plan gets (`mode:planning`, `world:…`, the month, `size:…`) |
+| GET | `/api/chat/sessions` | `?limit=&project_label=&tag=` → `{sessions: [{session_id, title, project_name, project_label, tags, stage, created_at, last_modified, last_node_completed, counts: {features, stories, tasks, sprints}}]}` — every plan, newest first; `limit` defaults to 50 and `0` means every row |
+| GET | `/api/chat/commands` | `{commands: [{name, help, availability}]}` — the slash verbs the window runs itself (below) |
+| GET | `/api/chat/sessions/{session_id}` | the session view; 404 when no such conversation is open or stored |
+| POST | `/api/chat/sessions/{session_id}/send` | body `{text, images?: [..]}` → a chunked NDJSON turn; 400 when `text` starts with `/`; 409 while a turn is already running, or while the stage is `pipeline` or `epic` (call `advance`) |
+| POST | `/api/chat/sessions/{session_id}/advance` | no body → a chunked NDJSON turn that runs the one step needing no reply: a build stage, or the epic reformat; 409 in any other stage |
+| POST | `/api/chat/sessions/{session_id}/update` | body `{title?, project_label?, tags?, context?}` → `{session_id, title, project_label, tags, context}`. Only the keys present change; `tags` replaces the list; `context` null or blank clears the scope |
+| POST | `/api/chat/sessions/{session_id}/delete` | → `{deleted: true, session_id}` — the row, its versions, labels, pasted images and log; 404 when unknown |
+| GET | `/api/chat/sessions/{session_id}/questions` | `{questions: [{number, label, answer, remaining, skipped}], total, completed, derived}` |
+| POST | `/api/chat/sessions/{session_id}/size` | body `{mode: "small_project"\|"smart"}` → `{changed, mode, reopened?}`; 409 in dry-run |
+| POST | `/api/chat/sessions/{session_id}/attachments` | body `{image: base64, mime: "image/png"\|"image/jpeg", index}` → `{path, chip}`; 413 over 4.5 MB |
+| GET | `/api/chat/sessions/{session_id}/plan` | the plan view (below) |
+| GET | `/api/chat/sessions/{session_id}/plan/versions` | `?section=` → `{versions: [{section, version, created_at}]}` — every accepted snapshot, oldest first |
+| GET | `/api/chat/sessions/{session_id}/plan/versions/{section}/{version}` | `{section, version, created_at, payload}` — one accepted snapshot; 404 when there is none |
 
 `images` on `send` is the **composer's whole attachment list, in order** — not
 the images to send. Which of them travel is decided from the text, by the
@@ -185,29 +195,88 @@ client must say so rather than present it as the plan. It backs three
 affordances the terminal keeps apart: `/questions`, `/form`, and a bare
 `/edit`. Re-asking one is an ordinary turn — `send` the literal `edit N`.
 
-The **session view** is
-`{project_id, stage, opening, transcript: [<event>], question: {question_text, choices, multi_select, auto_submit, prior_art, suggestion, progress, phase_label, current_question, preamble_lines}}`.
-`opening` is the description until it has been sent as the conversation's
-first turn — a client that skips it leaves the intake with nothing to plan.
-`stage` is one of `intake`, `review`, `pipeline`, `epic`, `capacity`, `spike`,
-`chat` — the one predicate every surface routes on.
+**Slash commands run on the client.** A `send` whose text starts with `/` is a
+400: the terminal's rule that slash input never reaches the model holds on
+the wire too. `GET /api/chat/commands` lists the verbs a window answers with
+`availability` ∈ `always` \| `intake` \| `questionnaire` \| `unfinished` \|
+`intake_or_pregraph` (when the verb may run). The terminal's `/image`,
+`/paste`, `/voice`, `/quit` and `/duck` are absent — a window pastes, dictates,
+closes and mutes the duck its own way. What each verb sends: `/skip` →
+`send("skip")`, `/defaults` → `send("defaults")`, `/finish` → `send("defaults
+all")`, `/edit N` → `send("edit N")`, a bare `/edit` arms the next message as
+edit feedback, `/small` and `/large` → `size`, `/questions` → `questions`,
+`/summary` → the intake section of the plan view, `/export` → `plan_export`,
+`/form` → the intake section, editable.
 
-A **turn** streams these line types, in order: `op` first, then any number of
-`token`/`assistant`/`question`/`await_confirm`/`artifact`, terminated by
-`done`, `cancelled` or `error`. Consumers must ignore unknown types.
+The **session view** is
+`{session_id, project_id, title, project_label, tags, stage, intake_mode, opening, created_at, last_modified, transcript: [<line>], question: {question_text, choices, multi_select, auto_submit, prior_art, suggestion, progress, phase_label, current_question, preamble_lines}, progress: {steps: [{node, label, status: "pending"|"running"|"done"}], step, total}, pending: <line> | null, sections: [{kind, status, version}]}`.
+`project_id` repeats `session_id` for one release, until every window reads
+the new name. `opening` is the description until it has been sent as the
+conversation's first turn — a client that skips it leaves the intake with
+nothing to plan. `stage` is one of `intake`, `review`, `pipeline`, `epic`,
+`capacity`, `spike`, `chat` — the one predicate every surface routes on;
+`pipeline` and `epic` want `advance`, everything else a `send`. `pending` is
+the gate the conversation is parked on (an `await_review` or `await_choice`
+line), so a reopened window redraws its buttons from it rather than from
+prose. `sections` is the plan view's status column.
+
+A **turn** streams these line types: `op` first, then any of the others,
+terminated by `done`, `cancelled` or `error`. Consumers must ignore unknown
+types. `token` lines appear only in the `chat` stage (the ReAct node streams);
+every other stage lands its reply as one `question`, `assistant` or `await_*`
+line.
 
 | Line | Shape |
 |---|---|
-| `op` | `{type, op_id}` — cancel the turn with `POST /api/ops/{op_id}/cancel` |
+| `op` | `{type, op_id}` — cancel the turn with `POST /api/ops/{op_id}/cancel`. Cancel is best-effort: only the `chat` stage streams and stops mid-reply; a build step runs to completion and then reports |
 | `token` | `{type, text}` — a chunk of the reply as it forms |
 | `assistant` | `{type, text}` — the finished reply, as prose |
 | `user` | `{type, text}` — replay only |
 | `question` | `{type, text, number}` — an intake question, decorated for chat |
-| `await_confirm` | `{type, kind, prompt}` — an artifact card plus the line asking for a verdict |
-| `artifact` | `{type, kind}` — a card rendered from state (replay only) |
+| `await_confirm` | `{type, kind, prompt}` — the intake summary (`intake_summary`), the prior-art verdict (`prior_art`), or a tracker write the ReAct node wants confirmed (`tool_write`; reply `yes` or `no`) |
+| `await_review` | `{type, node, kind, prompt}` — a build step parked on its gate; reply `accept`, `edit …`, or anything else to refine by chatting |
+| `await_choice` | `{type, kind: "capacity"\|"spike", prompt, options: [{key, label}]}` — reply with an option `key`, its 1-based number, or `accept` for the first |
+| `artifact` | `{type, kind}` — a card rendered from the plan view's section of that kind (`intake_summary`, `prior_art`, `analysis`, `epic`, `features`, `stories`, `tasks`, `sprints`, `recap`) |
+| `progress` | `{type, node, step, total, status: "running"\|"done"}` — the build checklist moving |
+| `section` | `{type, kind, status, version}` — a plan section changed; refetch `plan` |
+| `notice` | `{type, text}` — a dim local line (a blocked input, a switched size); never persisted |
+| `action` | `{type, name, detail}` — a verdict that is an action, not a reply: `sync` with the tracker name; the window opens its Sync action (`plan_sync`) |
 | `done` | `{type, stage}` — the turn landed; `stage` is the new one |
 | `cancelled` | `{type}` — the turn was cancelled; state is unchanged |
 | `error` | `{type, message}` — a classified, one-line provider/integration failure |
+
+After a `plan_sync` through `POST /api/tool/plan_sync` the live conversation
+is evicted, so the next `GET` reloads the synced plan from the store.
+
+### Plan view
+
+`GET …/plan` is
+`{session_id, stage, intake_mode, sections: [{kind, title, status, version, versions}], intake, analysis, epic, features, stories, tasks, sprints, capacity, sync, counts}`
+— text and numbers only, never markup.
+
+- `sections` is in build order: `intake`, `analysis`, `epic`, `features`,
+  `stories`, `tasks`, `sprints`. `status` is `empty` \| `generating` \|
+  `awaiting_review` \| `accepted`; `version` is the newest accepted version
+  (0 before the first accept) and `versions` how many there are.
+- `intake` is `{completed, confirmed, prior_art_pending, phases: [{key, label, questions: [{number, label, answer, source, origin, skipped}]}], prior_art: [{key, name, url, platform}]}`.
+  Every question of every phase is listed; `source` is the terminal's tag —
+  `answered` \| `from description` \| `default` \| `skipped` — or `""` for a
+  question the run has not reached; `origin` is the finer provenance the
+  intake records (`direct`, `extracted`, `defaulted`, `probed`, `scrum_md`).
+- `analysis` is `{name, description, type, goals, end_users, target_state, tech_stack, integrations, constraints, sprint_length_weeks, target_sprints, risks, out_of_scope, assumptions, skip_features, is_low_code, low_code_reason, architecture, team_size}`
+  (`{}` before the analyzer runs); `epic` is `{reviewed, calibration_profile_id, name, description, goals}`.
+- `features`, `stories` (with `acceptance_criteria` and an integer
+  `story_points`), `tasks` and `sprints` (with `story_ids`) are the plan's
+  artifacts as `plan_export` writes them; `capacity` is `{velocity_per_sprint, net_velocity_per_sprint, velocity_source, sprint_start_date, sprint_length_weeks, target_sprints}`;
+  `sync` holds whichever tracker key maps the plan carries; `counts` the four
+  artifact counts.
+
+### Plan versions
+
+Every accepted section is kept: the review gate's `accept`, the epic gate's,
+and the intake confirmation each record a snapshot of that section, and the
+`section` line names its new `version`. The working copy is the state; a
+version is what was accepted. There is no rollback route.
 
 ## Niko routes
 
@@ -979,19 +1048,28 @@ connected source's rows for the composer's `@` picker.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/sessions/recent` | `?limit=&mode=` → `{sessions: [row]}` — the newest runs across every mode, machine-wide |
+| GET | `/api/sessions/recent` | `?limit=&mode=&project_label=` → `{sessions: [row]}` — the newest runs across every mode, machine-wide; `project_label` keeps only the runs labelled with it (`project_id` is the older name for the same query key) |
 | GET | `/api/references` | `?source=&q=&limit=` (source ∈ `jira` \| `github` \| `azdevops` \| `linear` \| `confluence` \| `notion`; limit 1–25, default 8) → `{source, source_label, items: [{id, subject, label, detail, url}], warning}` — the live picker behind `@` in the desktop's composer: one row per concrete thing (a Jira issue or the Jira project itself, a GitHub repo, a Linear issue, an Azure DevOps work item, a Confluence or Notion page). An empty `q` lists the open or recent items; the trackers are listed once and filtered here (every token of `q` must appear in subject, label or detail), the doc platforms take `q` to their own search. `subject` is the identifier the desktop stores in its own backend (`PROJ-123`, `owner/repo`, a page id) — this server keeps no reference of its own; `label` is the words a chip shows; `url` may be blank when the base URL is unconfigured. A source that cannot be read answers 200 with `warning` (`Jira could not be read`) and no items, never a 502; a tracker whose credentials are dead may answer an empty list instead (its reader swallows the failure). Each read is cached for a minute per source (per query for the doc platforms), so typing costs one fetch. An unknown source, or a `limit` that is not a number, is a 400 |
 
-A **sessions row** is `{session_id, run_id, mode, title, created_at, last_modified}`:
+A **sessions row** is `{session_id, run_id, mode, title, created_at, last_modified, subtitle, kind, project_label, tags, engineer}`:
 
 - `mode` is one of `planning`, `analysis`, `standup`, `retro`, `reporting`,
-  `ship`, `review`. Planning and analysis rows are `sessions_meta` sessions and
-  carry `run_id: ""`; every other row is one saved run of that mode's store,
-  and `run_id` is that store's own id (the standup/retro/reporting/review
-  history row as a string, the ship run id).
+  `ship`, `review`, `poker`, `performance`, `roadmap`, `agent-usage`,
+  `agent-advisor`, `agent-security`. Planning and analysis rows are
+  `sessions_meta` sessions and carry `run_id: ""`; every other row is one saved
+  run of that mode's store, and `run_id` is that store's own id (the
+  standup/retro/reporting/review/poker history row as a string, the ship run
+  id, the roadmap id, the agent report id, and `<kind>:<id>` for performance,
+  whose three tables share one mode — `kind` names which).
 - `title` is the same label the terminal lists — the planning session's
-  display name, `Standup — <date>`, `Retro — <date>`, `Report — <period>`,
-  `Ship — <item> · <status>`, `Week <label>`.
+  title or display name, `Standup — <date>`, `Retro — <date>`,
+  `Report — <period>`, `Ship — <item> · <status>`, `Week <label>`,
+  `Poker — <date>`, the roadmap's label, `Agent usage — <date>`.
+  `subtitle` is the hub's second line (`Stories written`, `sprint day 4 ·
+  80% confidence`, `Sprint 42 · 7/9 estimated`), `""` when the store has none;
+  `engineer` is set on performance rows.
+- `project_label` and `tags` are the labels the run carries (see *Context
+  scope and labels*), blank when it carries none.
 - Newest `last_modified` first; `limit` defaults to 20 and `0` means every
   row. A mode with no saved runs is simply absent — nothing is invented. An
   unknown `mode` is a 400.

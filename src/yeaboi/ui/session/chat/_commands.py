@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ._composer import NEWLINE_KEY, InsertResult, paste_notice
 
@@ -51,12 +51,34 @@ class ChatContext:
     show_questions: Callable[[], None]  # planned-question checklist (/questions)
 
 
+#: When a command may run. One vocabulary for the terminal's predicate and the
+#: wire (``GET /api/chat/commands``), so the two surfaces cannot disagree.
+AVAILABILITY: dict[str, Callable[[ChatContext], bool]] = {
+    "always": lambda ctx: True,
+    "intake": lambda ctx: ctx.intake_active(),
+    "questionnaire": lambda ctx: ctx.questionnaire_exists(),
+    "unfinished": lambda ctx: not ctx.plan_complete(),
+    "intake_or_pregraph": lambda ctx: ctx.intake_active() or not ctx.questionnaire_exists(),
+}
+
+#: Verbs a window does not offer because it does the job another way — the
+#: same set tests/unit/test_tui_parity.py names under TERMINAL_ONLY.
+TERMINAL_ONLY_COMMANDS: frozenset[str] = frozenset({"image", "paste", "voice", "quit", "duck"})
+
+
 @dataclass(frozen=True)
 class SlashCommand:
     name: str
     help: str
     handler: Callable[[ChatContext, str], None]
-    available: Callable[[ChatContext], bool] = field(default=lambda ctx: True)
+    availability: str = "always"
+
+    def __post_init__(self) -> None:
+        if self.availability not in AVAILABILITY:
+            raise ValueError(f"unknown availability {self.availability!r} for /{self.name}")
+
+    def available(self, ctx: ChatContext) -> bool:
+        return AVAILABILITY[self.availability](ctx)
 
 
 def _cmd_help(ctx: ChatContext, args: str) -> None:
@@ -157,32 +179,19 @@ def _cmd_duck(ctx: ChatContext, args: str) -> None:
 COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("help", "list commands and shortcuts", _cmd_help),
     SlashCommand("export", "save the plan and/or chat transcript", _cmd_export),
-    SlashCommand("skip", "skip the current question", _cmd_skip, lambda ctx: ctx.intake_active()),
-    SlashCommand("defaults", "accept defaults for all remaining questions", _cmd_defaults, lambda c: c.intake_active()),
+    SlashCommand("skip", "skip the current question", _cmd_skip, "intake"),
+    SlashCommand("defaults", "accept defaults for all remaining questions", _cmd_defaults, "intake"),
+    # Pre-questionnaire availability lets a greeting-time /form defer (the
+    # driver opens the form after the description) instead of bouncing off
+    # the unknown-command notice.
+    SlashCommand("form", "fill out the remaining questions as a full-screen form", _cmd_form, "intake_or_pregraph"),
+    # Available pre-questionnaire too (the greeting advertises it) — the
+    # driver defers until the description exists, like /form.
     SlashCommand(
-        "form",
-        "fill out the remaining questions as a full-screen form",
-        _cmd_form,
-        # Pre-questionnaire availability lets a greeting-time /form defer
-        # (the driver opens the form after the description) instead of
-        # bouncing off the unknown-command notice.
-        lambda c: c.intake_active() or not c.questionnaire_exists(),
+        "finish", "answer the remaining questions with defaults (/finish again stops)", _cmd_finish, "unfinished"
     ),
-    SlashCommand(
-        "finish",
-        "answer the remaining questions with defaults (/finish again stops)",
-        _cmd_finish,
-        # Available pre-questionnaire too (the greeting advertises it) — the
-        # driver defers until the description exists, like /form.
-        lambda c: not c.plan_complete(),
-    ),
-    SlashCommand("summary", "show your answers so far", _cmd_summary, lambda ctx: ctx.questionnaire_exists()),
-    SlashCommand(
-        "questions",
-        "see what I'll ask and what's already answered",
-        _cmd_questions,
-        lambda ctx: ctx.questionnaire_exists(),
-    ),
+    SlashCommand("summary", "show your answers so far", _cmd_summary, "questionnaire"),
+    SlashCommand("questions", "see what I'll ask and what's already answered", _cmd_questions, "questionnaire"),
     SlashCommand("edit", "browse your answers (/edit 6 re-asks one) or refine the last artifact", _cmd_edit),
     SlashCommand("image", "attach a screenshot from the clipboard (same as Ctrl+V)", _cmd_image),
     SlashCommand("voice", "dictate (same as double-tap Space)", _cmd_voice),
@@ -194,6 +203,15 @@ COMMANDS: tuple[SlashCommand, ...] = (
 )
 
 _BY_NAME = {cmd.name: cmd for cmd in COMMANDS}
+
+
+def wire_commands() -> list[dict]:
+    """The verbs a window runs itself, as ``{name, help, availability}`` rows."""
+    return [
+        {"name": cmd.name, "help": cmd.help, "availability": cmd.availability}
+        for cmd in COMMANDS
+        if cmd.name not in TERMINAL_ONLY_COMMANDS
+    ]
 
 
 def matching_commands(ctx: ChatContext, prefix: str) -> list[SlashCommand]:

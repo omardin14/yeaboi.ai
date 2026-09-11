@@ -170,11 +170,13 @@ class LabelStore:
         tags=(),
         scope: ContextScope | dict | None = None,
         merge_tags: bool = True,
+        clear_scope: bool = False,
     ) -> SessionLabels:
         """Upsert one row.
 
         ``merge_tags`` keeps the tags already there and adds; a blank ``project``
-        keeps the old one.
+        keeps the old one; a ``None`` scope keeps the old one unless
+        ``clear_scope`` says the run reads unscoped now.
         """
         if mode not in LABEL_MODES:
             raise ValueError(f"unknown label mode {mode!r} — one of {', '.join(LABEL_MODES)}")
@@ -186,11 +188,14 @@ class LabelStore:
             new_tags |= set(existing.tags)
         project = (project or "").strip() or (existing.project if existing else "")
         scope_dict = scope.to_dict() if isinstance(scope, ContextScope) else scope
-        scope_json = (
-            json.dumps(scope_dict, sort_keys=True)
-            if scope_dict is not None
-            else (json.dumps(existing.scope, sort_keys=True) if existing and existing.scope is not None else "")
-        )
+        if clear_scope:
+            scope_json = ""
+        elif scope_dict is not None:
+            scope_json = json.dumps(scope_dict, sort_keys=True)
+        elif existing and existing.scope is not None:
+            scope_json = json.dumps(existing.scope, sort_keys=True)
+        else:
+            scope_json = ""
         now = _now()
         self._conn.execute(
             """INSERT INTO session_labels

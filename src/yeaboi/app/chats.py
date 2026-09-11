@@ -6,22 +6,29 @@ rather than once per turn. Persistence is the shared session store
 (``sessions.py``), the same rows ``plan_get``/``plan_export``/``plan_sync``
 and the recent-sessions list read — a plan started here is one plan
 everywhere. Conversations the old file store holds still open, read-only.
+The label a plan carries (its project label, tags and the scope it reads
+under) lives in the context package's label store beside it.
 
-The graph factory, loader, saver and version recorder are injected so the
-whole surface can be tested without an LLM or a home directory.
+The graph factory and every store access are injected so the whole surface
+can be tested without an LLM or a home directory.
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from functools import partial
 
-from yeaboi.agent.chat_session import ChatSession, last_completed_node, start_state
+from yeaboi.agent.chat_session import ChatSession, last_completed_node, stage_of, start_state
 
 logger = logging.getLogger(__name__)
+
+#: The section counts a list row carries.
+COUNT_KINDS = ("features", "stories", "tasks", "sprints")
 
 
 @dataclass
@@ -47,39 +54,11 @@ def _store():
     return SessionStore(get_db_path())
 
 
-def _load(session_id: str) -> dict | None:
-    with _store() as store:
-        state = store.load_state(session_id)
-    if state is not None:
-        return state
-    # A conversation from before the store move. Read-only: its next save
-    # lands in the store, where every other reader already looks.
-    from yeaboi.persistence import load_graph_state
+def _label_store():
+    from yeaboi.context.labels import LabelStore
+    from yeaboi.paths import get_db_path
 
-    return load_graph_state(session_id)
-
-
-def _save(session_id: str, state: dict) -> None:
-    with _store() as store:
-        store.create_session(session_id, mode="planning")  # INSERT OR IGNORE — adopts a file-store chat
-        store.save_state(session_id, state)
-        analysis = state.get("project_analysis")
-        name = getattr(analysis, "project_name", "") or ""
-        if name:
-            store.update_project_name(session_id, name)
-        node = last_completed_node(state)
-        if node:
-            store.update_last_node(session_id, node)
-
-
-def _save_meta(session_id: str, *, title: str) -> None:
-    with _store() as store:
-        store.update_session_meta(session_id, title=title)
-
-
-def _record_version(session_id: str, section: str, payload: dict) -> int:
-    with _store() as store:
-        return store.record_plan_version(session_id, section, payload)
+    return LabelStore(get_db_path())
 
 
 def _new_id() -> str:
@@ -88,33 +67,91 @@ def _new_id() -> str:
     return make_session_id()
 
 
+def _remove_attachments(session_id: str) -> None:
+    from yeaboi.paths import ATTACHMENTS_DIR, PLANNING_LOGS_DIR, _safe_key
+
+    folder = ATTACHMENTS_DIR / _safe_key(session_id, "misc")
+    if folder.exists():
+        shutil.rmtree(folder, ignore_errors=True)
+    if PLANNING_LOGS_DIR.exists():
+        for log_file in PLANNING_LOGS_DIR.glob(f"{session_id}.log*"):
+            log_file.unlink(missing_ok=True)
+
+
 class UnknownChatError(LookupError):
     """No conversation with that id is open or stored."""
 
 
 class ChatSupervisor:
-    """The open conversations. Thread-safe; one compiled graph for all of them."""
+    """The open conversations. Thread-safe; one compiled graph for all of them.
+
+    ``store_factory`` opens the session store and ``label_store_factory`` the
+    label store; the finer seams (``loader``, ``saver``, ``meta_saver``,
+    ``version_recorder``) default to the store and exist for tests that keep
+    state in a dict.
+    """
 
     def __init__(
         self,
         *,
         graph_factory=_compile_graph,
-        loader=_load,
-        saver=_save,
+        store_factory=_store,
+        label_store_factory=_label_store,
+        loader: Callable[[str], dict | None] | None = None,
+        saver: Callable[[str, dict], None] | None = None,
         id_factory=_new_id,
-        meta_saver: Callable[..., None] = _save_meta,
-        version_recorder: Callable[[str, str, dict], int] = _record_version,
+        meta_saver: Callable[..., None] | None = None,
+        version_recorder: Callable[[str, str, dict], int] | None = None,
+        attachment_remover: Callable[[str], None] = _remove_attachments,
+        today: Callable[[], date] = date.today,
     ) -> None:
         self._graph_factory = graph_factory
-        self._loader = loader
-        self._saver = saver
+        self._store = store_factory
+        self._labels = label_store_factory
+        self._loader = loader or self._load
+        self._saver = saver or self._save
         self._id_factory = id_factory
-        self._meta_saver = meta_saver
-        self._version_recorder = version_recorder
+        self._meta_saver = meta_saver or self._save_meta
+        self._version_recorder = version_recorder or self._record_version
+        self._attachment_remover = attachment_remover
+        self._today = today
         self._chats: dict[str, LiveChat] = {}
         self._lock = threading.Lock()
         self._graph = None
         self._graph_lock = threading.Lock()
+
+    # ------------------------------------------------------------ the store
+
+    def _load(self, session_id: str) -> dict | None:
+        with self._store() as store:
+            state = store.load_state(session_id)
+        if state is not None:
+            return state
+        # A conversation from before the store move. Read-only: its next save
+        # lands in the store, where every other reader already looks.
+        from yeaboi.persistence import load_graph_state
+
+        return load_graph_state(session_id)
+
+    def _save(self, session_id: str, state: dict) -> None:
+        with self._store() as store:
+            store.create_session(session_id, mode="planning")  # INSERT OR IGNORE — adopts a file-store chat
+            store.save_state(session_id, state)
+            analysis = state.get("project_analysis")
+            name = getattr(analysis, "project_name", "") or ""
+            if name:
+                store.update_project_name(session_id, name)
+            node = last_completed_node(state)
+            if node:
+                store.update_last_node(session_id, node)
+
+    def _save_meta(self, session_id: str, *, title: str) -> None:
+        with self._store() as store:
+            store.update_session_meta(session_id, title=title)
+
+    def _record_version(self, session_id: str, section: str, payload: dict) -> int:
+        with self._store() as store:
+            return store.record_plan_version(session_id, section, payload)
 
     def graph(self):
         """The compiled planning graph — built once, on first use."""
@@ -133,6 +170,8 @@ class ChatSupervisor:
             typewriter=False,
             on_version=partial(self._version_recorder, session_id),
         )
+
+    # ------------------------------------------------------- conversations
 
     def create(
         self,
@@ -185,6 +224,11 @@ class ChatSupervisor:
             self._meta_saver(chat.session_id, title=chat.title)
             chat.title = ""
 
+    def rename(self, chat: LiveChat, title: str) -> None:
+        """A user-given title, written now (the row exists once saved)."""
+        self._meta_saver(chat.session_id, title=title)
+        chat.title = ""
+
     def close(self, session_id: str) -> None:
         """Forget a conversation (it stays on disk and can be reopened)."""
         with self._lock:
@@ -193,3 +237,155 @@ class ChatSupervisor:
     def close_all(self) -> None:
         with self._lock:
             self._chats.clear()
+
+    def delete(self, session_id: str) -> bool:
+        """Remove a conversation everywhere: the store, its labels, attachments and log."""
+        self.close(session_id)
+        with self._store() as store:
+            deleted = store.delete_session(session_id)
+        if not deleted:
+            return False
+        try:
+            with self._labels() as labels:
+                labels.delete("planning", session_id)
+        except Exception:  # noqa: BLE001 — the row is gone; a stale label is harmless
+            logger.warning("Labels for %s were not removed", session_id, exc_info=True)
+        try:
+            self._attachment_remover(session_id)
+        except OSError:
+            logger.warning("Attachments for %s were not removed", session_id, exc_info=True)
+        logger.info("Chat deleted: session=%s", session_id)
+        return True
+
+    # ------------------------------------------------------------ metadata
+
+    def meta(self, session_id: str) -> dict:
+        """The row's title and dates; blank fields for a conversation not yet saved."""
+        with self._store() as store:
+            row = store.get_session(session_id)
+        if row is None:
+            return {"title": "", "created_at": "", "last_modified": "", "last_node_completed": ""}
+        return {
+            "title": row.get("title") or "",
+            "created_at": row.get("created_at") or "",
+            "last_modified": row.get("last_modified") or "",
+            "last_node_completed": row.get("last_node_completed") or "",
+        }
+
+    def labels(self, session_id: str) -> dict:
+        """``{project_label, tags, scope}`` for a plan; blanks when it carries none."""
+        try:
+            with self._labels() as labels:
+                row = labels.get_labels("planning", session_id)
+        except Exception:  # noqa: BLE001 — a label read must not break the view
+            logger.warning("Labels for %s could not be read", session_id, exc_info=True)
+            row = None
+        if row is None:
+            return {"project_label": "", "tags": [], "scope": None}
+        return {"project_label": row.project, "tags": list(row.tags), "scope": row.scope}
+
+    def set_labels(
+        self,
+        chat: LiveChat,
+        *,
+        project_label: str = "",
+        tags=None,
+        scope=None,
+        defaults: bool = False,
+        clear_scope: bool = False,
+    ) -> dict:
+        """Write a plan's labels.
+
+        ``tags`` None leaves the tags alone and a list replaces them; ``defaults``
+        adds the tags every plan gets; ``clear_scope`` records that the plan
+        reads unscoped now.
+        """
+        from yeaboi.context.labels import default_tags
+
+        all_tags = list(tags or ())
+        if defaults:
+            state = chat.session.state
+            all_tags += default_tags(
+                "planning",
+                today=self._today(),
+                world="solo" if state.get("solo") else "team",
+                plan_size=state.get("_intake_mode", ""),
+            )
+        with self._labels() as labels:
+            labels.set_labels(
+                "planning",
+                chat.session_id,
+                project=project_label,
+                tags=all_tags,
+                scope=scope,
+                merge_tags=tags is None,
+                clear_scope=clear_scope,
+            )
+        return self.labels(chat.session_id)
+
+    def list_rows(self, *, limit: int = 50, project_label: str = "", tag: str = "") -> list[dict]:
+        """The planning hub's rows, newest first, each with its stage and counts."""
+        with self._store() as store:
+            rows = store.list_sessions(mode="planning")
+        try:
+            with self._labels() as labels:
+                by_id = {row.session_id: row for row in labels.list_labels(mode="planning", limit=0)}
+        except Exception:  # noqa: BLE001 — the list renders without labels
+            logger.warning("Plan labels could not be listed", exc_info=True)
+            by_id = {}
+        out: list[dict] = []
+        for row in rows:
+            label = by_id.get(row["session_id"])
+            row_label = label.project if label else ""
+            row_tags = list(label.tags) if label else []
+            if project_label and row_label != project_label:
+                continue
+            if tag and tag not in row_tags:
+                continue
+            state = self._peek(row["session_id"])
+            out.append(
+                {
+                    "session_id": row["session_id"],
+                    "title": row.get("title") or "",
+                    "project_name": row.get("project_name") or "",
+                    "project_label": row_label,
+                    "tags": row_tags,
+                    "stage": stage_of(state) if state is not None else "",
+                    "created_at": row.get("created_at") or "",
+                    "last_modified": row.get("last_modified") or "",
+                    "last_node_completed": row.get("last_node_completed") or "",
+                    "counts": {kind: len(state.get(kind) or []) if state else 0 for kind in COUNT_KINDS},
+                }
+            )
+            if limit and len(out) >= limit:
+                break
+        logger.info("Chat list: %d row(s) (label=%r tag=%r)", len(out), project_label, tag)
+        return out
+
+    def _peek(self, session_id: str) -> dict | None:
+        with self._lock:
+            chat = self._chats.get(session_id)
+        if chat is not None:
+            return chat.session.state
+        try:
+            with self._store() as store:
+                return store.load_state(session_id)
+        except Exception:  # noqa: BLE001 — one unreadable blob must not empty the list
+            logger.warning("Plan %s could not be read for the list", session_id, exc_info=True)
+            return None
+
+    # ------------------------------------------------------------ versions
+
+    def versions(self, session_id: str, section: str = "") -> list[dict]:
+        with self._store() as store:
+            return store.list_plan_versions(session_id, section)
+
+    def version(self, session_id: str, section: str, version: int) -> dict | None:
+        with self._store() as store:
+            return store.get_plan_version(session_id, section, version)
+
+    def version_counts(self, session_id: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in self.versions(session_id):
+            counts[row["section"]] = max(counts.get(row["section"], 0), int(row["version"]))
+        return counts

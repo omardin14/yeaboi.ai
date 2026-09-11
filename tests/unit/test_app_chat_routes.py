@@ -43,16 +43,38 @@ def graph():
 
 
 @pytest.fixture
-def app(graph):
+def app(graph, tmp_path):
+    """State in a dict; the row-level stores (titles, versions, labels) on a throwaway db."""
+    from yeaboi.context.labels import LabelStore
+    from yeaboi.sessions import SessionStore
+
     saved: dict[str, dict] = {}
+    db = tmp_path / "sessions.db"
     chats = ChatSupervisor(
         graph_factory=lambda: graph,
+        store_factory=lambda: SessionStore(db),
+        label_store_factory=lambda: LabelStore(db),
         loader=saved.get,
         saver=saved.__setitem__,
         id_factory=lambda: "proj-1",
     )
     server = AppServer(token=TOKEN, chats=chats)
     server.saved = saved  # the tests assert on what was persisted
+    server.db = db
+    return server
+
+
+@pytest.fixture
+def store_app(graph, tmp_path, monkeypatch):
+    """Everything on the session store — what the room's list, rename and delete read."""
+    db = tmp_path / "sessions.db"
+    monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+    ids = iter(f"new-{n:08x}-2026-09-12" for n in range(1, 100))
+    removed: list[str] = []
+    chats = ChatSupervisor(graph_factory=lambda: graph, id_factory=lambda: next(ids), attachment_remover=removed.append)
+    server = AppServer(token=TOKEN, chats=chats)
+    server.db = db
+    server.removed = removed
     return server
 
 
@@ -412,3 +434,340 @@ class TestSupervisorOnSessionStore:
             row = store.get_session(chat.session_id)
         assert row["project_name"] == make_dummy_analysis().project_name
         assert row["last_node_completed"] == "project_analyzer"
+
+
+# ---------------------------------------------------------------------------
+# The planning room: list, update, delete, plan, versions, commands, advance.
+# ---------------------------------------------------------------------------
+
+
+class PipelineGraph:
+    """A graph whose one step produces the analysis and parks on its gate."""
+
+    def __init__(self):
+        self.invocations: list[dict] = []
+
+    def invoke(self, state: dict) -> dict:
+        from tests._node_helpers import make_dummy_analysis
+
+        self.invocations.append(state)
+        return {
+            **state,
+            "project_analysis": make_dummy_analysis(),
+            "pending_review": "project_analyzer",
+            "messages": [*state["messages"], AIMessage(content="## Analysis\nA booking app.")],
+        }
+
+
+def _stories(count: int) -> list:
+    from yeaboi.agent.state import Priority, StoryPointValue, UserStory
+
+    return [
+        UserStory(
+            id=f"S{n}",
+            feature_id="F1",
+            persona="client",
+            goal="book",
+            benefit="time",
+            acceptance_criteria=(),
+            story_points=StoryPointValue.ONE,
+            priority=Priority.LOW,
+        )
+        for n in range(count)
+    ]
+
+
+def _completed_questionnaire() -> QuestionnaireState:
+    qs = QuestionnaireState(intake_mode="smart", current_question=31)
+    qs.completed = True
+    qs.answers = {1: "A booking app"}
+    return qs
+
+
+class TestSessionViewShape:
+    def test_the_keys_are_the_pinned_ones_in_order(self, app):
+        from yeaboi.app.routes_chat import SESSION_VIEW_KEYS
+
+        view = open_chat(app)
+        assert set(view) == set(SESSION_VIEW_KEYS)
+        assert view["session_id"] == view["project_id"] == "proj-1"
+        assert view["pending"] is None and view["intake_mode"] == "smart"
+        assert view["progress"]["step"] == 1 and view["progress"]["total"] == 6
+        assert [s["kind"] for s in view["sections"]][:2] == ["intake", "analysis"]
+        assert {s["status"] for s in view["sections"]} == {"empty"}
+
+    def test_a_parked_gate_is_the_pending_line(self, app):
+        open_chat(app)
+        chat = app.chats.open("proj-1")
+        chat.session.state.update(pending_review="story_writer", stories=[])
+        view = json.loads(request(app, "GET", "/api/chat/sessions/proj-1").body)
+        assert view["stage"] == "review"
+        assert view["pending"]["type"] == "await_review" and view["pending"]["kind"] == "stories"
+        assert view["transcript"][-1] == view["pending"]
+        assert {s["kind"]: s["status"] for s in view["sections"]}["stories"] == "awaiting_review"
+
+
+class TestCreateSeedsProfileAndContext:
+    def test_the_three_context_keys_reach_the_state_and_the_labels(self, app):
+        from yeaboi.context.labels import LabelStore
+
+        open_chat(app, context="standup,retro:1@2sprints", project_label="Apollo", tags=["Q3"])
+        state = app.saved["proj-1"]
+        assert state["project_label"] == "Apollo"
+        assert set(json.loads(state["context_scope"])["sources"]) == {"retro", "standup"}
+        with LabelStore(app.db) as labels:
+            row = labels.get_labels("planning", "proj-1")
+        assert row.project == "Apollo"
+        assert {"q3", "mode:planning", "world:team", "size:large"} <= set(row.tags)
+        assert row.scope["window"]["kind"] == "sprints"
+        view = json.loads(request(app, "GET", "/api/chat/sessions/proj-1").body)
+        assert view["project_label"] == "Apollo" and "q3" in view["tags"]
+
+    def test_a_bad_context_is_refused_before_anything_is_created(self, app):
+        resp = request(app, "POST", "/api/chat/sessions", {"description": "x", "context": "stanup"})
+        assert resp.code == 400 and "standup" in json.loads(resp.body)["error"]
+        assert not app.saved
+
+    def test_an_analysis_profile_must_exist(self, app, monkeypatch):
+        monkeypatch.setattr("yeaboi.app.routes_chat._profile_exists", lambda pid: pid == "jira-PROJ-1")
+        resp = request(app, "POST", "/api/chat/sessions", {"description": "x", "analysis_profile_id": "nope"})
+        assert resp.code == 400
+        view = open_chat(app, analysis_profile_id="jira-PROJ-1")
+        assert view["session_id"] == "proj-1"
+        assert app.saved["proj-1"]["analysis_profile_id"] == "jira-PROJ-1"
+
+    def test_a_title_is_kept(self, store_app):
+        view = open_chat(store_app, title="  Barbers  ")
+        assert view["title"] == "Barbers"
+        again = json.loads(request(store_app, "GET", f"/api/chat/sessions/{view['session_id']}").body)
+        assert again["title"] == "Barbers" and again["created_at"]
+
+    def test_a_label_failure_does_not_fail_the_plan(self, app, monkeypatch):
+        def boom(*args, **kwargs):
+            raise RuntimeError("labels down")
+
+        monkeypatch.setattr(app.chats, "set_labels", boom)
+        assert open_chat(app, project_label="Apollo")["session_id"] == "proj-1"
+
+
+class TestSendRefusesSlash:
+    def test_slash_input_never_reaches_the_model(self, app, graph):
+        open_chat(app)
+        resp = request(app, "POST", "/api/chat/sessions/proj-1/send", {"text": "/help"})
+        assert resp.code == 400 and "commands" in json.loads(resp.body)["error"]
+        assert graph.invocations == []
+
+    def test_a_build_stage_wants_advance(self, app):
+        open_chat(app)
+        app.chats.open("proj-1").session.state["questionnaire"] = _completed_questionnaire()
+        resp = request(app, "POST", "/api/chat/sessions/proj-1/send", {"text": "hello"})
+        assert resp.code == 409 and "advance" in json.loads(resp.body)["error"]
+
+
+class TestAdvance:
+    @pytest.fixture
+    def graph(self):
+        return PipelineGraph()
+
+    def test_it_runs_one_step_and_parks_on_the_gate(self, app, graph):
+        open_chat(app)
+        app.chats.open("proj-1").session.state["questionnaire"] = _completed_questionnaire()
+        resp = request(app, "POST", "/api/chat/sessions/proj-1/advance")
+        assert resp.code == 200 and resp.content_type == "application/x-ndjson"
+        lines = [json.loads(line) for line in b"".join(resp.stream).decode().splitlines()]
+        kinds = [line["type"] for line in lines]
+        assert kinds[0] == "op" and kinds[-1] == "done"
+        assert kinds[1:3] == ["progress", "section"]
+        assert lines[1]["node"] == "project_analyzer" and lines[1]["status"] == "running"
+        assert "await_review" in kinds and "artifact" in kinds
+        assert lines[-1]["stage"] == "review"
+        assert len(graph.invocations) == 1
+        assert app.saved["proj-1"]["pending_review"] == "project_analyzer"
+
+    def test_it_is_refused_while_a_reply_is_owed(self, app, graph):
+        open_chat(app)
+        resp = request(app, "POST", "/api/chat/sessions/proj-1/advance")
+        assert resp.code == 409
+        assert graph.invocations == []
+
+    def test_an_unknown_conversation_is_a_404(self, app):
+        assert request(app, "POST", "/api/chat/sessions/nope/advance").code == 404
+
+
+class TestList:
+    def test_plans_list_newest_first_with_their_stage_and_counts(self, store_app):
+        first = open_chat(store_app, title="First")
+        second = open_chat(store_app, title="Second")
+        chat = store_app.chats.open(second["session_id"])
+        chat.session.state.update(pending_review="story_writer", stories=_stories(2))
+        store_app.chats.save(chat)
+        rows = json.loads(request(store_app, "GET", "/api/chat/sessions").body)["sessions"]
+        assert [row["title"] for row in rows] == ["Second", "First"]
+        assert rows[0]["stage"] == "review" and rows[0]["counts"]["stories"] == 2
+        assert rows[1]["session_id"] == first["session_id"] and rows[1]["stage"] == "intake"
+        assert set(rows[0]) == {
+            "session_id",
+            "title",
+            "project_name",
+            "project_label",
+            "tags",
+            "stage",
+            "created_at",
+            "last_modified",
+            "last_node_completed",
+            "counts",
+        }
+
+    def test_limit_label_and_tag_narrow_the_list(self, store_app):
+        open_chat(store_app, title="Apollo plan", project_label="Apollo", tags=["q3"])
+        open_chat(store_app, title="Other")
+        by_limit = json.loads(request(store_app, "GET", "/api/chat/sessions?limit=1").body)["sessions"]
+        assert len(by_limit) == 1
+        by_label = json.loads(request(store_app, "GET", "/api/chat/sessions?project_label=Apollo").body)["sessions"]
+        assert [row["title"] for row in by_label] == ["Apollo plan"]
+        by_tag = json.loads(request(store_app, "GET", "/api/chat/sessions?tag=q3").body)["sessions"]
+        assert [row["title"] for row in by_tag] == ["Apollo plan"]
+        assert request(store_app, "GET", "/api/chat/sessions?limit=x").code == 400
+
+    def test_an_empty_store_is_an_empty_list(self, store_app):
+        assert json.loads(request(store_app, "GET", "/api/chat/sessions").body) == {"sessions": []}
+
+
+class TestUpdate:
+    def test_only_the_keys_present_change(self, store_app):
+        sid = open_chat(store_app, title="Old", project_label="Apollo", tags=["q3"])["session_id"]
+        resp = request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"title": "New"})
+        body = json.loads(resp.body)
+        assert resp.code == 200 and body["title"] == "New" and body["project_label"] == "Apollo"
+        assert "q3" in body["tags"]
+        view = json.loads(request(store_app, "GET", f"/api/chat/sessions/{sid}").body)
+        assert view["title"] == "New"
+
+    def test_tags_replace_and_a_blank_context_clears_the_scope(self, store_app):
+        sid = open_chat(store_app, context="standup@month", tags=["q3"])["session_id"]
+        body = json.loads(
+            request(
+                store_app,
+                "POST",
+                f"/api/chat/sessions/{sid}/update",
+                {"tags": ["mode:planning", "Team A"], "context": "", "project_label": "Borealis"},
+            ).body
+        )
+        assert body["tags"] == ["mode:planning", "team-a"] and body["context"] is None
+        assert body["project_label"] == "Borealis"
+        state = store_app.chats.open(sid).session.state
+        assert "context_scope" not in state and state["project_label"] == "Borealis"
+
+    def test_a_new_scope_reaches_the_state(self, store_app):
+        sid = open_chat(store_app)["session_id"]
+        body = json.loads(
+            request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"context": "retro:1@quarter"}).body
+        )
+        assert body["context"]["sources"] == ["retro"] and body["context"]["window"]["kind"] == "quarter"
+        assert json.loads(store_app.chats.open(sid).session.state["context_scope"])["limits"] == {"retro": 1}
+
+    def test_malformed_updates_are_400s(self, store_app):
+        sid = open_chat(store_app)["session_id"]
+        assert request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"title": 3}).code == 400
+        assert request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"context": "stanup"}).code == 400
+        assert request(store_app, "POST", "/api/chat/sessions/nope/update", {"title": "x"}).code == 404
+
+
+class TestDelete:
+    def test_the_plan_its_versions_and_files_go(self, store_app):
+        from yeaboi.sessions import SessionStore
+
+        sid = open_chat(store_app, project_label="Apollo")["session_id"]
+        chat = store_app.chats.open(sid)
+        chat.session.state.update(pending_review="story_writer", stories=[])
+        turn(store_app, sid, "accept")
+        with SessionStore(store_app.db) as store:
+            assert store.list_plan_versions(sid)
+        resp = request(store_app, "POST", f"/api/chat/sessions/{sid}/delete")
+        assert json.loads(resp.body) == {"deleted": True, "session_id": sid}
+        assert request(store_app, "GET", f"/api/chat/sessions/{sid}").code == 404
+        with SessionStore(store_app.db) as store:
+            assert store.list_plan_versions(sid) == [] and store.get_session(sid) is None
+        assert store_app.removed == [sid]
+        assert json.loads(request(store_app, "GET", "/api/chat/sessions").body) == {"sessions": []}
+
+    def test_an_unknown_plan_is_a_404(self, store_app):
+        assert request(store_app, "POST", "/api/chat/sessions/nope/delete").code == 404
+
+
+class TestPlan:
+    def test_the_plan_view_carries_every_section(self, app):
+        open_chat(app)
+        turn(app)
+        view = json.loads(request(app, "GET", "/api/chat/sessions/proj-1/plan").body)
+        assert view["session_id"] == "proj-1" and view["stage"] == "intake"
+        assert [s["kind"] for s in view["sections"]] == [
+            "intake",
+            "analysis",
+            "epic",
+            "features",
+            "stories",
+            "tasks",
+            "sprints",
+        ]
+        assert view["sections"][0]["status"] == "generating"
+        assert view["intake"]["phases"][0]["label"] == "Project Context"
+        assert view["counts"] == {"features": 0, "stories": 0, "tasks": 0, "sprints": 0}
+
+    def test_an_unknown_conversation_is_a_404(self, app):
+        assert request(app, "GET", "/api/chat/sessions/nope/plan").code == 404
+
+
+class TestVersions:
+    def test_an_accept_records_a_version_the_routes_serve(self, store_app):
+        sid = open_chat(store_app)["session_id"]
+        chat = store_app.chats.open(sid)
+        chat.session.state.update(pending_review="story_writer", stories=[])
+        lines = turn(store_app, sid, "accept")
+        section = next(line for line in lines if line["type"] == "section")
+        assert section == {"type": "section", "kind": "stories", "status": "accepted", "version": 1}
+        listed = json.loads(request(store_app, "GET", f"/api/chat/sessions/{sid}/plan/versions").body)["versions"]
+        assert [(v["section"], v["version"]) for v in listed] == [("stories", 1)]
+        one = json.loads(request(store_app, "GET", f"/api/chat/sessions/{sid}/plan/versions/stories/1").body)
+        assert one["section"] == "stories" and one["version"] == 1 and one["payload"] == {"items": []}
+        plan = json.loads(request(store_app, "GET", f"/api/chat/sessions/{sid}/plan").body)
+        assert {s["kind"]: s["version"] for s in plan["sections"]}["stories"] == 1
+        only = request(store_app, "GET", f"/api/chat/sessions/{sid}/plan/versions?section=intake")
+        assert json.loads(only.body) == {"versions": []}
+
+    def test_a_missing_version_and_a_bad_section_are_refused(self, store_app):
+        sid = open_chat(store_app)["session_id"]
+        assert request(store_app, "GET", f"/api/chat/sessions/{sid}/plan/versions/stories/9").code == 404
+        assert request(store_app, "GET", f"/api/chat/sessions/{sid}/plan/versions/budget/1").code == 400
+        assert request(store_app, "GET", f"/api/chat/sessions/{sid}/plan/versions/stories/x").code == 400
+        assert request(store_app, "GET", f"/api/chat/sessions/{sid}/plan/versions?section=budget").code == 400
+
+
+class TestCommands:
+    def test_the_window_gets_the_verbs_it_runs(self, app):
+        body = json.loads(request(app, "GET", "/api/chat/commands").body)
+        names = {row["name"] for row in body["commands"]}
+        assert {"help", "export", "skip", "finish", "edit", "small", "large"} <= names
+        assert not names & {"image", "paste", "voice", "quit", "duck"}
+        assert all(row["availability"] and row["help"] for row in body["commands"])
+
+    def test_it_needs_auth(self, app):
+        assert request(app, "GET", "/api/chat/commands", authed=False).code == 401
+
+
+class TestPlanSyncEvictsTheLiveChat:
+    def test_a_sync_closes_the_named_conversation(self, app):
+        from yeaboi.app.routes_meta import _after_tool
+
+        open_chat(app)
+        _after_tool(app, "plan_get", {"session_id": "proj-1"})
+        assert "proj-1" in app.chats._chats
+        _after_tool(app, "plan_sync", {"session_id": "proj-1"})
+        assert "proj-1" not in app.chats._chats
+
+    def test_a_sync_of_the_newest_plan_closes_every_conversation(self, app):
+        from yeaboi.app.routes_meta import _after_tool
+
+        open_chat(app)
+        _after_tool(app, "plan_sync", {})
+        assert app.chats._chats == {}
