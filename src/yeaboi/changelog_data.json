@@ -2,6 +2,36 @@
   "schema_version": 2,
   "entries": [
     {
+      "version": "4.0.0",
+      "date": "2026-09-11",
+      "headline": "Yeaboi is now sessions-only, simpler",
+      "summary": "Projects are removed. All work now runs in sessions, so opening yeaboi skips straight to your modes instead of asking about projects first. Nothing you did before stops working.",
+      "highlights": [
+        {
+          "text": "Sessions are the only container for all your work",
+          "areas": [
+            "planning",
+            "general"
+          ]
+        },
+        {
+          "text": "Opening yeaboi goes straight to your modes",
+          "areas": [
+            "general"
+          ],
+          "surfaces": [
+            "tui"
+          ]
+        },
+        {
+          "text": "What you ran in projects now runs in sessions without extra steps",
+          "areas": [
+            "general"
+          ]
+        }
+      ]
+    },
+    {
       "version": "3.46.0",
       "date": "2026-09-09",
       "headline": "Credentials show whether they actually work",
