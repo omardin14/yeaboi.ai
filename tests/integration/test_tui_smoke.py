@@ -41,9 +41,6 @@ _MODE_SCREEN_MARKERS = ("changelog", "Tip:", "channel")
 # menu. Fragments of the heading/hints so a copy tweak can't break the test.
 _CATEGORY_SCREEN_MARKERS = ("working with", "choose", "switch")
 
-# Chrome of the door (Projects vs Sessions), between the split and the menu.
-_DOOR_SCREEN_MARKERS = ("work today",)
-
 _ANSI_RE = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]"  # CSI sequences (colours, cursor movement, modes)
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences (window title etc.)
@@ -127,6 +124,40 @@ def _read_until(master_fd: int, proc: subprocess.Popen, predicate, timeout: floa
 
 
 class TestTuiLiveSmoke:
+    def test_selecting_a_card_does_not_kill_the_menu(self, tmp_path):
+        """Enter on the first card leaves the menu's frame loop alive.
+
+        The menu is one long function whose locals are shared across a frame
+        loop, and a selection leaves that loop by a different branch than Esc
+        does — so a local seeded on only the Esc branch is an UnboundLocalError
+        on the ordinary path, and the app dies on the first keypress anyone
+        makes. Every other test patches ``select_mode`` wholesale and cannot
+        see it; this drives the real thing through a pty.
+        """
+        proc, master_fd = _spawn_tui_in_pty(tmp_path)
+        try:
+            booted = _read_until(
+                master_fd,
+                proc,
+                lambda b: any(m in _strip_ansi(b[-262_144:]) for m in _MODE_SCREEN_MARKERS),
+                timeout=30.0,
+            )
+            assert any(m in _strip_ansi(booted[-262_144:]) for m in _MODE_SCREEN_MARKERS), (
+                f"mode-select never rendered; exit={proc.poll()}"
+            )
+            os.write(master_fd, b"\r")
+            after = _read_until(master_fd, proc, lambda b: proc.poll() is not None, timeout=15.0)
+            text = _strip_ansi(after)
+            assert "Traceback" not in text and "UnboundLocalError" not in text, (
+                f"selecting a card raised:\n{text[-1500:]}"
+            )
+            assert proc.poll() is None, f"the TUI exited on the first card selection ({proc.poll()})"
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+            os.close(master_fd)
+
     @pytest.mark.parametrize("solo", [False, True], ids=["one-world", "solo-on"])
     def test_dry_run_boots_to_mode_select_and_quits_cleanly(self, tmp_path, solo):
         """The real TUI reaches mode-select and exits 0 on 'q'.
@@ -153,30 +184,11 @@ class TestTuiLiveSmoke:
                 assert any(m in text for m in _CATEGORY_SCREEN_MARKERS), (
                     f"category screen never rendered; exit={proc.poll()}; last output:\n{text[-2000:]}"
                 )
-                # Enter picks the preselected category (Team) → the door.
+                # Enter picks the preselected category (Team) → the mode menu.
                 os.write(master_fd, b"\r")
             else:
                 landed = b""
 
-            door = _read_until(
-                master_fd,
-                proc,
-                lambda b: any(m in _strip_ansi(b[-262_144:]) for m in _DOOR_SCREEN_MARKERS),
-                timeout=30.0,
-            )
-            text = _strip_ansi(door[-262_144:])
-            assert any(m in text for m in _DOOR_SCREEN_MARKERS), (
-                f"door screen never rendered; exit={proc.poll()}; last output:\n{text[-2000:]}"
-            )
-            if not solo:
-                # The split is not merely skipped — it is never drawn at all.
-                whole = _strip_ansi(door)
-                assert not any(m in whole for m in _CATEGORY_SCREEN_MARKERS), (
-                    "the landing split rendered even though the Solo world is off"
-                )
-
-            # Enter picks the preselected door (Sessions) → the mode menu.
-            os.write(master_fd, b"\r")
             booted = _read_until(
                 master_fd,
                 proc,
@@ -187,9 +199,14 @@ class TestTuiLiveSmoke:
             assert any(m in text for m in _MODE_SCREEN_MARKERS), (
                 f"mode-select screen never rendered; exit={proc.poll()}; last output:\n{text[-2000:]}"
             )
+            if not solo:
+                # The split is not merely skipped — it is never drawn at all.
+                assert not any(m in _strip_ansi(booted) for m in _CATEGORY_SCREEN_MARKERS), (
+                    "the landing split rendered even though the Solo world is off"
+                )
             # Alt-screen must have been entered — the strongest signal that the
             # live terminal path (not a fallback print) is actually running.
-            assert b"\x1b[?1049h" in landed + door + booted, "TUI never entered the alternate screen buffer"
+            assert b"\x1b[?1049h" in landed + booted, "TUI never entered the alternate screen buffer"
 
             os.write(master_fd, b"q")
             # Drain until the pty hits EOF or the process exits, so the pty

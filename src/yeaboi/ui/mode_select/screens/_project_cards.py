@@ -2,7 +2,7 @@
 
 # See docs: "Architecture" — this module builds the project list UI:
 # project cards with metadata, action buttons (Delete/Export), viewport
-# scrolling with peek stubs, and the "+ New Project" button.
+# scrolling with peek stubs, and the "+ New plan" button.
 """
 
 from __future__ import annotations
@@ -348,7 +348,7 @@ def _build_new_project_card(
     selected: bool,
     box_w: int = 64,
     opacity: float = 1.0,
-    label_text: str = "+ New Project",
+    label_text: str = "+ New plan",
 ) -> Panel:
     """Build the '+ New Project' button card (label_text re-brands it, e.g. '+ New Roadmap')."""
     label = Text(justify="left")
@@ -489,8 +489,8 @@ def _build_empty_state_card(
     selected: bool,
     box_w: int = 64,
     opacity: float = 1.0,
-    title: str = "No projects yet",
-    subtitle: str = "Press Enter to create your first project",
+    title: str = "No plans yet",
+    subtitle: str = "Press Enter to create your first plan",
 ) -> Panel:
     """Build the empty-state prompt when no items exist (title/subtitle re-brand it)."""
     if selected:

@@ -234,6 +234,25 @@ def set_last_category(category: str) -> None:
     logger.info("Landing category set to %s (persisted to %s)", category, config_file)
 
 
+# Which world the running session is in. Process-local and unpersisted, unlike
+# the preselection above: the world is chosen on the landing split every launch,
+# and a stale one silently reshaping next week's runs is worse than re-picking.
+_solo_mode: bool = False
+
+
+def is_solo_mode() -> bool:
+    """True while this session is in the Solo world (set by the landing split)."""
+    return _solo_mode
+
+
+def set_solo_mode(solo: bool) -> None:
+    """Record which world this session is in."""
+    global _solo_mode
+    if solo != _solo_mode:
+        logger.info("solo mode %s", "on" if solo else "off")
+    _solo_mode = solo
+
+
 LAST_DOOR_KEY = "YEABOI_LAST_DOOR"
 _VALID_DOORS = ("projects", "sessions")
 

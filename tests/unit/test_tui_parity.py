@@ -223,8 +223,8 @@ class TestPlanningIsWholeOnTheDesktop:
         desktop had a window for none of them.
         """
         paths = {route["path"] for route in manifest["routes"]}
-        assert "/projects/:id/plan" in paths, (
+        assert "/sessions/:id/plan" in paths, (
             "the desktop has no page for a finished plan — plan_get/plan_export/plan_publish/plan_sync "
             f"would have no window to be called from\n{_HOW_TO}"
         )
-        assert "/projects/:id/plan" in CAPABILITIES["planning"]["desktop"]
+        assert "/sessions/:id/plan" in CAPABILITIES["planning"]["desktop"]

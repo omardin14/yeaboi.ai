@@ -77,21 +77,6 @@ class FeatureTip:
 # ``mode_key`` (when set) MUST be a _MODE_CARDS key so the jump-into-feature key
 # lands on the right card.
 _FEATURE_TIPS: tuple[FeatureTip, ...] = (
-    # No mode_key on either: projects open from the welcome screen's `P` keycap,
-    # not a card. Split by surface because only the terminal has that keycap —
-    # the desktop opens a project from the Projects page.
-    FeatureTip(
-        "projects",
-        "\U0001f5c2️ Tip: Projects — describe what you're building, and every run inside reads what the others left (P switches)",  # noqa: E501
-        is_new=True,
-        surfaces=("tui",),
-    ),
-    FeatureTip(
-        "projects",
-        "\U0001f5c2️ Tip: open a project — its standups, retros and reports feed each other's context",
-        is_new=True,
-        surfaces=("desktop",),
-    ),
     FeatureTip(
         "team-analysis",
         "\U0001f50d Tip: Analysis reads your board for velocity, estimation & delivery signals",
@@ -195,18 +180,16 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
     ),
     # Capabilities without a dedicated home-screen card (tui_mode Exempt) — they
     # still rotate to aid discovery, just with no jump target.
-    # TUI-only: on the desktop, saved plans surface through each project's plan
-    # panel (CAPABILITIES marks sessions exempt there), so no desktop tip.
+    # TUI-only: on the desktop, saved plans surface through the session's own
+    # plan panel (CAPABILITIES marks sessions exempt there), so no desktop tip.
     FeatureTip(
         "sessions",
         "\U0001f5c2️ Tip: every plan is saved — resume any past session with --resume",
         surfaces=("tui",),
     ),
-    # The other door, on both surfaces: the desktop's Sessions page is the same room.
     FeatureTip(
         "sessions",
-        "\U0001f5c2️ Tip: Sessions are one-off runs — a standalone standup or analysis that carries nothing over",
-        is_new=True,
+        "\U0001f5c2️ Tip: every run is its own session — a standup or analysis that carries nothing over",
     ),
     # No desktop route (CAPABILITIES marks it exempt there), so no desktop tip.
     FeatureTip(
@@ -367,13 +350,8 @@ _DESKTOP_TIPS: tuple[FeatureTip, ...] = (
         surfaces=("desktop",),
     ),
     FeatureTip(
-        "desktop:projects",
-        "\U0001f4c1 Tip: Projects is the durable door — every run you start inside one shares its context",
-        surfaces=("desktop",),
-    ),
-    FeatureTip(
         "desktop:board",
-        "\U0001f4cb Tip: Board shows every ticket across projects, waves and sprints in one place",
+        "\U0001f4cb Tip: Board shows every ticket across sessions, waves and sprints in one place",
         surfaces=("desktop",),
     ),
     FeatureTip(

@@ -1312,7 +1312,6 @@ class WeeklyReview:
     week_label: str = ""  # ISO week, e.g. "2026-W35"
     week_start: str = ""  # ISO date (Monday)
     week_end: str = ""
-    project_id: str = ""
     project_name: str = ""
     session_id: str = ""
     my_name: str = ""
@@ -2520,17 +2519,10 @@ class ScrumState(_RequiredState, total=False):
     # When set, intake auto-fills Q6/Q8/Q9 from the profile and nodes
     # use this profile for team calibration. Empty string = no profile selected.
     analysis_profile_id: str
-    # The run's project link and context toggles, read by _state_scope/_wants_dep
-    # to narrow every cross-mode read. Both are seeded by the caller, never by a
-    # node. Declared as ScrumState fields so LangGraph doesn't strip them —
-    # undeclared keys never reach a node, which silently unscopes the whole run.
-    # project_id is '' when unscoped; context_deps is a JSON array of dep tokens,
-    # absent when every source is on.
-    project_id: str
-    context_deps: str
     # True for a Solo-world run: the intake plans for one developer (team
-    # questions default, no member picker). Seeded by the caller like
-    # project_id, and declared for the same reason.
+    # questions default, no member picker). Seeded by the caller and declared as
+    # a ScrumState field so LangGraph doesn't strip it — undeclared keys never
+    # reach a node.
     # See docs: "Memory & State" — StateGraph keeps only declared keys
     solo: bool
     # Existing team repositories the user accepted as prior art for this plan.

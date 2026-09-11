@@ -20,12 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 def today(app, request: Request) -> Response:
-    """``GET /api/solo/today?project_id=`` — the TodaySnapshot, text and numbers only."""
+    """``GET /api/solo/today`` — the TodaySnapshot, text and numbers only."""
     from yeaboi.solo.today import build_today_snapshot
 
-    project_id = (request.query.get("project_id") or "").strip()
-    logger.info("solo today requested (project=%s)", project_id or "-")
-    return json_response(to_jsonable(build_today_snapshot(project_id=project_id)))
+    logger.info("solo today requested")
+    return json_response(to_jsonable(build_today_snapshot()))
 
 
 # ---------------------------------------------------------------------------
@@ -45,25 +44,20 @@ def _beta_notice() -> str:
 def review(app, request: Request) -> Response:
     """``GET /api/solo/review`` — the latest review, the history, and last week's actions."""
     from yeaboi.paths import get_db_path
-    from yeaboi.projects.scope import resolve_scope
     from yeaboi.solo.engine import carried_actions
     from yeaboi.solo.store import WeeklyReviewStore
 
-    session_id = str(request.query.get("session_id", "")).strip()
-    project_id = str(request.query.get("project_id", "")).strip()
     path = get_db_path()
-    scope = resolve_scope(project_id, session_id, db_path=path)
-    session_ids = scope.session_ids if scope is not None else None
     with WeeklyReviewStore(path) as store:
-        history = store.get_all_history(limit=30, session_ids=session_ids)
-        latest = store.get_latest_report(session_ids=session_ids)
+        history = store.get_all_history(limit=30)
+        latest = store.get_latest_report()
     latest_row = history[0]["id"] if history and latest is not None else 0
-    logger.info("weekly review page: project=%s history=%d", project_id or "-", len(history))
+    logger.info("weekly review page: history=%d", len(history))
     return json_response(
         {
             "latest": {"run_id": latest_row, "review": to_jsonable(latest)} if latest is not None else None,
             "history": history,
-            "carried": [to_jsonable(a) for a in carried_actions(scope, db_path=path)],
+            "carried": [to_jsonable(a) for a in carried_actions(db_path=path)],
             "beta_notice": _beta_notice(),
         }
     )
@@ -105,10 +99,6 @@ def review_run(app, request: Request) -> Response:
     """
     payload = request.json()
     session_id = str(payload.get("session_id", "")).strip()
-    project_id = str(payload.get("project_id", "")).strip()
-    context_deps = payload.get("context_deps")
-    if context_deps is not None and not isinstance(context_deps, list):
-        raise HTTPError(400, "context_deps must be a list of tokens or null")
     week_end = str(payload.get("week_end", "")).strip()
     if week_end:
         from yeaboi.timeparse import parse_date
@@ -122,20 +112,19 @@ def review_run(app, request: Request) -> Response:
         raise HTTPError(400, "carried_statuses must be an object of {action_id: status}")
     op = app.ops.create()
     logger.info(
-        "Weekly review run start: session=%s project=%s week_end=%s marks=%d",
+        "Weekly review run start: session=%s week_end=%s marks=%d",
         session_id or "-",
-        project_id or "-",
         week_end or "today",
         len(carried_statuses or {}),
     )
     return Response(
         content_type="application/x-ndjson",
-        stream=_lines(_run(app, op, session_id, project_id, context_deps, week_end, carried_statuses)),
+        stream=_lines(_run(app, op, session_id, week_end, carried_statuses)),
         headers=(("X-Accel-Buffering", "no"),),
     )
 
 
-def _run(app, op, session_id, project_id, context_deps, week_end, carried_statuses) -> Iterator[dict]:
+def _run(app, op, session_id, week_end, carried_statuses) -> Iterator[dict]:
     from yeaboi.mcp.runtime import _ENGINE_LOCK
 
     events: queue.Queue = queue.Queue()
@@ -163,8 +152,6 @@ def _run(app, op, session_id, project_id, context_deps, week_end, carried_status
             with _ENGINE_LOCK:
                 result[0] = run_weekly_review(
                     session_id=session_id,
-                    project_id=project_id,
-                    context_deps=context_deps,
                     week_end=week_end,
                     carried_statuses=carried_statuses,
                     on_progress=on_progress,

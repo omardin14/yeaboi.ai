@@ -3,7 +3,7 @@
 # See docs: "Architecture" — this module composes project cards with
 # action buttons into rows, and builds the full project list screen
 # with viewport scrolling, delete popup overlay, team analysis section,
-# and "+ New Project" / "+ New Analysis" buttons.
+# and "+ New plan" / "+ New Analysis" buttons.
 """
 
 from __future__ import annotations
@@ -321,7 +321,7 @@ def _build_project_list_screen(
     if mode == "analysis":
         sub = Text(_PAD + "Your analyses", style=sub_color, justify="left") if show_subtitle else Text("")
     else:
-        sub = Text(_PAD + "Your projects", style=sub_color, justify="left") if show_subtitle else Text("")
+        sub = Text(_PAD + "Your plans", style=sub_color, justify="left") if show_subtitle else Text("")
 
     # Card width leaves room for two action buttons + gaps to the right.
     box_w = min(56, width - 12 - 2 * _BTN_W)
@@ -362,7 +362,7 @@ def _build_project_list_screen(
 
     if not _use_viewport and not projects:
         # No scrolling needed for empty state (only 2 items + team section)
-        # Both the empty-state card (index 0) and the "+ New Project" card
+        # Both the empty-state card (index 0) and the "+ New plan" card
         # (index 1) start the new-project flow, so both are clickable.
         body.append(
             Padding(
@@ -390,7 +390,7 @@ def _build_project_list_screen(
         _row_cursor += 3
         body_h += 3
 
-        # Team Analysis section (after "+ New Project")
+        # Team Analysis section (after "+ New plan")
         if _profiles or _analysis_labels:
             body.append(Text(""))
             body_h += 1
@@ -458,7 +458,7 @@ def _build_project_list_screen(
             _proj_boundary = 0  # no projects in analysis mode
             _team_section_start = 0
         else:
-            _proj_boundary = len(projects)  # index of "+ New Project"
+            _proj_boundary = len(projects)  # index of "+ New plan"
             _team_section_start = _proj_boundary + 1
         _profile_end = _team_section_start + len(_profiles)
 
@@ -466,7 +466,7 @@ def _build_project_list_screen(
             if mode != "analysis" and idx < _proj_boundary:
                 return projects[idx].name
             if mode != "analysis" and idx == _proj_boundary:
-                return "+ New Project"
+                return "+ New plan"
             if idx < _profile_end:
                 p = _profiles[idx - _team_section_start]
                 _tn = getattr(p, "team_name", "")
@@ -538,7 +538,7 @@ def _build_project_list_screen(
                 )
                 body.append(Padding(row, _card_pad))
             elif mode != "analysis" and i == _proj_boundary:
-                # "+ New Project" card (planning mode only)
+                # "+ New plan" card (planning mode only)
                 card = _build_new_project_card(
                     selected=(i == selected),
                     box_w=box_w,

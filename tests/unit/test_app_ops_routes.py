@@ -371,72 +371,6 @@ class TestAgentRun:
         assert request(app, "POST", "/api/agents/nonsense/run", {}).code == 404
 
 
-class TestAgentScope:
-    """`project_id` resolves to the project's repo_path; saved reports are machine-wide."""
-
-    @pytest.fixture
-    def project(self, env):
-        from yeaboi.projects.engine import create_project, set_project_defaults
-
-        pid = create_project("Apollo", db_path=env["db"])["project_id"]
-        set_project_defaults(pid, {"repo_path": "/srv/apollo"}, db_path=env["db"])
-        bare = create_project("Bare", db_path=env["db"])["project_id"]
-        return {"pid": pid, "bare": bare}
-
-    def test_unscoped_latest_carries_an_empty_scope(self, app, env):
-        assert body(request(app, "GET", "/api/agents/usage/latest"))["scoped_to"] == ""
-
-    def test_a_scoped_latest_is_null_with_the_repo_named(self, app, env, project):
-        from yeaboi.agentwatch.store import AgentWatchStore
-
-        with AgentWatchStore(env["db"]) as store:
-            store.record_report("usage", AgentUsageReport(period_start="2026-07-01", total_cost_usd=9.99))
-        payload = body(request(app, "GET", f"/api/agents/usage/latest?project_id={project['pid']}"))
-        assert payload["report"] is None and payload["as_of"] == ""
-        assert payload["scoped_to"] == "/srv/apollo"
-
-    def test_security_ignores_the_project(self, app, env, project):
-        payload = body(request(app, "GET", f"/api/agents/security/latest?project_id={project['pid']}"))
-        assert payload["scoped_to"] == ""
-
-    def test_run_passes_the_repo_to_the_engine_and_echoes_it(self, app, env, project, monkeypatch):
-        from yeaboi.agentwatch import setup
-
-        seen = {}
-
-        def _fake(mode, on_progress, **kw):
-            seen.update(kw)
-            return AgentUsageReport(period_start="2026-07-01")
-
-        monkeypatch.setattr(setup, "run", _fake)
-        lines = drain(request(app, "POST", "/api/agents/usage/run", {"project_id": project["pid"]}))
-        assert seen == {"project_path": "/srv/apollo", "options": {}}
-        assert lines[-1]["type"] == "done" and lines[-1]["scoped_to"] == "/srv/apollo"
-
-    def test_run_options_reach_the_engine(self, app, env, monkeypatch):
-        from yeaboi.agentwatch import setup
-
-        seen = {}
-
-        def _fake(mode, on_progress, **kw):
-            seen.update(kw)
-            return AgentUsageReport(period_start="2026-07-01")
-
-        monkeypatch.setattr(setup, "run", _fake)
-        drain(request(app, "POST", "/api/agents/usage/run", {"window_days": 7, "include_info": True}))
-        assert seen["options"] == {"window_days": 7, "include_info": True}
-        assert request(app, "POST", "/api/agents/usage/run", {"window_days": "lots"}).code == 400
-
-    def test_an_unknown_project_is_404(self, app, env, project):
-        assert request(app, "GET", "/api/agents/usage/latest?project_id=proj-00000000").code == 404
-        assert request(app, "POST", "/api/agents/usage/run", {"project_id": "proj-00000000"}).code == 404
-
-    def test_a_project_without_a_repo_path_is_400_naming_the_command(self, app, env, project):
-        resp = request(app, "GET", f"/api/agents/usage/latest?project_id={project['bare']}")
-        assert resp.code == 400
-        assert b"set-defaults" in resp.body
-
-
 class TestAgentExport:
     def test_copy_is_answered_as_data(self, app, env):
         from yeaboi.agentwatch.store import AgentWatchStore
@@ -494,12 +428,6 @@ class TestSecurityDismissals:
         restored = body(request(app, "POST", "/api/agents/security/dismiss", {"key": "secret:p:/a", "undo": True}))
         assert restored["restored"] == "secret:p:/a" and restored["dismissed"] == []
         assert request(app, "POST", "/api/agents/security/dismiss", {"key": "secret:p:/a", "undo": True}).code == 404
-
-    def test_an_unscoped_run_echoes_an_empty_scope(self, app, env, monkeypatch):
-        from yeaboi.agentwatch import setup
-
-        monkeypatch.setattr(setup, "run", lambda mode, on_progress, **kw: AgentUsageReport(period_start="2026-07-01"))
-        assert drain(request(app, "POST", "/api/agents/usage/run", {}))[-1]["scoped_to"] == ""
 
 
 class TestSecurityActions:

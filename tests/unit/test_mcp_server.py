@@ -26,13 +26,6 @@ EXPECTED_TOOLS = {
     "connections_fetch",
     "artifact_edit_apply",
     "niko_ask",
-    "project_create",
-    "project_list",
-    "project_get",
-    "project_link_session",
-    "project_set_defaults",
-    "project_set_status",
-    "project_draft",
     "ceremonies_list",
     "ceremonies_history",
     "artifact_edit_history",
@@ -1146,161 +1139,6 @@ class TestStandupPracticeFeedbackTool:
         assert payload["ok"] is False
 
 
-class TestStandupConfigTools:
-    def test_config_get_unset(self, seeded_session):
-        payload = call_tool("standup_config_get")
-        assert payload["ok"] is True
-        assert payload["data"]["config"] is None
-        assert "slack" in payload["data"]["valid_channels"]
-
-    def test_config_set_creates_with_defaults(self, seeded_session):
-        payload = call_tool("standup_config_set", {"time": "09:15", "delivery_channels": ["slack"]})
-        assert payload["ok"] is True
-        config = payload["data"]["config"]
-        assert config["time"] == "09:15"
-        assert config["delivery_channels"] == ["slack"]
-        assert config["weekdays"] == "1-5"  # default kept
-        assert config["enabled"] is False  # not enabled unless asked
-
-    def test_config_set_merges_over_existing(self, seeded_session):
-        call_tool("standup_config_set", {"time": "09:15", "delivery_channels": ["slack"]})
-        payload = call_tool("standup_config_set", {"enabled": True})
-        config = payload["data"]["config"]
-        assert config["enabled"] is True
-        assert config["time"] == "09:15"  # earlier value preserved
-        assert config["delivery_channels"] == ["slack"]
-
-    def test_config_set_saves_authoritative_team_scope(self, seeded_session):
-        payload = call_tool(
-            "standup_config_set",
-            {
-                "tracker_sources": ["jira", "azure_devops"],
-                "team_members": ["Alice", "Bob", "Alice"],
-            },
-        )
-        config = payload["data"]["config"]
-        assert config["tracker_sources"] == ["jira", "azure_devops"]
-        assert config["team_members"] == ["Alice", "Bob"]
-        assert config["roster_configured"] is True
-
-    def test_members_previews_selected_trackers(self, seeded_session, monkeypatch):
-        monkeypatch.setattr("yeaboi.config.get_jira_project_key", lambda: "PSOT")
-        monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "Core")
-        monkeypatch.setattr(
-            "yeaboi.standup.roster.discover_team_members",
-            lambda sources, **kwargs: ["Alice", "Bob"],
-        )
-        payload = call_tool("standup_members", {"tracker_sources": ["jira"]})
-        assert payload["ok"] is True
-        assert payload["data"]["tracker_sources"] == ["jira"]
-        assert payload["data"]["members"] == ["Alice", "Bob"]
-
-    def test_config_set_rejects_sandboxed_repo_path(self, seeded_session, tmp_path):
-        """A repo_path outside the sandbox whitelist is refused at write time."""
-        payload = call_tool("standup_config_set", {"repo_path": "/denied-sandbox-dir/repo"})
-        assert payload["ok"] is False
-        assert "YEABOI_ALLOWED_PATHS" in payload["error"]["message"]
-
-    def test_config_set_accepts_whitelisted_repo_path(self, seeded_session, tmp_path):
-        repo = tmp_path / "repo"  # tmp_path is whitelisted by the conftest fixture
-        repo.mkdir()
-        payload = call_tool("standup_config_set", {"repo_path": str(repo)})
-        assert payload["ok"] is True
-        assert payload["data"]["config"]["repo_path"] == str(repo)
-
-    def test_config_set_rejects_bad_time(self, seeded_session):
-        payload = call_tool("standup_config_set", {"time": "quarter past nine"})
-        assert payload["ok"] is False
-        assert "HH:MM" in payload["error"]["message"]
-
-    def test_config_set_rejects_bad_channel(self, seeded_session):
-        payload = call_tool("standup_config_set", {"delivery_channels": ["pager"]})
-        assert payload["ok"] is False
-        assert "unknown delivery channel" in payload["error"]["message"]
-
-    def test_config_set_automation_fields_merge(self, seeded_session):
-        call_tool("standup_config_set", {"time": "09:15"})
-        payload = call_tool("standup_config_set", {"automation_markers": "wiz", "automation_handling": "off"})
-        config = payload["data"]["config"]
-        assert config["automation_markers"] == "wiz"
-        assert config["automation_handling"] == "off"
-        assert config["time"] == "09:15"  # earlier value preserved
-        # Omitting both keeps the tuned values.
-        payload = call_tool("standup_config_set", {"enabled": True})
-        config = payload["data"]["config"]
-        assert config["automation_markers"] == "wiz"
-        assert config["automation_handling"] == "off"
-
-    def test_config_set_rejects_bad_automation_handling(self, seeded_session):
-        payload = call_tool("standup_config_set", {"automation_handling": "flag"})
-        assert payload["ok"] is False
-        assert "automation_handling" in payload["error"]["message"]
-
-    def test_config_get_defaults_practices_to_on(self, seeded_session):
-        call_tool("standup_config_set", {"time": "09:15"})
-        config = call_tool("standup_config_get", {})["data"]["config"]
-        assert config["habit_detection"] == "on"
-        assert config["habit_rules"] == ""
-
-    def test_config_set_habit_fields_merge(self, seeded_session):
-        call_tool("standup_config_set", {"time": "09:15"})
-        payload = call_tool("standup_config_set", {"habit_detection": "off", "habit_rules": "wip-sprawl"})
-        config = payload["data"]["config"]
-        assert config["habit_detection"] == "off"
-        assert config["habit_rules"] == "wip-sprawl"
-        assert config["time"] == "09:15"  # earlier value preserved
-        # Omitting both keeps the tuned values — save_config is a full upsert,
-        # so a dropped key here would silently switch practices back on.
-        config = call_tool("standup_config_set", {"enabled": True})["data"]["config"]
-        assert config["habit_detection"] == "off"
-        assert config["habit_rules"] == "wip-sprawl"
-
-    def test_config_set_canonicalises_habit_rules(self, seeded_session):
-        payload = call_tool("standup_config_set", {"habit_rules": "wip-sprawl, untracked-work"})
-        assert payload["data"]["config"]["habit_rules"] == "untracked-work,wip-sprawl"
-
-    def test_config_set_rejects_bad_habit_detection(self, seeded_session):
-        payload = call_tool("standup_config_set", {"habit_detection": "maybe"})
-        assert payload["ok"] is False
-        assert "habit_detection" in payload["error"]["message"]
-
-    def test_config_set_rejects_an_unknown_habit_rule(self, seeded_session):
-        # Silently dropping a typo would read to the user as "that rule is off".
-        payload = call_tool("standup_config_set", {"habit_rules": "untracked-work,nonsense"})
-        assert payload["ok"] is False
-        assert "nonsense" in payload["error"]["message"]
-
-    def test_config_set_round_trips_habit_ai_match(self, seeded_session):
-        call_tool("standup_config_set", {"time": "09:15"})
-        assert call_tool("standup_config_get", {})["data"]["config"]["habit_ai_match"] == "on"
-        config = call_tool("standup_config_set", {"habit_ai_match": "off"})["data"]["config"]
-        assert config["habit_ai_match"] == "off"
-        # save_config is a full upsert, so an omitted key here would silently
-        # switch the LLM matching back on and start spending again.
-        assert call_tool("standup_config_set", {"enabled": True})["data"]["config"]["habit_ai_match"] == "off"
-
-    def test_config_set_rejects_bad_habit_ai_match(self, seeded_session):
-        payload = call_tool("standup_config_set", {"habit_ai_match": "sometimes"})
-        assert payload["ok"] is False
-        assert "habit_ai_match" in payload["error"]["message"]
-
-    def test_config_set_context_deps_grammar(self, seeded_session):
-        # '' = unchanged; csv narrows; 'none' = incognito; 'inherit' resets.
-        call_tool("standup_config_set", {"time": "09:15"})
-        assert call_tool("standup_config_get", {})["data"]["config"]["context_deps"] is None
-        config = call_tool("standup_config_set", {"context_deps": "retro,plan"})["data"]["config"]
-        assert config["context_deps"] == ["retro", "plan"]
-        # A merge that omits the field keeps the saved toggles.
-        assert call_tool("standup_config_set", {"enabled": True})["data"]["config"]["context_deps"] == ["retro", "plan"]
-        assert call_tool("standup_config_set", {"context_deps": "none"})["data"]["config"]["context_deps"] == []
-        assert call_tool("standup_config_set", {"context_deps": "inherit"})["data"]["config"]["context_deps"] is None
-
-    def test_config_set_rejects_a_context_deps_typo(self, seeded_session):
-        payload = call_tool("standup_config_set", {"context_deps": "retro,bogus"})
-        assert payload["ok"] is False
-        assert "unknown context source" in payload["error"]["message"]
-
-
 class TestServerEntry:
     def test_import_without_mcp_is_safe(self):
         # The package must import fine even where the extra is missing —
@@ -1458,6 +1296,145 @@ class TestSlackTools:
         }
 
 
+class TestStandupConfigTools:
+    def test_config_get_unset(self, seeded_session):
+        payload = call_tool("standup_config_get")
+        assert payload["ok"] is True
+        assert payload["data"]["config"] is None
+        assert "slack" in payload["data"]["valid_channels"]
+
+    def test_config_set_creates_with_defaults(self, seeded_session):
+        payload = call_tool("standup_config_set", {"time": "09:15", "delivery_channels": ["slack"]})
+        assert payload["ok"] is True
+        config = payload["data"]["config"]
+        assert config["time"] == "09:15"
+        assert config["delivery_channels"] == ["slack"]
+        assert config["weekdays"] == "1-5"  # default kept
+        assert config["enabled"] is False  # not enabled unless asked
+
+    def test_config_set_merges_over_existing(self, seeded_session):
+        call_tool("standup_config_set", {"time": "09:15", "delivery_channels": ["slack"]})
+        payload = call_tool("standup_config_set", {"enabled": True})
+        config = payload["data"]["config"]
+        assert config["enabled"] is True
+        assert config["time"] == "09:15"  # earlier value preserved
+        assert config["delivery_channels"] == ["slack"]
+
+    def test_config_set_saves_authoritative_team_scope(self, seeded_session):
+        payload = call_tool(
+            "standup_config_set",
+            {
+                "tracker_sources": ["jira", "azure_devops"],
+                "team_members": ["Alice", "Bob", "Alice"],
+            },
+        )
+        config = payload["data"]["config"]
+        assert config["tracker_sources"] == ["jira", "azure_devops"]
+        assert config["team_members"] == ["Alice", "Bob"]
+        assert config["roster_configured"] is True
+
+    def test_members_previews_selected_trackers(self, seeded_session, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_jira_project_key", lambda: "PSOT")
+        monkeypatch.setattr("yeaboi.config.get_azure_devops_project", lambda: "Core")
+        monkeypatch.setattr(
+            "yeaboi.standup.roster.discover_team_members",
+            lambda sources, **kwargs: ["Alice", "Bob"],
+        )
+        payload = call_tool("standup_members", {"tracker_sources": ["jira"]})
+        assert payload["ok"] is True
+        assert payload["data"]["tracker_sources"] == ["jira"]
+        assert payload["data"]["members"] == ["Alice", "Bob"]
+
+    def test_config_set_rejects_sandboxed_repo_path(self, seeded_session, tmp_path):
+        """A repo_path outside the sandbox whitelist is refused at write time."""
+        payload = call_tool("standup_config_set", {"repo_path": "/denied-sandbox-dir/repo"})
+        assert payload["ok"] is False
+        assert "YEABOI_ALLOWED_PATHS" in payload["error"]["message"]
+
+    def test_config_set_accepts_whitelisted_repo_path(self, seeded_session, tmp_path):
+        repo = tmp_path / "repo"  # tmp_path is whitelisted by the conftest fixture
+        repo.mkdir()
+        payload = call_tool("standup_config_set", {"repo_path": str(repo)})
+        assert payload["ok"] is True
+        assert payload["data"]["config"]["repo_path"] == str(repo)
+
+    def test_config_set_rejects_bad_time(self, seeded_session):
+        payload = call_tool("standup_config_set", {"time": "quarter past nine"})
+        assert payload["ok"] is False
+        assert "HH:MM" in payload["error"]["message"]
+
+    def test_config_set_rejects_bad_channel(self, seeded_session):
+        payload = call_tool("standup_config_set", {"delivery_channels": ["pager"]})
+        assert payload["ok"] is False
+        assert "unknown delivery channel" in payload["error"]["message"]
+
+    def test_config_set_automation_fields_merge(self, seeded_session):
+        call_tool("standup_config_set", {"time": "09:15"})
+        payload = call_tool("standup_config_set", {"automation_markers": "wiz", "automation_handling": "off"})
+        config = payload["data"]["config"]
+        assert config["automation_markers"] == "wiz"
+        assert config["automation_handling"] == "off"
+        assert config["time"] == "09:15"  # earlier value preserved
+        # Omitting both keeps the tuned values.
+        payload = call_tool("standup_config_set", {"enabled": True})
+        config = payload["data"]["config"]
+        assert config["automation_markers"] == "wiz"
+        assert config["automation_handling"] == "off"
+
+    def test_config_set_rejects_bad_automation_handling(self, seeded_session):
+        payload = call_tool("standup_config_set", {"automation_handling": "flag"})
+        assert payload["ok"] is False
+        assert "automation_handling" in payload["error"]["message"]
+
+    def test_config_get_defaults_practices_to_on(self, seeded_session):
+        call_tool("standup_config_set", {"time": "09:15"})
+        config = call_tool("standup_config_get", {})["data"]["config"]
+        assert config["habit_detection"] == "on"
+        assert config["habit_rules"] == ""
+
+    def test_config_set_habit_fields_merge(self, seeded_session):
+        call_tool("standup_config_set", {"time": "09:15"})
+        payload = call_tool("standup_config_set", {"habit_detection": "off", "habit_rules": "wip-sprawl"})
+        config = payload["data"]["config"]
+        assert config["habit_detection"] == "off"
+        assert config["habit_rules"] == "wip-sprawl"
+        assert config["time"] == "09:15"  # earlier value preserved
+        # Omitting both keeps the tuned values — save_config is a full upsert,
+        # so a dropped key here would silently switch practices back on.
+        config = call_tool("standup_config_set", {"enabled": True})["data"]["config"]
+        assert config["habit_detection"] == "off"
+        assert config["habit_rules"] == "wip-sprawl"
+
+    def test_config_set_canonicalises_habit_rules(self, seeded_session):
+        payload = call_tool("standup_config_set", {"habit_rules": "wip-sprawl, untracked-work"})
+        assert payload["data"]["config"]["habit_rules"] == "untracked-work,wip-sprawl"
+
+    def test_config_set_rejects_bad_habit_detection(self, seeded_session):
+        payload = call_tool("standup_config_set", {"habit_detection": "maybe"})
+        assert payload["ok"] is False
+        assert "habit_detection" in payload["error"]["message"]
+
+    def test_config_set_rejects_an_unknown_habit_rule(self, seeded_session):
+        # Silently dropping a typo would read to the user as "that rule is off".
+        payload = call_tool("standup_config_set", {"habit_rules": "untracked-work,nonsense"})
+        assert payload["ok"] is False
+        assert "nonsense" in payload["error"]["message"]
+
+    def test_config_set_round_trips_habit_ai_match(self, seeded_session):
+        call_tool("standup_config_set", {"time": "09:15"})
+        assert call_tool("standup_config_get", {})["data"]["config"]["habit_ai_match"] == "on"
+        config = call_tool("standup_config_set", {"habit_ai_match": "off"})["data"]["config"]
+        assert config["habit_ai_match"] == "off"
+        # save_config is a full upsert, so an omitted key here would silently
+        # switch the LLM matching back on and start spending again.
+        assert call_tool("standup_config_set", {"enabled": True})["data"]["config"]["habit_ai_match"] == "off"
+
+    def test_config_set_rejects_bad_habit_ai_match(self, seeded_session):
+        payload = call_tool("standup_config_set", {"habit_ai_match": "sometimes"})
+        assert payload["ok"] is False
+        assert "habit_ai_match" in payload["error"]["message"]
+
+
 class TestWeeklyReviewTools:
     """The Solo world's review tools: the run forwards every wire param, the
     reads never need an LLM, and export names the Markdown path."""
@@ -1489,8 +1466,6 @@ class TestWeeklyReviewTools:
             "weekly_review_run",
             {
                 "session_id": seeded_session,
-                "project_id": "proj-12345678",
-                "context_deps": ["standup"],
                 "week_end": "2026-08-28",
                 "carried_statuses": {"a1b2c3d4e5f6": "done"},
             },
@@ -1499,8 +1474,6 @@ class TestWeeklyReviewTools:
         assert payload["data"]["week_label"] == "2026-W35"
         assert seen == {
             "session_id": seeded_session,
-            "project_id": "proj-12345678",
-            "context_deps": ["standup"],
             "week_end": "2026-08-28",
             "carried_statuses": {"a1b2c3d4e5f6": "done"},
         }
@@ -1509,8 +1482,8 @@ class TestWeeklyReviewTools:
         seen: dict = {}
         monkeypatch.setattr("yeaboi.solo.engine.run_weekly_review", lambda **kw: seen.update(kw) or self._review())
         assert call_tool("weekly_review_run", {})["ok"] is True
-        assert seen["session_id"] == "" and seen["project_id"] == ""
-        assert seen["context_deps"] is None and seen["carried_statuses"] is None and seen["week_end"] == ""
+        assert seen["session_id"] == ""
+        assert seen["carried_statuses"] is None and seen["week_end"] == ""
 
     def test_history_lists_runs_the_latest_and_the_carried_actions(self, seeded_session):
         from yeaboi.paths import get_db_path
@@ -1530,7 +1503,7 @@ class TestWeeklyReviewTools:
 
     def test_history_is_empty_before_any_review(self, tmp_db):
         data = call_tool("weekly_review_history", {})["data"]
-        assert data == {"project_id": "", "history": [], "latest": None, "carried": []}
+        assert data == {"history": [], "latest": None, "carried": []}
 
     def test_export_writes_markdown_for_the_latest_or_a_run(self, seeded_session, tmp_path, monkeypatch):
         from yeaboi.paths import get_db_path

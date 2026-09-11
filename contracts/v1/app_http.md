@@ -278,7 +278,7 @@ The two run-and-read modes. Their read-only pieces are MCP tools already
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/standup/dashboard` | query `session_id?` (blank = the most recent session), `run_id?` (open one past run instead of the latest) → the whole dashboard in one read |
-| POST | `/api/standup/run` | body `{session_id, deliver?: false, solo?: false, project_id?}` → a chunked NDJSON run. `deliver: false` builds the report without posting it anywhere. `project_id` (a `proj-<8hex>` projects-table row id) scopes the run to that project; blank inherits the session's own link, an unknown id is a 400. `solo: true` is a one-person run (the Solo world): self-only roster, no tracker roster discovery, first-person summary; the stored report carries `solo` so the dashboard drops its team card |
+| POST | `/api/standup/run` | body `{session_id, deliver?: false, solo?: false}` → a chunked NDJSON run. `deliver: false` builds the report without posting it anywhere. `solo: true` is a one-person run (the Solo world): self-only roster, no tracker roster discovery, first-person summary; the stored report carries `solo` so the dashboard drops its team card |
 | POST | `/api/standup/runs/{run_id}/delete` | drop one run from the saved-runs hub; 404 when unknown |
 | GET | `/api/standup/schedule` | query `session_id` → the saved schedule plus the installed reminder offset |
 | POST | `/api/standup/schedule` | body `{session_id, enabled, time, weekdays, lead_minutes, delivery_channels, remind_after, solo?: false}` → `{message, schedule}`; saves the config **and** installs or removes the OS jobs. `solo` is not saved — it rides on the installed job's command line, so the scheduled run is a one-person standup |
@@ -286,7 +286,7 @@ The two run-and-read modes. Their read-only pieces are MCP tools already
 | POST | `/api/analysis/steps` | a partial selection → `{steps, grid, run}`: which steps still apply, the component rows they may offer, and the payload the answers would run. `solo: true` in the answers marks a Solo-world wizard: the `members` step never applies and stale member picks coerce out of `run` |
 | GET | `/api/analysis/profiles` | the saved team profiles |
 | GET | `/api/analysis/result/{team_id}` | one stored profile plus the cards it earned; 404 when unknown. `?solo=1` drops the Team Members card from `cards` |
-| POST | `/api/analysis/run` | the setup wizard's payload (plus an optional `project_id`) → a chunked NDJSON run |
+| POST | `/api/analysis/run` | the setup wizard's payload → a chunked NDJSON run |
 
 The **standup dashboard** is
 `{session_id, session_name, my_name, run_id, history, cards: [{key, title, member}], report, config, schedule, review, nudge, gap_issues, active: [name]}`.
@@ -321,12 +321,7 @@ feature unselectable rather than merely disappointing. Its result is team-wide
 counts and a per-30-day rate, never anything attributable to a person.
 The run body is the wizard's answers:
 `{source?, project_key?, team_name?, sprint_count?, features?, components?,
-members_map?, analysis_scope?, depth?, window_days?, model?, project_id?}`.
-`project_id` (a `proj-<8hex>` projects-table row id) is the edge the terminal
-draws after an analysis: on `done` the run has created an analysis session
-linked to that project and recorded the profile it produced as the project's
-`default_analysis_profile_id`, so the next scoped plan seeds it. Blank creates
-no session, exactly as before; an unknown id is a 400.
+members_map?, analysis_scope?, depth?, window_days?, model?}`.
 
 A **run** streams: `op` first, then `progress` (and, for standup, `run_id`
 once its history row exists), terminated by `done`, `cancelled` or `error`.
@@ -336,7 +331,7 @@ once its history row exists), terminated by `done`, `cancelled` or `error`.
 | `op` | `{type, op_id}` |
 | `progress` | `{type, phase}` — one pipeline phase, as user-facing text |
 | `run_id` | `{type, run_id}` — standup only; the history row this run writes |
-| `done` | `{type, report}` (standup) or `{type, result, session_id?}` (analysis — `session_id` only on a run with a `project_id`: the session it created and linked) |
+| `done` | `{type, report}` (standup) or `{type, result}` (analysis) |
 | `cancelled` | `{type}` — analysis only; nothing was persisted |
 | `error` | `{type, message}` — a classified, one-line failure |
 
@@ -470,17 +465,7 @@ that the window never runs past today, are one answer on every surface.
 
 A **run** streams `op`, `progress`, then `done: {report, delivered}`; cancelling
 the op raises at the next stage boundary, before anything is persisted, and the
-stream ends `cancelled`. The run body also takes an optional `project_id`
-(a `proj-<8hex>` projects-table row id): a scoped run frames itself with
-that project's latest sprint plan; blank inherits the session's own link. It
-also takes an optional `context_deps` (a list drawn from retro, standup, plan,
-performance, analysis): the run's context-source toggles — omitted/null
-inherits the project default, `[]` is an incognito run (no cross-mode
-context). The standup run takes the same optional `project_id` (blank inherits
-the session's own link, so an unlinked session runs team-wide exactly as before
-projects existed; an unknown id is a 400) but no `context_deps` — its toggles
-live in the session's saved standup config (`standup_config_set`'s
-`context_deps`).
+stream ends `cancelled`.
 
 A delivery report carries `production`: one row per ops roll-up over the
 report's **own** period (`kind`, `source`, `family`, `count`, `resolved`,
@@ -624,8 +609,8 @@ already running) is not a failure.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/agents/modes` | the modes and how fresh each saved report is; `fresh_minutes` is the re-run threshold |
-| GET | `/api/agents/{kind}/latest` | the last saved report, for an instant open, with `fresh: bool`; `?project_id=` scopes it (see below) |
-| POST | `/api/agents/{kind}/run` | one fresh pass, streamed as NDJSON; body `{project_id?, window_days?, include_info?}` |
+| GET | `/api/agents/{kind}/latest` | the last saved report, for an instant open, with `fresh: bool` |
+| POST | `/api/agents/{kind}/run` | one fresh pass, streamed as NDJSON; body `{window_days?, include_info?}` |
 | POST | `/api/agents/{kind}/export` | write the report, or hand back its Markdown |
 | POST | `/api/agents/security/dismiss` | body `{key, reason, expires?, undo?, include_info?}` — set one finding aside with the reason (400 without one), or restore it; answers with the re-derived `report` |
 | GET | `/api/agents/security/dismissed` | `{dismissed: [{key, reason, by, at, expires}]}` |
@@ -674,17 +659,6 @@ a plain phase, so a mode that grows a bare-string step still reaches the
 surface. No `op` line — the agentwatch engines take no cancel event, and backing
 out is free: the pass finishes and stores its report either way.
 
-**Scoping to a project.** `usage` and `advisor` take a `project_id`
-(the `proj-<8hex>` id of *Projects and sessions* below) and resolve it to the
-project's `repo_path` setting: only sessions whose project directory is that
-absolute path or sits under it (a worktree counts — never a basename match)
-are read. `security` ignores it and stays machine-wide. Saved reports carry
-no project, so a scoped `latest` answers `{report: null, as_of: "",
-scoped_to: <repo_path>}` and the surface runs fresh; `run` echoes the same
-`scoped_to` on its `done` line. Both answer `scoped_to: ""` when unscoped. An
-unknown project is a 404; a project with no `repo_path` yet is a 400 naming
-`yeaboi project set-defaults <id> --repo <path>` (the same key
-`/api/projects/{project_id}/defaults` takes).
 
 Provenance has no routes here. `provenance_audit` and `provenance_trace` are
 request/response reads with no progress, no cancel and no page-shaped gap, so
@@ -986,10 +960,10 @@ disagree about today.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/solo/today` | `?project_id=` narrows the standup and plan reads to that project ('' = newest of everything). Returns the `TodaySnapshot` fields verbatim, text and numbers only: `project_id`, `project_name`, `standup_date`, `standup_summary`, `standup_blockers`, `sprint_name`, `sprint_day`, `sprint_total_days`, `confidence_pct`, `confidence_label`, `confidence_trend`, `next_story_id`, `next_story_title`, `next_sprint_name`, `plan_session_id`, `plan_scoped`, `spend_usd`, `spend_sessions`, `spend_known`, `warnings`. An empty string or zero is the honest empty state (no standup yet, no plan yet); `warnings` lists the sources that could not be read. The spend is the last agentwatch ingest's, never a fresh scan |
-| GET | `/api/solo/review` | `?session_id=&project_id=` scope the reads (blank = everything). `{latest: {run_id, review} \| null, history: [{id, session_id, project_id, run_at, week_label, week_start, week_end, project_name, action_count}], carried: [ReviewAction], beta_notice}` — `carried` is last review's still-open actions with the `id`s a run's `carried_statuses` takes; `beta_notice` is the gate copy |
+| GET | `/api/solo/today` | the `TodaySnapshot` fields verbatim, text and numbers only: `project_name`, `standup_date`, `standup_summary`, `standup_blockers`, `sprint_name`, `sprint_day`, `sprint_total_days`, `confidence_pct`, `confidence_label`, `confidence_trend`, `next_story_id`, `next_story_title`, `next_sprint_name`, `plan_session_id`, `spend_usd`, `spend_sessions`, `spend_known`, `warnings`. An empty string or zero is the honest empty state (no standup yet, no plan yet); `warnings` lists the sources that could not be read. The spend is the last agentwatch ingest's, never a fresh scan |
+| GET | `/api/solo/review` | `{latest: {run_id, review} \| null, history: [{id, session_id, run_at, week_label, week_start, week_end, project_name, action_count}], carried: [ReviewAction], beta_notice}` — `carried` is last review's still-open actions with the `id`s a run's `carried_statuses` takes; `beta_notice` is the gate copy |
 | GET | `/api/solo/review/runs/{run_id}` | one saved review: `{run_id, review}`; 404 when unknown |
-| POST | `/api/solo/review/run` | body `{session_id?, project_id?, context_deps?: [tokens] \| null, week_end?: "YYYY-MM-DD", carried_statuses?: {action_id: "done" \| "dropped" \| "pending" \| "carried"}}` → a chunked NDJSON run in the standup's line shapes: `{type: "op", op_id}` first, then `{type: "progress", phase}` per engine phase (`scope, standups, plan, delivery, carried, model, save`), then `{type: "done", run_id, review}` or `{type: "error", message}`. One `progress` line per phase, in that order; 400 when `week_end` is not an ISO date. Not cancellable — the engine has no cancel seam. The review is stored and exported to Markdown |
+| POST | `/api/solo/review/run` | body `{session_id?, week_end?: "YYYY-MM-DD", carried_statuses?: {action_id: "done" \| "dropped" \| "pending" \| "carried"}}` → a chunked NDJSON run in the standup's line shapes: `{type: "op", op_id}` first, then `{type: "progress", phase}` per engine phase (`standups, plan, delivery, carried, model, save`), then `{type: "done", run_id, review}` or `{type: "error", message}`. One `progress` line per phase, in that order; 400 when `week_end` is not an ISO date. Not cancellable — the engine has no cancel seam. The review is stored and exported to Markdown |
 | POST | `/api/solo/review/runs/{run_id}/delete` | drop one review from the saved-runs hub: `{deleted, run_id}`; 404 when unknown |
 
 **Weekly Review** is the Solo world's own capability — a self-review of the
@@ -998,31 +972,17 @@ over the user's own standups, delivered tickets and sprint plan. The desktop
 renders it at `/solo/review` (hub) and `/solo/review/report?id=` (one saved
 run). Export stays on the MCP tool (`/api/tool/weekly_review_export`).
 
-## Projects and sessions
+## Sessions and references
 
-A project is the durable way to work: every run inside it shares context
-through `ProjectScope`. A session is the other way — one run of one mode,
-unscoped. These routes are the projects engine's verbs on the wire, plus the
-one read no engine owns: the union of every mode's saved runs.
-
-`{project_id}` here is the engine's `proj-<8hex>` id from the `projects` table
-in sessions.db. It is **unrelated** to the `{project_id}` segment of
-`/api/chat/sessions/{project_id}`, which is the planning chat's own handle.
+Two reads no engine owns: the union of every mode's saved runs, and one
+connected source's rows for the composer's `@` picker.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/projects` | `?include_archived=` (`1`/`true`/`yes`/`on`; default off). `{projects: [row]}`, most recently active first. A row is `{project_id, name, description, settings, created_at, last_active, archived, status, session_count}`; `status` is `active` (in progress) or `done` (the owner marked it complete) — archive is separate and hides a row whatever its status |
-| POST | `/api/projects` | body `{name, description?}` → the new row (no `session_count`). A blank name is a 400 |
-| POST | `/api/projects/draft` | body `{description}` → `{name, description, source, note}` — the name and pitch for a project that does not exist yet, the AI rewrite behind the New project dialog. `source` is `ai` when the LLM rewrote the draft, `original` when it could not (unconfigured, failed, or answered nothing usable) and `description` is the draft as sent with a name made from its first words; `note` says which in one sentence. A blank description is a 400. Never a 502: the fallback is the reader's own words |
-| GET | `/api/projects/suggestions` | `?refresh=1` forces a recompute. `{refreshing, suggestions: [{id, text, source, source_label, subject, facts, url, repo_path, wording}], sources, warnings, computed_at, stale, connected}` — up to three recommended projects computed from what this machine is connected to: the trackers (Jira, Azure DevOps, Linear), the GitHub repos of the configured owners, the local repos the coding agents worked in lately (the last agentwatch ingest, never a fresh scan) and the Confluence and Notion pages edited lately. `text` is the description in the composer's voice; `wording` is `ai` when the model wrote it and `facts` when it is the facts alone (no provider, or the call failed). `facts` is one line of numbers for the row (`14 open issues, milestone 4.2 due 12 Sep`), `sources` names what was read (labels: `GitHub`, `Jira`, `Your agents`…) — a source that failed is in `warnings` (`GitHub could not be read`) and not in `sources`; the empty stale first sheet names the sources being read instead, so the client can say so. Stale-while-revalidate like `/api/news`: a request answers at once from the cache (`stale: true` while a background refresh runs, `refreshing` says whether one is) and the first call on a fresh install is an empty stale sheet. `connected` is false only when nothing at all can be read — the desktop shows its connect line then. Never a 502 |
-| GET | `/api/projects/references` | `?source=&q=&limit=` (source ∈ `jira` \| `github` \| `azdevops` \| `linear` \| `confluence` \| `notion`; limit 1–25, default 8) → `{source, source_label, items: [{id, subject, label, detail, url}], warning}` — the live picker behind `@` in the desktop's project composer: one row per concrete thing (a Jira issue or the Jira project itself, a GitHub repo, a Linear issue, an Azure DevOps work item, a Confluence or Notion page). An empty `q` lists the open or recent items; the trackers are listed once and filtered here (every token of `q` must appear in subject, label or detail), the doc platforms take `q` to their own search. `subject` is the identifier the desktop stores on the project in its own backend (`PROJ-123`, `owner/repo`, a page id) — this server keeps no reference of its own; `label` is the words a chip shows; `url` may be blank when the base URL is unconfigured. A source that cannot be read answers 200 with `warning` (`Jira could not be read`) and no items, never a 502; a tracker whose credentials are dead may answer an empty list instead (its reader swallows the failure). Each read is cached for a minute per source (per query for the doc platforms), so typing costs one fetch. An unknown source, or a `limit` that is not a number, is a 400 |
-| POST | `/api/projects/{project_id}/status` | body `{status}` (`active` \| `done`) → the row. Anything else is a 400; an unknown project a 404 |
-| GET | `/api/projects/{project_id}` | the row plus `session_ids` (the linked planning/analysis sessions, newest first); 404 when unknown |
-| GET | `/api/projects/{project_id}/sessions` | `?mode=&limit=` → `{sessions: [row]}` — the project's runs across every mode (see the row shape below); 404 when the project is unknown |
-| POST | `/api/projects/{project_id}/defaults` | body `{defaults: {…}}` → `{project_id, settings}` (the merged settings). Accepted keys: `default_analysis_profile_id`, `default_context_deps`, `repo_path` (an absolute path — the repo the Agents world scopes to). An unknown key, an empty object, or a `repo_path` that is not an absolute path (or is the filesystem root) is a 400; an unknown project a 404 |
-| GET | `/api/sessions/recent` | `?limit=&mode=&project_id=` → `{sessions: [row]}` — the newest runs across every mode, machine-wide or one project's |
+| GET | `/api/sessions/recent` | `?limit=&mode=` → `{sessions: [row]}` — the newest runs across every mode, machine-wide |
+| GET | `/api/references` | `?source=&q=&limit=` (source ∈ `jira` \| `github` \| `azdevops` \| `linear` \| `confluence` \| `notion`; limit 1–25, default 8) → `{source, source_label, items: [{id, subject, label, detail, url}], warning}` — the live picker behind `@` in the desktop's composer: one row per concrete thing (a Jira issue or the Jira project itself, a GitHub repo, a Linear issue, an Azure DevOps work item, a Confluence or Notion page). An empty `q` lists the open or recent items; the trackers are listed once and filtered here (every token of `q` must appear in subject, label or detail), the doc platforms take `q` to their own search. `subject` is the identifier the desktop stores in its own backend (`PROJ-123`, `owner/repo`, a page id) — this server keeps no reference of its own; `label` is the words a chip shows; `url` may be blank when the base URL is unconfigured. A source that cannot be read answers 200 with `warning` (`Jira could not be read`) and no items, never a 502; a tracker whose credentials are dead may answer an empty list instead (its reader swallows the failure). Each read is cached for a minute per source (per query for the doc platforms), so typing costs one fetch. An unknown source, or a `limit` that is not a number, is a 400 |
 
-A **sessions row** is `{session_id, run_id, mode, title, created_at, last_modified, project_id}`:
+A **sessions row** is `{session_id, run_id, mode, title, created_at, last_modified}`:
 
 - `mode` is one of `planning`, `analysis`, `standup`, `retro`, `reporting`,
   `ship`, `review`. Planning and analysis rows are `sessions_meta` sessions and
@@ -1032,9 +992,6 @@ A **sessions row** is `{session_id, run_id, mode, title, created_at, last_modifi
 - `title` is the same label the terminal lists — the planning session's
   display name, `Standup — <date>`, `Retro — <date>`, `Report — <period>`,
   `Ship — <item> · <status>`, `Week <label>`.
-- `project_id` is the project the run's planning session is linked to, `""`
-  when unscoped.
 - Newest `last_modified` first; `limit` defaults to 20 and `0` means every
   row. A mode with no saved runs is simply absent — nothing is invented. An
-  unknown `mode` is a 400; an unknown `project_id` on `/api/sessions/recent`
-  is an empty list.
+  unknown `mode` is a 400.

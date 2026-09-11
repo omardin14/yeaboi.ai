@@ -374,36 +374,27 @@ class TestSeedFrame:
     the tail of the splash — the flicker at the splash → landing-split boundary.
     """
 
-    def _seed(self, category="team", door="sessions", width=110, height=40, split=True):
+    def _seed(self, category="team", width=110, height=40, split=True):
         from yeaboi.ui.mode_select import _landing_first_frame
 
-        return _landing_first_frame(category, door, width=width, height=height, split=split)
+        return _landing_first_frame(category, width=width, height=height, split=split)
 
     def _flat(self, renderable, width=110, height=40):
         console = Console(width=width, height=height, force_terminal=False)
         rows = console.render_lines(renderable, console.options.update(height=height), pad=True)
         return "\n".join("".join(seg.text for seg in row) for row in rows)
 
-    def test_it_is_the_door_when_there_is_no_split(self):
+    def test_it_is_the_mode_menu_when_there_is_no_split(self):
         # With the Solo world off there is one world, so the loop opens on the
-        # door and that is what the Live has to be seeded with.
+        # menu and that is what the Live has to be seeded with.
         text = self._flat(self._seed(split=False))
-        assert "work today" in text and "working with" not in text
-        assert "esc quit" in text
+        assert "working with" not in text  # not the split
 
     def test_it_is_the_landing_split(self):
         console = Console(width=110, height=40, force_terminal=False)
         rows = console.render_lines(self._seed(), console.options.update(height=40), pad=True)
         text = "\n".join("".join(seg.text for seg in row) for row in rows)
         assert "switch" in text and "choose" in text  # the split's own hint row
-
-    def test_it_is_not_the_door(self):
-        # The door comes AFTER the split; seeding it would flash its heading
-        # over the tail of the splash for a frame.
-        console = Console(width=110, height=40, force_terminal=False)
-        rows = console.render_lines(self._seed(), console.options.update(height=40), pad=True)
-        text = "\n".join("".join(seg.text for seg in row) for row in rows)
-        assert "work today" not in text and "working with" in text
 
     def test_it_is_not_the_mode_menu(self):
         # The row that flashed. If the seed ever goes back to _build_mode_screen
@@ -604,7 +595,7 @@ class TestInformer:
         from yeaboi.ui.mode_select import _landing_first_frame
 
         console = Console(width=110, height=53, force_terminal=False)
-        seed = _landing_first_frame("team", "sessions", width=110, height=53)
+        seed = _landing_first_frame("team", width=110, height=53)
         rows = [
             "".join(seg.text for seg in row)
             for row in console.render_lines(seed, console.options.update(height=53), pad=True)

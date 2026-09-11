@@ -43,7 +43,6 @@ _CONFIG_DEFAULTS = {
     "habit_detection": "on",
     "habit_rules": "",
     "habit_ai_match": "on",
-    "context_deps": None,
 }
 
 
@@ -73,8 +72,6 @@ def _standup_run(
     azdo_repositories: list | None,
     documentation_sources: list | None,
     review_transcripts: bool,
-    project_id: str,
-    context_deps: list | None,
     solo: bool,
 ):
     from yeaboi.mcp.tools_sessions import resolve_session_id
@@ -83,8 +80,6 @@ def _standup_run(
     resolved = resolve_session_id(session_id)
     return run_standup(
         resolved,
-        project_id=project_id,
-        context_deps=context_deps,
         solo=solo,
         review_transcripts=review_transcripts,
         deliver=deliver,
@@ -310,11 +305,9 @@ def _standup_config_set(
     habit_detection: str | None,
     habit_rules: str | None,
     habit_ai_match: str | None,
-    context_deps: str,
 ) -> dict:
     from yeaboi.mcp.tools_sessions import resolve_session_id
     from yeaboi.paths import get_db_path
-    from yeaboi.projects.scope import parse_context_spec
     from yeaboi.standup.automation import VALID_AUTOMATION_HANDLING
     from yeaboi.standup.code_scope import validate_code_sources
     from yeaboi.standup.documentation_scope import validate_documentation_sources
@@ -429,9 +422,6 @@ def _standup_config_set(
             "habit_detection": (current.get("habit_detection", "on") if habit_detection is None else habit_detection),
             "habit_rules": (current.get("habit_rules", "") if normalized_rules is None else normalized_rules),
             "habit_ai_match": (current.get("habit_ai_match", "on") if habit_ai_match is None else habit_ai_match),
-            # "" = unchanged; "inherit"/"all"/"none"/csv per parse_context_spec
-            # (raises on a typo'd token rather than silently switching it off).
-            "context_deps": (current.get("context_deps") if not context_deps else parse_context_spec(context_deps)),
         }
         store.save_config(resolved, **merged)
     logger.info("Standup config updated via MCP: session=%s enabled=%s", resolved, merged["enabled"])
@@ -458,8 +448,6 @@ def register(app) -> None:
         azdo_repositories: list[str] | None = None,
         documentation_sources: list[str] | None = None,
         review_transcripts: bool = True,
-        project_id: str = "",
-        context_deps: list[str] | None = None,
         solo: bool = False,
     ) -> dict:
         """Run a Daily Standup: collect team activity (Jira/AzDO/GitHub/git/docs), score sprint
@@ -477,11 +465,6 @@ def register(app) -> None:
         window. review_transcripts (default true) first reviews any unreviewed standup meeting
         transcripts covering earlier dates, so yesterday's corrections inform today's report; it
         drafts issues locally and never writes to GitHub. Blank session_id = most recent session.
-        project_id scopes the run to a project (project_list shows them): sprint and roster
-        context come from the project's latest plan; blank inherits the session's own link.
-        context_deps toggles the run's cross-mode context sources (retro, standup, plan,
-        performance, analysis): null inherits the saved config then the project default,
-        an empty list is an incognito run (no cross-mode context; the session still persists).
         solo=true runs it for one person (the Solo world): self-only roster, no tracker roster
         discovery, first-person summary; team_members is ignored."""
         return await run_engine(
@@ -501,8 +484,6 @@ def register(app) -> None:
             azdo_repositories,
             documentation_sources,
             review_transcripts,
-            project_id,
-            context_deps,
             solo,
         )
 
@@ -631,7 +612,6 @@ def register(app) -> None:
         habit_detection: str | None = None,
         habit_rules: str | None = None,
         habit_ai_match: str | None = None,
-        context_deps: str = "",
     ) -> dict:
         """Update a session's standup configuration; omitted fields keep their current value.
         time is HH:MM (the meeting time), weekdays like '1-5' or '1,3,5', delivery_channels from
@@ -654,9 +634,6 @@ def register(app) -> None:
         wip-sprawl, large-change, no-pull-request, commit-messages (empty = all of them).
         habit_ai_match is 'on' (default) or 'off': when on, an LLM pass may excuse a change that
         belongs to a ticket it never names. It can only ever suppress a signal, never raise one.
-        context_deps sets the session's saved context-source toggles: '' leaves them unchanged,
-        'inherit' resets to the project default, 'all' enables everything, 'none' is incognito,
-        or a comma-separated subset of retro,standup,plan,performance,analysis.
         NOTE: this saves the config only — installing the OS schedule (launchd/cron) is
         machine-local and done from the yeaboi TUI. Blank session_id = most recent session."""
         return await run_readonly(
@@ -685,5 +662,4 @@ def register(app) -> None:
             habit_detection,
             habit_rules,
             habit_ai_match,
-            context_deps,
         )

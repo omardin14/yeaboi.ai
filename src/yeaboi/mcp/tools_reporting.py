@@ -78,8 +78,6 @@ def _report_delivery(
     period_label_override: str,
     theme: str,
     sources: dict | None,
-    project_id: str,
-    context_deps: list | None,
     solo: bool,
 ):
     if period not in _PERIODS:
@@ -91,8 +89,6 @@ def _report_delivery(
         session_id=session_id,
         jira_project=jira_project,
         azdo_project=azdo_project,
-        project_id=project_id,
-        context_deps=context_deps,
         window_start=window_start,
         window_end=window_end,
         sprint_names=tuple(sprint_names or ()),
@@ -119,8 +115,6 @@ def register(app) -> None:
         period_label_override: str = "",
         theme: str = "midnight",
         sources: dict[str, list[str]] | None = None,
-        project_id: str = "",
-        context_deps: list[str] | None = None,
         solo: bool = False,
     ) -> dict:
         """Generate a stakeholder-friendly delivery report of completed work from the team's
@@ -134,10 +128,7 @@ def register(app) -> None:
         'azuredevops'], 'docs': ['confluence','notion']} — delivery picks the tracker(s)
         tickets come from, code/docs add supporting PR/commit and doc-update context
         (azdevops/azure_devops accepted as aliases); omit for all configured. Blank
-        session_id = most recent session (sprint length/project name). project_id scopes the
-        sprint framing to a project's latest plan; blank inherits the session's own link.
-        context_deps toggles the run's cross-mode context sources — the 'plan' token gates
-        the sprint framing; null inherits the project default, an empty list is incognito.
+        session_id = most recent session (sprint length/project name).
         solo=true writes a one-person report (the Solo world): first-person narrative, never
         'the team'."""
         return await run_engine(
@@ -153,8 +144,6 @@ def register(app) -> None:
             period_label_override,
             theme,
             sources,
-            project_id,
-            context_deps,
             solo,
         )
 

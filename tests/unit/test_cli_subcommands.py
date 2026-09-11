@@ -301,15 +301,11 @@ class TestStandupCommand:
             azdo_repositories,
             documentation_sources,
             review_transcripts,
-            project_id,
-            context_deps,
             solo,
         ):
             captured.update(
                 solo=solo,
                 session_id=session_id,
-                project_id=project_id,
-                context_deps=context_deps,
                 deliver=deliver,
                 days=days,
                 channels=channels,
@@ -333,8 +329,6 @@ class TestStandupCommand:
         assert captured == {
             "solo": False,
             "session_id": "sid",
-            "project_id": "",
-            "context_deps": None,
             "deliver": True,
             "days": 2,
             "channels": ["slack"],
@@ -1529,208 +1523,6 @@ class TestShipCommand:
         assert "⚠ boom" in capsys.readouterr().err
 
 
-class TestProjectCommand:
-    def test_create_list_show_round_trip(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-
-        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "create", "Apollo", "--description", "the big one"])
-        assert _cmd_project(args, _console(buf)) == 0
-        assert "Apollo" in buf.getvalue()
-
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "list"])
-        assert _cmd_project(args, _console(buf)) == 0
-        out = buf.getvalue()
-        assert "Apollo" in out and "proj-" in out
-
-        project_id = next(w for w in out.split() if w.startswith("proj-"))
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "show", project_id])
-        assert _cmd_project(args, _console(buf)) == 0
-        assert "Apollo" in buf.getvalue()
-
-    def test_link_uses_the_resolved_session(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-        from yeaboi.projects.engine import create_project
-        from yeaboi.sessions import SessionStore
-
-        db = tmp_path / "sessions.db"
-        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
-        project = create_project("Apollo", db_path=db)
-        with SessionStore(db) as sessions:
-            sessions.create_session("s1")
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "link", project["project_id"], "--session", "s1"])
-        assert _cmd_project(args, _console(buf)) == 0
-        with SessionStore(db) as sessions:
-            assert sessions.session_project_id("s1") == project["project_id"]
-
-    def test_set_status_marks_done_and_list_says_so(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-        from yeaboi.projects.engine import create_project, get_project
-
-        db = tmp_path / "sessions.db"
-        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
-        project = create_project("Apollo", db_path=db)
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "set-status", project["project_id"], "done"])
-        assert _cmd_project(args, _console(buf)) == 0
-        assert "Apollo" in buf.getvalue() and "done" in buf.getvalue()
-        assert get_project(project["project_id"], db_path=db)["status"] == "done"
-
-        buf = io.StringIO()
-        assert _cmd_project(build_parser().parse_args(["project", "list"]), _console(buf)) == 0
-        assert "done" in buf.getvalue()
-
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "set-status", project["project_id"], "active"])
-        assert _cmd_project(args, _console(buf)) == 0
-        assert "in progress" in buf.getvalue()
-
-    def test_set_status_only_accepts_the_two_words(self):
-        from yeaboi.cli import build_parser
-
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["project", "set-status", "proj-1", "finished"])
-
-    def test_draft_prints_the_name_pitch_and_note(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-
-        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "draft", "A pond where ducks plan sprints"])
-        assert _cmd_project(args, _console(buf)) == 0
-        out = buf.getvalue()
-        assert "a pond where ducks" in out and "A pond where ducks plan sprints" in out and "AI unavailable" in out
-
-    def test_set_defaults_assembles_the_dict(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-        from yeaboi.projects.engine import create_project, get_project
-
-        db = tmp_path / "sessions.db"
-        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
-        project = create_project("Apollo", db_path=db)
-        args = build_parser().parse_args(
-            ["project", "set-defaults", project["project_id"], "--analysis-profile", "team-x"]
-        )
-        assert _cmd_project(args, _console()) == 0
-        assert get_project(project["project_id"], db_path=db)["settings"] == {"default_analysis_profile_id": "team-x"}
-
-    def test_set_defaults_sets_the_context_deps(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-        from yeaboi.projects.engine import create_project, get_project
-
-        db = tmp_path / "sessions.db"
-        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
-        project = create_project("Apollo", db_path=db)
-        args = build_parser().parse_args(["project", "set-defaults", project["project_id"], "--context", "retro"])
-        assert _cmd_project(args, _console()) == 0
-        assert get_project(project["project_id"], db_path=db)["settings"] == {"default_context_deps": ["retro"]}
-
-    def test_set_defaults_sets_the_repo_path_absolute(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-        from yeaboi.projects.engine import create_project, get_project
-
-        db = tmp_path / "sessions.db"
-        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
-        project = create_project("Apollo", db_path=db)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        monkeypatch.chdir(tmp_path)
-        args = build_parser().parse_args(["project", "set-defaults", project["project_id"], "--repo", "repo"])
-        assert _cmd_project(args, _console()) == 0
-        assert get_project(project["project_id"], db_path=db)["settings"] == {"repo_path": str(repo.resolve())}
-
-    def test_agents_repo_flag_reaches_the_engines(self, monkeypatch):
-        from yeaboi.agent.state import AgentAdvisorReport, AgentUsageReport
-        from yeaboi.cli import _cmd_agents, build_parser
-
-        seen: dict = {}
-        monkeypatch.setattr(
-            "yeaboi.agentwatch.engine.run_agent_usage",
-            lambda **kw: seen.setdefault("cost", kw) and AgentUsageReport(),
-        )
-        monkeypatch.setattr(
-            "yeaboi.agentwatch.advisor.run_agent_advisor",
-            lambda **kw: seen.setdefault("advisor", kw) and AgentAdvisorReport(),
-        )
-        for sub in ("cost", "advisor"):
-            args = build_parser().parse_args(["agents", sub, "--repo", "/srv/app", "--format", "json"])
-            _cmd_agents(args, _console())
-        assert {k: v["project_path"] for k, v in seen.items()} == {
-            "cost": "/srv/app",
-            "advisor": "/srv/app",
-        }
-
-    def test_set_defaults_with_no_flags_changes_nothing(self, tmp_path, monkeypatch):
-        from yeaboi.cli import _cmd_project, build_parser
-        from yeaboi.projects.engine import create_project, get_project
-
-        db = tmp_path / "sessions.db"
-        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
-        project = create_project("Apollo", db_path=db)
-        buf = io.StringIO()
-        args = build_parser().parse_args(["project", "set-defaults", project["project_id"]])
-        assert _cmd_project(args, _console(buf)) == 2
-        assert "Nothing to set" in buf.getvalue()
-        assert get_project(project["project_id"], db_path=db)["settings"] == {}
-
-
-class TestContextFlags:
-    """--context/--incognito map onto the engines' context_deps."""
-
-    def _capture(self, monkeypatch):
-        captured: dict = {}
-
-        def fake_report(period, **kw):
-            captured.update(kw)
-            return DeliveryReport()
-
-        monkeypatch.setattr("yeaboi.reporting.engine.run_delivery_report", fake_report)
-        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
-        return captured
-
-    def test_absent_flag_inherits(self, monkeypatch):
-        captured = self._capture(monkeypatch)
-        assert _cmd_report(build_parser().parse_args(["report"]), _console()) == 0
-        assert captured["context_deps"] is None
-
-    def test_csv_reaches_the_engine(self, monkeypatch):
-        captured = self._capture(monkeypatch)
-        args = build_parser().parse_args(["report", "--context", "retro,plan"])
-        assert _cmd_report(args, _console()) == 0
-        assert captured["context_deps"] == ["retro", "plan"]
-
-    def test_none_word_is_incognito(self, monkeypatch):
-        captured = self._capture(monkeypatch)
-        args = build_parser().parse_args(["report", "--context", "none"])
-        assert _cmd_report(args, _console()) == 0
-        assert captured["context_deps"] == []
-
-    def test_all_word_enables_everything(self, monkeypatch):
-        from yeaboi.projects.scope import CONTEXT_DEP_TOKENS
-
-        captured = self._capture(monkeypatch)
-        args = build_parser().parse_args(["report", "--context", "all"])
-        assert _cmd_report(args, _console()) == 0
-        assert captured["context_deps"] == list(CONTEXT_DEP_TOKENS)
-
-    def test_incognito_wins_over_context(self, monkeypatch):
-        captured = self._capture(monkeypatch)
-        args = build_parser().parse_args(["report", "--context", "all", "--incognito"])
-        assert _cmd_report(args, _console()) == 0
-        assert captured["context_deps"] == []
-
-    def test_a_typo_is_a_parse_error(self, capsys):
-        import pytest
-
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["report", "--context", "retro,bogus"])
-        assert "unknown context source" in capsys.readouterr().err
-
-
 class TestSoloFlags:
     def test_standup_solo_reaches_the_engine(self, monkeypatch):
         seen: dict = {}
@@ -1788,52 +1580,6 @@ class TestReviewCommand:
         args = build_parser().parse_args(["review"])
         assert _cmd_review(args, _console()) == 2
         assert "review {run,history,export}" in capsys.readouterr().err
-
-    def test_run_forwards_the_marks_and_scope_to_the_engine(self, monkeypatch, capsys):
-        from yeaboi.cli import _cmd_review
-
-        seen: dict = {}
-        monkeypatch.setattr("yeaboi.solo.engine.run_weekly_review", lambda **kw: seen.update(kw) or _weekly_review())
-        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
-        args = build_parser().parse_args(
-            [
-                "review",
-                "run",
-                "--project",
-                "proj-12345678",
-                "--week-end",
-                "2026-08-28",
-                "--mark",
-                "a1b2c3d4e5f6=done",
-                "--mark",
-                "ffffffffffff=dropped",
-                "--context",
-                "standup",
-                "--format",
-                "json",
-            ]
-        )
-        assert _cmd_review(args, _console()) == 0
-        assert seen == {
-            "session_id": "sid",
-            "project_id": "proj-12345678",
-            "context_deps": ["standup"],
-            "week_end": "2026-08-28",
-            "carried_statuses": {"a1b2c3d4e5f6": "done", "ffffffffffff": "dropped"},
-        }
-        payload = json.loads(capsys.readouterr().out)  # stdout is machine-clean
-        assert payload["week_label"] == "2026-W35" and payload["actions"][0]["text"] == "Write the ADR"
-
-    def test_no_marks_means_none_and_incognito_wins(self, monkeypatch):
-        from yeaboi.cli import _cmd_review
-
-        seen: dict = {}
-        monkeypatch.setattr("yeaboi.solo.engine.run_weekly_review", lambda **kw: seen.update(kw) or _weekly_review())
-        monkeypatch.setattr("yeaboi.solo.render.format_review_rich", lambda r: "")
-        monkeypatch.setattr("yeaboi.cli._resolve_cli_session", lambda s: "sid")
-        args = build_parser().parse_args(["review", "run", "--incognito"])
-        assert _cmd_review(args, _console()) == 0
-        assert seen["carried_statuses"] is None and seen["context_deps"] == []
 
     @pytest.mark.parametrize("bad", ["nope", "abc=", "abc=maybe", "=done"])
     def test_a_malformed_mark_is_refused_before_the_engine_runs(self, monkeypatch, capsys, bad):

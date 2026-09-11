@@ -21,12 +21,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from yeaboi.projects.suggest import SOURCE_LABELS as _ALL_LABELS
-
 logger = logging.getLogger(__name__)
 
 SOURCES = ("jira", "github", "azdevops", "linear", "confluence", "notion")
-SOURCE_LABELS: dict[str, str] = {key: _ALL_LABELS[key] for key in SOURCES}
+SOURCE_LABELS: dict[str, str] = {
+    "jira": "Jira",
+    "github": "GitHub",
+    "azdevops": "Azure DevOps",
+    "linear": "Linear",
+    "confluence": "Confluence",
+    "notion": "Notion",
+}
 #: Rows a picker shows by default, and the most it may ask for.
 DEFAULT_LIMIT = 8
 MAX_LIMIT = 25
