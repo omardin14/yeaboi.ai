@@ -44,7 +44,11 @@ FIELD_TEXT = "text"
 FIELD_ITEMS = "items"
 """A list of plain strings — bullets. Supports set / append / remove."""
 
-FIELD_KINDS = (FIELD_LINE, FIELD_TEXT, FIELD_ITEMS)
+FIELD_CHOICE = "choice"
+"""A single-line string from a fixed vocabulary — a status, a verdict. Set only,
+and refused unless the value is one of :attr:`FieldSpec.choices`."""
+
+FIELD_KINDS = (FIELD_LINE, FIELD_TEXT, FIELD_ITEMS, FIELD_CHOICE)
 
 MAX_LINE = 300
 MAX_TEXT = 2000
@@ -74,12 +78,19 @@ class FieldSpec:
     label: str
     max_len: int = 0
     max_items: int = MAX_ITEMS
+    choices: tuple[str, ...] = ()
+    """The whole accepted vocabulary, for a :data:`FIELD_CHOICE`; empty elsewhere."""
 
     def limit(self) -> int:
         """Longest accepted value, defaulted from the kind when not overridden."""
         if self.max_len:
             return self.max_len
-        return {FIELD_LINE: MAX_LINE, FIELD_TEXT: MAX_TEXT, FIELD_ITEMS: MAX_ITEM}[self.kind]
+        return {
+            FIELD_LINE: MAX_LINE,
+            FIELD_TEXT: MAX_TEXT,
+            FIELD_ITEMS: MAX_ITEM,
+            FIELD_CHOICE: MAX_LINE,
+        }[self.kind]
 
 
 def _line(chain: str, label: str, **kw) -> FieldSpec:
@@ -88,6 +99,10 @@ def _line(chain: str, label: str, **kw) -> FieldSpec:
 
 def _text(chain: str, label: str, **kw) -> FieldSpec:
     return FieldSpec(chain=tuple(chain.split(".")), kind=FIELD_TEXT, label=label, **kw)
+
+
+def _choice(chain: str, label: str, choices: tuple[str, ...], **kw) -> FieldSpec:
+    return FieldSpec(chain=tuple(chain.split(".")), kind=FIELD_CHOICE, label=label, choices=choices, **kw)
 
 
 def _items(chain: str, label: str, **kw) -> FieldSpec:
@@ -174,6 +189,10 @@ _REPORTING = ArtifactSpec(
     ),
 )
 
+ACTION_STATUSES: tuple[str, ...] = ("pending", "done", "in_progress", "carried_over", "not_relevant")
+"""Kept in step with ``retro.board.CARRIED_STATUSES`` by a test, not by an import:
+this module is read by the HTTP layer and stays free of the board's imports."""
+
 _RETRO = ArtifactSpec(
     kind="retro",
     dataclass_name="RetroReport",
@@ -187,6 +206,8 @@ _RETRO = ArtifactSpec(
     fields=(
         _text("cards.text", "card"),
         _text("carried_action_items.text", "carried action item"),
+        _choice("cards.status", "action status", ACTION_STATUSES),
+        _choice("carried_action_items.status", "action status", ACTION_STATUSES),
     ),
 )
 

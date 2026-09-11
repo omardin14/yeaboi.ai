@@ -29,6 +29,22 @@ class TestRows:
             for f in spec.fields:
                 assert f.label.strip(), f"{spec.kind}.{f.chain} has no label"
 
+    def test_only_a_choice_field_carries_a_vocabulary(self):
+        for spec in registry.ARTIFACTS.values():
+            for f in spec.fields:
+                if f.kind == registry.FIELD_CHOICE:
+                    assert f.choices, f"{spec.kind}.{f.chain} is a choice with nothing to choose"
+                else:
+                    assert not f.choices, f"{spec.kind}.{f.chain} is not a choice but lists some"
+
+    def test_the_action_statuses_are_the_board_s_own(self):
+        # Held apart from `retro.board` on purpose — this module is read by the
+        # HTTP layer and stays free of the board's imports — so drift between
+        # the two has to fail here rather than in a refused correction.
+        from yeaboi.retro.board import CARRIED_STATUSES
+
+        assert registry.ACTION_STATUSES == CARRIED_STATUSES
+
     def test_every_field_has_a_positive_limit(self):
         for spec in registry.ARTIFACTS.values():
             for f in spec.fields:

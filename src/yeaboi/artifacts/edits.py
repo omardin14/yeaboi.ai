@@ -269,6 +269,10 @@ def validate(edit: Edit, spec: ArtifactSpec) -> Edit:
         _check_injection(value)
     if edit.op in (OP_SET, OP_APPEND) and not value:
         raise EditError("value is empty")
+    if field.choices and value not in field.choices:
+        # Named in full: the vocabulary is the point of a choice field, and a
+        # caller that guessed "complete" for "done" should be told what to send.
+        raise EditError(f"{field.label} must be one of: {', '.join(field.choices)}")
 
     return replace(
         edit,

@@ -100,6 +100,7 @@ def artifact_fields(kind: str = "") -> dict:
                         "label": field.label,
                         "max_length": field.limit(),
                         "max_items": field.max_items,
+                        "choices": list(field.choices),
                     }
                     for field in spec.fields
                 ],

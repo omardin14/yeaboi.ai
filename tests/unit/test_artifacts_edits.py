@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from yeaboi.agent.state import DeliveryReport, MemberUpdate, StandupReport
+from yeaboi.agent.state import DeliveryReport, MemberUpdate, RetroCard, RetroReport, StandupReport
 from yeaboi.artifacts.edits import (
     MAX_NEWLINES,
     OP_APPEND,
@@ -27,6 +27,7 @@ from yeaboi.artifacts.registry import ARTIFACTS
 
 STANDUP = ARTIFACTS["standup"]
 REPORTING = ARTIFACTS["reporting"]
+RETRO = ARTIFACTS["retro"]
 
 
 def report() -> StandupReport:
@@ -37,6 +38,14 @@ def report() -> StandupReport:
             MemberUpdate(name="Ada", summary="Landed the login flow.", blockers="staging db"),
             MemberUpdate(name="Grace", summary="Reviewed three PRs."),
         ),
+    )
+
+
+def retro() -> RetroReport:
+    return RetroReport(
+        date="2026-09-04",
+        cards=(RetroCard(id="c1", grid="action_items", text="Split the deploy job", status="pending"),),
+        carried_action_items=(RetroCard(id="k1", grid="action_items", text="Chase the vendor", status="carried_over"),),
     )
 
 
@@ -425,3 +434,54 @@ class TestAnnotations:
 
         out, _ = apply_edits(report(), (self.note(value="context"),), STANDUP)
         assert _dict_to_standup_report(json.loads(_standup_report_to_json(out))) == out
+
+
+class TestActionStatus:
+    """The retro's status field — a choice, so its vocabulary is the allowlist.
+
+    Closing an action from outside a live board is the only way the hub has to
+    take a sticky off the wall, and it is a `set` on this field. A free-text
+    status would have been the same code with a hole in it: `openActions`
+    treats anything outside the open words as closed, so a typo would hide an
+    action rather than be refused.
+    """
+
+    def test_a_status_the_board_uses_is_accepted(self):
+        edit = validate(Edit(op=OP_SET, path="cards[id=c1].status", value="done", author="Ada"), RETRO)
+        corrected, results = apply_edits(retro(), (edit,), RETRO)
+        assert results[0].applied
+        assert corrected.cards[0].status == "done"
+
+    def test_a_carried_item_is_closed_by_its_own_list(self):
+        edit = validate(
+            Edit(op=OP_SET, path="carried_action_items[id=k1].status", value="not_relevant", author="Ada"), RETRO
+        )
+        corrected, results = apply_edits(retro(), (edit,), RETRO)
+        assert results[0].applied
+        assert corrected.carried_action_items[0].status == "not_relevant"
+
+    def test_a_word_the_board_does_not_use_is_refused(self):
+        with pytest.raises(EditError) as caught:
+            validate(Edit(op=OP_SET, path="cards[id=c1].status", value="complete", author="Ada"), RETRO)
+        # The refusal names the vocabulary: a caller that guessed is told what to send.
+        assert "done" in str(caught.value)
+
+    def test_a_status_cannot_be_removed(self):
+        with pytest.raises(EditError):
+            validate(Edit(op=OP_REMOVE, path="cards[id=c1].status", author="Ada"), RETRO)
+
+    def test_a_stale_status_comes_back_as_a_conflict(self):
+        edit = validate(
+            Edit(op=OP_SET, path="cards[id=c1].status", value="done", base="in_progress", author="Ada"), RETRO
+        )
+        _, results = apply_edits(retro(), (edit,), RETRO)
+        assert not results[0].applied
+        assert results[0].reason == "conflict"
+
+    def test_the_text_beside_it_is_still_editable(self):
+        edit = validate(
+            Edit(op=OP_SET, path="cards[id=c1].text", value="Split the deploy job in two", author="Ada"), RETRO
+        )
+        corrected, results = apply_edits(retro(), (edit,), RETRO)
+        assert results[0].applied
+        assert corrected.cards[0].text == "Split the deploy job in two"
