@@ -13616,6 +13616,9 @@ def select_mode(
     set_solo_mode(category == "solo")
     cards, mascot = _CATEGORY_MENUS[category]
     _category_pending = split  # show the split on the first pass through the loop
+    # Esc on the menu, read on every pass out of the frame loop — so it is
+    # seeded here rather than only on the branch that raises it.
+    _back_to_split = False
 
     # The Solo welcome's Today strip. Built ONCE per (re)entry of the Solo menu —
     # never inside the frame loop, which re-renders at 60 fps — and None on the
@@ -13821,11 +13824,14 @@ def select_mode(
                         break
                     continue
                 elif key == "esc":
-                    # Esc backs out to the landing split (the screen this menu
-                    # came from). Quitting stays on q, mirroring every sub-page's
-                    # esc-goes-back convention.
-                    logger.info("esc from %s menu — back to the door", category)
-                    _back_to_door = True
+                    # Esc backs out to the landing split. With Solo off there is
+                    # no split and the menu is the first screen, so Esc leaves
+                    # the app — the rule the door used to carry.
+                    if not split:
+                        logger.info("esc from %s menu, the first screen — quitting", category)
+                        return None
+                    logger.info("esc from %s menu — back to the landing split", category)
+                    _back_to_split = True
                     break
                 elif key == "q":
                     # Courtesy on quit: offer to stop a running local Ollama
@@ -14133,11 +14139,11 @@ def select_mode(
                     )
                 )
 
-            # Esc backed out of the menu — return to the door rather than
+            # Esc backed out of the menu — show the split again rather than
             # running the select transition below.
-            if _back_to_door:
-                _back_to_door = False
-                _door_pending = True
+            if _back_to_split:
+                _back_to_split = False
+                _category_pending = True
                 _restart_mode_select = True
                 continue
 

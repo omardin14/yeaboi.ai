@@ -124,6 +124,40 @@ def _read_until(master_fd: int, proc: subprocess.Popen, predicate, timeout: floa
 
 
 class TestTuiLiveSmoke:
+    def test_selecting_a_card_does_not_kill_the_menu(self, tmp_path):
+        """Enter on the first card leaves the menu's frame loop alive.
+
+        The menu is one long function whose locals are shared across a frame
+        loop, and a selection leaves that loop by a different branch than Esc
+        does — so a local seeded on only the Esc branch is an UnboundLocalError
+        on the ordinary path, and the app dies on the first keypress anyone
+        makes. Every other test patches ``select_mode`` wholesale and cannot
+        see it; this drives the real thing through a pty.
+        """
+        proc, master_fd = _spawn_tui_in_pty(tmp_path)
+        try:
+            booted = _read_until(
+                master_fd,
+                proc,
+                lambda b: any(m in _strip_ansi(b[-262_144:]) for m in _MODE_SCREEN_MARKERS),
+                timeout=30.0,
+            )
+            assert any(m in _strip_ansi(booted[-262_144:]) for m in _MODE_SCREEN_MARKERS), (
+                f"mode-select never rendered; exit={proc.poll()}"
+            )
+            os.write(master_fd, b"\r")
+            after = _read_until(master_fd, proc, lambda b: proc.poll() is not None, timeout=15.0)
+            text = _strip_ansi(after)
+            assert "Traceback" not in text and "UnboundLocalError" not in text, (
+                f"selecting a card raised:\n{text[-1500:]}"
+            )
+            assert proc.poll() is None, f"the TUI exited on the first card selection ({proc.poll()})"
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+            os.close(master_fd)
+
     @pytest.mark.parametrize("solo", [False, True], ids=["one-world", "solo-on"])
     def test_dry_run_boots_to_mode_select_and_quits_cleanly(self, tmp_path, solo):
         """The real TUI reaches mode-select and exits 0 on 'q'.
