@@ -4,27 +4,24 @@
     {
       "version": "4.0.0",
       "date": "2026-09-11",
-      "headline": "Yeaboi is now sessions-only, simpler",
-      "summary": "Projects are removed. All work now runs in sessions, so opening yeaboi skips straight to your modes instead of asking about projects first. Nothing you did before stops working.",
+      "headline": "One kind of thing: a session",
+      "summary": "Projects are gone and yeaboi opens straight on the modes. Anything that only existed inside a project is deleted, so export what you need first.",
       "highlights": [
         {
-          "text": "Sessions are the only container for all your work",
+          "text": "Sessions are the only container — no door to choose first",
           "areas": [
             "planning",
             "general"
           ]
         },
         {
-          "text": "Opening yeaboi goes straight to your modes",
+          "text": "Project data is deleted, including anything only reachable through one",
           "areas": [
             "general"
-          ],
-          "surfaces": [
-            "tui"
           ]
         },
         {
-          "text": "What you ran in projects now runs in sessions without extra steps",
+          "text": "Sessions linked to a project now age out like every other session",
           "areas": [
             "general"
           ]
@@ -67,7 +64,7 @@
       "version": "3.45.1",
       "date": "2026-09-09",
       "headline": "yeaboi opens straight into your modes",
-      "summary": "The terminal now opens on the door \u2014 a project, or a one-off session \u2014 rather than asking which world you are in first. Longer menus also keep their footer on screen, and a card opens the one you clicked.",
+      "summary": "The terminal now opens on the door — a project, or a one-off session — rather than asking which world you are in first. Longer menus also keep their footer on screen, and a card opens the one you clicked.",
       "highlights": [
         {
           "text": "Opens on the door instead of a world chooser",
@@ -119,7 +116,7 @@
       "version": "3.44.0",
       "date": "2026-09-06",
       "headline": "Agent spend is accurate, security findings are actionable",
-      "summary": "Agent usage now tracks spend accurately by day, including every API call and tool cost. Security findings are grouped by issue with verdicts\u2014you can dismiss false positives, replay the exact context, and apply one-click fixes.",
+      "summary": "Agent usage now tracks spend accurately by day, including every API call and tool cost. Security findings are grouped by issue with verdicts—you can dismiss false positives, replay the exact context, and apply one-click fixes.",
       "highlights": [
         {
           "text": "See accurate daily agent spend with all API calls and tool usage costs included",
@@ -356,7 +353,7 @@
       "version": "3.38.1",
       "date": "2026-09-01",
       "headline": "Desktop route manifest corrected",
-      "summary": "Nothing changes in how yeaboi works \u2014 this release is internal corrections to the desktop route manifest and parity checks, ensuring the desktop app builds against reality.",
+      "summary": "Nothing changes in how yeaboi works — this release is internal corrections to the desktop route manifest and parity checks, ensuring the desktop app builds against reality.",
       "highlights": [
         {
           "text": "Desktop manifest now matches what the app generates",
@@ -507,7 +504,7 @@
       "version": "3.34.0",
       "date": "2026-08-31",
       "headline": "Reach six more AI models directly",
-      "summary": "yeaboi now works with Grok, DeepSeek, Kimi, Mistral, Qwen and GLM through their native endpoints. No extra install needed \u2014 each one rides the same OpenAI-compatible integration.",
+      "summary": "yeaboi now works with Grok, DeepSeek, Kimi, Mistral, Qwen and GLM through their native endpoints. No extra install needed — each one rides the same OpenAI-compatible integration.",
       "highlights": [
         {
           "text": "Choose from Grok, DeepSeek, Kimi, Mistral, Qwen and GLM in settings",
@@ -533,7 +530,7 @@
       "version": "3.33.0",
       "date": "2026-08-31",
       "headline": "Check your sharing setup before you publish",
-      "summary": "Settings can now tell you whether secure sharing is ready \u2014 sign-in, certificate and anything still missing \u2014 before you turn it on. You find out up front instead of when a share fails.",
+      "summary": "Settings can now tell you whether secure sharing is ready — sign-in, certificate and anything still missing — before you turn it on. You find out up front instead of when a share fails.",
       "highlights": [
         {
           "text": "See whether Cloudflare Access is ready before you publish anything",
@@ -559,7 +556,7 @@
       "version": "3.32.0",
       "date": "2026-08-27",
       "headline": "Meet Niko, an assistant across all your work",
-      "summary": "Ask Niko what a mode does, or what your plans, standups, retros and agent spend actually say, and it will take you to the screen that does the thing. Niko only reads \u2014 it never changes anything.",
+      "summary": "Ask Niko what a mode does, or what your plans, standups, retros and agent spend actually say, and it will take you to the screen that does the thing. Niko only reads — it never changes anything.",
       "highlights": [
         {
           "text": "Read-only by design: Niko looks things up and points you the right way",
@@ -594,7 +591,7 @@
       "version": "3.31.0",
       "date": "2026-08-25",
       "headline": "The browser pages now install as their own package",
-      "summary": "Boards, share pages, exports and the slide deck are unchanged \u2014 they now arrive as a separate package. Upgrading or installing fresh picks it up for you.",
+      "summary": "Boards, share pages, exports and the slide deck are unchanged — they now arrive as a separate package. Upgrading or installing fresh picks it up for you.",
       "highlights": [
         {
           "text": "Boards, share pages, exports and the slide deck behave exactly as before",
@@ -751,7 +748,7 @@
           ]
         },
         {
-          "text": "Patchy wifi will not block you \u2014 only a real rejection does",
+          "text": "Patchy wifi will not block you — only a real rejection does",
           "areas": [
             "general"
           ]
@@ -889,7 +886,7 @@
           ]
         },
         {
-          "text": "Sign in without leaving yeaboi \u2014 it opens a browser for you",
+          "text": "Sign in without leaving yeaboi — it opens a browser for you",
           "areas": [
             "settings"
           ]
@@ -971,7 +968,7 @@
       "version": "3.18.2",
       "date": "2026-08-17",
       "headline": "A clearer activity timeline in Standup",
-      "summary": "The standup timeline now labels what happened \u2014 merged pull requests, ticket changes, bursts of commits \u2014 and links the lanes that touched the same pull request.",
+      "summary": "The standup timeline now labels what happened — merged pull requests, ticket changes, bursts of commits — and links the lanes that touched the same pull request.",
       "highlights": [
         {
           "text": "The timeline labels merged pull requests, ticket changes and commit bursts",
@@ -1212,7 +1209,7 @@
       "version": "3.12.1",
       "date": "2026-08-15",
       "headline": "Under-the-hood improvements",
-      "summary": "Nothing changes in how yeaboi works \u2014 this release is internal plumbing and fixes.",
+      "summary": "Nothing changes in how yeaboi works — this release is internal plumbing and fixes.",
       "highlights": [
         {
           "text": "Internal release and verification improvements only",
@@ -3809,7 +3806,7 @@
       "version": "2.1.0",
       "date": "2026-07-13",
       "headline": "Performance reviews built from real work",
-      "summary": "New Performance mode preps your 1:1s, records what you agreed, and builds a six-month review \u2014 all from real Jira and Azure DevOps activity. You can also pick your exact model.",
+      "summary": "New Performance mode preps your 1:1s, records what you agreed, and builds a six-month review — all from real Jira and Azure DevOps activity. You can also pick your exact model.",
       "highlights": [
         {
           "text": "Prepare a 1:1, then capture the actions you agreed",
@@ -4018,7 +4015,7 @@
       "version": "1.0.0",
       "date": "2026-03-20",
       "headline": "yeaboi 1.0: your AI Scrum Master arrives",
-      "summary": "Describe a project, answer a short adaptive interview, and get epics, user stories, tasks and a sprint plan \u2014 reviewed step by step, exportable, and sent to Jira in one go.",
+      "summary": "Describe a project, answer a short adaptive interview, and get epics, user stories, tasks and a sprint plan — reviewed step by step, exportable, and sent to Jira in one go.",
       "highlights": [
         {
           "text": "An adaptive intake that asks only the follow-ups that matter",
