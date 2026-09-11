@@ -93,11 +93,6 @@ MODE_SCREEN_MARKERS = ("changelog", "Tip:", "channel")
 # `await` resolve against the menu it is leaving and race the transition.
 # test_record_demo.py renders both screens and asserts the disjointness.
 CATEGORY_SCREEN_MARKERS = ("working with",)
-# Chrome of the door (Projects vs Sessions) — the first screen after the splash.
-# One fragment of its heading, for the same disjointness reason.
-DOOR_SCREEN_MARKERS = ("work today",)
-# Chrome of the project list, which the door's Projects card opens.
-PROJECTS_SCREEN_MARKERS = ("the others left behind",)
 _ANSI_RE = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]"
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
@@ -111,33 +106,18 @@ _ALT_SCREEN_EXIT = "\x1b[?1049l"
 KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT = b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D"
 KEY_ENTER, KEY_ESC = b"\r", b"\x1b"
 
-# The demo choreography — the whole product in one take: the door, the Team
-# menu, back out to the door, then in through Projects. There is no landing
-# split to film: the launch ships one world (see config.solo_world_enabled),
-# and a demo has to show what a viewer will actually get.
+# The demo choreography — the whole product in one take: the splash, then a walk
+# across the Team menu. There is no landing split to film: the launch ships one
+# world (see config.solo_world_enabled), and a demo has to show what a viewer
+# will actually get.
 #
-# Two rules hold this together, both load-bearing:
-#
-# 1. Every screen change is an `await` on that screen's markers, never a
-#    `pause`. A pause long enough to cover a slow machine's menu build would
-#    also be a pause the fast path sits through; markers make the recording
-#    both quick and machine-independent.
-# 2. A key step is NEVER placed immediately after KEY_ESC. read_key treats a
-#    lone \x1b as Escape only when no second byte arrives within 100ms
-#    (src/yeaboi/ui/shared/_input.py:158-165) — a key written straight after it
-#    would be swallowed as an escape sequence. Every step following KEY_ESC
-#    here is an `await`, i.e. a drained read far longer than 100ms.
-#    tests/unit/test_record_demo.py pins this.
+# One rule holds this together: every screen change is an `await` on that
+# screen's markers, never a `pause`. A pause long enough to cover a slow
+# machine's menu build would also be a pause the fast path sits through;
+# markers make the recording both quick and machine-independent.
 DEMO_SCRIPT: list[tuple] = [
-    ("await", DOOR_SCREEN_MARKERS, 30.0),  # splash plays through; sync on the door
-    ("pause", 2.5),  # both door-cards settle: Projects left, Sessions right
-    ("key", KEY_LEFT),
-    ("pause", 1.2),  # Projects wakes — accent border, tinted interior
-    ("key", KEY_RIGHT),
-    ("pause", 1.0),  # back on Sessions, which is preselected
-    ("key", KEY_ENTER),
-    ("await", MODE_SCREEN_MARKERS, 15.0),  # the Team cards sweep in
-    ("pause", 1.2),
+    ("await", MODE_SCREEN_MARKERS, 30.0),  # splash plays through; the Team cards sweep in
+    ("pause", 2.0),
     ("key", KEY_DOWN),
     ("pause", 0.8),
     ("key", KEY_DOWN),
@@ -145,15 +125,9 @@ DEMO_SCRIPT: list[tuple] = [
     ("key", KEY_RIGHT),
     ("pause", 0.8),
     ("key", KEY_UP),
-    ("pause", 1.2),  # settle on a card, let the description reveal finish
-    ("key", KEY_ESC),  # esc from a menu returns to the door (q would quit)
-    ("await", DOOR_SCREEN_MARKERS, 15.0),
-    ("pause", 1.0),
-    ("key", KEY_LEFT),  # and in again through Projects this time
     ("pause", 0.8),
-    ("key", KEY_ENTER),
-    ("await", PROJECTS_SCREEN_MARKERS, 15.0),
-    ("pause", 2.0),  # rest on the project list so the last frame is a real screen
+    ("key", KEY_DOWN),
+    ("pause", 2.0),  # rest on a card so the last frame is a real screen
     ("key", b"q"),
 ]
 

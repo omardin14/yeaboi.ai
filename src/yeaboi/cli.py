@@ -275,21 +275,6 @@ def _resolve_resume(console: Console, resume_arg: str) -> tuple[dict | None, str
         return state, resume_arg
 
 
-def _context_spec(spec: str) -> list[str] | None:
-    """argparse type for --context: 'all' | 'none' | csv of dep tokens."""
-    from yeaboi.projects.scope import parse_context_spec
-
-    try:
-        return parse_context_spec(spec)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-
-
-def _cli_context_deps(args: argparse.Namespace) -> list[str] | None:
-    """Map --incognito/--context onto the engines' context_deps value."""
-    return [] if getattr(args, "incognito", False) else args.context
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -589,7 +574,7 @@ def build_parser() -> argparse.ArgumentParser:
     # See CLAUDE.md "REQUIRED: Surface Parity" — each mode needs a CLI path;
     # these run the same engines the TUI and the MCP server use.
     subparsers = parser.add_subparsers(
-        dest="command", metavar="{report,standup,standup-review,perf,project,retro,poker,review,analyze,agents}"
+        dest="command", metavar="{report,standup,standup-review,perf,retro,poker,review,analyze,agents}"
     )
 
     report_p = subparsers.add_parser("report", help="Generate a stakeholder delivery report (Reporting mode)")
@@ -597,23 +582,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--period", choices=["last_week", "last_sprint", "last_month", "quarter", "window"], default="last_sprint"
     )
     report_p.add_argument("--session", default="", metavar="ID", help="Session to use (default: most recent)")
-    report_p.add_argument(
-        "--project",
-        default="",
-        metavar="PROJ_ID",
-        help="Project to scope by (see `yeaboi project list`); default inherits the session's own link",
-    )
-    report_p.add_argument(
-        "--context",
-        default=None,
-        type=_context_spec,
-        metavar="SPEC",
-        help="Context sources for this run: 'all', 'none', or a comma-separated subset of "
-        "retro,standup,plan,performance,analysis (default: inherit the project setting)",
-    )
-    report_p.add_argument(
-        "--incognito", action="store_true", help="No cross-mode context (same as --context none; wins if both given)"
-    )
     report_p.add_argument(
         "--window-start", default="", metavar="YYYY-MM-DD", help="Explicit window start (quarter/window periods)"
     )
@@ -662,23 +630,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     standup_p = subparsers.add_parser("standup", help="Run a Daily Standup (alias of --standup-run, more knobs)")
     standup_p.add_argument("--session", default="", metavar="ID", help="Session to use (default: most recent)")
-    standup_p.add_argument(
-        "--project",
-        default="",
-        metavar="PROJ_ID",
-        help="Project to scope by (sprint/roster from its latest plan); default inherits the session's own link",
-    )
-    standup_p.add_argument(
-        "--context",
-        default=None,
-        type=_context_spec,
-        metavar="SPEC",
-        help="Context sources for this run: 'all', 'none', or a comma-separated subset of "
-        "retro,standup,plan,performance,analysis (default: inherit the saved config, then the project setting)",
-    )
-    standup_p.add_argument(
-        "--incognito", action="store_true", help="No cross-mode context (same as --context none; wins if both given)"
-    )
     standup_p.add_argument(
         "--solo",
         action="store_true",
@@ -830,52 +781,6 @@ def build_parser() -> argparse.ArgumentParser:
     review_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     review_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
-    # ── project ───────────────────────────────────────────────────────────
-    project_p = subparsers.add_parser("project", help="Manage projects — the identity that links sessions across modes")
-    project_sub = project_p.add_subparsers(
-        dest="project_command", metavar="{create,list,show,link,set-defaults,set-status,draft}", required=True
-    )
-    project_create_p = project_sub.add_parser("create", help="Create a project")
-    project_create_p.add_argument("name", help="Short human project name")
-    project_create_p.add_argument("--description", default="", metavar="TEXT", help="One-line description")
-    project_list_p = project_sub.add_parser("list", help="List projects (most recently active first)")
-    project_list_p.add_argument("--all", dest="include_archived", action="store_true", help="Include archived projects")
-    project_show_p = project_sub.add_parser("show", help="Show one project and its linked sessions")
-    project_show_p.add_argument("project_id", metavar="PROJ_ID", help="Project id (see `yeaboi project list`)")
-    project_link_p = project_sub.add_parser(
-        "link", help="Link a session to a project so its runs count toward the project's context"
-    )
-    project_link_p.add_argument("project_id", metavar="PROJ_ID", help="Project id")
-    project_link_p.add_argument("--session", default="", metavar="ID", help="Session to link (default: most recent)")
-    project_status_p = project_sub.add_parser("set-status", help="Mark a project done, or reopen it")
-    project_status_p.add_argument("project_id", metavar="PROJ_ID", help="Project id")
-    project_status_p.add_argument("status", choices=("active", "done"), help="done = complete; active = in progress")
-    project_draft_p = project_sub.add_parser(
-        "draft", help="Turn a rough description into a project name and pitch (the New project AI rewrite)"
-    )
-    project_draft_p.add_argument("description", metavar="TEXT", help="What you are building, in your own words")
-    project_defaults_p = project_sub.add_parser("set-defaults", help="Set a project's default settings")
-    project_defaults_p.add_argument("project_id", metavar="PROJ_ID", help="Project id")
-    project_defaults_p.add_argument(
-        "--analysis-profile",
-        default="",
-        metavar="ID",
-        help="Team profile a scoped plan seeds when the caller passes none",
-    )
-    project_defaults_p.add_argument(
-        "--context",
-        default=None,
-        type=_context_spec,
-        metavar="SPEC",
-        help="Cross-mode sources a scoped run reads by default ('all', 'none', or a csv)",
-    )
-    project_defaults_p.add_argument(
-        "--repo",
-        default="",
-        metavar="PATH",
-        help="The project's repository — Agents reports scope to sessions under it (worktrees included)",
-    )
-
     perf_p = subparsers.add_parser(
         "perf",
         help=f"Performance mode {BETA_TAG}: 1:1 prep/completion, reviews, notes",
@@ -892,20 +797,6 @@ def build_parser() -> argparse.ArgumentParser:
     prep_p = perf_sub.add_parser("prep", help="Prepare a 1:1 for an engineer", description=PERFORMANCE_BETA_NOTICE)
     prep_p.add_argument("engineer", help="Engineer name (see `yeaboi perf roster`)")
     prep_p.add_argument("--session", default="", metavar="ID", help="Session for team context (default: most recent)")
-    prep_p.add_argument(
-        "--project",
-        default="",
-        metavar="PROJ_ID",
-        help="Narrow the cross-mode evidence to one project; the engineer's own 1:1 history stays unscoped",
-    )
-    prep_p.add_argument(
-        "--context",
-        default=None,
-        type=_context_spec,
-        metavar="SPEC",
-        help="Which cross-mode sources to read ('all', 'none', or a csv); a switched-off source says so",
-    )
-    prep_p.add_argument("--incognito", action="store_true", help="Same as --context none")
     prep_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
     prep_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
     prep_p.add_argument(
@@ -936,20 +827,6 @@ def build_parser() -> argparse.ArgumentParser:
     review_p.add_argument("engineer", help="Engineer name")
     review_p.add_argument("--months", type=int, default=6, help="Review period in months (default 6)")
     review_p.add_argument("--session", default="", metavar="ID", help="Session for team context")
-    review_p.add_argument(
-        "--project",
-        default="",
-        metavar="PROJ_ID",
-        help="Narrow the cross-mode evidence to one project; the engineer's own review history stays unscoped",
-    )
-    review_p.add_argument(
-        "--context",
-        default=None,
-        type=_context_spec,
-        metavar="SPEC",
-        help="Which cross-mode sources to read ('all', 'none', or a csv); a switched-off source says so",
-    )
-    review_p.add_argument("--incognito", action="store_true", help="Same as --context none")
     review_p.add_argument("--jira-project", default="", metavar="KEY", help="Jira project key override")
     review_p.add_argument("--azdo-project", default="", metavar="NAME", help="Azure DevOps project override")
     review_p.add_argument(
@@ -1001,22 +878,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_run_p.add_argument("--session", default="", metavar="ID", help="Session to scope by (default: newest)")
     review_run_p.add_argument(
-        "--project",
-        default="",
-        metavar="PROJ_ID",
-        help="Project id (proj-<8hex>) to scope the standup and plan reads to (default: the session's link)",
-    )
-    review_run_p.add_argument(
-        "--context",
-        default=None,
-        metavar="SPEC",
-        type=_context_spec,
-        help="Context sources for this run: 'all', 'none', or a comma-separated subset of "
-        "retro,standup,plan,performance,analysis — standup and plan gate the reads here "
-        "(default: inherit the project setting)",
-    )
-    review_run_p.add_argument("--incognito", action="store_true", help="Read no cross-mode context at all")
-    review_run_p.add_argument(
         "--week-end",
         dest="week_end",
         default="",
@@ -1034,7 +895,6 @@ def build_parser() -> argparse.ArgumentParser:
     review_run_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
     review_hist_p = review_sub.add_parser("history", help="List past weekly reviews and last week's open actions")
     review_hist_p.add_argument("--session", default="", metavar="ID", help="Session to scope by (default: all)")
-    review_hist_p.add_argument("--project", default="", metavar="PROJ_ID", help="Project id to scope by")
     review_hist_p.add_argument("--limit", type=int, default=12, help="Number of past reviews to show (default 12)")
     review_hist_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     review_exp_p = review_sub.add_parser("export", help="Export one weekly review to Markdown")
@@ -2186,7 +2046,6 @@ def _run_subcommand(args: argparse.Namespace) -> int:
         "standup": _cmd_standup,
         "standup-review": _cmd_standup_review,
         "perf": _cmd_perf,
-        "project": _cmd_project,
         "retro": _cmd_retro,
         "poker": _cmd_poker,
         "review": _cmd_review,
@@ -2274,8 +2133,6 @@ def _cmd_report(args: argparse.Namespace, console: Console) -> int:
         session_id=_resolve_cli_session(args.session) or "",
         jira_project=args.jira_project,
         azdo_project=args.azdo_project,
-        project_id=args.project,
-        context_deps=_cli_context_deps(args),
         window_start=args.window_start,
         window_end=args.window_end,
         sprint_names=sprint_names,
@@ -2347,8 +2204,6 @@ def _cmd_standup_inner(args: argparse.Namespace, console: Console) -> int:
         return 0
     report = run_standup(
         session_id,
-        project_id=args.project,
-        context_deps=_cli_context_deps(args),
         deliver=args.deliver,
         days=args.days or None,
         channels=args.channels,
@@ -2557,90 +2412,6 @@ def _cmd_standup_review_inner(args: argparse.Namespace, console: Console) -> int
     return _strict_exit(args.strict, warnings)
 
 
-def _cmd_project(args: argparse.Namespace, console: Console) -> int:
-    logging.getLogger(__name__).info("project %s", args.project_command)
-
-    if args.project_command == "create":
-        from yeaboi.projects.engine import create_project
-
-        project = create_project(args.name, args.description)
-        console.print(f"Created [bold]{project['name']}[/bold] — {project['project_id']}")
-        return 0
-
-    if args.project_command == "list":
-        from yeaboi.projects.engine import list_projects
-
-        rows = list_projects(args.include_archived)
-        if not rows:
-            console.print("[yellow]No projects yet — `yeaboi project create <name>`.[/yellow]")
-            return 0
-        for project in rows:
-            suffix = " [dim](archived)[/dim]" if project["archived"] else ""
-            if project.get("status") == "done":
-                suffix = " [green]done[/green]" + suffix
-            console.print(
-                f"  {project['project_id']}  [bold]{project['name']}[/bold]"
-                f"  {project['session_count']} session(s){suffix}"
-            )
-        return 0
-
-    if args.project_command == "show":
-        from yeaboi.projects.engine import get_project
-
-        project = get_project(args.project_id)
-        console.print(f"[bold]{project['name']}[/bold] — {project['project_id']}")
-        if project["description"]:
-            console.print(project["description"])
-        console.print(f"Settings: {project['settings'] or '—'}")
-        console.print(f"Sessions: {', '.join(project['session_ids']) or '—'}")
-        return 0
-
-    if args.project_command == "set-status":
-        from yeaboi.projects.engine import set_project_status
-
-        project = set_project_status(args.project_id, args.status)
-        word = "done" if project["status"] == "done" else "in progress"
-        console.print(f"[bold]{project['name']}[/bold] is {word}.")
-        return 0
-
-    if args.project_command == "draft":
-        from yeaboi.projects.engine import draft_project_idea
-
-        result = draft_project_idea(args.description)
-        console.print(f"[bold]{result['name']}[/bold]")
-        console.print(result["description"])
-        console.print(f"[dim]{result['note']}[/dim]")
-        return 0
-
-    if args.project_command == "link":
-        from yeaboi.projects.engine import link_session
-
-        linked = link_session(args.project_id, _resolve_cli_session(args.session) or "")
-        console.print(f"Linked {linked['session_id']} → {linked['project_id']}")
-        return 0
-
-    # set-defaults
-    from yeaboi.projects.engine import set_project_defaults
-
-    defaults: dict = {}
-    if args.analysis_profile:
-        defaults["default_analysis_profile_id"] = args.analysis_profile
-    if args.context is not None:
-        defaults["default_context_deps"] = args.context
-    if args.repo:
-        from pathlib import Path
-
-        defaults["repo_path"] = str(Path(args.repo).expanduser().resolve())
-    if not defaults:
-        # Nothing to merge — say so rather than printing a success line for a
-        # call that changed nothing.
-        console.print("[yellow]Nothing to set — pass --analysis-profile, --context and/or --repo.[/yellow]")
-        return 2
-    result = set_project_defaults(args.project_id, defaults)
-    console.print(f"Defaults for {args.project_id}: {result['settings'] or '—'}")
-    return 0
-
-
 def _cmd_perf(args: argparse.Namespace, console: Console) -> int:
     logging.getLogger(__name__).info("perf %s (beta)", args.perf_command)
     # One call site ahead of the branch covers all five subcommands.
@@ -2666,8 +2437,6 @@ def _cmd_perf(args: argparse.Namespace, console: Console) -> int:
             jira_project=args.jira_project,
             azdo_project=args.azdo_project,
             deep_scan=args.deep_scan,
-            project_id=args.project,
-            context_deps=_cli_context_deps(args),
         )
         for warning in prep.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
@@ -2711,8 +2480,6 @@ def _cmd_perf(args: argparse.Namespace, console: Console) -> int:
             azdo_project=args.azdo_project,
             period_months=args.months,
             deep_scan=args.deep_scan,
-            project_id=args.project,
-            context_deps=_cli_context_deps(args),
         )
         for warning in review.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
@@ -4094,8 +3861,6 @@ def _cmd_review_run(args: argparse.Namespace, console: Console) -> int:
     console.print("[bold cyan]Reviewing your week...[/bold cyan]")
     review = run_weekly_review(
         session_id=_resolve_cli_session(args.session) or "",
-        project_id=args.project,
-        context_deps=_cli_context_deps(args),
         week_end=args.week_end,
         carried_statuses=marks or None,
     )
@@ -4115,16 +3880,13 @@ def _cmd_review_history(args: argparse.Namespace, console: Console) -> int:
     import json
 
     from yeaboi.paths import get_db_path
-    from yeaboi.projects.scope import resolve_scope
     from yeaboi.solo.engine import carried_actions
     from yeaboi.solo.store import WeeklyReviewStore
 
     path = get_db_path()
-    scope = resolve_scope(args.project, args.session, db_path=path)
-    session_ids = scope.session_ids if scope is not None else None
     with WeeklyReviewStore(path) as store:
-        history = store.get_all_history(limit=args.limit, session_ids=session_ids)
-    carried = carried_actions(scope, db_path=path)
+        history = store.get_all_history(limit=args.limit)
+    carried = carried_actions(db_path=path)
     if args.format == "json":
         print(
             json.dumps(

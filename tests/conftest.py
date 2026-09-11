@@ -102,6 +102,20 @@ class RealBrowserBlocked(BaseException):
 
 
 @pytest.fixture(autouse=True)
+def _reset_solo_mode():
+    """Clear the process-local Solo/Team world flag between tests.
+
+    ``yeaboi.config`` holds it in a module global, so a test that enters the
+    Solo world leaks it into every test that runs after it in the same worker.
+    """
+    from yeaboi import config
+
+    config.set_solo_mode(False)
+    yield
+    config.set_solo_mode(False)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_browser(monkeypatch):
     """No test may open a real browser tab.
 

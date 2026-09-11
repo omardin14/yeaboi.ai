@@ -53,29 +53,20 @@ class TestToday:
         assert request(app, "GET", "/api/solo/today", authed=False).code == 401
 
     def test_serves_the_snapshot_fields_verbatim(self, app, monkeypatch):
-        seen = {}
-
-        def fake(*, project_id=""):
-            seen["project_id"] = project_id
+        def fake():
             return TodaySnapshot(standup_date="2026-09-01", next_story_id="S-1", spend_usd=1.5, warnings=("x",))
 
         monkeypatch.setattr("yeaboi.solo.today.build_today_snapshot", fake)
-        resp = request(app, "GET", "/api/solo/today?project_id=proj-12345678")
+        resp = request(app, "GET", "/api/solo/today")
         payload = json.loads(resp.body)
         assert resp.code == 200
-        assert seen == {"project_id": "proj-12345678"}
         assert set(payload) == {f.name for f in fields(TodaySnapshot)}
         assert payload["standup_date"] == "2026-09-01" and payload["next_story_id"] == "S-1"
         assert payload["spend_usd"] == 1.5 and payload["warnings"] == ["x"]
 
-    def test_defaults_to_the_unscoped_snapshot(self, app, monkeypatch):
-        seen = {}
-        monkeypatch.setattr(
-            "yeaboi.solo.today.build_today_snapshot",
-            lambda *, project_id="": seen.setdefault("project_id", project_id) or TodaySnapshot(),
-        )
+    def test_an_empty_snapshot_is_the_honest_answer(self, app, monkeypatch):
+        monkeypatch.setattr("yeaboi.solo.today.build_today_snapshot", TodaySnapshot)
         payload = json.loads(request(app, "GET", "/api/solo/today").body)
-        assert seen == {"project_id": ""}
         assert payload["standup_date"] == "" and payload["warnings"] == []
 
     def test_route_is_chrome_not_a_capability(self):
@@ -115,7 +106,6 @@ class TestReviewPage:
         assert set(payload["history"][0]) == {
             "id",
             "session_id",
-            "project_id",
             "run_at",
             "week_label",
             "week_start",
@@ -186,7 +176,7 @@ class TestReviewRun:
             from yeaboi.analysis.progress import send_component_progress
 
             seen.update(kwargs)
-            for phase in ("scope", "standups"):
+            for phase in ("standups", "plan"):
                 send_component_progress(on_progress, component_id=phase, label=phase, status="running")
                 send_component_progress(on_progress, component_id=phase, label=phase, status="running", detail="x")
                 send_component_progress(on_progress, component_id=phase, label=phase, status="completed")
@@ -203,8 +193,6 @@ class TestReviewRun:
             "/api/solo/review/run",
             body={
                 "session_id": "sid",
-                "project_id": "proj-12345678",
-                "context_deps": ["standup"],
                 "week_end": "2026-08-28",
                 "carried_statuses": {"a1b2c3d4e5f6": "done"},
             },
@@ -212,11 +200,10 @@ class TestReviewRun:
         assert resp.code == 200
         lines = _ndjson(resp)
         assert [line["type"] for line in lines] == ["op", "progress", "progress", "done"]
-        assert lines[1]["phase"] == "scope" and lines[2]["phase"] == "standups"
+        assert lines[1]["phase"] == "standups" and lines[2]["phase"] == "plan"
         assert lines[-1]["run_id"] == seen["run_id"]
         assert lines[-1]["review"]["week_label"] == "2026-W35"
-        assert seen["session_id"] == "sid" and seen["project_id"] == "proj-12345678"
-        assert seen["context_deps"] == ["standup"] and seen["week_end"] == "2026-08-28"
+        assert seen["session_id"] == "sid" and seen["week_end"] == "2026-08-28"
         assert seen["carried_statuses"] == {"a1b2c3d4e5f6": "done"}
 
     def test_a_malformed_week_end_is_400(self, app, db, monkeypatch):
@@ -234,13 +221,7 @@ class TestReviewRun:
         )
         lines = _ndjson(request(app, "POST", "/api/solo/review/run", body={}))
         assert lines[-1]["type"] == "done" and lines[-1]["run_id"] == 0  # nothing stored by the fake
-        assert seen == {
-            "session_id": "",
-            "project_id": "",
-            "context_deps": None,
-            "week_end": "",
-            "carried_statuses": None,
-        }
+        assert seen == {"session_id": "", "week_end": "", "carried_statuses": None}
 
     def test_an_engine_failure_is_an_error_line(self, app, db, monkeypatch):
         def boom(*, on_progress=None, **kw):
@@ -251,6 +232,6 @@ class TestReviewRun:
         assert [line["type"] for line in lines] == ["op", "error"]
         assert lines[-1]["message"]
 
-    @pytest.mark.parametrize("body", [{"context_deps": "standup"}, {"carried_statuses": ["a=done"]}])
-    def test_malformed_scope_fields_are_400(self, app, db, body):
+    def test_malformed_carried_statuses_are_400(self, app, db):
+        body = {"carried_statuses": ["a=done"]}
         assert request(app, "POST", "/api/solo/review/run", body=body).code == 400

@@ -3913,9 +3913,8 @@ class TestGapModeSkipDefaults:
         assert 6 not in _find_essential_gaps(qs, SMART_ESSENTIALS)
 
 
-class TestAnalysisToggleInIntake:
-    """The analysis context toggle beats a seeded profile id: with analysis off,
-    intake never reads the profile and the prior-art stash stays disabled."""
+class TestAnalysisProfileInIntake:
+    """A seeded analysis profile id is read once and stashed for prior art."""
 
     @pytest.fixture(autouse=True)
     def _hermetic(self, monkeypatch):
@@ -3937,18 +3936,7 @@ class TestAnalysisToggleInIntake:
         result = project_intake(state)
         return result["questionnaire"], loads
 
-    def test_analysis_off_drops_the_profile_and_never_loads_it(self, monkeypatch):
-        qs, loads = self._run(monkeypatch, {"context_deps": '["retro"]'})
-        assert loads == []
-        assert qs._analysis_profile_id == ""
-        assert qs._analysis_enabled is False
-
-    def test_incognito_behaves_the_same(self, monkeypatch):
-        qs, loads = self._run(monkeypatch, {"context_deps": "[]"})
-        assert loads == []
-        assert qs._analysis_profile_id == "" and qs._analysis_enabled is False
-
-    def test_without_toggles_the_profile_still_seeds_intake(self, monkeypatch):
+    def test_the_profile_seeds_intake(self, monkeypatch):
         qs, loads = self._run(monkeypatch, {})
         assert loads == ["jira-DEMO-1"]  # the Q6/Q8/Q9 auto-fill read
         assert qs._analysis_profile_id == "jira-DEMO-1"
@@ -3969,6 +3957,7 @@ class TestSoloIntake:
         state = {
             "messages": [HumanMessage(content="Building a todo app")],
             "_intake_mode": "smart",
+            "analysis_profile_id": "team-apollo",
             **({"solo": True} if solo else {}),
             **state_extra,
         }
@@ -3982,7 +3971,6 @@ class TestSoloIntake:
         examples = {
             "contributor_stats": [{"name": n, "per_sprint": 15.0, "top_discipline": "backend"} for n in contributors]
         }
-        monkeypatch.setattr("yeaboi.agent.nodes._effective_analysis_profile_id", lambda state: "team-apollo")
         monkeypatch.setattr("yeaboi.agent.nodes._load_profile_by_id", lambda pid: (profile, examples))
 
     def test_team_questions_are_defaulted_not_asked(self, monkeypatch):

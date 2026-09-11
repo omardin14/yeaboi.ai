@@ -113,7 +113,6 @@ class TestSessionsWire:
             "title",
             "created_at",
             "last_modified",
-            "project_id",
         ]
 
     def test_mode_vocabulary_is_pinned(self):
@@ -121,10 +120,9 @@ class TestSessionsWire:
 
         assert MODES == ("planning", "analysis", "standup", "retro", "reporting", "ship", "review")
 
-    def test_doc_names_the_id_space(self):
+    def test_doc_has_the_section(self):
         text = CONTRACT.read_text(encoding="utf-8")
-        assert "## Projects and sessions" in text
-        assert "proj-<8hex>" in text
+        assert "## Sessions and references" in text
 
 
 class TestReferencesWire:
@@ -133,7 +131,7 @@ class TestReferencesWire:
     def test_item_keys_are_pinned(self):
         from dataclasses import fields
 
-        from yeaboi.projects.references import Reference, ReferenceSheet
+        from yeaboi.references import Reference, ReferenceSheet
 
         assert [f.name for f in fields(Reference)] == ["id", "subject", "label", "detail", "url"]
         assert [f.name for f in fields(ReferenceSheet)] == ["source", "source_label", "items", "warning"]

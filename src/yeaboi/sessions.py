@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
 #   stored < current → run migrations, UPDATE to current
 #   stored == current → schema_mismatch=False
 # See docs: "Memory & State" — session persistence
-CURRENT_SCHEMA_VERSION = 33  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review, v33=project status  # noqa: E501
+CURRENT_SCHEMA_VERSION = 34  # v1=8A, v2=8B, v3=team_profiles, v4=session_mode, v5=token_usage, v6=standup, v7=retro, v8=performance, v9=reporting, v10=roadmap, v11=roadmap list, v12=token usage perf, v13=analysis ticket cache, v14=standup roster, v15=standup code scope, v16=standup documentation scope, v17=standup Azure project scope, v18=poker, v19=analysis enrichment cache, v20=analysis feature selection, v21=artifact edits, v22=standup transcript review, v23=standup practices, v24=standup practice AI matching, v25=standup practice feedback, v26=edit-provenance collision repair, v27=agentwatch, v28=standup GitHub owner scope, v29=standup GitHub repo exclusions, v30=planning prior-art feedback, v31=projects, v32=weekly review, v33=project status, v34=projects removed  # noqa: E501
 
 _SCHEMA_INFO = """\
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -178,8 +178,6 @@ _SCALAR_KEYS = {
     "_intake_mode",
     "output_format",
     "context_sources",
-    "project_id",
-    "context_deps",
     "solo",
     "_chat_greeting_done",
     "_chat_preamble",
@@ -893,22 +891,8 @@ class SessionStore:
             self._conn.execute(PRIOR_ART_FEEDBACK_SCHEMA)
             logger.info("Migration v30: created planning_prior_art_feedback table")
 
-        if from_version < 31:
-            # v31: first-class projects — the identity that links sessions
-            # across modes. Table schema lives in projects/store.py (also
-            # created on that store's open, for callers that never construct a
-            # SessionStore); the column links sessions to it, '' = unscoped.
-            from yeaboi.projects.store import PROJECTS_SCHEMA
-
-            self._conn.executescript(PROJECTS_SCHEMA)
-            added = True
-            try:
-                self._conn.execute("ALTER TABLE sessions_meta ADD COLUMN project_id TEXT NOT NULL DEFAULT ''")
-            except sqlite3.OperationalError:
-                added = False
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_meta_project ON sessions_meta(project_id)")
-            if added:
-                logger.info("Migration v31: created projects table and sessions_meta.project_id")
+        # v31 (projects) and v33 (project status) are no-ops: v34 drops what
+        # they created. A database that never saw them simply never has it.
 
         if from_version < 32:
             # v32: the Solo world's weekly reviews. Schema lives in solo/store.py
@@ -918,14 +902,20 @@ class SessionStore:
             self._conn.executescript(_WEEKLY_REVIEW_SCHEMA)
             logger.info("Migration v32: created weekly_review_history table")
 
-        if from_version < 33:
-            # v33: the owner's verdict on a project (active | done). A fresh
-            # database already has the column from PROJECTS_SCHEMA above.
+        if from_version < 34:
+            # v34: projects removed — one kind of thing, and it is a session.
+            # The index goes first: SQLite refuses DROP COLUMN on an indexed
+            # column, so leaving it would make the ALTER below always raise.
+            self._conn.execute("DROP INDEX IF EXISTS idx_sessions_meta_project")
+            self._conn.execute("DROP TABLE IF EXISTS projects")
             try:
-                self._conn.execute("ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
-                logger.info("Migration v33: added projects.status")
+                self._conn.execute("ALTER TABLE sessions_meta DROP COLUMN project_id")
+                logger.info("Migration v34: dropped the projects table and sessions_meta.project_id")
             except sqlite3.OperationalError:
-                pass
+                # DROP COLUMN needs SQLite >= 3.35. An older one keeps the
+                # column, which is inert: _SCHEMA never declares it and every
+                # INSERT names its columns.
+                logger.info("Migration v34: dropped the projects table; project_id left in place (SQLite < 3.35)")
 
     def _apply_edit_provenance(self) -> None:
         """The v21 migration body — idempotent, so v26 re-runs it verbatim.
@@ -1077,28 +1067,16 @@ class SessionStore:
         project_name: str = "",
         *,
         mode: str = "planning",
-        project_id: str = "",
     ) -> None:
-        """Insert a new session row. Silently ignores duplicate session IDs.
-
-        ``project_id`` links the session to a ``projects`` row; '' = unscoped.
-        """
-        logger.info("Creating session: %s (mode=%s, project=%s)", session_id, mode, project_id or "-")
+        """Insert a new session row. Silently ignores duplicate session IDs."""
+        logger.info("Creating session: %s (mode=%s)", session_id, mode)
         now = self._now()
         self._conn.execute(
             """INSERT OR IGNORE INTO sessions_meta
                (session_id, project_name, created_at, last_modified,
-                last_node_completed, session_state, session_mode, project_id)
-               VALUES (?, ?, ?, ?, '', '', ?, ?)""",
-            (session_id, project_name, now, now, mode, project_id),
-        )
-
-    def set_session_project(self, session_id: str, project_id: str) -> None:
-        """Link (or unlink, with '') a session to a project."""
-        logger.info("Linking session %s to project %s", session_id, project_id or "-")
-        self._conn.execute(
-            "UPDATE sessions_meta SET project_id = ?, last_modified = ? WHERE session_id = ?",
-            (project_id, self._now(), session_id),
+                last_node_completed, session_state, session_mode)
+               VALUES (?, ?, ?, ?, '', '', ?)""",
+            (session_id, project_name, now, now, mode),
         )
 
     def update_project_name(self, session_id: str, project_name: str) -> None:
@@ -1163,30 +1141,26 @@ class SessionStore:
         )
         return dict(zip(keys, row))
 
-    def list_sessions(self, *, project_id: str = "", mode: str = "", limit: int = 0) -> list[dict]:
+    def list_sessions(self, *, mode: str = "", limit: int = 0) -> list[dict]:
         """Return sessions ordered by last_modified descending.
 
         Used by the interactive session picker (--resume), --list-sessions and
-        the cross-mode recent list. ``project_id`` and ``mode`` narrow the rows
-        (blank = all); ``limit`` caps them (0 = every row). Each row carries
-        ``session_mode`` and ``project_id`` beside the legacy keys.
+        the cross-mode recent list. ``mode`` narrows the rows (blank = all);
+        ``limit`` caps them (0 = every row). Each row carries ``session_mode``
+        beside the legacy keys.
         """
-        logger.debug("Listing sessions (project=%s mode=%s limit=%d)", project_id or "-", mode or "-", limit)
-        clauses: list[str] = []
+        logger.debug("Listing sessions (mode=%s limit=%d)", mode or "-", limit)
         params: list[object] = []
-        if project_id:
-            clauses.append("project_id = ?")
-            params.append(project_id)
+        where = ""
         if mode:
-            clauses.append("session_mode = ?")
+            where = " WHERE session_mode = ?"
             params.append(mode)
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         tail = " LIMIT ?" if limit > 0 else ""
         if limit > 0:
             params.append(limit)
         rows = self._conn.execute(
             "SELECT session_id, project_name, created_at, last_modified, "  # noqa: S608 — placeholders, not values
-            "last_node_completed, session_state, session_mode, project_id "
+            "last_node_completed, session_state, session_mode "
             f"FROM sessions_meta{where} ORDER BY last_modified DESC{tail}",
             params,
         ).fetchall()
@@ -1198,7 +1172,6 @@ class SessionStore:
             "last_node_completed",
             "session_state_raw",
             "session_mode",
-            "project_id",
         )
         result = [dict(zip(keys, row)) for row in rows]
         logger.debug("Found %d session(s)", len(result))
@@ -1242,38 +1215,6 @@ class SessionStore:
         except Exception:
             logger.error("Failed to deserialize state for session %s", session_id)
             return None
-
-    def session_project_id(self, session_id: str) -> str:
-        """The project a session is linked to, '' if unscoped or unknown."""
-        row = self._conn.execute(
-            "SELECT project_id FROM sessions_meta WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        return row[0] if row else ""
-
-    def session_project_ids(self) -> dict[str, str]:
-        """Every session's project id ('' = unscoped) — ids only, never the state blob."""
-        rows = self._conn.execute("SELECT session_id, project_id FROM sessions_meta").fetchall()
-        return {row[0]: row[1] for row in rows}
-
-    def session_ids_for_project(self, project_id: str, *, mode: str = "") -> list[str]:
-        """Session ids linked to a project, newest first, optionally one mode.
-
-        Ids only, never the state blob — the same reasoning as
-        ``recent_session_ids``; scope resolution must stay cheap.
-        """
-        if mode:
-            rows = self._conn.execute(
-                "SELECT session_id FROM sessions_meta WHERE project_id = ? AND session_mode = ? "
-                "ORDER BY last_modified DESC",
-                (project_id, mode),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT session_id FROM sessions_meta WHERE project_id = ? ORDER BY last_modified DESC",
-                (project_id,),
-            ).fetchall()
-        return [r[0] for r in rows]
 
     def get_latest_session_id(self) -> str | None:
         """Return the session_id of the most recently modified session, or None."""
@@ -1329,10 +1270,8 @@ class SessionStore:
             return 0
         # SQLite datetime('now', '-N days') computes a UTC cutoff timestamp.
         # last_modified is stored as ISO-8601 UTC so string comparison works.
-        # Project-linked sessions are exempt: a project's old planning session
-        # is what its standups and retros resolve against.
         cursor = self._conn.execute(
-            "DELETE FROM sessions_meta WHERE last_modified < datetime('now', ?) AND project_id = ''",
+            "DELETE FROM sessions_meta WHERE last_modified < datetime('now', ?)",
             (f"-{max_age_days} days",),
         )
         if cursor.rowcount > 0:

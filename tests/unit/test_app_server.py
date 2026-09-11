@@ -68,7 +68,7 @@ class TestMetaRoutes:
         keys = {tip["key"] for tip in payload["tips"]}
         assert "planning" in keys and "voice" in keys
         assert "meta:headless" not in keys and "music" not in keys
-        assert "desktop:projects" in keys
+        assert "desktop:board" in keys
         assert not [t for t in payload["tips"] if "--" in t["text"] or "press " in t["text"]]
         # Pin the shape: a field added to FeatureTip lands on the wire for free,
         # so the contract doc only stays true if something notices.

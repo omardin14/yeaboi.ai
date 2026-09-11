@@ -7,9 +7,9 @@
       "title": "Home"
     },
     {
-      "path": "/sessions",
+      "path": "/runs",
       "capability": "sessions",
-      "title": "Sessions"
+      "title": "Runs"
     },
     {
       "path": "/whats-new",
@@ -157,16 +157,6 @@
       "title": "Agent Security"
     },
     {
-      "path": "/agents/projects",
-      "capability": "projects",
-      "title": "Agent projects"
-    },
-    {
-      "path": "/agents/projects/:id",
-      "capability": "projects",
-      "title": "Agent project"
-    },
-    {
       "path": "/ceremonies",
       "capability": "ceremonies",
       "title": "Ceremonies"
@@ -237,47 +227,47 @@
       "title": "Correct a shared artifact"
     },
     {
-      "path": "/projects",
-      "capability": "projects",
-      "title": "Projects"
+      "path": "/sessions",
+      "capability": "planning",
+      "title": "Sessions"
     },
     {
-      "path": "/projects/:id",
-      "capability": "projects",
-      "title": "Project"
+      "path": "/sessions/:id",
+      "capability": "planning",
+      "title": "Session"
     },
     {
-      "path": "/projects/:id/board-settings",
+      "path": "/sessions/:id/board-settings",
       "capability": null,
       "title": "Board settings"
     },
     {
-      "path": "/projects/:id/blueprint",
+      "path": "/sessions/:id/blueprint",
       "capability": "planning",
       "title": "Blueprint"
     },
     {
-      "path": "/projects/:id/plan",
+      "path": "/sessions/:id/plan",
       "capability": "planning",
-      "title": "Project · Plan"
+      "title": "Session · Plan"
     },
     {
-      "path": "/projects/new/from-roadmap",
+      "path": "/sessions/new/from-roadmap",
       "capability": "roadmap",
-      "title": "New project · From roadmap"
+      "title": "New session · From roadmap"
     },
     {
-      "path": "/projects/:id/sessions/new",
+      "path": "/sessions/:id/new",
       "capability": null,
-      "title": "New session"
+      "title": "New conversation"
     },
     {
-      "path": "/projects/:id/sessions/:sessionId",
+      "path": "/sessions/:id/room",
       "capability": null,
-      "title": "Session"
+      "title": "Session · Room"
     },
     {
-      "path": "/projects/:id/sessions/:sessionId/completed",
+      "path": "/sessions/:id/completed",
       "capability": null,
       "title": "Session recap"
     },

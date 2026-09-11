@@ -50,18 +50,15 @@ def modes(app, request: Request) -> Response:
 
 
 def latest(app, request: Request) -> Response:
-    """``GET /api/agents/{kind}/latest?project_id=`` — the last saved report, for an instant open.
+    """``GET /api/agents/{kind}/latest`` — the last saved report, for an instant open.
 
     ``report`` is ``null`` when nothing has been stored yet, which is the
-    first-run loading state rather than an error. Saved reports carry no
-    project, so a scoped read (``project_id`` resolving to a ``repo_path``)
-    answers ``null`` with ``scoped_to`` set and the surface runs fresh.
+    first-run loading state rather than an error.
     """
     from yeaboi.agentwatch import setup
 
     mode = _mode(request)
-    scoped_to = _repo_path(str(request.query.get("project_id", "")).strip()) if mode.scoped else ""
-    loaded = None if scoped_to else setup.latest_artifact(mode.kind)
+    loaded = setup.latest_artifact(mode.kind)
     include_info = str(request.query.get("include_info", "")).lower() in ("1", "true", "yes")
     if loaded and mode.kind == "security" and include_info and getattr(loaded[0], "hidden_info_count", 0):
         # The saved report folded its informational rows; re-derive with them
@@ -78,17 +75,14 @@ def latest(app, request: Request) -> Response:
             # The surface re-runs only when this is false — the same rule the
             # terminal follows, decided once here so the two cannot drift.
             "fresh": bool(loaded and setup.is_fresh(loaded[1])),
-            "scoped_to": scoped_to,
         }
     )
 
 
 def run(app, request: Request) -> Response:
-    """``POST /api/agents/{kind}/run`` ``{project_id?, window_days?, include_info?}`` — one fresh pass, as NDJSON."""
+    """``POST /api/agents/{kind}/run`` ``{window_days?, include_info?}`` — one fresh pass, as NDJSON."""
     mode = _mode(request)
     body = request.json()
-    project_id = str(body.get("project_id", "")).strip()
-    scoped_to = _repo_path(project_id) if mode.scoped else ""
     options: dict = {}
     if "window_days" in body:
         try:
@@ -97,10 +91,10 @@ def run(app, request: Request) -> Response:
             raise HTTPError(400, "window_days must be an integer between 1 and 365") from exc
     if "include_info" in body:
         options["include_info"] = bool(body["include_info"])
-    logger.info("Agents run start: %s (repo=%s options=%s)", mode.key, scoped_to or "-", options or "-")
+    logger.info("Agents run start: %s (options=%s)", mode.key, options or "-")
     return Response(
         content_type="application/x-ndjson",
-        stream=_lines(_run(mode, scoped_to, options)),
+        stream=_lines(_run(mode, options)),
         headers=(("X-Accel-Buffering", "no"),),
     )
 
@@ -340,32 +334,7 @@ def _mode(request: Request):
     return mode
 
 
-def _repo_path(project_id: str) -> str:
-    """The ``repo_path`` a project scopes to; "" for no project.
-
-    An unknown project is a 404; a project with no ``repo_path`` yet is a 400
-    naming the command that sets one — a silently machine-wide report under a
-    project's name would be the worse answer.
-    """
-    if not project_id:
-        return ""
-    from yeaboi.paths import get_db_path
-    from yeaboi.projects.store import ProjectStore
-
-    with ProjectStore(get_db_path()) as store:
-        project = store.get(project_id)
-    if project is None:
-        raise HTTPError(404, f"unknown project {project_id!r}")
-    repo_path = str(project["settings"].get("repo_path") or "").strip()
-    if not repo_path:
-        raise HTTPError(
-            400,
-            f"project {project_id!r} has no repo_path yet — yeaboi project set-defaults {project_id} --repo <path>",
-        )
-    return repo_path
-
-
-def _run(mode, project_path: str = "", options: dict | None = None) -> Iterator[dict]:
+def _run(mode, options: dict | None = None) -> Iterator[dict]:
     from yeaboi.agentwatch import setup
     from yeaboi.mcp.runtime import _ENGINE_LOCK
 
@@ -377,7 +346,7 @@ def _run(mode, project_path: str = "", options: dict | None = None) -> Iterator[
         try:
             # Engines are one-at-a-time process-wide. Never fork this lock.
             with _ENGINE_LOCK:
-                result_box[0] = setup.run(mode, progress.put, project_path=project_path, options=options)
+                result_box[0] = setup.run(mode, progress.put, options=options)
         except BaseException as exc:  # noqa: BLE001 — reported on the stream below
             result_box[1] = exc
         finally:
@@ -399,7 +368,7 @@ def _run(mode, project_path: str = "", options: dict | None = None) -> Iterator[
         logger.error("Agents run failed: %s", result_box[1])
         yield {"type": "error", "message": f"The {mode.label} pass stopped unexpectedly — see logs."}
         return
-    yield {"type": "done", "kind": mode.kind, "report": to_jsonable(result_box[0]), "scoped_to": project_path}
+    yield {"type": "done", "kind": mode.kind, "report": to_jsonable(result_box[0])}
 
 
 def _progress_line(event: object) -> dict:

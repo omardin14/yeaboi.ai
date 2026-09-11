@@ -449,7 +449,7 @@ def _build_team_analysis_screen(
         examples=examples,
         analysis_features=analysis_features,
     )
-    from yeaboi.projects.active import is_solo_mode
+    from yeaboi.config import is_solo_mode
 
     # The results loop reads the same rule (its selection index and this
     # rendered order share visible_card_order), so the two cannot drift.

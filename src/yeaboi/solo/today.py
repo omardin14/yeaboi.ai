@@ -32,7 +32,6 @@ class TodaySnapshot:
     """What the Solo welcome says about today. Every field defaulted: an empty
     snapshot is the honest answer for a fresh install."""
 
-    project_id: str = ""
     project_name: str = ""
     # The latest standup: "" when there is none yet.
     standup_date: str = ""
@@ -49,7 +48,6 @@ class TodaySnapshot:
     next_story_title: str = ""
     next_sprint_name: str = ""
     plan_session_id: str = ""
-    plan_scoped: bool = False  # True when the plan came from the active project
     # Agent spend since Monday, from the last agentwatch ingest.
     spend_usd: float = 0.0
     spend_sessions: int = 0
@@ -91,14 +89,10 @@ def sprint_story_ids(sprint) -> list[str]:
     return [str(sid) for sid in (_attr(sprint, "story_ids", ()) or ())]
 
 
-def build_today_snapshot(
-    *, project_id: str = "", db_path: Path | None = None, today: date | None = None
-) -> TodaySnapshot:
+def build_today_snapshot(*, db_path: Path | None = None, today: date | None = None) -> TodaySnapshot:
     """Assemble the snapshot from the standup, planning and agentwatch stores.
 
-    ``project_id`` narrows the standup and plan reads to that project (the
-    welcome passes the active one); '' reads the newest of everything.
-    Never raises.
+    Reads the newest of everything. Never raises.
     """
     from yeaboi.paths import get_db_path
 
@@ -108,12 +102,10 @@ def build_today_snapshot(
         logger.info("today snapshot: no sessions db at %s — empty snapshot", path)
         return TodaySnapshot()
 
-    fields: dict = {"project_id": project_id}
+    fields: dict = {}
     warnings: list[str] = []
-    scope = _resolve(project_id, path, warnings)
-    fields.update(_project_name(project_id, path, warnings))
-    fields.update(_standup_fields(scope, path, warnings))
-    fields.update(_plan_fields(scope, path, today, warnings))
+    fields.update(_standup_fields(path, warnings))
+    fields.update(_plan_fields(path, today, warnings))
     fields.update(_spend_fields(path, today, warnings))
     snapshot = TodaySnapshot(**fields, warnings=tuple(warnings))
     logger.info(
@@ -129,40 +121,13 @@ def build_today_snapshot(
     return snapshot
 
 
-def _resolve(project_id: str, path: Path, warnings: list[str]):
-    try:
-        from yeaboi.projects.scope import resolve_scope
-
-        return resolve_scope(project_id, db_path=path)
-    except Exception as e:  # noqa: BLE001 — the strip must never take the welcome down
-        logger.warning("today snapshot: scope resolution failed: %s", e)
-        warnings.append("could not resolve the active project")
-        return None
-
-
-def _project_name(project_id: str, path: Path, warnings: list[str]) -> dict:
-    if not project_id:
-        return {}
-    try:
-        from yeaboi.projects.store import ProjectStore
-
-        with ProjectStore(path) as store:
-            row = store.get(project_id)
-        return {"project_name": str((row or {}).get("name") or "")}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("today snapshot: project lookup failed: %s", e)
-        warnings.append("could not read the project")
-        return {}
-
-
-def _standup_fields(scope, path: Path, warnings: list[str]) -> dict:
+def _standup_fields(path: Path, warnings: list[str]) -> dict:
     try:
         from yeaboi.standup.insights import yesterday_context
         from yeaboi.standup.store import StandupStore
 
-        session_ids = scope.session_ids if scope is not None else None
         with StandupStore(path) as store:
-            rows = store.get_all_history(limit=10, session_ids=session_ids)
+            rows = store.get_all_history(limit=10)
             row = next((r for r in rows if r.get("status") in REVIEWABLE_STANDUP_STATUSES), None)
             report = store.get_run_by_id(int(row["id"])) if row else None
         if report is None:
@@ -188,39 +153,29 @@ def _standup_fields(scope, path: Path, warnings: list[str]) -> dict:
         return {}
 
 
-def _plan_fields(scope, path: Path, today: date, warnings: list[str]) -> dict:
+def _plan_fields(path: Path, today: date, warnings: list[str]) -> dict:
     try:
-        from yeaboi.projects.scope import latest_planning_state
         from yeaboi.ship.plans import latest_plan_with_work
 
-        scoped = latest_planning_state(scope, db_path=path)
-        if scoped is not None:
-            session_id, state = scoped
-            plan_scoped = True
-        elif scope is not None and scope.project_id:
-            # A project with no plan has no plan — another project's next story
-            # would be a wrong answer, not a helpful one.
+        found = latest_plan_with_work(db_path=path)
+        if found is None:
             return {}
-        else:
-            found = latest_plan_with_work(db_path=path)
-            if found is None:
-                return {}
-            state, session_id, _name = found
-            plan_scoped = False
+        state, session_id, _name = found
+        name = {"project_name": str(state.get("project_name", "") or "")}
         sprint = current_sprint(state, today)
         if sprint is None:
-            return {"plan_session_id": session_id, "plan_scoped": plan_scoped}
+            return {**name, "plan_session_id": session_id}
         titles = {
             str(_attr(s, "id", "")): (_attr(s, "title") or _attr(s, "goal") or "") for s in state.get("stories") or []
         }
         story_ids = sprint_story_ids(sprint)
         next_id = story_ids[0] if story_ids else ""
         return {
+            **name,
             "next_story_id": next_id,
             "next_story_title": _clip(titles.get(next_id, "")),
             "next_sprint_name": str(_attr(sprint, "name", "") or ""),
             "plan_session_id": session_id,
-            "plan_scoped": plan_scoped,
         }
     except Exception as e:  # noqa: BLE001
         logger.warning("today snapshot: plan read failed: %s", e)

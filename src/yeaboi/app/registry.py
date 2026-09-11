@@ -31,9 +31,9 @@ from yeaboi.app import (
     routes_news,
     routes_niko,
     routes_performance,
-    routes_projects,
     routes_reporting,
     routes_roadmap,
+    routes_sessions,
     routes_settings,
     routes_share,
     routes_ship,
@@ -84,20 +84,11 @@ ROUTES: tuple[AppRoute, ...] = (
     AppRoute("POST", "/api/solo/review/run", routes_solo.review_run, "weekly-review"),
     AppRoute("GET", "/api/solo/review/runs/{run_id}", routes_solo.review_run_get, "weekly-review"),
     AppRoute("POST", "/api/solo/review/runs/{run_id}/delete", routes_solo.review_delete, "weekly-review"),
-    # -- projects and the cross-mode sessions list ---------------------------
-    # The projects engine's five verbs on the wire, plus the one read no engine
-    # owns: every mode's saved runs in one list. `{project_id}` is the engine's
-    # proj-<8hex> id, not the planning chat's handle of the same name.
-    AppRoute("GET", "/api/projects", routes_projects.projects, "projects"),
-    AppRoute("POST", "/api/projects", routes_projects.create, "projects"),
-    AppRoute("POST", "/api/projects/draft", routes_projects.draft, "projects"),
-    AppRoute("GET", "/api/projects/suggestions", routes_projects.suggestions, "projects"),
-    AppRoute("GET", "/api/projects/references", routes_projects.references, "projects"),
-    AppRoute("GET", "/api/projects/{project_id}", routes_projects.get, "projects"),
-    AppRoute("POST", "/api/projects/{project_id}/status", routes_projects.status, "projects"),
-    AppRoute("GET", "/api/projects/{project_id}/sessions", routes_projects.sessions, "projects"),
-    AppRoute("POST", "/api/projects/{project_id}/defaults", routes_projects.defaults, "projects"),
-    AppRoute("GET", "/api/sessions/recent", routes_projects.recent, "sessions"),
+    # -- the cross-mode sessions list and the composer's @ picker ------------
+    # Two reads no engine owns: every mode's saved runs in one list, and one
+    # connected source's rows for the reference picker.
+    AppRoute("GET", "/api/sessions/recent", routes_sessions.recent, "sessions"),
+    AppRoute("GET", "/api/references", routes_sessions.references, "planning"),
     AppRoute("GET", "/api/tools", routes_meta.tools),
     AppRoute("POST", "/api/tool/{name}", routes_meta.call_tool),
     AppRoute("GET", "/api/events", routes_meta.events),

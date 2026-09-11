@@ -12,7 +12,7 @@ review as ``carried_actions`` with the statuses marked *now*, and the review
 that created them stays an append-only record.
 
 Pipeline (run_weekly_review):
-  resolve scope → week window → own standups (standup dep) → delivered tickets
+  week window → own standups → delivered tickets
   → plan + current sprint (plan dep) → deterministic verdict → carried actions
   → LLM prose → WeeklyReview → store + Markdown export
 
@@ -36,7 +36,7 @@ from yeaboi.timeparse import parse_date
 logger = logging.getLogger(__name__)
 
 #: Progress phase ids, in order — a surface's checklist keys on these.
-PHASES: tuple[str, ...] = ("scope", "standups", "plan", "delivery", "carried", "model", "save")
+PHASES: tuple[str, ...] = ("standups", "plan", "delivery", "carried", "model", "save")
 
 ACTION_STATUSES = ("pending", "done", "dropped", "carried")
 #: Statuses that keep an action alive into the next review.
@@ -47,7 +47,6 @@ _MAX_LIST = 6
 
 #: The checklist label a surface shows for each phase id.
 PHASE_LABELS: dict[str, str] = {
-    "scope": "Resolving scope",
     "standups": "Reading your standups",
     "plan": "Reading your sprint plan",
     "delivery": "Gathering delivered work",
@@ -149,21 +148,15 @@ def _own_update(report):
     return own
 
 
-def _standups(scope, path: Path, monday: date, end: date, warnings: list[str]) -> dict:
+def _standups(path: Path, monday: date, end: date, warnings: list[str]) -> dict:
     """The user's own standup lines for the week, oldest first, plus sprint context."""
-    from yeaboi.projects.scope import wants
-
-    if not wants(scope, "standup"):
-        warnings.append("standup context is switched off for this run")
-        return {}
     try:
         from yeaboi.standup.insights import yesterday_context
         from yeaboi.standup.store import StandupStore
 
-        session_ids = scope.session_ids if scope is not None else None
         lo, hi = monday.isoformat(), end.isoformat()
         with StandupStore(path) as store:
-            rows = store.get_all_history(limit=60, session_ids=session_ids)
+            rows = store.get_all_history(limit=60)
             picked = [
                 r
                 for r in rows
@@ -236,27 +229,17 @@ def _delivered(
     return tuple(items)
 
 
-def _plan(scope, path: Path, today: date, warnings: list[str]) -> tuple[dict, str, int, str]:
+def _plan(path: Path, today: date, warnings: list[str]) -> tuple[dict, str, int, str]:
     """``(state, session_id, planned_story_count, sprint_name)`` for the current sprint."""
-    from yeaboi.projects.scope import latest_planning_state, wants
     from yeaboi.solo.today import current_sprint, sprint_story_ids
 
-    if not wants(scope, "plan"):
-        warnings.append("plan context is switched off for this run")
-        return {}, "", 0, ""
     try:
-        scoped = latest_planning_state(scope, db_path=path)
-        if scoped is not None:
-            session_id, state = scoped
-        elif scope is not None and scope.project_id:
-            return {}, "", 0, ""  # a project with no plan has no plan
-        else:
-            from yeaboi.ship.plans import latest_plan_with_work
+        from yeaboi.ship.plans import latest_plan_with_work
 
-            found = latest_plan_with_work(db_path=path)
-            if found is None:
-                return {}, "", 0, ""
-            state, session_id, _name = found
+        found = latest_plan_with_work(db_path=path)
+        if found is None:
+            return {}, "", 0, ""
+        state, session_id, _name = found
         sprint = current_sprint(state, today)
         if sprint is None:
             return state, session_id, 0, ""
@@ -303,13 +286,12 @@ def _plan_verdict(
 # ---------------------------------------------------------------------------
 
 
-def carried_actions(scope, *, db_path: Path | None = None, week_label: str = "") -> tuple[ReviewAction, ...]:
+def carried_actions(*, db_path: Path | None = None, week_label: str = "") -> tuple[ReviewAction, ...]:
     """Last review's actions still worth tracking, reset to pending carry-overs.
 
     Source = the previous review's new actions plus whatever *it* carried and
     left open — the retro rule, so an action marked "carried" twice does not
     vanish. Deduplicated by text, ids kept so a surface can mark them.
-    ``scope`` narrows to the project's own reviews; ``None`` reads the newest.
     ``week_label`` is the week being generated: a review of that same week is
     skipped, so a re-run carries from the last *earlier* week rather than from
     its own draft. Never raises.
@@ -323,8 +305,7 @@ def carried_actions(scope, *, db_path: Path | None = None, week_label: str = "")
         if not path.exists():
             return ()
         with WeeklyReviewStore(path) as store:
-            session_ids = scope.session_ids if scope is not None else None
-            recent = store.get_recent_reports(limit=12, session_ids=session_ids)
+            recent = store.get_recent_reports(limit=12)
         previous = next((r for r in recent if not week_label or r.week_label != week_label), None)
     except Exception as e:  # noqa: BLE001
         logger.warning("weekly review: could not read the previous review: %s", e)
@@ -430,8 +411,6 @@ def _new_action(text: str, week_label: str, origin: str = "ai") -> ReviewAction:
 def run_weekly_review(
     *,
     session_id: str = "",
-    project_id: str = "",
-    context_deps: list[str] | None = None,
     week_end: str = "",
     carried_statuses: dict[str, str] | None = None,
     dry_run: bool = False,
@@ -442,10 +421,8 @@ def run_weekly_review(
     """Review the week ending ``week_end`` (default today) and store the result.
 
     Args:
-        session_id / project_id: the scope — an explicit project wins, else the
-            session's linked project; blank reads the newest of everything.
-        context_deps: per-run context toggles (``standup`` and ``plan`` gate the
-            reads here); ``None`` inherits, ``[]`` is incognito.
+        session_id: the session this review belongs to (blank reads the newest
+            of everything).
         week_end: ISO date inside the week under review; the window is that
             week's Monday through this date.
         carried_statuses: ``{action_id: status}`` marks for last review's
@@ -454,35 +431,27 @@ def run_weekly_review(
         on_progress: receives one component lifecycle event per phase transition —
             ``{kind, component_id: <PHASES id>, label, status: running|completed, detail}``.
     """
-    from yeaboi.projects.scope import resolve_scope
-
     path = _resolve_db_path(db_path)
     today = today or date.today()
     warnings: list[str] = []
     logger.info(
-        "run_weekly_review: session=%s project=%s week_end=%s dry_run=%s",
+        "run_weekly_review: session=%s week_end=%s dry_run=%s",
         session_id or "-",
-        project_id or "-",
         week_end or "today",
         dry_run,
     )
 
     phases = _Phases(on_progress)
-    phases.start("scope")
-    scope = resolve_scope(project_id, session_id, context_deps=context_deps, db_path=path)
     monday, end, week_label = _week_window(week_end, today)
-    pid = scope.project_id if scope is not None else project_id
-    project_name = _project_name(pid, path)
 
     phases.start("standups")
-    standup = _standups(scope, path, monday, end, warnings) if path.exists() else {}
+    standup = _standups(path, monday, end, warnings) if path.exists() else {}
     blockers: list[str] = standup.pop("_blockers", [])
     my_name = standup.get("my_name") or _configured_name()
 
     phases.start("plan")
-    plan_state, plan_session, planned, plan_sprint = (
-        _plan(scope, path, end, warnings) if path.exists() else ({}, "", 0, "")
-    )
+    plan_state, plan_session, planned, plan_sprint = _plan(path, end, warnings) if path.exists() else ({}, "", 0, "")
+    project_name = str(plan_state.get("project_name", "") or "")
 
     phases.start("delivery")
     if dry_run:
@@ -505,7 +474,7 @@ def run_weekly_review(
     )
 
     phases.start("carried")
-    carried = _apply_statuses(carried_actions(scope, db_path=path, week_label=week_label), carried_statuses, warnings)
+    carried = _apply_statuses(carried_actions(db_path=path, week_label=week_label), carried_statuses, warnings)
 
     phases.start("model")
     parsed: dict = {}
@@ -540,7 +509,6 @@ def run_weekly_review(
         week_label=week_label,
         week_start=monday.isoformat(),
         week_end=end.isoformat(),
-        project_id=pid,
         project_name=project_name,
         session_id=session_id or plan_session,
         my_name=my_name,
@@ -584,20 +552,6 @@ def _configured_name() -> str:
     from yeaboi.config import get_standup_user_name
 
     return get_standup_user_name()
-
-
-def _project_name(project_id: str, path: Path) -> str:
-    if not project_id or not path.exists():
-        return ""
-    try:
-        from yeaboi.projects.store import ProjectStore
-
-        with ProjectStore(path) as store:
-            row = store.get(project_id)
-        return str((row or {}).get("name") or "")
-    except Exception as e:  # noqa: BLE001
-        logger.warning("weekly review: project lookup failed: %s", e)
-        return ""
 
 
 def _save(review: WeeklyReview, path: Path) -> None:

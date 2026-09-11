@@ -122,7 +122,6 @@ def apply_schedule(
             habit_detection=existing.get("habit_detection", "on"),
             habit_rules=existing.get("habit_rules", ""),
             habit_ai_match=existing.get("habit_ai_match", "on"),
-            context_deps=existing.get("context_deps"),
         )
     if enabled:
         if solo:

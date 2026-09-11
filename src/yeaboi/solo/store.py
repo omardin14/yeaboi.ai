@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS weekly_review_history (
     edited_from_id INTEGER NOT NULL DEFAULT 0
 );"""
 
-_HISTORY_COLUMNS = "id, session_id, project_id, run_at, week_label, week_start, week_end, project_name, action_count"
+_HISTORY_COLUMNS = "id, session_id, run_at, week_label, week_start, week_end, project_name, action_count"
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +85,6 @@ def _dict_to_weekly_review(d: dict) -> WeeklyReview:
         week_label=d.get("week_label", ""),
         week_start=d.get("week_start", ""),
         week_end=d.get("week_end", ""),
-        project_id=d.get("project_id", ""),
         project_name=d.get("project_name", ""),
         session_id=d.get("session_id", ""),
         my_name=d.get("my_name", ""),
@@ -153,12 +152,11 @@ class WeeklyReviewStore:
         """Persist a review and return its history row id."""
         cursor = self._conn.execute(
             """INSERT INTO weekly_review_history
-                   (session_id, project_id, run_at, week_label, week_start, week_end, project_name,
+                   (session_id, run_at, week_label, week_start, week_end, project_name,
                     action_count, report_json, origin, edited_from_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 review.session_id,
-                review.project_id,
                 self._now(),
                 review.week_label,
                 review.week_start,
@@ -171,23 +169,12 @@ class WeeklyReviewStore:
             ),
         )
         logger.info(
-            "Recorded weekly review: week=%s project=%s actions=%d carried=%d",
+            "Recorded weekly review: week=%s actions=%d carried=%d",
             review.week_label,
-            review.project_id or "-",
             len(review.actions),
             len(review.carried_actions),
         )
         return int(cursor.lastrowid or 0)
-
-    def _session_clause(self, session_ids: tuple[str, ...] | None) -> tuple[str, tuple]:
-        """``session_ids`` is the hard filter a ProjectScope resolves to; an
-        empty tuple matches nothing, ``None`` matches every session."""
-        if session_ids is None:
-            return "", ()
-        if not session_ids:
-            return " WHERE 0", ()
-        slots = ", ".join("?" for _ in session_ids)
-        return f" WHERE session_id IN ({slots})", tuple(session_ids)
 
     def _load(self, row, *, what: str) -> WeeklyReview | None:
         if row is None or not row[0]:
@@ -198,21 +185,18 @@ class WeeklyReviewStore:
             logger.warning("Failed to deserialize weekly review %s: %s", what, exc)
             return None
 
-    def get_latest_report(self, session_ids: tuple[str, ...] | None = None) -> WeeklyReview | None:
-        """The newest review (within ``session_ids`` when given), or None."""
-        where, params = self._session_clause(session_ids)
+    def get_latest_report(self) -> WeeklyReview | None:
+        """The newest review, or None."""
         row = self._conn.execute(
-            f"SELECT report_json FROM weekly_review_history{where} ORDER BY run_at DESC, id DESC LIMIT 1",  # noqa: S608 — placeholders, not values
-            params,
+            "SELECT report_json FROM weekly_review_history ORDER BY run_at DESC, id DESC LIMIT 1",
         ).fetchone()
         return self._load(row, what="latest")
 
-    def get_recent_reports(self, limit: int = 10, session_ids: tuple[str, ...] | None = None) -> list[WeeklyReview]:
-        """Recent reviews newest first, hard-filtered to ``session_ids`` when given."""
-        where, params = self._session_clause(session_ids)
+    def get_recent_reports(self, limit: int = 10) -> list[WeeklyReview]:
+        """Recent reviews newest first."""
         rows = self._conn.execute(
-            f"SELECT report_json FROM weekly_review_history{where} ORDER BY run_at DESC, id DESC LIMIT ?",  # noqa: S608 — placeholders, not values
-            (*params, limit),
+            "SELECT report_json FROM weekly_review_history ORDER BY run_at DESC, id DESC LIMIT ?",
+            (limit,),
         ).fetchall()
         reviews = [self._load(r, what="recent") for r in rows]
         return [r for r in reviews if r is not None]
@@ -222,13 +206,12 @@ class WeeklyReviewStore:
             {
                 "id": r[0],
                 "session_id": r[1],
-                "project_id": r[2],
-                "run_at": r[3],
-                "week_label": r[4],
-                "week_start": r[5],
-                "week_end": r[6],
-                "project_name": r[7],
-                "action_count": r[8],
+                "run_at": r[2],
+                "week_label": r[3],
+                "week_start": r[4],
+                "week_end": r[5],
+                "project_name": r[6],
+                "action_count": r[7],
             }
             for r in rows
         ]
@@ -248,12 +231,11 @@ class WeeklyReviewStore:
             ).fetchall()
         return self._history_rows(rows)
 
-    def get_all_history(self, limit: int = 100, session_ids: tuple[str, ...] | None = None) -> list[dict]:
-        """Run metadata across sessions for the hub, hard-filtered to ``session_ids`` when given."""
-        where, params = self._session_clause(session_ids)
+    def get_all_history(self, limit: int = 100) -> list[dict]:
+        """Run metadata across sessions for the hub, newest first."""
         rows = self._conn.execute(
-            f"SELECT {_HISTORY_COLUMNS} FROM weekly_review_history{where} ORDER BY run_at DESC, id DESC LIMIT ?",  # noqa: S608
-            (*params, limit),
+            f"SELECT {_HISTORY_COLUMNS} FROM weekly_review_history ORDER BY run_at DESC, id DESC LIMIT ?",  # noqa: S608
+            (limit,),
         ).fetchall()
         return self._history_rows(rows)
 

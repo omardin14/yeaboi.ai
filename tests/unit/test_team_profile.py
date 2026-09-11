@@ -1728,7 +1728,7 @@ class TestProjectListPopup:
         projects = [ProjectSummary(name=f"Project {i}", id=str(i)) for i in range(6)]
         panel = _build_project_list_screen(
             projects,
-            len(projects),  # selected = "+ New Project"
+            len(projects),  # selected = "+ New plan"
             width=80,
             height=30,
             team_popup_t=1.0,

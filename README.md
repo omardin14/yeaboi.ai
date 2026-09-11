@@ -20,7 +20,7 @@
 ---
 
 <div align="center">
-<img src="https://yeaboi.ai/demo.gif" alt="yeaboi.ai demo — the door asks whether the work belongs to a project or is a one-off, then tours the modes (analysis, planning, standup, retro, poker, performance, reporting)" width="800"/>
+<img src="https://yeaboi.ai/demo.gif" alt="yeaboi.ai demo — a tour of the modes (analysis, planning, standup, retro, poker, performance, reporting)" width="800"/>
 
 *One command: your team's whole scrum, from the plan to the report.*
 </div>

@@ -49,7 +49,6 @@ SOLO_REVIEW_PHASES: tuple[tuple[str, str], ...] = tuple(
     zip(
         PHASES,
         (
-            "Resolving scope",
             "Reading your standups",
             "Reading your sprint plan",
             "Gathering delivered work",

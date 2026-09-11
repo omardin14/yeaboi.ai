@@ -101,50 +101,20 @@ CAPABILITIES: dict[str, dict] = {
             "--architecture-spike",
         },
         "skill": "plan-sprint",
-        # Planning folded into the desktop's project flow: the blueprint is
-        # the intake and /projects/:id/plan renders the finished plan.
-        "desktop": {"/projects/:id/blueprint", "/projects/:id/plan"},
-    },
-    "projects": {
-        "engines": {
-            ("yeaboi.projects.engine", "create_project"),
-            ("yeaboi.projects.engine", "list_projects"),
-            ("yeaboi.projects.engine", "get_project"),
-            ("yeaboi.projects.engine", "link_session"),
-            ("yeaboi.projects.engine", "set_project_defaults"),
-            ("yeaboi.projects.engine", "set_project_status"),
-            ("yeaboi.projects.engine", "draft_project_idea"),
-        },
-        "mcp_tools": {
-            "project_create",
-            "project_list",
-            "project_get",
-            "project_link_session",
-            "project_set_defaults",
-            "project_set_status",
-            "project_draft",
-        },
-        "tui_mode": Exempt(
-            "the Projects door after the landing split (and the P keycap on the menu), not a card — "
-            "an eleventh card breaks the 84x40 layout, the ceremonies/niko argument"
-        ),
-        "cli": {"project"},
-        "skill": Exempt(
-            "a scoping primitive, not a guided workflow — modes gain --project/project_id, "
-            "and agents call the project_* tools directly"
-        ),
-        "desktop": {"/projects", "/projects/:id", "/agents/projects", "/agents/projects/:id"},
+        # Planning folded into the desktop's session flow: the blueprint is
+        # the intake and /sessions/:id/plan renders the finished plan.
+        "desktop": {"/sessions", "/sessions/:id", "/sessions/:id/blueprint", "/sessions/:id/plan"},
     },
     "sessions": {
         "engines": Exempt("thin SessionStore reads — no pipeline to extract"),
         "mcp_tools": {"sessions_list", "session_get", "session_delete"},
         "tui_mode": Exempt(
-            "the Sessions door after the landing split plus each project's sessions page, not a card — "
-            "a one-off run of any mode starts from that mode's own card"
+            "not a card — a one-off run of any mode starts from that mode's own card, and saved runs "
+            "reopen from that mode's own hub"
         ),
         "cli": {"--list-sessions", "--resume", "--clear-sessions"},
         "skill": Exempt("agents call the session tools directly — no guided workflow needed"),
-        "desktop": {"/sessions"},
+        "desktop": {"/runs"},
     },
     "standup": {
         "engines": {
@@ -242,14 +212,11 @@ CAPABILITIES: dict[str, dict] = {
     "retro-board": {
         # carried_action_items_for_session: the headless carry-forward load (prior
         # retro's action items) the TUI/browser adapt for the review column.
-        # standup_blocker_cards: its project-scoped sibling — the standup→retro
-        # edge, seeding a scoped board with the project's recent blockers.
         # history_providers/report_payload: the board's step-back through previous
         # retros — the same runs `retro_history` already reads, shaped as cards.
         "engines": {
             ("yeaboi.retro.engine", "generate_action_items"),
             ("yeaboi.retro.engine", "carried_action_items_for_session"),
-            ("yeaboi.retro.engine", "standup_blocker_cards"),
             ("yeaboi.retro.engine", "history_providers"),
             ("yeaboi.retro.engine", "report_payload"),
         },
@@ -295,7 +262,7 @@ CAPABILITIES: dict[str, dict] = {
         # carrying a milestone that has shipped: the intake tile needs a
         # roadmap path that is not TUI-only, and no surface has one yet — the
         # same gap the four rows above already track.
-        "desktop": {"/projects/new/from-roadmap"},
+        "desktop": {"/sessions/new/from-roadmap"},
     },
     "anonymize": {
         # Post-processing action, not a mode of its own: an "Anonymize" button on every
@@ -570,13 +537,6 @@ PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "provenance_audit": ("yeaboi.provenance.engine", "run_provenance_audit"),
     "provenance_trace": ("yeaboi.provenance.engine", "trace_entity"),
     "niko_ask": ("yeaboi.niko.engine", "ask"),
-    "project_create": ("yeaboi.projects.engine", "create_project"),
-    "project_list": ("yeaboi.projects.engine", "list_projects"),
-    "project_get": ("yeaboi.projects.engine", "get_project"),
-    "project_link_session": ("yeaboi.projects.engine", "link_session"),
-    "project_set_defaults": ("yeaboi.projects.engine", "set_project_defaults"),
-    "project_set_status": ("yeaboi.projects.engine", "set_project_status"),
-    "project_draft": ("yeaboi.projects.engine", "draft_project_idea"),
 }
 
 # Injection/test seams that are never exposed on any wire surface.
@@ -647,45 +607,26 @@ CLI_PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "agents security": ("yeaboi.agentwatch.engine", "run_agent_security"),
     "ship run": ("yeaboi.ship.engine", "run_ship"),
     "ship resume": ("yeaboi.ship.engine", "resume_ship"),
-    "project create": ("yeaboi.projects.engine", "create_project"),
-    "project list": ("yeaboi.projects.engine", "list_projects"),
-    "project show": ("yeaboi.projects.engine", "get_project"),
-    "project link": ("yeaboi.projects.engine", "link_session"),
-    "project set-defaults": ("yeaboi.projects.engine", "set_project_defaults"),
-    "project set-status": ("yeaboi.projects.engine", "set_project_status"),
-    "project draft": ("yeaboi.projects.engine", "draft_project_idea"),
 }
 
 # CLI dest → engine param renames (the CLI keeps short ergonomic flag names).
 CLI_RENAMES: dict[str, dict[str, str]] = {
-    "report": {
-        "session": "session_id",
-        "label": "period_label_override",
-        "project": "project_id",
-        "context": "context_deps",
-    },
-    "standup": {"session": "session_id", "project": "project_id", "context": "context_deps"},
-    "review run": {"session": "session_id", "project": "project_id", "context": "context_deps"},
+    "report": {"session": "session_id", "label": "period_label_override"},
+    "standup": {"session": "session_id"},
+    "review run": {"session": "session_id"},
     # --transcript/--date carry explicit dest= in cli.py, so only --session
     # needs a rename here.
     "standup-review": {"session": "session_id"},
-    "perf prep": {"session": "session_id", "project": "project_id", "context": "context_deps"},
+    "perf prep": {"session": "session_id"},
     "perf complete": {"session": "session_id"},
-    "perf review": {
-        "session": "session_id",
-        "months": "period_months",
-        "project": "project_id",
-        "context": "context_deps",
-    },
+    "perf review": {"session": "session_id", "months": "period_months"},
     "ship run": {"session": "session_id", "check": "check_command"},
     "ship resume": {"check": "check_command"},
-    "project link": {"session": "session_id"},
     # --repo is the repository path the Agents reports scope to (exact-or-prefix
     # on the session's project directory, never a basename substring).
     "agents cost": {"repo": "project_path"},
     "analyze": {
-        # NOT project_id: analysis's --project is the tracker key (Jira/AzDO),
-        # a different id space from the projects table's proj-<8hex> ids.
+        # NOT a project link: analysis's --project is the tracker key (Jira/AzDO).
         "project": "project_key",
         "sprints": "sprint_count",
         "depth": "analysis_depth",
@@ -700,14 +641,12 @@ CLI_RENAMES: dict[str, dict[str, str]] = {
 CLI_ONLY_DESTS: dict[str, set[str]] = {
     # source/code_sources/documentation_sources are assembled into the engine's
     # `sources` dict (component → source list), mirroring analyze's components flags.
-    # incognito is sugar over context_deps=[] (see _cli_context_deps), not an engine param.
-    "report": {"format", "strict", "source", "code_sources", "documentation_sources", "incognito"},
+    "report": {"format", "strict", "source", "code_sources", "documentation_sources"},
     "standup": {
         "format",
         "strict",
         "schedule",
         "list_members",
-        "incognito",
     },  # schedule/list-members are adapters, not run_standup params
     # file-issues drives the separate file_transcript_issues entry point;
     # list-gaps is a store read. `paths` is the bare positional form of
@@ -716,10 +655,10 @@ CLI_ONLY_DESTS: dict[str, set[str]] = {
     # transcript_text.
     "standup-review": {"format", "strict", "file_issues", "list_gaps", "paths"},
     # --mark ID=STATUS pairs are assembled into the engine's carried_statuses dict.
-    "review run": {"format", "strict", "incognito", "mark"},
-    "perf prep": {"strict", "incognito"},
+    "review run": {"format", "strict", "mark"},
+    "perf prep": {"strict"},
     "perf complete": {"strict"},
-    "perf review": {"strict", "incognito"},
+    "perf review": {"strict"},
     "agents cost": {"format", "strict"},
     # The dismissal verbs edit a hand-kept allowlist instead of running the scan.
     "agents security": {
@@ -741,14 +680,6 @@ CLI_ONLY_DESTS: dict[str, set[str]] = {
     # --split picks the entry point (run_ship_batch) rather than a run_ship param.
     "ship run": {"format", "strict", "split"},
     "ship resume": {"format", "strict"},
-    "project create": set(),
-    "project list": set(),
-    "project show": set(),
-    "project link": set(),
-    # --analysis-profile, --context and --repo are each one key of the engine's `defaults` dict.
-    "project set-defaults": {"analysis_profile", "context", "repo"},
-    "project set-status": set(),
-    "project draft": set(),
     # delivery/code/docs/ops are assembled into the engine's `components` dict (component
     # → sub-source map); each flag names a component's sub-sources, not an engine param.
     "analyze": {
@@ -794,9 +725,6 @@ CLI_HIDDEN: dict[str, dict[str, str]] = {
     "ship resume": {
         "cancel_event": "in-process threading.Event cancel seam for the TUI worker; the CLI cancels via Ctrl-C",
         "driver": "AgentDriver injection seam for tests; every wire surface runs the real Claude Code driver",
-    },
-    "project set-defaults": {
-        "defaults": "assembled from the per-key flags (--analysis-profile, --context, --repo); a raw dict flag invites typos",  # noqa: E501
     },
 }
 

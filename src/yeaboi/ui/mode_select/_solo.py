@@ -42,12 +42,9 @@ def _cycle_status(status: str) -> str:
 
 def _load_carried(db_path):
     """Last review's open actions, or an empty list when nothing is carried."""
-    from yeaboi.projects.active import get_active_project, get_context_deps
-    from yeaboi.projects.scope import resolve_scope
     from yeaboi.solo.engine import carried_actions
 
-    scope = resolve_scope(get_active_project(), context_deps=get_context_deps(), db_path=db_path)
-    return list(carried_actions(scope, db_path=db_path))
+    return list(carried_actions(db_path=db_path))
 
 
 def run_solo_review_page(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
@@ -119,23 +116,19 @@ def _generate(console, live, read_key, frame_time, supports_timeout, carried_sta
     Returns ``(review, None)`` or ``(None, error)``; the frame loop repaints
     live progress while the tracker and LLM calls run.
     """
-    from yeaboi.projects.active import get_active_project, get_context_deps
     from yeaboi.solo.engine import run_weekly_review
     from yeaboi.ui.mode_select import _ana_dbp, _duck_react
     from yeaboi.ui.mode_select.screens._screens_secondary import _build_standup_progress_screen
     from yeaboi.ui.shared._components import SOLO_THEME, solo_review_title
     from yeaboi.ui.shared._music_bar import duck_working_thread
 
-    project_id = get_active_project()
-    logger.info("weekly review: generating (project=%s, %d marked)", project_id or "(none)", len(carried_statuses))
+    logger.info("weekly review: generating (%d marked)", len(carried_statuses))
     progress: list[str] = ["Starting"]
     result_box: list = [None, None]  # [review, exception]
 
     def _worker() -> None:
         try:
             result_box[0] = run_weekly_review(
-                project_id=project_id,
-                context_deps=get_context_deps(),
                 carried_statuses=carried_statuses or None,
                 db_path=_ana_dbp,
                 on_progress=progress.append,

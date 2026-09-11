@@ -14,9 +14,7 @@ description: "(beta) Review a solo developer's own week with yeaboi: what went w
 
 2. **Run the review.** Call `weekly_review_run`, passing `carried_statuses` with
    those marks. `week_end` (YYYY-MM-DD) reviews a past week; blank is this week
-   so far. `project_id` scopes the reads to one project; blank reads everything.
-   `context_deps` toggles the cross-mode sources (`standup`, `plan`); an empty
-   list is incognito.
+   so far.
 
 3. **Present it in the user's own voice.** Lead with `plan_line` (the deterministic
    on-track sentence), then `summary`, then went well / to change, then the new

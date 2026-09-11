@@ -128,8 +128,6 @@ def _plan_generate(
     prior_art: list[str] | None,
     ac_format: str,
     architecture_spike: str,
-    project_id: str,
-    context_deps: list | None,
     solo: bool,
     on_progress,
 ) -> dict:
@@ -143,8 +141,6 @@ def _plan_generate(
         prior_art=prior_art,
         ac_format=ac_format,
         architecture_spike=architecture_spike or "auto",
-        project_id=project_id,
-        context_deps=context_deps,
         solo=solo,
     )
     plan = json.loads(export_plan_json(state))
@@ -336,8 +332,6 @@ def register(app) -> None:
         prior_art: list[str] | None = None,
         ac_format: str = "",
         architecture_spike: str = "auto",
-        project_id: str = "",
-        context_deps: list[str] | None = None,
         solo: bool = False,
     ) -> dict:
         """Generate a full sprint plan (analysis, epics, stories, tasks, sprints) from a project
@@ -352,12 +346,6 @@ def register(app) -> None:
         `architecture_spike`: when the analyzer's architecture decision is open (2+ options),
         whether to add a validation spike — 'include' / 'skip', or 'auto' (default: add it
         unless the analyzer's confidence is high).
-        `project_id`: link the session to a project (project_list shows them); a scoped run
-        reads ceremony context from the project's own sessions and seeds the analysis profile
-        from the project's defaults. Empty = unscoped (team-wide context).
-        `context_deps`: toggle the run's cross-mode context sources (retro, standup, plan,
-        performance, analysis). Null inherits the project's default_context_deps then all-on;
-        an empty list is an incognito run — no cross-mode context, the session still persists.
         `solo`: true when the user is running their own delivery with no team — the team
         questions default to one developer and no member picker is offered."""
 
@@ -380,8 +368,6 @@ def register(app) -> None:
             prior_art,
             ac_format,
             architecture_spike,
-            project_id,
-            context_deps,
             solo,
             report,
         )

@@ -9,7 +9,6 @@ import pytest
 
 from yeaboi.agent.state import MemberUpdate, Sprint, StandupReport, UserStory
 from yeaboi.agentwatch.store import AgentWatchStore
-from yeaboi.projects.store import ProjectStore
 from yeaboi.sessions import SessionStore
 from yeaboi.solo.today import TodaySnapshot, build_today_snapshot
 from yeaboi.standup.store import StandupStore
@@ -71,14 +70,10 @@ def _report(session_id: str, *, my_name: str = "Dinho") -> StandupReport:
     )
 
 
-def _seed(tmp_path, *, with_project: bool = True):
+def _seed(tmp_path):
     db = tmp_path / "sessions.db"
-    pid = ""
-    with ProjectStore(db) as projects:
-        if with_project:
-            pid = projects.create("Apollo")["project_id"]
     with SessionStore(db) as sessions:
-        sessions.create_session("plan-1", "Apollo", project_id=pid)
+        sessions.create_session("plan-1", "Apollo")
         sessions.save_state("plan-1", _plan_state())
     with StandupStore(db) as standups:
         standups.record_run(_report("plan-1"))
@@ -99,7 +94,7 @@ def _seed(tmp_path, *, with_project: bool = True):
                 model_usage={"claude-sonnet-4-5": {"input": 1000, "output": 200}},
                 tool_counts={},
             )
-    return db, pid
+    return db
 
 
 class TestEmptyStates:
@@ -125,8 +120,8 @@ class TestEmptyStates:
 
 class TestSeeded:
     def test_reads_the_standup_plan_and_spend(self, tmp_path):
-        db, pid = _seed(tmp_path)
-        snap = build_today_snapshot(project_id=pid, db_path=db, today=TODAY)
+        db = _seed(tmp_path)
+        snap = build_today_snapshot(db_path=db, today=TODAY)
         assert snap.project_name == "Apollo"
         assert snap.standup_date == "2026-09-01"
         # The user's own card, not the first member's.
@@ -140,48 +135,33 @@ class TestSeeded:
             "Wire the login form",
             "Sprint 1",
         )
-        assert snap.plan_session_id == "plan-1" and snap.plan_scoped is True
+        assert snap.plan_session_id == "plan-1"
         # Two of the three agent sessions ended on or after Monday the 31st.
         assert snap.spend_sessions == 2 and snap.spend_usd > 0 and snap.spend_known is True
         assert snap.warnings == ()
 
     def test_the_current_sprint_follows_the_date(self, tmp_path):
-        db, pid = _seed(tmp_path)
-        snap = build_today_snapshot(project_id=pid, db_path=db, today=date(2026, 9, 9))
+        db = _seed(tmp_path)
+        snap = build_today_snapshot(db_path=db, today=date(2026, 9, 9))
         assert (snap.next_story_id, snap.next_sprint_name) == ("S-2", "Sprint 2")
 
-    def test_unscoped_falls_back_to_the_newest_plan(self, tmp_path):
-        db, _ = _seed(tmp_path, with_project=False)
-        snap = build_today_snapshot(db_path=db, today=TODAY)
-        assert snap.next_story_id == "S-1" and snap.plan_scoped is False
-        assert snap.standup_date == "2026-09-01"
-
-    def test_a_scoped_project_with_no_runs_reads_nothing(self, tmp_path):
-        db, _ = _seed(tmp_path)
-        with ProjectStore(db) as projects:
-            other = projects.create("Zephyr")["project_id"]
-        snap = build_today_snapshot(project_id=other, db_path=db, today=TODAY)
-        assert snap.project_name == "Zephyr"
-        assert snap.standup_date == "" and snap.next_story_id == ""
-        assert snap.warnings == ()
-
     def test_a_failed_standup_run_is_skipped(self, tmp_path):
-        db, pid = _seed(tmp_path)
+        db = _seed(tmp_path)
         with StandupStore(db) as standups:
             standups.record_run(_report("plan-1").__class__(date="2026-09-02", session_id="plan-1"), status="failed")
-        snap = build_today_snapshot(project_id=pid, db_path=db, today=TODAY)
+        snap = build_today_snapshot(db_path=db, today=TODAY)
         assert snap.standup_date == "2026-09-01"
 
 
 class TestNeverRaises:
     def test_a_broken_source_becomes_a_warning(self, tmp_path, monkeypatch):
-        db, pid = _seed(tmp_path)
+        db = _seed(tmp_path)
 
         def boom(*a, **k):
             raise RuntimeError("locked")
 
         monkeypatch.setattr("yeaboi.standup.store.StandupStore.get_all_history", boom)
-        snap = build_today_snapshot(project_id=pid, db_path=db, today=TODAY)
+        snap = build_today_snapshot(db_path=db, today=TODAY)
         assert snap.standup_date == ""
         assert "could not read the latest standup" in snap.warnings
         # The other sources still answered.

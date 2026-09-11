@@ -11,12 +11,11 @@ from yeaboi.agent.state import DeliveredItem, ReviewAction, WeeklyReview
 from yeaboi.solo.store import WeeklyReviewStore, _dict_to_weekly_review, _review_to_json
 
 
-def _review(week="2026-W36", session_id="s1", project_id="proj-1", **kw) -> WeeklyReview:
+def _review(week="2026-W36", session_id="s1", **kw) -> WeeklyReview:
     base = dict(
         week_label=week,
         week_start="2026-08-31",
         week_end="2026-09-04",
-        project_id=project_id,
         project_name="Apollo",
         session_id=session_id,
         my_name="Dinho",
@@ -93,7 +92,6 @@ class TestStore:
         assert row["week_label"] == "2026-W36"
         assert row["project_name"] == "Apollo"
         assert row["action_count"] == 1
-        assert row["project_id"] == "proj-1"
 
     def test_newest_first(self, db):
         with WeeklyReviewStore(db) as store:
@@ -102,16 +100,6 @@ class TestStore:
             assert store.get_latest_report().week_label == "2026-W36"
             assert [r.week_label for r in store.get_recent_reports()] == ["2026-W36", "2026-W35"]
             assert [r["week_label"] for r in store.get_all_history()] == ["2026-W36", "2026-W35"]
-
-    def test_session_ids_is_a_hard_filter(self, db):
-        with WeeklyReviewStore(db) as store:
-            store.record_run(_review(session_id="s1"))
-            store.record_run(_review(session_id="s2", week="2026-W37"))
-            assert store.get_latest_report(session_ids=("s1",)).session_id == "s1"
-            assert store.get_latest_report(session_ids=()) is None
-            assert store.get_recent_reports(session_ids=()) == []
-            assert store.get_all_history(session_ids=("s2",))[0]["session_id"] == "s2"
-            assert store.get_latest_report(session_ids=None).session_id == "s2"
 
     def test_delete(self, db):
         with WeeklyReviewStore(db) as store:
