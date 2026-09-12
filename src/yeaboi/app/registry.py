@@ -25,6 +25,7 @@ from yeaboi.app import (
     routes_ceremonies,
     routes_chat,
     routes_consent,
+    routes_context,
     routes_feedback,
     routes_meta,
     routes_music,
@@ -89,6 +90,11 @@ ROUTES: tuple[AppRoute, ...] = (
     # connected source's rows for the reference picker.
     AppRoute("GET", "/api/sessions/recent", routes_sessions.recent, "sessions"),
     AppRoute("GET", "/api/references", routes_sessions.references, "planning"),
+    # -- context scope and labels --
+    AppRoute("GET", "/api/context/options", routes_context.options, "context"),
+    AppRoute("POST", "/api/context/preview", routes_context.preview, "context"),
+    AppRoute("GET", "/api/sessions/{mode}/{session_id}/labels", routes_context.labels_get, "context"),
+    AppRoute("POST", "/api/sessions/{mode}/{session_id}/labels", routes_context.labels_set, "context"),
     AppRoute("GET", "/api/tools", routes_meta.tools),
     AppRoute("POST", "/api/tool/{name}", routes_meta.call_tool),
     AppRoute("GET", "/api/events", routes_meta.events),

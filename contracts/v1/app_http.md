@@ -1073,3 +1073,40 @@ A **sessions row** is `{session_id, run_id, mode, title, created_at, last_modifi
 - Newest `last_modified` first; `limit` defaults to 20 and `0` means every
   row. A mode with no saved runs is simply absent — nothing is invented. An
   unknown `mode` is a 400.
+
+## Context scope and labels
+
+What a run may read from other sessions, and the labels every run carries.
+Every run route (`/api/chat/sessions`, `/api/standup/run`, `/api/analysis/run`,
+`/api/reporting/run`, `/api/solo/review/run`, `/api/boards/retro`,
+`/api/boards/poker`) accepts the same three body keys; these routes are what a
+picker talks to before the run starts.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/context/options` | `?mode=` → `{sources: [{key, label, hint, count}], windows: [{kind, label, needs_count, needs_range}], projects: [str], tags: [{tag, count}], calendar: {source, length_weeks, anchor_date, current: {number, start, end}}, default: scope \| null, defaults: {tags: [str]}}` — `sources` are the eight producer modes with how many runs each has on this machine; `windows` the kinds a scope can read over; `projects` and `tags` the labels in use, most recent first; `calendar` the sprint grid a "last N sprints" window resolves against and where it came from (`tracker` \| `plan` \| `settings` \| `default`); `default` the scope last used for `mode` on this machine; `defaults.tags` the fixed `key:value` tags a run of `mode` gets. An unknown `mode` is a 400 |
+| POST | `/api/context/preview` | `{context, mode?, rows?}` → `{scope, window: {start, end, label}, summary, sources: [{key, count, rows: [{session_id, run_id, title, date, project_label, tags}]}], warnings}` — what the scope would read, without running anything. `summary` is the picker's line (`12 standups · 2 retros · 4 Aug – 11 Sep`); `rows` are listed only when `rows: true`. A scope that names an unknown source is a 400 naming the valid ones |
+| GET | `/api/sessions/{mode}/{session_id}/labels` | `?run_id=` → a labels row; 404 when the run carries none, 400 on an unknown mode |
+| POST | `/api/sessions/{mode}/{session_id}/labels` | `{run_id?, project_label?, tags?, merge_tags?}` → the labels row. `tags` are added to the run's existing tags unless `merge_tags: false` replaces them; a blank `project_label` keeps the old one |
+
+A **scope** is `{sources: [str] | null, window: {kind, count?, start?, end?}, projects: [str], tags: [str], limits: {source: n}}`:
+
+- `sources` names the producer modes the run may read (`plan`, `standup`,
+  `retro`, `poker`, `performance`, `analysis`, `reporting`, `review`); `null`
+  is every source, `[]` is incognito — the run reads nothing across modes.
+- `window.kind` is one of `all`, `sprints` (with `count`), `month`, `quarter`,
+  `year` (rolling 30 / 91 / 365 days) or `custom` (`start`..`end`, ISO dates,
+  `end` blank means today).
+- `projects` keeps runs carrying any of those project labels; `tags` keeps runs
+  carrying all of those tags; `limits` caps a source at its newest `n` runs.
+- The same scope has a one-line spelling every surface accepts in place of the
+  object: `all`, `none`, or clauses such as `standup,retro:1@2sprints
+  project=apollo tags=team-a,q3`.
+
+A **labels row** is `{mode, session_id, run_id, project_label, tags, scope, created_at, updated_at}`:
+`mode` is one of `planning`, `analysis`, `standup`, `retro`, `poker`,
+`performance`, `reporting`, `review`; `run_id` is the store's own row id for the
+history modes and blank for a planning or analysis session; `tags` always carry
+the run's default `key:value` tags (`mode:standup`, `world:team`, `2026-09`,
+`sprint:12` when known) beside the user's; `scope` is the scope the run read
+under, `null` when it read unscoped.

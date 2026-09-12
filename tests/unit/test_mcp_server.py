@@ -24,6 +24,11 @@ from yeaboi.mcp.server import create_app  # noqa: E402
 EXPECTED_TOOLS = {
     "connections_list",
     "connections_fetch",
+    "context_options",
+    "context_preview",
+    "session_labels_get",
+    "session_labels_set",
+    "session_labels_list",
     "artifact_edit_apply",
     "niko_ask",
     "ceremonies_list",

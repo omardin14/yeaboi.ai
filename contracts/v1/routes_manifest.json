@@ -3,13 +3,13 @@
   "routes": [
     {
       "path": "/home",
-      "capability": null,
+      "capability": "sessions",
       "title": "Home"
     },
     {
-      "path": "/runs",
-      "capability": "sessions",
-      "title": "Runs"
+      "path": "/news",
+      "capability": null,
+      "title": "Front page"
     },
     {
       "path": "/whats-new",
@@ -227,49 +227,34 @@
       "title": "Correct a shared artifact"
     },
     {
-      "path": "/sessions",
+      "path": "dialog:context-scope",
+      "capability": "context",
+      "title": "Context"
+    },
+    {
+      "path": "/planning",
       "capability": "planning",
-      "title": "Sessions"
+      "title": "Planning"
     },
     {
-      "path": "/sessions/:id",
+      "path": "/planning/new",
       "capability": "planning",
-      "title": "Session"
+      "title": "Planning · New plan"
     },
     {
-      "path": "/sessions/:id/board-settings",
-      "capability": null,
-      "title": "Board settings"
-    },
-    {
-      "path": "/sessions/:id/blueprint",
-      "capability": "planning",
-      "title": "Blueprint"
-    },
-    {
-      "path": "/sessions/:id/plan",
-      "capability": "planning",
-      "title": "Session · Plan"
-    },
-    {
-      "path": "/sessions/new/from-roadmap",
+      "path": "/planning/from-roadmap",
       "capability": "roadmap",
-      "title": "New session · From roadmap"
+      "title": "Planning · From roadmap"
     },
     {
-      "path": "/sessions/:id/new",
-      "capability": null,
-      "title": "New conversation"
+      "path": "/planning/:id",
+      "capability": "planning",
+      "title": "Plan"
     },
     {
-      "path": "/sessions/:id/room",
+      "path": "/planning/:id/completed",
       "capability": null,
-      "title": "Session · Room"
-    },
-    {
-      "path": "/sessions/:id/completed",
-      "capability": null,
-      "title": "Session recap"
+      "title": "Plan · Recap"
     },
     {
       "path": "/board",
@@ -309,7 +294,7 @@
     {
       "path": "/settings/news",
       "capability": null,
-      "title": "Settings · Front page"
+      "title": "Settings · Paper"
     },
     {
       "path": "/settings/themes",
@@ -377,5 +362,61 @@
       ]
     }
   ],
-  "commands": []
+  "commands": [
+    {
+      "name": "help",
+      "tui": "help",
+      "help": "shortcuts and everything you can type"
+    },
+    {
+      "name": "export",
+      "tui": "export",
+      "help": "save the plan and/or chat transcript"
+    },
+    {
+      "name": "skip",
+      "tui": "skip",
+      "help": "skip the current question"
+    },
+    {
+      "name": "defaults",
+      "tui": "defaults",
+      "help": "accept defaults for all remaining questions"
+    },
+    {
+      "name": "form",
+      "tui": "form",
+      "help": "see every question in one panel and answer them in any order"
+    },
+    {
+      "name": "finish",
+      "tui": "finish",
+      "help": "answer the remaining questions with defaults"
+    },
+    {
+      "name": "summary",
+      "tui": "summary",
+      "help": "show your answers so far"
+    },
+    {
+      "name": "questions",
+      "tui": "questions",
+      "help": "see what I'll ask and what's already answered"
+    },
+    {
+      "name": "edit",
+      "tui": "edit",
+      "help": "browse your answers (/edit 6 re-asks one) or refine the last artifact"
+    },
+    {
+      "name": "small",
+      "tui": "small",
+      "help": "switch to a Small plan"
+    },
+    {
+      "name": "large",
+      "tui": "large",
+      "help": "switch to a Large plan"
+    }
+  ]
 }

@@ -191,3 +191,28 @@ class TestCapabilities:
     def test_list_routes_names_the_capability_each_screen_belongs_to(self):
         rows = {row["path"]: row for row in niko_tools.call("list_routes", {})["routes"]}
         assert rows["/agents/usage"]["capability"] == "agent-usage"
+
+
+class TestContextReads:
+    """The two context reads are observations like every other tool: never a raise."""
+
+    def test_context_preview_answers_with_counts(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
+        monkeypatch.setattr("yeaboi.context.window._from_tracker", lambda: None)
+        result = niko_tools.call("context_preview", {"context": "standup@month"})
+        assert "error" not in result and result["counts"]["standup"] == 0 and result["summary"]
+
+    def test_context_preview_typo_is_an_observation(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: tmp_path / "sessions.db")
+        assert "standup" in niko_tools.call("context_preview", {"context": "stanup"})["error"]
+
+    def test_session_labels_list_narrows_by_tag(self, tmp_path, monkeypatch):
+        from yeaboi.context.labels import LabelStore
+
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr("yeaboi.paths.get_db_path", lambda: db)
+        with LabelStore(db) as labels:
+            labels.set_labels("retro", "p1", "3", project="Apollo", tags=["q3"])
+        rows = niko_tools.call("session_labels_list", {"mode": "retro", "tag": "q3"})["labels"]
+        assert [row["run_id"] for row in rows] == ["3"]
+        assert niko_tools.call("session_labels_list", {"tag": "nope"})["labels"] == []

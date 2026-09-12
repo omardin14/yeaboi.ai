@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -167,7 +167,7 @@ def _walk(
         by_source[source] = tuple(r.key for r in selected) if restricted else None
         counts[source] = len(selected)
         if keep_rows:
-            kept[source] = selected
+            kept[source] = _with_labels(selected, source, path)
     selection = Selection(
         scope=scope,
         start=start,
@@ -202,6 +202,19 @@ def _select(
     rows = sorted(rows, key=lambda r: (r.on_date, r.created_at), reverse=True)
     cap = scope.limit_for(source)
     return rows[:cap] if cap else rows
+
+
+def _with_labels(rows: list[SourceRow], source: str, path: Path) -> list[SourceRow]:
+    """The rows a picker lists carry their labels; the ids a run reads do not need them."""
+    if not rows:
+        return rows
+    try:
+        with LabelStore(path) as labels:
+            found = {r.run_id or r.session_id: r for r in labels.list_labels(mode=SOURCE_MODES[source], limit=0)}
+    except Exception:  # noqa: BLE001 — a missing label is a blank column, not a failed preview
+        logger.warning("preview: labels for %s could not be read", source, exc_info=True)
+        return rows
+    return [replace(r, project=found[r.key].project, tags=found[r.key].tags) if r.key in found else r for r in rows]
 
 
 def _plural(source: str, n: int) -> str:
@@ -241,7 +254,22 @@ def _plan(path: Path) -> list[SourceRow]:
 
 
 def _analysis(path: Path) -> list[SourceRow]:
-    return _sessions(path, "analysis", "analysis")
+    """Analysis profiles, keyed by ``team_id`` — the id analysis labels its runs with."""
+    from yeaboi.team_profile import TeamProfileStore
+
+    with TeamProfileStore(path) as store:
+        profiles = store.list_profiles()
+    return [
+        SourceRow(
+            source="analysis",
+            session_id=p.team_id,
+            run_id="",
+            on_date=_day(p.updated_at or p.created_at),
+            created_at=p.created_at or p.updated_at or "",
+            title=p.team_name or p.project_key or p.team_id,
+        )
+        for p in profiles
+    ]
 
 
 def _standup(path: Path) -> list[SourceRow]:

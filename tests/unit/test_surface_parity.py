@@ -104,20 +104,51 @@ CAPABILITIES: dict[str, dict] = {
             "--tag",
         },
         "skill": "plan-sprint",
-        # Planning folded into the desktop's session flow: the blueprint is
-        # the intake and /sessions/:id/plan renders the finished plan.
-        "desktop": {"/sessions", "/sessions/:id", "/sessions/:id/blueprint", "/sessions/:id/plan"},
+        # The desktop's planning hub, its composer and the room — the chat in
+        # the middle, the living plan in a drawer — all over the chat routes.
+        "desktop": {"/planning", "/planning/new", "/planning/:id"},
     },
     "sessions": {
         "engines": Exempt("thin SessionStore reads — no pipeline to extract"),
         "mcp_tools": {"sessions_list", "session_get", "session_delete"},
         "tui_mode": Exempt(
-            "not a card — a one-off run of any mode starts from that mode's own card, and saved runs "
-            "reopen from that mode's own hub"
+            "not a card — the mode menu is the sessions surface: every card that records runs lands on "
+            "its own saved-runs hub (SAVED_SESSION_HUBS), and the cross-mode list is --list-sessions / sessions_list"
         ),
         "cli": {"--list-sessions", "--resume", "--clear-sessions"},
         "skill": Exempt("agents call the session tools directly — no guided workflow needed"),
-        "desktop": {"/runs"},
+        # The home: the mode menu over the cross-mode Recent list.
+        "desktop": {"/home"},
+    },
+    "context": {
+        # What a run may read: which producer modes, over which timeframe, under
+        # which project label and tags. The engine resolves it once; every
+        # mode's run engine takes the result as `context=` and every run
+        # labels itself for the next one.
+        "engines": {
+            ("yeaboi.context.engine", "parse_context_spec"),
+            ("yeaboi.context.engine", "resolve_scope"),
+            ("yeaboi.context.engine", "preview_scope"),
+            ("yeaboi.context.engine", "context_options"),
+            ("yeaboi.context.engine", "set_session_labels"),
+            ("yeaboi.context.engine", "get_session_labels"),
+            ("yeaboi.context.engine", "list_session_labels"),
+            ("yeaboi.context.engine", "label_run"),
+        },
+        "mcp_tools": {
+            "context_options",
+            "context_preview",
+            "session_labels_get",
+            "session_labels_set",
+            "session_labels_list",
+        },
+        "tui_mode": Exempt("a sub-page every hub's '+ New' card and the planning intake open, not a card of its own"),
+        "cli": {"--context", "--project-label", "--tag"},
+        "skill": Exempt(
+            "agents pass context/project_label/tags straight into each mode's run tool; every mode skill "
+            "documents the knob"
+        ),
+        "desktop": {"dialog:context-scope"},
     },
     "standup": {
         "engines": {
@@ -270,11 +301,10 @@ CAPABILITIES: dict[str, dict] = {
         "tui_mode": Exempt("a Planning intake card in _INTAKE_CARDS (Chat/Roadmap/Offline), not a mode card"),
         "cli": Exempt("interactive source picker + intake handoff; a headless roadmap path is a tracked gap"),
         "skill": Exempt("no plugin skill yet — tracked follow-up gap"),
-        # Slipped M5 deliberately, and the ledger says so rather than quietly
-        # carrying a milestone that has shipped: the intake tile needs a
-        # roadmap path that is not TUI-only, and no surface has one yet — the
-        # same gap the four rows above already track.
-        "desktop": {"/sessions/new/from-roadmap"},
+        # The desktop opens an engine chat from a roadmap item — the one
+        # roadmap path that is not TUI-only, and the gap the four rows above
+        # still track on the other surfaces.
+        "desktop": {"/planning/from-roadmap"},
     },
     "anonymize": {
         # Post-processing action, not a mode of its own: an "Anonymize" button on every
@@ -534,6 +564,10 @@ PARAM_PAIRS: dict[str, tuple[str, str]] = {
     "connections_list": ("yeaboi.connectors.engine", "list_connections"),
     "connections_fetch": ("yeaboi.connectors.engine", "fetch_ops_events"),
     "plan_generate": ("yeaboi.agent.headless", "run_planning_pipeline"),
+    "context_options": ("yeaboi.context.engine", "context_options"),
+    "context_preview": ("yeaboi.context.engine", "preview_scope"),
+    "session_labels_set": ("yeaboi.context.engine", "set_session_labels"),
+    "session_labels_list": ("yeaboi.context.engine", "list_session_labels"),
     "standup_run": ("yeaboi.standup.engine", "run_standup"),
     "standup_review": ("yeaboi.standup.engine", "run_transcript_review"),
     "report_delivery": ("yeaboi.reporting.engine", "run_delivery_report"),
@@ -1044,7 +1078,8 @@ class TestTips:
 # length-checked, like Exempt — "no time" must not pass for "nothing to save".
 SAVED_SESSIONS_EXEMPT: dict[str, str] = {
     "team-analysis": "saved analyses ARE the card's landing list (_build_project_list_screen)",
-    "project-planning": "saved projects and roadmaps ARE the card's landing list",
+    "project-planning": "saved plans ARE the card's landing list (load_projects unions projects.json "
+    "and the session store's planning rows)",
     "performance": "artifacts are per-engineer — the hub opens from the roster's History action",
     "usage": "a live dashboard over the usage DB; every view already spans the whole history",
     "settings": "a live config editor — there is no completed session to re-open",

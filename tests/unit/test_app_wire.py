@@ -210,6 +210,47 @@ class TestPlanningRoomWire:
         assert "### Plan view" in text and "### Plan versions" in text
 
 
+class TestContextWire:
+    """The context scope and the labels row the desktop's picker and drawers parse."""
+
+    def test_labels_row_keys_are_pinned(self):
+        from yeaboi.context.labels import SessionLabels
+
+        assert list(SessionLabels("standup", "s1").to_dict()) == [
+            "mode",
+            "session_id",
+            "run_id",
+            "project_label",
+            "tags",
+            "scope",
+            "created_at",
+            "updated_at",
+        ]
+
+    def test_scope_dict_keys_are_pinned(self):
+        from yeaboi.context.scope import ContextScope
+
+        assert list(ContextScope().to_dict()) == ["sources", "window", "projects", "tags", "limits"]
+
+    def test_options_keys_are_pinned(self):
+        from dataclasses import fields
+
+        from yeaboi.context.engine import ContextOptions
+
+        assert [f.name for f in fields(ContextOptions)] == [
+            "sources",
+            "windows",
+            "projects",
+            "tags",
+            "calendar",
+            "default",
+            "defaults",
+        ]
+
+    def test_doc_has_the_section(self):
+        assert "## Context scope and labels" in CONTRACT.read_text(encoding="utf-8")
+
+
 class TestReferencesWire:
     """The @ picker's row, pinned field for field against the contract."""
 

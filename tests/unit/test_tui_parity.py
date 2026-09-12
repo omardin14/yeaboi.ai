@@ -57,6 +57,7 @@ TERMINAL_ONLY: dict[str, str] = {
     "/paste": "the terminal's own paste mangles line breaks and applies flow control; a window's does neither",
     "/voice": "double-tap Space exists because a terminal never sees a key released; the composer has a mic button",
     "/quit": "a window is closed, or navigated away from — there is no single-screen takeover to leave",
+    "/duck": "the duck's bubble is muted from the desktop's Duck settings page (/settings/duck), not from a chat verb",
     "double-tap-space": "a terminal cannot detect key release at all, which is the whole reason for the gesture",
     "esc-esc": "the double press disambiguates Esc from an escape sequence; a window has no ambiguity to resolve",
     "bracketed-paste": "a terminal mode, negotiated with the terminal — a DOM paste event carries the text whole",
@@ -99,16 +100,6 @@ class TestTerminalOnly:
 # ---------------------------------------------------------------------------
 
 
-# The desktop ships no chat surface: the standalone planning chat folded into the
-# project flow, and the conversation returns with the ChatSession-in-project work.
-# An empty commands registry is the honest encoding of that — reverse this when
-# the chat comes back.
-DESKTOP_CHAT_RETIRED = (
-    "the standalone planning chat folded into the project flow; the interactive "
-    "chat returns with the ChatSession-in-project work"
-)
-
-
 class TestSlashCommands:
     @staticmethod
     def _terminal_verbs() -> set[str]:
@@ -117,17 +108,23 @@ class TestSlashCommands:
         return {command.name for command in COMMANDS}
 
     def test_every_terminal_verb_reaches_the_desktop_or_is_exempt(self, manifest):
-        if not manifest["commands"]:
-            # The standalone chat retired with the planning pages, so there is no
-            # verb registry to mirror. Skipped rather than passed, so the run
-            # reports the guard as off instead of green; it re-arms the moment the
-            # manifest carries one command, and a half-registered list still fails
-            # below.
-            pytest.skip(DESKTOP_CHAT_RETIRED)
+        # The planning room's composer answers the terminal's verbs; an empty
+        # registry here would mean the room shipped without its slash menu.
+        assert manifest["commands"], f"the desktop manifest carries no slash commands\n{_HOW_TO}"
         answered = {command["tui"] for command in manifest["commands"]}
         exempt = {name.lstrip("/") for name in TERMINAL_ONLY}
         missing = self._terminal_verbs() - answered - exempt
         assert not missing, f"terminal slash commands with no desktop answer: {sorted(missing)}\n{_HOW_TO}"
+
+    def test_the_wire_list_matches_the_registry(self):
+        # GET /api/chat/commands serves COMMANDS minus TERMINAL_ONLY_COMMANDS, and
+        # that set is exactly the slash entries above — so the wire, the terminal
+        # and this ledger cannot drift apart one at a time.
+        from yeaboi.ui.session.chat._commands import COMMANDS, TERMINAL_ONLY_COMMANDS, wire_commands
+
+        assert TERMINAL_ONLY_COMMANDS == {name.lstrip("/") for name in TERMINAL_ONLY if name.startswith("/")}
+        served = {command["name"] for command in wire_commands()}
+        assert served == {command.name for command in COMMANDS} - TERMINAL_ONLY_COMMANDS
 
     def test_the_desktop_invents_no_verb_the_terminal_lacks(self, manifest):
         # Two-way: a desktop-only verb would be a feature the terminal user
@@ -223,8 +220,11 @@ class TestPlanningIsWholeOnTheDesktop:
         desktop had a window for none of them.
         """
         paths = {route["path"] for route in manifest["routes"]}
-        assert "/sessions/:id/plan" in paths, (
-            "the desktop has no page for a finished plan — plan_get/plan_export/plan_publish/plan_sync "
+        assert "/planning/:id" in paths, (
+            "the desktop has no room for a plan — plan_get/plan_export/plan_publish/plan_sync "
             f"would have no window to be called from\n{_HOW_TO}"
         )
-        assert "/sessions/:id/plan" in CAPABILITIES["planning"]["desktop"]
+        assert "/planning/:id" in CAPABILITIES["planning"]["desktop"]
+        # The room's Blueprint drawer hosts the export menu; the manifest names
+        # the affordance so the claim is checkable here rather than trusted.
+        assert "dialog:export" in paths

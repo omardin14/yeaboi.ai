@@ -37,13 +37,18 @@ def seeded(db):
     from yeaboi.sessions import SessionStore
     from yeaboi.solo.store import WeeklyReviewStore
     from yeaboi.standup.store import StandupStore
+    from yeaboi.team_profile import TeamProfile, TeamProfileStore
 
     with SessionStore(db) as store:
         store.create_session("p1", "Apollo")
-        store.create_session("a1", "Apollo", mode="analysis")
         # Stamped inside the window rather than on the real clock, so the test
         # does not depend on the day it runs.
         store._conn.execute("UPDATE sessions_meta SET created_at = '2026-09-02T10:00:00+00:00'")
+    # Analysis rows are team profiles — the id analysis labels its runs with.
+    with TeamProfileStore(db) as profiles:
+        profiles.save(TeamProfile(team_id="a1", source="jira", project_key="APO"))
+        stamp = "2026-09-02T10:00:00+00:00"
+        profiles._conn.execute("UPDATE team_profiles SET created_at = ?, updated_at = ?", (stamp, stamp))
     with StandupStore(db) as store:
         old = store.record_run(StandupReport(session_id="p1", date="2026-06-01"))
         new = store.record_run(StandupReport(session_id="p1", date="2026-09-03"))
@@ -180,7 +185,8 @@ class TestPreview:
     def test_rows_on_request(self, seeded):
         preview = preview_scope("retro", today=TODAY, db_path=seeded["db"], rows=True)
         assert preview.rows["retro"][0].title == "Retro — 2026-09-05"
-        assert preview.rows["retro"][0].project == ""
+        # The rows a picker lists carry their labels (the seeded retro is Apollo's).
+        assert preview.rows["retro"][0].project == "Apollo"
         assert preview_scope("retro", today=TODAY, db_path=seeded["db"]).rows == {}
 
     def test_incognito_preview(self, seeded):
