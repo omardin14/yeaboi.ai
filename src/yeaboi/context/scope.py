@@ -232,15 +232,20 @@ class ContextScope:
             return "none"
         if self.sources is None:
             head = "all"
+            caps = ",".join(f"{name}:{cap}" for name, cap in self.limits if cap > 0)
         else:
             head = ",".join(
                 f"{name}:{self.limit_for(name)}" if self.limit_for(name) else name
                 for name in SOURCES
                 if name in self.sources
             )
+            caps = ""
         if self.window.bounded:
             head = f"{head}@{self.window.to_spec()}"
         parts = [head]
+        if caps:
+            # "all" carries no per-source token, so the caps ride as their own clause.
+            parts.append(caps)
         if self.projects:
             parts.append("project=" + ",".join(_quote(label) for label in self.projects))
         if self.tags:

@@ -204,3 +204,21 @@ class TestCoerceJsonString:
 
         with pytest.raises(ValueError, match="JSON"):
             coerce_scope("{not json")
+
+
+class TestSpecKeepsCapsUnderAll:
+    def test_all_with_caps_round_trips(self):
+        scope = parse_context_spec("all standup:5")
+        assert scope.sources is None and scope.limits == (("standup", 5),)
+        assert scope.to_spec() == "all standup:5"
+        assert parse_context_spec(scope.to_spec()) == scope
+
+    def test_all_with_window_and_caps_round_trips(self):
+        scope = ContextScope(window=Window(kind="sprints", count=2), limits=(("standup", 5), ("retro", 1)))
+        spec = scope.to_spec()
+        assert spec == "all@2sprints standup:5,retro:1"
+        assert parse_context_spec(spec) == scope
+
+    def test_dict_twin_with_all_and_caps_matches_the_spec_twin(self):
+        scope = ContextScope.from_dict({"sources": None, "limits": {"retro": 1}})
+        assert parse_context_spec(scope.to_spec()) == scope

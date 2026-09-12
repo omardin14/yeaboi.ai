@@ -264,3 +264,41 @@ class TestBoardPagesRecordTheirScope:
         source = Path(mode_select.__file__).read_text()
         assert "record_retro_run(report, db_path=_ana_dbp, scope=selection.scope)" in source
         assert "record_poker_run(report, db_path=_ana_dbp, scope=board.selection.scope)" in source
+
+
+class TestTypingDoesNotWalkTheStores:
+    """The preview reads every store, so it waits for typing to settle."""
+
+    def _count(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            page, "preview_draft", lambda draft, db_path=None: calls.append(1) or page.ContextPreview(label="n")
+        )
+        return calls
+
+    def test_keystrokes_within_the_debounce_preview_once(self, monkeypatch):
+        calls = self._count(monkeypatch)
+        keys = ["down"] * 9 + ["a", "p", "o", "l", "l", "o", "esc"]  # to the project row, type, leave
+        _drive(keys)
+        assert len(calls) == 1  # the opening preview only
+
+    def test_leaving_the_text_row_settles_the_preview(self, monkeypatch):
+        calls = self._count(monkeypatch)
+        keys = ["down"] * 9 + ["a", "p", "down", "esc"]
+        _drive(keys)
+        assert len(calls) == 2
+
+    def test_the_debounce_elapsing_settles_the_preview(self, monkeypatch):
+        calls = self._count(monkeypatch)
+        clock = [0.0]
+        monkeypatch.setattr(page.time, "monotonic", lambda: clock[0])
+        it = iter(["down"] * 9 + ["a", None, None, "esc"])
+
+        def read_key(**_k):
+            key = next(it)
+            if key is None:
+                clock[0] += page.TEXT_PREVIEW_DEBOUNCE_S  # a quiet frame, time passes
+            return key
+
+        page.run_context_page(_Console(), _Live(), read_key, 0.001, True, mode="standup", initial=None)
+        assert len(calls) == 2

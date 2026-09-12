@@ -114,6 +114,11 @@ class ContextPreview:
     calendar_source: str = ""
 
 
+#: How long a text row must sit unchanged before its preview re-reads the stores —
+#: the preview walks every source, so it must never run per keystroke.
+TEXT_PREVIEW_DEBOUNCE_S = 0.35
+
+
 def preview_draft(draft: ContextDraft, db_path=None) -> ContextPreview:
     """Read the stores for ``draft``; a malformed draft or a failing read is a blank preview."""
     from yeaboi.context.resolve import preview_scope
@@ -174,14 +179,16 @@ def run_context_page(
     selected = 0
     action_sel = 0
     dirty = True
+    text_due: float | None = None  # a pending re-preview after typing settles
     preview = ContextPreview()
     start = time.monotonic()
     logger.info("context page opened: mode=%s initial=%s", mode, initial.to_spec() if initial else "-")
 
     while True:
-        if dirty:
+        if dirty or (text_due is not None and time.monotonic() >= text_due):
             preview = preview_draft(draft, db_path=db_path)
             dirty = False
+            text_due = None
         rows = draft.rows()
         selected = min(selected, len(rows) - 1)
         row = rows[selected]
@@ -207,6 +214,14 @@ def run_context_page(
         if key == "esc" or (key == "q" and not on_text):
             logger.info("context page closed: mode=%s unchanged", mode)
             return None
+        if (
+            text_due is not None
+            and key not in (None, "backspace")
+            and not (on_text and isinstance(key, str) and len(key) == 1 and key.isprintable())
+        ):
+            # Any key that is not more typing settles the text: preview now.
+            dirty = True
+            text_due = None
         if key in ("up", "down"):
             selected = (selected + (1 if key == "down" else -1)) % len(rows)
             draft.message = ""
@@ -245,10 +260,10 @@ def run_context_page(
                 return scope
         elif on_text and key == "backspace":
             draft.set_text(row, draft.text(row)[:-1])
-            dirty = True
+            text_due = time.monotonic() + TEXT_PREVIEW_DEBOUNCE_S
         elif on_text and key == "tab":
             draft.set_text(row, complete_text(row, draft.text(row), db_path=db_path))
             dirty = True
         elif on_text and isinstance(key, str) and len(key) == 1 and key.isprintable():
             draft.set_text(row, draft.text(row) + key)
-            dirty = True
+            text_due = time.monotonic() + TEXT_PREVIEW_DEBOUNCE_S
