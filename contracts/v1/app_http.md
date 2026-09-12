@@ -168,7 +168,7 @@ and a plan started here is one plan everywhere.
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/chat/sessions` | body `{description, intake_mode?: "small_project"\|"smart", solo?: false, analysis_profile_id?, title?, context?, project_label?, tags?}` → 201 with the session view. An absent `intake_mode` is classified from the description. `solo: true` opens a one-person intake (the Solo world). `analysis_profile_id` seeds the team calibration and must name a saved profile (400 otherwise). `context`, `project_label` and `tags` are the three keys every run body takes — see *Context scope and labels*; an absent `context` inherits the scope last used for planning on this machine, like every other run; the plan is labelled with them plus the tags every plan gets (`mode:planning`, `world:…`, the month, `size:…`) |
-| GET | `/api/chat/sessions` | `?limit=&project_label=&tag=` → `{sessions: [{session_id, title, project_name, project_label, tags, stage, created_at, last_modified, last_node_completed, counts: {features, stories, tasks, sprints}}]}` — every plan, newest first; `limit` defaults to 50 and `0` means every row |
+| GET | `/api/chat/sessions` | `?limit=&project_label=&tag=` → `{sessions: [{session_id, title, project_name, project_label, tags, stage, created_at, last_modified, last_node_completed, counts: {features, stories, tasks, sprints}}]}` — every plan, newest first; `limit` defaults to 50 and `0` means every row. `title` is derived, never stored: the user's title, else the analysed project name, else the description's first sentence cut to 60 characters |
 | GET | `/api/chat/commands` | `{commands: [{name, help, availability}]}` — the slash verbs the window runs itself (below) |
 | GET | `/api/chat/sessions/{session_id}` | the session view; 404 when no such conversation is open or stored |
 | POST | `/api/chat/sessions/{session_id}/send` | body `{text, images?: [..]}` → a chunked NDJSON turn; 400 when `text` starts with `/`; 409 while a turn is already running, or while the stage is `pipeline` or `epic` (call `advance`) |
@@ -210,6 +210,8 @@ edit feedback, `/small` and `/large` → `size`, `/questions` → `questions`,
 
 The **session view** is
 `{session_id, project_id, title, project_label, tags, stage, intake_mode, opening, created_at, last_modified, transcript: [<line>], question: {question_text, choices, multi_select, auto_submit, prior_art, suggestion, progress, phase_label, current_question, preamble_lines}, progress: {steps: [{node, label, status: "pending"|"running"|"done"}], step, total}, pending: <line> | null, sections: [{kind, status, version}]}`.
+
+`title` follows the list's rule: the user's title, else the analysed project name, else a provisional name cut from the description, so a plan is never "Untitled" on any surface.
 `project_id` repeats `session_id` for one release, until every window reads
 the new name. `opening` is the description until it has been sent as the
 conversation's first turn — a client that skips it leaves the intake with

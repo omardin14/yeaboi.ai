@@ -24,6 +24,7 @@ from datetime import date
 from functools import partial
 
 from yeaboi.agent.chat_session import ChatSession, last_completed_node, stage_of, start_state
+from yeaboi.sessions import plan_title
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,20 @@ def _remove_attachments(session_id: str) -> None:
     if PLANNING_LOGS_DIR.exists():
         for log_file in PLANNING_LOGS_DIR.glob(f"{session_id}.log*"):
             log_file.unlink(missing_ok=True)
+
+
+def described_as(state: dict | None) -> str:
+    """The description a plan was opened on: the analysis's, else the opening line, else messages[0]."""
+    if not state:
+        return ""
+    text = state.get("project_description") or state.get("_chat_opening") or ""
+    if text:
+        return str(text)
+    for message in state.get("messages") or []:
+        if getattr(message, "type", "") == "human":
+            content = getattr(message, "content", "")
+            return content if isinstance(content, str) else ""
+    return ""
 
 
 class UnknownChatError(LookupError):
@@ -368,7 +383,11 @@ class ChatSupervisor:
             out.append(
                 {
                     "session_id": row["session_id"],
-                    "title": row.get("title") or "",
+                    "title": plan_title(
+                        row.get("title") or "",
+                        row.get("project_name") or "",
+                        described_as(state),
+                    ),
                     "project_name": row.get("project_name") or "",
                     "project_label": row_label,
                     "tags": row_tags,

@@ -43,9 +43,10 @@ from yeaboi.agent.chat_session import (
 )
 from yeaboi.agent.plan_view import pipeline_progress, plan_view, section_status
 from yeaboi.app._context_body import read_context
-from yeaboi.app.chats import ChatBusyError, LiveChat, UnknownChatError
+from yeaboi.app.chats import ChatBusyError, LiveChat, UnknownChatError, described_as
 from yeaboi.app.router import HTTPError, Request, Response, json_response
 from yeaboi.mcp.runtime import to_jsonable
+from yeaboi.sessions import plan_title
 
 logger = logging.getLogger(__name__)
 
@@ -552,7 +553,11 @@ def _view(app, chat: LiveChat) -> dict:
     values = {
         "session_id": chat.session_id,
         "project_id": chat.session_id,
-        "title": chat.title or meta["title"],
+        "title": plan_title(
+            chat.title or meta["title"],
+            getattr(state.get("project_analysis"), "project_name", "") or "",
+            described_as(state),
+        ),
         "project_label": labels["project_label"],
         "tags": labels["tags"],
         "stage": chat.session.awaiting,

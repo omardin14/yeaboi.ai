@@ -10,7 +10,7 @@ import stat
 
 import pytest
 
-from yeaboi.sessions import CURRENT_SCHEMA_VERSION, SessionStore
+from yeaboi.sessions import CURRENT_SCHEMA_VERSION, SessionStore, plan_title, provisional_title
 
 
 class TestSessionStoreFilePermissions:
@@ -458,3 +458,36 @@ class TestSessionLabelsMigration:
         with LabelStore(db) as labels:
             assert labels.get_labels("planning", "p2") is None
             assert labels.get_labels("analysis", "jira-PROJ-20260401") is not None
+
+
+class TestProvisionalTitle:
+    def test_blank_description_has_no_title(self):
+        assert provisional_title("") == ""
+        assert provisional_title("   \n ") == ""
+
+    def test_a_short_description_is_its_own_title(self):
+        assert provisional_title("A booking app for barbers") == "A booking app for barbers"
+
+    def test_only_the_first_sentence_is_used(self):
+        assert provisional_title("A booking app for barbers. It needs payments.") == "A booking app for barbers."
+
+    def test_a_long_first_sentence_is_cut_at_a_word(self):
+        text = "A booking platform for independent barbers with online payments and reminders for every customer"
+        title = provisional_title(text)
+        assert title.endswith("…") and len(title) <= 61
+        assert title == "A booking platform for independent barbers with online…"
+
+    def test_a_single_long_word_is_cut_hard(self):
+        assert provisional_title("x" * 80) == "x" * 60 + "…"
+
+
+class TestPlanTitle:
+    def test_the_users_title_wins(self):
+        assert plan_title("Mine", "Analysed", "described") == "Mine"
+
+    def test_the_analysed_name_beats_the_description(self):
+        assert plan_title("", "Analysed", "described") == "Analysed"
+
+    def test_the_description_is_the_last_resort(self):
+        assert plan_title("", "", "A booking app. More.") == "A booking app."
+        assert plan_title("", "", "") == ""

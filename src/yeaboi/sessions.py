@@ -81,6 +81,31 @@ def make_display_name(meta: dict) -> str:
     return meta.get("session_id", "unknown")
 
 
+#: Where a provisional plan title is cut when the description runs long.
+PROVISIONAL_TITLE_CHARS = 60
+
+
+def provisional_title(description: str, *, limit: int = PROVISIONAL_TITLE_CHARS) -> str:
+    """A plan's name before the analysis gives it one: the description's first sentence.
+
+    Cut at a word boundary past ``limit`` characters with an ellipsis; empty
+    when the description is blank.
+    """
+    text = " ".join(description.split())
+    if not text:
+        return ""
+    first = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    if len(first) <= limit:
+        return first
+    cut = first[:limit].rsplit(" ", 1)[0].rstrip(" ,;:") or first[:limit]
+    return cut + "…"
+
+
+def plan_title(title: str, project_name: str, description: str) -> str:
+    """The name a plan shows: the user's title, else the analysed name, else a provisional one."""
+    return title or project_name or provisional_title(description)
+
+
 def make_unique_display_names(sessions: list[dict]) -> dict[str, str]:
     """Compute collision-free display names for a list of sessions.
 

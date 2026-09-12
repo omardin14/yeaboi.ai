@@ -4504,11 +4504,11 @@ def project_intake(state: ScrumState) -> dict:
             num_defaulted = len(qs.defaulted_questions)
             preamble_parts: list[str] = []
             if num_from_desc > 0:
-                preamble_parts.append(f"**{num_from_desc}** extracted from your description")
+                preamble_parts.append(f"extracted **{num_from_desc}** from your description")
             if num_from_scrum > 0:
-                preamble_parts.append(f"**{num_from_scrum}** from SCRUM.md")
+                preamble_parts.append(f"took **{num_from_scrum}** from SCRUM.md")
             if num_defaulted > 0:
-                preamble_parts.append(f"**{num_defaulted}** filled with defaults")
+                preamble_parts.append(f"filled **{num_defaulted}** with defaults")
             preamble = ""
             if preamble_parts:
                 preamble = "I " + " and ".join(preamble_parts) + ".\n\n"

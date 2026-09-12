@@ -496,6 +496,35 @@ class TestSessionViewShape:
         assert [s["kind"] for s in view["sections"]][:2] == ["intake", "analysis"]
         assert {s["status"] for s in view["sections"]} == {"empty"}
 
+    def test_the_title_falls_back_to_the_description_then_the_analysis(self, store_app):
+        from yeaboi.agent.state import ProjectAnalysis
+
+        view = open_chat(store_app, description="A booking app for barbers. Payments later.")
+        assert view["title"] == "A booking app for barbers."
+        sid = view["session_id"]
+        chat = store_app.chats.open(sid)
+        chat.session.state["project_analysis"] = ProjectAnalysis(
+            project_name="Barbershop",
+            project_description="",
+            project_type="greenfield",
+            goals=(),
+            end_users=(),
+            target_state="",
+            tech_stack=(),
+            integrations=(),
+            constraints=(),
+            sprint_length_weeks=2,
+            risks=(),
+            out_of_scope=(),
+            assumptions=(),
+            target_sprints=3,
+        )
+        view = json.loads(request(store_app, "GET", f"/api/chat/sessions/{sid}").body)
+        assert view["title"] == "Barbershop"
+        request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"title": "Mine"})
+        view = json.loads(request(store_app, "GET", f"/api/chat/sessions/{sid}").body)
+        assert view["title"] == "Mine"
+
     def test_a_parked_gate_is_the_pending_line(self, app):
         open_chat(app)
         chat = app.chats.open("proj-1")
@@ -641,6 +670,11 @@ class TestList:
         by_tag = json.loads(request(store_app, "GET", "/api/chat/sessions?tag=q3").body)["sessions"]
         assert [row["title"] for row in by_tag] == ["Apollo plan"]
         assert request(store_app, "GET", "/api/chat/sessions?limit=x").code == 400
+
+    def test_a_plan_without_a_title_is_named_from_its_description(self, store_app):
+        open_chat(store_app, description="A booking app for barbers. Payments later.")
+        rows = json.loads(request(store_app, "GET", "/api/chat/sessions").body)["sessions"]
+        assert rows[0]["title"] == "A booking app for barbers."
 
     def test_an_empty_store_is_an_empty_list(self, store_app):
         assert json.loads(request(store_app, "GET", "/api/chat/sessions").body) == {"sessions": []}
@@ -816,3 +850,16 @@ class TestPlanSyncEvictsTheLiveChat:
         open_chat(app)
         _after_tool(app, "plan_sync", {})
         assert app.chats._chats == {}
+
+
+class TestDescribedAs:
+    def test_the_analysis_description_wins_then_the_opening_then_the_first_turn(self):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        from yeaboi.app.chats import described_as
+
+        assert described_as(None) == ""
+        assert described_as({"project_description": "analysed", "_chat_opening": "opening"}) == "analysed"
+        assert described_as({"_chat_opening": "opening", "messages": [HumanMessage(content="first")]}) == "opening"
+        assert described_as({"messages": [AIMessage(content="hi"), HumanMessage(content="first")]}) == "first"
+        assert described_as({"messages": [HumanMessage(content=[{"type": "text", "text": "x"}])]}) == ""
