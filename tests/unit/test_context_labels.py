@@ -191,3 +191,42 @@ class TestDropRunLabels:
 
     def test_never_raises(self, tmp_path):
         drop_run_labels(tmp_path / "missing-dir" / "sessions.db", "retro", 1)
+
+
+class TestLabelRun:
+    def test_writes_the_defaults_and_the_users_tags(self, db):
+        from datetime import date
+
+        from yeaboi.context.labels import LabelStore, label_run
+        from yeaboi.context.scope import ContextScope
+
+        scope = ContextScope(sources=frozenset({"retro"}))
+        row = label_run(
+            "standup",
+            "s1",
+            7,
+            project_label="Apollo",
+            tags=["Q3 Push"],
+            scope=scope,
+            defaults={"sprint_day": 3, "today": date(2026, 9, 11)},
+            db_path=db,
+        )
+        assert row is not None
+        assert {"mode:standup", "world:team", "2026-09", "sprint-day:3", "q3-push"} <= set(row.tags)
+        assert row.project == "Apollo" and row.scope == scope.to_dict()
+        with LabelStore(db) as store:
+            assert store.get_labels("standup", "s1", "7") == row
+
+    def test_an_unscoped_run_clears_the_old_scope(self, db):
+        from yeaboi.context.labels import LabelStore, label_run
+        from yeaboi.context.scope import ContextScope
+
+        label_run("retro", "s1", 1, scope=ContextScope(sources=frozenset({"plan"})), db_path=db)
+        label_run("retro", "s1", 1, db_path=db)
+        with LabelStore(db) as store:
+            assert store.get_labels("retro", "s1", "1").scope is None
+
+    def test_never_raises(self, tmp_path):
+        from yeaboi.context.labels import label_run
+
+        assert label_run("standup", "s1", 1, db_path=tmp_path) is None  # a directory is not a database

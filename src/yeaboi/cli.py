@@ -275,6 +275,56 @@ def _resolve_resume(console: Console, resume_arg: str) -> tuple[dict | None, str
         return state, resume_arg
 
 
+def _context_spec(spec: str):
+    """argparse type for --context: 'all' | 'none' | 'inherit' | a scope spec."""
+    from yeaboi.context.scope import parse_context_spec
+
+    try:
+        return parse_context_spec(spec)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _add_context_flags(parser: argparse.ArgumentParser, *, scope: bool = True) -> None:
+    """The three flags every run takes: what it reads, and how it is labelled."""
+    if scope:
+        parser.add_argument(
+            "--context",
+            default=None,
+            type=_context_spec,
+            metavar="SPEC",
+            help="Which other sessions this run may read: 'all', 'none', or e.g. "
+            "'standup,retro:1@2sprints project=apollo tags=a,b' (default: the mode's saved or last-used scope)",
+        )
+    parser.add_argument(
+        "--project-label",
+        dest="project_label",
+        default="",
+        metavar="NAME",
+        help="Free-text project label recorded on this run (autocompletes on the other surfaces)",
+    )
+    parser.add_argument(
+        "--tag",
+        dest="tags",
+        action="append",
+        default=[],
+        metavar="TAG",
+        help="Tag recorded on this run beside its default tags (repeatable)",
+    )
+
+
+def _context_kwargs(args: argparse.Namespace) -> dict:
+    """The engine kwargs the context flags map onto — only the ones the user set."""
+    out: dict = {}
+    if getattr(args, "context", None) is not None:
+        out["context"] = args.context
+    if getattr(args, "project_label", ""):
+        out["project_label"] = args.project_label
+    if getattr(args, "tags", None):
+        out["tags"] = list(args.tags)
+    return out
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -507,6 +557,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sprint length in weeks (maps to intake Q8). Only used with --non-interactive.",
     )
 
+    # What a headless plan may read, and how it is labelled — the same three
+    # flags every run subcommand takes.
+    _add_context_flags(parser)
+
     # ── Daily Standup flags ───────────────────────────────────────────────
     # --standup-run is what the OS scheduler (launchd/cron) invokes: it runs a
     # standup headlessly and delivers it. See docs: "Daily Standup".
@@ -620,6 +674,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="A one-person report: first-person narrative, never 'the team' (the Solo world)",
     )
     report_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings/empty report)")
+    _add_context_flags(report_p)
     report_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     report_p.add_argument(
         "--theme",
@@ -636,6 +691,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="A one-person standup: your own activity only, first-person summary (the Solo world)",
     )
     standup_p.add_argument("--deliver", action="store_true", help="Send to the configured channels (default: print)")
+    _add_context_flags(standup_p)
+    standup_p.add_argument(
+        "--set-context",
+        dest="set_context",
+        default="",
+        metavar="SPEC",
+        help="Save the session's standup scope ('inherit' clears it) instead of running",
+    )
     standup_p.add_argument(
         "--channels", nargs="+", choices=["terminal", "desktop", "slack", "email"], help="Override delivery channels"
     )
@@ -805,6 +868,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also live-scan the stretch no saved standup covered (slower, costs API calls)",
     )
     prep_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
+    _add_context_flags(prep_p)
     complete_p = perf_sub.add_parser(
         "complete", help="Complete a held 1:1 from its transcript", description=PERFORMANCE_BETA_NOTICE
     )
@@ -821,6 +885,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--recipients", nargs="+", default=None, metavar="EMAIL", help="Email recipients override (with --deliver)"
     )
     complete_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
+    _add_context_flags(complete_p, scope=False)
     review_p = perf_sub.add_parser(
         "review", help="Draft a periodic performance review", description=PERFORMANCE_BETA_NOTICE
     )
@@ -835,6 +900,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also live-scan the stretch no saved standup covered (slower, costs API calls)",
     )
     review_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
+    _add_context_flags(review_p)
     note_p = perf_sub.add_parser("note", help="Record a note about an engineer", description=PERFORMANCE_BETA_NOTICE)
     note_p.add_argument("engineer", help="Engineer name")
     note_p.add_argument("--text", required=True, help="The note text")
@@ -893,6 +959,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_run_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     review_run_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
+    _add_context_flags(review_run_p)
     review_hist_p = review_sub.add_parser("history", help="List past weekly reviews and last week's open actions")
     review_hist_p.add_argument("--session", default="", metavar="ID", help="Session to scope by (default: all)")
     review_hist_p.add_argument("--limit", type=int, default=12, help="Number of past reviews to show (default 12)")
@@ -1396,6 +1463,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     analyze_p.add_argument("--strict", action="store_true", help="Exit 3 on a degraded run (warnings present)")
+    _add_context_flags(analyze_p)
     analyze_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     app_p = subparsers.add_parser(
@@ -1478,6 +1546,7 @@ def _run_headless(args: argparse.Namespace) -> None:
         output_format=output_format,
         prior_art=args.prior_art,
         solo=bool(getattr(args, "solo", False)),
+        **_context_kwargs(args),
     )
 
 
@@ -2140,6 +2209,7 @@ def _cmd_report(args: argparse.Namespace, console: Console) -> int:
         theme=args.theme,
         sources=sources,
         solo=args.solo,
+        **_context_kwargs(args),
     )
     for warning in report.warnings:
         print(f"⚠ {warning}", file=sys.stderr)
@@ -2177,6 +2247,15 @@ def _cmd_standup_inner(args: argparse.Namespace, console: Console) -> int:
         return 2
     if args.schedule:
         return _cmd_standup_schedule(args, console, session_id)
+    if args.set_context:
+        from yeaboi.paths import get_db_path
+        from yeaboi.standup.store import StandupStore
+
+        scope = _context_spec(args.set_context)
+        with StandupStore(get_db_path()) as store:
+            store.set_context_scope(session_id, scope)
+        console.print(f"Standup scope for {session_id}: {scope.to_spec() if scope is not None else 'inherit'}")
+        return 0
     if args.list_members:
         from yeaboi.config import get_azure_devops_project, get_jira_project_key
         from yeaboi.paths import get_db_path
@@ -2218,6 +2297,7 @@ def _cmd_standup_inner(args: argparse.Namespace, console: Console) -> int:
         documentation_sources=args.documentation_sources,
         review_transcripts=args.review_transcripts,
         solo=args.solo,
+        **_context_kwargs(args),
     )
     for warning in report.warnings:
         print(f"⚠ {warning}", file=sys.stderr)
@@ -2437,6 +2517,7 @@ def _cmd_perf(args: argparse.Namespace, console: Console) -> int:
             jira_project=args.jira_project,
             azdo_project=args.azdo_project,
             deep_scan=args.deep_scan,
+            **_context_kwargs(args),
         )
         for warning in prep.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
@@ -2464,6 +2545,7 @@ def _cmd_perf(args: argparse.Namespace, console: Console) -> int:
             deliver=args.deliver,
             recipients=args.recipients,
             images=tuple(args.images),
+            **_context_kwargs(args),
         )
         for warning in record.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
@@ -2480,6 +2562,7 @@ def _cmd_perf(args: argparse.Namespace, console: Console) -> int:
             azdo_project=args.azdo_project,
             period_months=args.months,
             deep_scan=args.deep_scan,
+            **_context_kwargs(args),
         )
         for warning in review.warnings:
             print(f"⚠ {warning}", file=sys.stderr)
@@ -3863,6 +3946,7 @@ def _cmd_review_run(args: argparse.Namespace, console: Console) -> int:
         session_id=_resolve_cli_session(args.session) or "",
         week_end=args.week_end,
         carried_statuses=marks or None,
+        **_context_kwargs(args),
     )
     for warning in review.warnings:
         print(f"⚠ {warning}", file=sys.stderr)
@@ -4023,6 +4107,7 @@ def _cmd_analyze(args: argparse.Namespace, console: Console) -> int:
         analysis_features=getattr(args, "features", None),
         components=components or None,
         members=members,
+        **_context_kwargs(args),
     )
     for warning in result["warnings"]:
         print(f"⚠ {warning}", file=sys.stderr)

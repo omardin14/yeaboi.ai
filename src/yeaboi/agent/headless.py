@@ -28,14 +28,17 @@ export-only branch exactly:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
 
 from yeaboi.agent.state import QuestionnaireState, prior_art_refs
+from yeaboi.context.labels import label_run
+from yeaboi.context.scope import ContextScope, coerce_scope
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +186,9 @@ def run_planning_pipeline(
     ac_format: str = "",
     architecture_spike: str = "auto",
     solo: bool = False,
+    context: ContextScope | dict | str | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> dict:
     """Run the full planning pipeline headlessly and return the final graph state.
 
@@ -218,6 +224,12 @@ def run_planning_pipeline(
         solo: A one-developer run (the Solo world). The intake defaults the
             team questions to one person and never offers a member picker,
             so the plan is sized for you alone.
+        context: What this plan may read from other sessions — a
+            ``ContextScope``, its dict twin or its spec string (``"all"``,
+            ``"none"``, ``"standup,retro:1@2sprints"``). ``None`` reads as
+            today: every source, no window.
+        project_label: The free-text project label recorded on the session.
+        tags: Tags recorded beside the defaults every plan gets.
 
     Returns:
         The final graph state dict (analysis, features, stories, tasks,
@@ -278,6 +290,14 @@ def run_planning_pipeline(
         if solo:
             graph_state["solo"] = True
             logger.info("Headless: solo run — team questions default to one developer")
+        scope = coerce_scope(context)
+        if scope is not None:
+            # The JSON twin on state, so the nodes' _wants_dep and the saved
+            # session both carry what this run may read.
+            graph_state["context_scope"] = json.dumps(scope.to_dict(), sort_keys=True)
+            logger.info("Headless: context scope %s", scope.to_spec())
+        if project_label:
+            graph_state["project_label"] = project_label
 
         store = SessionStore(db_path or get_db_path()) if save_session else None
         session_created = False
@@ -316,6 +336,15 @@ def run_planning_pipeline(
                     if not session_created:
                         store.create_session(session_id)
                         session_created = True
+                        label_run(
+                            "planning",
+                            session_id,
+                            project_label=project_label,
+                            tags=tags,
+                            scope=scope,
+                            defaults={"world": "solo" if solo else "team", "plan_size": "small_project"},
+                            db_path=db_path,
+                        )
                     store.save_state(session_id, graph_state)
                     if not project_name_recorded:
                         analysis = graph_state.get("project_analysis")

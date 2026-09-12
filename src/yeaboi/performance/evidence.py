@@ -39,6 +39,14 @@ PARTIAL = "partial"
 FAILED = "failed"
 NOT_CONFIGURED = "not_configured"
 
+#: The coverage detail a source settles with when the run's scope switched it off.
+_TOGGLED_OFF = "Switched off by this run's context scope."
+
+
+class _SourceOffError(Exception):
+    """Raised inside a source block to skip its read after settling its coverage row."""
+
+
 SOURCE_TICKETS = "tickets"
 SOURCE_CODE = "code"
 SOURCE_DOCUMENTATION = "documentation"
@@ -604,11 +612,19 @@ def gather_engineer_evidence(
     deep_scan: bool = False,
     db_path=None,
     on_progress=None,
+    selection=None,
 ) -> EngineerEvidence:
     """Read every mode's history for one engineer. Never raises.
 
     Saved stores are read first (free); ``deep_scan`` additionally permits one
     capped live multi-source collection over the stretch no saved standup covered.
+
+    ``selection`` (a resolved ``context.Selection``) applies the run's scope:
+    every source obeys its toggle (a switched-off source settles its coverage
+    row saying so, so silence never reads as an idle period — the delivery
+    read rides ``reporting``), and a narrowed selection filters the standup/
+    retro/poker/delivery reads to its own runs. The live gap-fill borrows the
+    saved standup config, so it rides the ``standup`` toggle too.
 
 
     ``on_progress``: optional callable taking one lifecycle event per source
@@ -616,6 +632,13 @@ def gather_engineer_evidence(
     source reports ``running`` and then whatever its own SourceCoverage row says.
     """
     state = state or {}
+
+    def _wants(name: str) -> bool:
+        return selection is None or selection.wants(name)
+
+    def _ids(name: str):
+        return selection.run_ids(name) if selection is not None else None
+
     logger.info(
         "gather_engineer_evidence: engineer=%s period=%s..%s deep_scan=%s",
         engineer,
@@ -698,23 +721,28 @@ def gather_engineer_evidence(
 
     # ── Standup — per-member code, docs, self-reports, blockers, practices. ──
     _emit(on_progress, SOURCE_STANDUP, "running")
-    try:
-        from yeaboi.standup.store import StandupStore
+    if not _wants("standup"):
+        coverage.append(SourceCoverage(SOURCE_STANDUP, NOT_CONFIGURED, _TOGGLED_OFF))
+        coverage.append(SourceCoverage(SOURCE_CODE, NOT_CONFIGURED, _TOGGLED_OFF))
+        coverage.append(SourceCoverage(SOURCE_DOCUMENTATION, NOT_CONFIGURED, _TOGGLED_OFF))
+    else:
+        try:
+            from yeaboi.standup.store import StandupStore
 
-        with StandupStore(db_path) as store:
-            reports = [
-                r
-                for r in store.get_recent_reports(_MAX_STANDUP_RUNS)
-                if _in_period(getattr(r, "date", ""), period_start, period_end)
-            ]
-        standup_stats = _standup_lines(reports, aliases)
-        standup_lines = standup_stats["standup"][:_MAX_STANDUP_LINES]
-        code_lines = standup_stats["code"][:_MAX_CODE_LINES]
-        doc_lines = standup_stats["documentation"][:_MAX_DOC_LINES]
-        practice_lines = standup_stats["practices"][:_MAX_PRACTICE_LINES]
-    except Exception:  # noqa: BLE001 — evidence is best-effort; never abort the run
-        logger.debug("performance evidence: standup read failed (non-fatal)", exc_info=True)
-        coverage.append(SourceCoverage(SOURCE_STANDUP, FAILED, "The standup history could not be read."))
+            with StandupStore(db_path) as store:
+                reports = [
+                    r
+                    for r in store.get_recent_reports(_MAX_STANDUP_RUNS, run_ids=_ids("standup"))
+                    if _in_period(getattr(r, "date", ""), period_start, period_end)
+                ]
+            standup_stats = _standup_lines(reports, aliases)
+            standup_lines = standup_stats["standup"][:_MAX_STANDUP_LINES]
+            code_lines = standup_stats["code"][:_MAX_CODE_LINES]
+            doc_lines = standup_stats["documentation"][:_MAX_DOC_LINES]
+            practice_lines = standup_stats["practices"][:_MAX_PRACTICE_LINES]
+        except Exception:  # noqa: BLE001 — evidence is best-effort; never abort the run
+            logger.debug("performance evidence: standup read failed (non-fatal)", exc_info=True)
+            coverage.append(SourceCoverage(SOURCE_STANDUP, FAILED, "The standup history could not be read."))
 
     if standup_stats:
         runs = standup_stats["runs"]
@@ -727,8 +755,16 @@ def gather_engineer_evidence(
 
     # ── Analysis — delivery stats + practice hygiene + AI markers. ───────────
     _emit(on_progress, SOURCE_ANALYSIS, "running")
+    if not _wants("analysis"):
+        coverage.append(SourceCoverage(SOURCE_ANALYSIS, NOT_CONFIGURED, _TOGGLED_OFF))
+        analysis_lines, profiles_seen = [], 0
+        _read = None
+    else:
+        _read = _read_analysis
     try:
-        analysis_lines, analysis_metrics, profiles_seen = _read_analysis(db_path, aliases, jira_project, azdo_project)
+        if _read is None:
+            raise _SourceOffError
+        analysis_lines, analysis_metrics, profiles_seen = _read(db_path, aliases, jira_project, azdo_project)
         metrics.extend(analysis_metrics)
         # A profile that exists and names somebody else is an attribution gap,
         # not an unconfigured source — the same distinction every other source
@@ -744,6 +780,8 @@ def gather_engineer_evidence(
         else:
             analysis_state, analysis_detail = NOT_CONFIGURED, "No saved team analysis to read."
         coverage.append(SourceCoverage(SOURCE_ANALYSIS, analysis_state, analysis_detail))
+    except _SourceOffError:
+        pass
     except Exception:  # noqa: BLE001
         logger.debug("performance evidence: analysis read failed (non-fatal)", exc_info=True)
         coverage.append(SourceCoverage(SOURCE_ANALYSIS, FAILED, "The team analysis profile could not be read."))
@@ -752,13 +790,19 @@ def gather_engineer_evidence(
     # ── Retro — their cards, their action items, their attendance. ───────────
     _emit(on_progress, SOURCE_RETRO, "running")
     try:
+        if not _wants("retro"):
+            coverage.append(SourceCoverage(SOURCE_RETRO, NOT_CONFIGURED, _TOGGLED_OFF))
+            raise _SourceOffError
         from yeaboi.retro.store import RetroStore
 
-        project_bias = str(state.get("project_name", ""))
+        # The project-name sort bias only applies to a team-wide read; a hard
+        # run filter replaces it (same rule as gather_ceremony_context).
+        retro_ids = _ids("retro")
+        project_bias = str(state.get("project_name", "")) if retro_ids is None else ""
         with RetroStore(db_path) as store:
             reports = [
                 r
-                for r in store.get_recent_reports(_MAX_RETRO_RUNS, project_bias)
+                for r in store.get_recent_reports(_MAX_RETRO_RUNS, project_bias, run_ids=retro_ids)
                 if _in_period(getattr(r, "date", ""), period_start, period_end)
             ]
         lines, participated, total = _retro_lines(reports, aliases)
@@ -779,19 +823,23 @@ def gather_engineer_evidence(
         state_ = COVERED if participated else (PARTIAL if total else NOT_CONFIGURED)
         detail = _coverage_detail(state_, "retro", participated, total)
         coverage.append(SourceCoverage(SOURCE_RETRO, state_, detail))
+    except _SourceOffError:
+        pass
     except Exception:  # noqa: BLE001
         logger.debug("performance evidence: retro read failed (non-fatal)", exc_info=True)
         coverage.append(SourceCoverage(SOURCE_RETRO, FAILED, "The retro history could not be read."))
     _emit_coverage(on_progress, coverage, SOURCE_RETRO)
 
     # ── Poker — how their estimates track where the team lands. ──────────────
-    # No dep token of its own — silenced only by a full-incognito run.
     _emit(on_progress, SOURCE_POKER, "running")
     try:
+        if not _wants("poker"):
+            coverage.append(SourceCoverage(SOURCE_POKER, NOT_CONFIGURED, _TOGGLED_OFF))
+            raise _SourceOffError
         from yeaboi.poker.store import PokerStore
 
         with PokerStore(db_path) as store:
-            rows = store.get_all_history(_MAX_POKER_RUNS)
+            rows = store.get_all_history(_MAX_POKER_RUNS, run_ids=_ids("poker"))
             reports = []
             for row in rows:
                 if not _in_period(str(row.get("poker_date", "")), period_start, period_end):
@@ -823,19 +871,23 @@ def gather_engineer_evidence(
                 else _coverage_detail(state_, "poker", 0, total),
             )
         )
+    except _SourceOffError:
+        pass
     except Exception:  # noqa: BLE001
         logger.debug("performance evidence: poker read failed (non-fatal)", exc_info=True)
         coverage.append(SourceCoverage(SOURCE_POKER, FAILED, "The poker history could not be read."))
     _emit_coverage(on_progress, coverage, SOURCE_POKER)
 
     # ── Reporting — what actually shipped under their name. ──────────────────
-    # No dep token of its own — silenced only by a full-incognito run.
     _emit(on_progress, SOURCE_DELIVERY, "running")
     try:
+        if not _wants("reporting"):
+            coverage.append(SourceCoverage(SOURCE_DELIVERY, NOT_CONFIGURED, _TOGGLED_OFF))
+            raise _SourceOffError
         from yeaboi.reporting.store import ReportingStore
 
         with ReportingStore(db_path) as store:
-            report = store.get_latest_report()
+            report = store.get_latest_report(run_ids=_ids("reporting"))
         delivered = getattr(report, "delivered_items", ()) or ()
         shipped = [i for i in delivered if identity.matches(getattr(i, "assignee", ""), aliases)]
         delivery_lines = _delivery_lines(delivered, aliases)[:_MAX_DELIVERY_LINES]
@@ -864,13 +916,15 @@ def gather_engineer_evidence(
         else:
             delivery_state, delivery_detail = NOT_CONFIGURED, "No delivery report to read."
         coverage.append(SourceCoverage(SOURCE_DELIVERY, delivery_state, delivery_detail))
+    except _SourceOffError:
+        pass
     except Exception:  # noqa: BLE001
         logger.debug("performance evidence: reporting read failed (non-fatal)", exc_info=True)
         coverage.append(SourceCoverage(SOURCE_DELIVERY, FAILED, "The delivery report could not be read."))
     _emit_coverage(on_progress, coverage, SOURCE_DELIVERY)
 
     # ── Live gap-fill — only when asked, only over what nothing covered. ─────
-    if deep_scan:
+    if deep_scan and _wants("standup"):
         _emit(on_progress, PHASE_GAP_SCAN, "running")
         extra_code, extra_docs, gap_note, gap_outcome = _gap_fill(
             aliases,

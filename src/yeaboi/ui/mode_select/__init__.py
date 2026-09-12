@@ -11847,9 +11847,10 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
         # Always flush the board, stop the tunnel, and tear the server down — even
         # on exception or Ctrl-C — so the retro persists and no process leaks.
         try:
+            from yeaboi.retro.engine import record_retro_run
+
             report = board_to_report(board, sprint_name=sprint_name)
-            with RetroStore(_ana_dbp) as store:
-                store.record_run(report)
+            record_retro_run(report, db_path=_ana_dbp)
         except Exception as e:
             logger.warning("retro: flush to store failed: %s", e)
         link.stop()
@@ -12466,9 +12467,10 @@ def _run_poker_page(console: Console, live, read_key, frame_time: float, support
         # Always flush the session and tear the server down — even on exception
         # or Ctrl-C — so the estimates' record persists and no process leaks.
         try:
+            from yeaboi.poker.engine import record_poker_run
+
             report = board_to_report(board)
-            with PokerStore(_ana_dbp) as store:
-                store.record_run(report)
+            record_poker_run(report, db_path=_ana_dbp)
             if any(t.estimated for t in report.tickets):
                 _duck_react("poker_done")  # lands on the hub the page returns to
         except Exception as e:

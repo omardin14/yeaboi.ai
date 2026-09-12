@@ -29,6 +29,9 @@ from yeaboi.agent.state import (
     OneOnOneRecord,
     SixMonthReview,
 )
+from yeaboi.context.labels import label_run
+from yeaboi.context.resolve import selection_for
+from yeaboi.context.scope import ContextScope
 from yeaboi.performance import evidence as evidence_mod
 from yeaboi.performance.evidence import (
     COVERED,
@@ -225,6 +228,9 @@ def run_one_on_one_prep(
     db_path=None,
     today: date | None = None,
     on_progress=None,
+    context: ContextScope | dict | str | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> OneOnOnePrep:
     """Generate 1:1 prep for ``engineer`` from every source that knows them.
 
@@ -238,12 +244,16 @@ def run_one_on_one_prep(
     covered; it costs API calls, so it is off by default. ``on_progress`` takes
     one lifecycle event per phase (see ``analysis/progress.py``) so a caller can
     draw a live checklist; it is an injection seam, never a behaviour switch.
+    ``context`` narrows the evidence gather's cross-mode reads only; this
+    engine's own PerformanceStore reads stay engineer-keyed and unscoped — a
+    person's history must not shrink because a scope is active.
     """
     today = today or date.today()
     date_str = today.isoformat()
     db_path = _resolve_db_path(db_path)
     logger.info("run_one_on_one_prep: engineer=%s session=%s deep_scan=%s", engineer, session_id, deep_scan)
 
+    selection = selection_for("performance", context, today=today, db_path=db_path)
     state = _load_state(session_id, db_path)
     evidence = evidence_mod.gather_engineer_evidence(
         engineer,
@@ -255,6 +265,7 @@ def run_one_on_one_prep(
         deep_scan=deep_scan,
         db_path=db_path,
         on_progress=on_progress,
+        selection=selection,
     )
     activity = evidence.activity
 
@@ -308,7 +319,18 @@ def run_one_on_one_prep(
 
     _emit(on_progress, PHASE_SAVE, "running")
     with PerformanceStore(db_path) as store:
-        store.record_prep(prep, session_id=session_id)
+        prep_id = store.record_prep(prep, session_id=session_id)
+    label_run(
+        "performance",
+        session_id,
+        f"prep:{prep_id}",
+        project_label=project_label,
+        tags=tags,
+        scope=selection.scope,
+        defaults={"engineer": engineer, "kind": "prep"},
+        db_path=db_path,
+        today=today,
+    )
 
     from yeaboi.performance import provenance_log
 
@@ -359,6 +381,8 @@ def complete_one_on_one(
     today: date | None = None,
     images: Sequence[str] = (),
     on_progress=None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> OneOnOneRecord:
     """Turn a 1:1 transcript into an email summary + tracked action items.
 
@@ -451,7 +475,17 @@ def complete_one_on_one(
 
     _emit(on_progress, PHASE_SAVE, "running")
     with PerformanceStore(db_path) as store:
-        store.record_completion(record, session_id=session_id)
+        completion_id = store.record_completion(record, session_id=session_id)
+    label_run(
+        "performance",
+        session_id,
+        f"completion:{completion_id}",
+        project_label=project_label,
+        tags=tags,
+        defaults={"engineer": engineer, "kind": "completion"},
+        db_path=db_path,
+        today=today,
+    )
 
     from yeaboi.performance import provenance_log
 
@@ -667,6 +701,9 @@ def run_six_month_review(
     db_path=None,
     today: date | None = None,
     on_progress=None,
+    context: ContextScope | dict | str | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> SixMonthReview:
     """Synthesize a performance review for ``engineer`` over the last ``period_months``.
 
@@ -677,7 +714,9 @@ def run_six_month_review(
     framework, then asks the LLM for a structured review. Persists the review.
 
     ``deep_scan`` permits one capped live scan for the stretch no saved standup
-    covered; it costs API calls, so it is off by default.
+    covered; it costs API calls, so it is off by default. ``context`` narrows
+    the evidence gather's cross-mode reads and the ceremony summary; this
+    engine's own PerformanceStore reads stay engineer-keyed and unscoped.
     """
     today = today or date.today()
     period_end = today.isoformat()
@@ -685,6 +724,7 @@ def run_six_month_review(
     db_path = _resolve_db_path(db_path)
     logger.info("run_six_month_review: engineer=%s period=%s..%s", engineer, period_start, period_end)
 
+    selection = selection_for("performance", context, today=today, db_path=db_path)
     state = _load_state(session_id, db_path)
 
     with PerformanceStore(db_path) as store:
@@ -703,6 +743,7 @@ def run_six_month_review(
         deep_scan=deep_scan,
         db_path=db_path,
         on_progress=on_progress,
+        selection=selection,
     )
     delivery = evidence.activity
 
@@ -712,7 +753,7 @@ def run_six_month_review(
     try:
         from yeaboi.agent.ceremony_history import gather_ceremony_context
 
-        ceremony_summary = gather_ceremony_context(state.get("project_name", "")).summary_md
+        ceremony_summary = gather_ceremony_context(state.get("project_name", ""), selection=selection).summary_md
     except Exception as e:  # noqa: BLE001 — ceremony context is best-effort
         logger.warning("run_six_month_review: ceremony context failed: %s", e)
         ceremony_failed = True
@@ -769,7 +810,18 @@ def run_six_month_review(
 
     _emit(on_progress, PHASE_SAVE, "running")
     with PerformanceStore(db_path) as store:
-        store.record_review(review, session_id=session_id)
+        review_id = store.record_review(review, session_id=session_id)
+    label_run(
+        "performance",
+        session_id,
+        f"review:{review_id}",
+        project_label=project_label,
+        tags=tags,
+        scope=selection.scope,
+        defaults={"engineer": engineer, "kind": "review"},
+        db_path=db_path,
+        today=today,
+    )
 
     from yeaboi.performance import provenance_log
 

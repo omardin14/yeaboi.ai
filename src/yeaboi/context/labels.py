@@ -324,3 +324,43 @@ def drop_run_labels(db_path: Path, mode: str, run_id: int | str) -> None:
             store.delete(mode, run_id=str(run_id))
     except Exception:  # noqa: BLE001 — a label left behind is not worth failing a delete
         logger.debug("drop_run_labels failed for %s/%s", mode, run_id, exc_info=True)
+
+
+def label_run(
+    mode: str,
+    session_id: str,
+    run_id: int | str = "",
+    *,
+    project_label: str = "",
+    tags=(),
+    scope: ContextScope | dict | None = None,
+    defaults: dict | None = None,
+    db_path: Path | None = None,
+    today: date | None = None,
+) -> SessionLabels | None:
+    """The write side every engine calls at record time. Never raises.
+
+    ``defaults`` are the :func:`default_tags` keyword facts the run knows
+    (``sprint_number``, ``engineer``, ``period`` …); the user's ``tags`` are
+    merged on top. A label failure is logged, never raised — it must not
+    fail the run it describes.
+    """
+    try:
+        from yeaboi.paths import get_db_path
+
+        facts = dict(defaults or {})
+        facts.setdefault("today", today or date.today())
+        merged = (*default_tags(mode, **facts), *normalize_tags(tags))
+        with LabelStore(db_path or get_db_path()) as store:
+            return store.set_labels(
+                mode,
+                session_id,
+                str(run_id or ""),
+                project=project_label,
+                tags=merged,
+                scope=scope,
+                clear_scope=scope is None,
+            )
+    except Exception:  # noqa: BLE001 — a missing label must not fail the run it describes
+        logger.warning("label_run failed for %s/%s/%s (non-fatal)", mode, session_id, run_id, exc_info=True)
+        return None

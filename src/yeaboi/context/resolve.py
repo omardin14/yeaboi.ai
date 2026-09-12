@@ -366,3 +366,36 @@ _SOURCE_READERS: dict[str, Callable[[Path], list[SourceRow]]] = {
     "reporting": _reporting,
     "review": _review,
 }
+
+
+def selection_for(
+    mode: str,
+    context: ContextScope | Mapping | str | None,
+    *,
+    fallback: Mapping | None = None,
+    today: date | None = None,
+    db_path: Path | None = None,
+) -> Selection:
+    """Resolve a run's scope with the surfaces' precedence, then read the stores.
+
+    Caller value → the mode's own persisted scope (``fallback``, standup's config
+    column) → the last scope used for ``mode`` on this machine → ``None``, which
+    resolves without a store read and keeps the run byte-for-byte unscoped.
+    A value that fails to parse degrades to the next step with a warning.
+    """
+    from yeaboi.config import get_last_context_scope
+
+    for source, candidate in (("caller", context), ("config", fallback), ("last-used", None)):
+        if source == "last-used":
+            candidate = get_last_context_scope(mode)
+        if candidate in (None, ""):
+            continue
+        try:
+            scope = coerce_scope(candidate)
+        except (TypeError, ValueError) as exc:
+            logger.warning("%s: %s context scope ignored: %s", mode, source, exc)
+            continue
+        if scope is not None:
+            logger.info("%s: context scope from %s (%s)", mode, source, scope.to_spec())
+            return resolve_scope(scope, today=today, db_path=db_path)
+    return resolve_scope(None, today=today, db_path=db_path)

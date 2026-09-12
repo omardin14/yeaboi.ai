@@ -284,6 +284,16 @@ def coerce_scope(value: ContextScope | Mapping | str | None) -> ContextScope | N
     if value is None or isinstance(value, ContextScope):
         return value
     if isinstance(value, str):
+        if value.lstrip().startswith("{"):
+            # The JSON twin travels as a string on graph state and in config
+            # columns; a dict inside a string is still the dict twin.
+            import json
+
+            try:
+                parsed = json.loads(value)
+            except ValueError as exc:
+                raise ValueError(f"context scope is not valid JSON: {exc}") from None
+            return ContextScope.from_dict(parsed) if isinstance(parsed, dict) else None
         return parse_context_spec(value)
     if isinstance(value, Mapping):
         return ContextScope.from_dict(value)

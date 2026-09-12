@@ -50,3 +50,20 @@ def read_context(payload: Mapping) -> tuple[ContextScope | None, str, tuple[str,
     if scope is not None or label or tags:
         logger.info("context body: scope=%s label=%r tags=%d", scope.to_spec() if scope else "-", label, len(tags))
     return scope, label, tags
+
+
+def context_kwargs(payload: Mapping) -> dict:
+    """The engine kwargs for a run body — only the keys the body actually carried.
+
+    An engine's defaults are the unscoped, unlabelled run, so a blank body
+    forwards nothing and the call is byte-for-byte what it was.
+    """
+    scope, label, tags = read_context(payload)
+    out: dict = {}
+    if scope is not None:
+        out["context"] = scope
+    if label:
+        out["project_label"] = label
+    if tags:
+        out["tags"] = tags
+    return out

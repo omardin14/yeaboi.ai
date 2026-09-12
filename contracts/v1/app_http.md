@@ -347,7 +347,7 @@ The two run-and-read modes. Their read-only pieces are MCP tools already
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/standup/dashboard` | query `session_id?` (blank = the most recent session), `run_id?` (open one past run instead of the latest) → the whole dashboard in one read |
-| POST | `/api/standup/run` | body `{session_id, deliver?: false, solo?: false}` → a chunked NDJSON run. `deliver: false` builds the report without posting it anywhere. `solo: true` is a one-person run (the Solo world): self-only roster, no tracker roster discovery, first-person summary; the stored report carries `solo` so the dashboard drops its team card |
+| POST | `/api/standup/run` | body `{session_id, deliver?: false, solo?: false, context?, project_label?, tags?}` → a chunked NDJSON run. `deliver: false` builds the report without posting it anywhere. `solo: true` is a one-person run (the Solo world): self-only roster, no tracker roster discovery, first-person summary; the stored report carries `solo` so the dashboard drops its team card. The body also accepts `context`, `project_label` and `tags` — what the run may read and how it is labelled; see *Context scope and labels*; a blank `context` inherits the session's saved standup scope |
 | POST | `/api/standup/runs/{run_id}/delete` | drop one run from the saved-runs hub; 404 when unknown |
 | GET | `/api/standup/schedule` | query `session_id` → the saved schedule plus the installed reminder offset |
 | POST | `/api/standup/schedule` | body `{session_id, enabled, time, weekdays, lead_minutes, delivery_channels, remind_after, solo?: false}` → `{message, schedule}`; saves the config **and** installs or removes the OS jobs. `solo` is not saved — it rides on the installed job's command line, so the scheduled run is a one-person standup |
@@ -355,7 +355,7 @@ The two run-and-read modes. Their read-only pieces are MCP tools already
 | POST | `/api/analysis/steps` | a partial selection → `{steps, grid, run}`: which steps still apply, the component rows they may offer, and the payload the answers would run. `solo: true` in the answers marks a Solo-world wizard: the `members` step never applies and stale member picks coerce out of `run` |
 | GET | `/api/analysis/profiles` | the saved team profiles |
 | GET | `/api/analysis/result/{team_id}` | one stored profile plus the cards it earned; 404 when unknown. `?solo=1` drops the Team Members card from `cards` |
-| POST | `/api/analysis/run` | the setup wizard's payload → a chunked NDJSON run |
+| POST | `/api/analysis/run` | the setup wizard's payload → a chunked NDJSON run. The body also accepts `context`, `project_label` and `tags` — what the run may read and how it is labelled; see *Context scope and labels* (analysis reads no other session, so `context` is recorded on the profile rather than applied) |
 
 The **standup dashboard** is
 `{session_id, session_name, my_name, run_id, history, cards: [{key, title, member}], report, config, schedule, review, nudge, gap_issues, active: [name]}`.
@@ -414,8 +414,8 @@ cancelling it does nothing.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/boards` | every board this process is hosting |
-| POST | `/api/boards/retro` | open a retro board for the latest session; 409 when there is none |
-| POST | `/api/boards/poker` | open a poker table over an already-fetched ticket list |
+| POST | `/api/boards/retro` | open a retro board for the latest session; 409 when there is none. The body also accepts `context`, `project_label` and `tags` — what the run may read and how it is labelled; see *Context scope and labels*. A scoped board narrows its carry-forward and history browser and seeds the selected standups' blockers as review cards; the snapshot carries `project_label`, `tags` and `context` |
+| POST | `/api/boards/poker` | open a poker table over an already-fetched ticket list. The body also accepts `context`, `project_label` and `tags` — what the run may read and how it is labelled; see *Context scope and labels*; the scope narrows the AI perspective's cross-mode gather |
 | GET | `/api/boards/{board_id}` | one board's host controls and current contents |
 | GET | `/api/boards/{board_id}/host` | the private host link — main process only |
 | POST | `/api/boards/{board_id}/link` | try the secure link again after a failure |
@@ -513,7 +513,7 @@ an LLM failure comes back as a warning over the deterministic seed mask.
 | GET | `/api/reporting/options` | periods, configured sources, palettes, the deck style and its vocabulary |
 | GET | `/api/reporting/sprints` | the quarter's sprints for `?session_id=`, pre-checked |
 | POST | `/api/reporting/window` | the window a set of checked sprints makes |
-| POST | `/api/reporting/run` | one delivery report, streamed as NDJSON. The body also takes an optional `solo` (false): a one-person report — first-person narrative, never "the team" |
+| POST | `/api/reporting/run` | one delivery report, streamed as NDJSON. The body also takes an optional `solo` (false): a one-person report — first-person narrative, never "the team". The body also accepts `context`, `project_label` and `tags` — what the run may read and how it is labelled; see *Context scope and labels* |
 | POST | `/api/reporting/style` | persist the deck style, or `{reset: true}` |
 | POST | `/api/reporting/fit` | how many extra slides fitting everything costs |
 | POST | `/api/reporting/export` | the styled deck outputs a plain export cannot write |
@@ -1032,7 +1032,7 @@ disagree about today.
 | GET | `/api/solo/today` | the `TodaySnapshot` fields verbatim, text and numbers only: `project_name`, `standup_date`, `standup_summary`, `standup_blockers`, `sprint_name`, `sprint_day`, `sprint_total_days`, `confidence_pct`, `confidence_label`, `confidence_trend`, `next_story_id`, `next_story_title`, `next_sprint_name`, `plan_session_id`, `spend_usd`, `spend_sessions`, `spend_known`, `warnings`. An empty string or zero is the honest empty state (no standup yet, no plan yet); `warnings` lists the sources that could not be read. The spend is the last agentwatch ingest's, never a fresh scan |
 | GET | `/api/solo/review` | `{latest: {run_id, review} \| null, history: [{id, session_id, run_at, week_label, week_start, week_end, project_name, action_count}], carried: [ReviewAction], beta_notice}` — `carried` is last review's still-open actions with the `id`s a run's `carried_statuses` takes; `beta_notice` is the gate copy |
 | GET | `/api/solo/review/runs/{run_id}` | one saved review: `{run_id, review}`; 404 when unknown |
-| POST | `/api/solo/review/run` | body `{session_id?, week_end?: "YYYY-MM-DD", carried_statuses?: {action_id: "done" \| "dropped" \| "pending" \| "carried"}}` → a chunked NDJSON run in the standup's line shapes: `{type: "op", op_id}` first, then `{type: "progress", phase}` per engine phase (`standups, plan, delivery, carried, model, save`), then `{type: "done", run_id, review}` or `{type: "error", message}`. One `progress` line per phase, in that order; 400 when `week_end` is not an ISO date. Not cancellable — the engine has no cancel seam. The review is stored and exported to Markdown |
+| POST | `/api/solo/review/run` | body `{session_id?, week_end?: "YYYY-MM-DD", carried_statuses?: {action_id: "done" \| "dropped" \| "pending" \| "carried"}, context?, project_label?, tags?}` → a chunked NDJSON run in the standup's line shapes: `{type: "op", op_id}` first, then `{type: "progress", phase}` per engine phase (`scope, standups, plan, delivery, carried, model, save`), then `{type: "done", run_id, review}` or `{type: "error", message}`. One `progress` line per phase, in that order; 400 when `week_end` is not an ISO date. Not cancellable — the engine has no cancel seam. The review is stored and exported to Markdown |
 | POST | `/api/solo/review/runs/{run_id}/delete` | drop one review from the saved-runs hub: `{deleted, run_id}`; 404 when unknown |
 
 **Weekly Review** is the Solo world's own capability — a self-review of the

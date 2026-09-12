@@ -190,3 +190,17 @@ class TestCoerce:
 def test_vocabulary_is_pinned():
     assert SOURCES == ("plan", "standup", "retro", "poker", "performance", "analysis", "reporting", "review")
     assert WINDOW_KINDS == ("all", "sprints", "month", "quarter", "year", "custom")
+
+
+class TestCoerceJsonString:
+    def test_a_json_string_is_the_dict_twin(self):
+        from yeaboi.context.scope import ContextScope, coerce_scope
+
+        scope = coerce_scope('{"sources": ["standup"], "window": {"kind": "month"}}')
+        assert scope == ContextScope(sources=frozenset({"standup"}), window=Window(kind="month"))
+
+    def test_broken_json_is_refused_not_read_as_a_spec(self):
+        from yeaboi.context.scope import coerce_scope
+
+        with pytest.raises(ValueError, match="JSON"):
+            coerce_scope("{not json")

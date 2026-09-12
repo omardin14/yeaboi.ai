@@ -99,6 +99,9 @@ CAPABILITIES: dict[str, dict] = {
             "--prior-art",
             "--ac-format",
             "--architecture-spike",
+            "--context",
+            "--project-label",
+            "--tag",
         },
         "skill": "plan-sprint",
         # Planning folded into the desktop's session flow: the blueprint is
@@ -202,7 +205,12 @@ CAPABILITIES: dict[str, dict] = {
         # get_poker_perspective: the one LLM call (AI take on a revealed vote
         # spread); the live voting board itself is a real-time server the TUI
         # hosts and tunnels — like retro, it can't be a one-shot pipeline.
-        "engines": {("yeaboi.poker.engine", "get_poker_perspective")},
+        "engines": {
+            ("yeaboi.poker.engine", "get_poker_perspective"),
+            # The one record site every host (the app supervisor, the TUI page)
+            # calls, so a closed table is stored and labelled the same way.
+            ("yeaboi.poker.engine", "record_poker_run"),
+        },
         "mcp_tools": {"poker_history", "poker_export"},
         "tui_mode": "poker",
         "cli": {"poker"},  # history read-back + export; the live voting board stays TUI-hosted
@@ -219,6 +227,10 @@ CAPABILITIES: dict[str, dict] = {
             ("yeaboi.retro.engine", "carried_action_items_for_session"),
             ("yeaboi.retro.engine", "history_providers"),
             ("yeaboi.retro.engine", "report_payload"),
+            # The standup→retro edge: a scoped board seeds the selected
+            # standups' blockers as review cards.
+            ("yeaboi.retro.engine", "standup_blocker_cards"),
+            ("yeaboi.retro.engine", "record_retro_run"),
         },
         "mcp_tools": {"retro_history", "retro_export"},  # carried data rides along in retro_history's report
         "tui_mode": "retro",
@@ -647,7 +659,8 @@ CLI_ONLY_DESTS: dict[str, set[str]] = {
         "strict",
         "schedule",
         "list_members",
-    },  # schedule/list-members are adapters, not run_standup params
+        "set_context",
+    },  # schedule/list-members/set-context are adapters, not run_standup params
     # file-issues drives the separate file_transcript_issues entry point;
     # list-gaps is a store read. `paths` is the bare positional form of
     # --transcript ("yeaboi standup-review meeting.vtt", and what a dragged file

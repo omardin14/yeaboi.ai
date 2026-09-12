@@ -3063,3 +3063,49 @@ class TestSoloRun:
         report = engine.run_standup(seeded_session, deliver=False, db_path=db_path, today=date(2026, 7, 10))
         assert report.solo is False
         assert "Alice" in [m.name for m in report.member_updates]
+
+
+class TestContextScope:
+    """What a standup may read from other sessions, and how its run is labelled."""
+
+    def _run(self, monkeypatch, db_path, session_id, **kw):
+        _patch_common(monkeypatch, items=[], counts=[])
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        calls: list = []
+        monkeypatch.setattr(engine, "latest_planning_state", lambda selection, **_k: calls.append(selection) or None)
+        report = engine.run_standup(session_id, deliver=False, db_path=db_path, today=date(2026, 7, 10), **kw)
+        with StandupStore(db_path) as store:
+            run_id = store.get_all_history(limit=1)[0]["id"]
+        from yeaboi.context.labels import LabelStore
+
+        with LabelStore(db_path) as labels:
+            row = labels.get_labels("standup", session_id, str(run_id))
+        return report, calls, row
+
+    def test_an_unscoped_run_reads_no_plan_and_still_labels_itself(self, monkeypatch, db_path, seeded_session):
+        _report, calls, row = self._run(monkeypatch, db_path, seeded_session)
+        assert calls == []
+        assert row is not None and "mode:standup" in row.tags and row.scope is None
+
+    def test_a_scoped_run_reads_the_selected_plan_and_records_the_scope(self, monkeypatch, db_path, seeded_session):
+        _report, calls, row = self._run(
+            monkeypatch, db_path, seeded_session, context="plan,standup", project_label="Apollo", tags=["Q3"]
+        )
+        assert len(calls) == 1 and calls[0].wants("plan") and not calls[0].wants("retro")
+        assert row.project == "Apollo" and "q3" in row.tags
+        assert set(row.scope["sources"]) == {"plan", "standup"}
+
+    def test_the_saved_config_scope_is_the_fallback(self, monkeypatch, db_path, seeded_session):
+        from yeaboi.context.scope import ContextScope
+
+        with StandupStore(db_path) as store:
+            store.set_context_scope(seeded_session, ContextScope(sources=frozenset({"retro"})))
+        _report, calls, row = self._run(monkeypatch, db_path, seeded_session)
+        assert calls == []  # the saved scope does not want plans
+        assert row.scope["sources"] == ["retro"]
+
+    def test_tracker_key_for_the_default_tag(self):
+        assert engine._tracker_key_for({"jira_epic_key": "PROJ-12"}) == "PROJ"
+        assert engine._tracker_key_for({"azdevops_epic_id": "42"}) == "42"
+        assert engine._tracker_key_for({}) == ""

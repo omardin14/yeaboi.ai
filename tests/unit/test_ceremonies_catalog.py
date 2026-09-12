@@ -122,3 +122,19 @@ class TestSoloParam:
             assert mode is not None
             assert catalog.engine_kwargs(mode, (("solo", "true"),), session_id="s1")["solo"] is True
             assert catalog.engine_kwargs(mode, (), session_id="s1")["solo"] is False
+
+
+class TestContextParam:
+    """A ceremony may declare what its run reads; the spec reaches the engine as its string."""
+
+    def test_the_spec_reaches_the_engine(self):
+        from yeaboi.ceremonies import catalog
+
+        kwargs = catalog.engine_kwargs(catalog.lookup("standup"), (("context", "standup@month"),), session_id="s1")
+        assert kwargs["context"] == "standup@month" and kwargs["session_id"] == "s1"
+
+    def test_every_run_ceremony_declares_it(self):
+        from yeaboi.ceremonies import catalog
+
+        for key in ("standup", "report", "weekly-review"):
+            assert "context" in [p.name for p in catalog.lookup(key).params], key

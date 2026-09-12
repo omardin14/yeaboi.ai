@@ -144,6 +144,7 @@ def get_poker_perspective(
     project_name: str = "",
     context=None,
     debate_transcript: str = "",
+    selection=None,
 ) -> dict:
     """One LLM call commenting on a revealed vote spread. Never raises.
 
@@ -179,7 +180,8 @@ def get_poker_perspective(
     if context is None:
         from yeaboi.poker.context import gather_poker_context
 
-        context = gather_poker_context(ticket or {}, project_name=project_name)
+        extra = {"selection": selection} if selection is not None else {}
+        context = gather_poker_context(ticket or {}, project_name=project_name, **extra)
 
     def _fallback(warning: str) -> dict:
         note = _build_fallback_note(votes, context)
@@ -253,3 +255,33 @@ def get_poker_perspective(
         "llm_mode": "llm",
         "warnings": [],
     }
+
+
+def record_poker_run(
+    report,
+    *,
+    db_path=None,
+    project_label: str = "",
+    tags=(),
+    scope=None,
+) -> int:
+    """Persist a finished poker session and label it. The one record site every host calls."""
+    from yeaboi.context.labels import label_run
+    from yeaboi.paths import get_db_path
+    from yeaboi.poker.store import PokerStore
+
+    path = db_path or get_db_path()
+    with PokerStore(path) as store:
+        run_id = store.record_run(report)
+    label_run(
+        "poker",
+        report.session_id,
+        run_id,
+        project_label=project_label or getattr(report, "project_name", ""),
+        tags=tags,
+        scope=scope,
+        defaults={"source": getattr(report, "source", "")},
+        db_path=path,
+    )
+    logger.info("poker: run %d recorded for session=%s", run_id, report.session_id)
+    return run_id

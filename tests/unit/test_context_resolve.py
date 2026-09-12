@@ -41,6 +41,9 @@ def seeded(db):
     with SessionStore(db) as store:
         store.create_session("p1", "Apollo")
         store.create_session("a1", "Apollo", mode="analysis")
+        # Stamped inside the window rather than on the real clock, so the test
+        # does not depend on the day it runs.
+        store._conn.execute("UPDATE sessions_meta SET created_at = '2026-09-02T10:00:00+00:00'")
     with StandupStore(db) as store:
         old = store.record_run(StandupReport(session_id="p1", date="2026-06-01"))
         new = store.record_run(StandupReport(session_id="p1", date="2026-09-03"))
@@ -183,3 +186,37 @@ class TestPreview:
     def test_incognito_preview(self, seeded):
         preview = preview_scope("none", today=TODAY, db_path=seeded["db"])
         assert preview.label == "nothing to read" and all(n == 0 for n in preview.counts.values())
+
+
+class TestSelectionFor:
+    """The surfaces' precedence: caller → the mode's saved scope → last used → unscoped."""
+
+    @pytest.fixture(autouse=True)
+    def _no_last_used(self, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+
+    def test_none_reads_no_store(self, tmp_path):
+        selection = res.selection_for("standup", None, db_path=tmp_path / "never.db")
+        assert selection.scope is None and selection.ids("standup") is None
+
+    def test_the_caller_wins(self, seeded, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: {"sources": ["retro"]})
+        selection = res.selection_for(
+            "standup", "standup@month", fallback={"sources": ["plan"]}, today=TODAY, db_path=seeded["db"]
+        )
+        assert selection.scope.sources == frozenset({"standup"})
+        assert selection.ids("standup") == (seeded["new"],)
+
+    def test_the_saved_scope_beats_the_last_used_one(self, seeded, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: {"sources": ["retro"]})
+        selection = res.selection_for("standup", None, fallback={"sources": ["plan"]}, db_path=seeded["db"])
+        assert selection.scope.sources == frozenset({"plan"})
+
+    def test_the_last_used_scope_is_the_final_fallback(self, seeded, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: {"sources": ["retro"]})
+        selection = res.selection_for("standup", None, db_path=seeded["db"])
+        assert selection.scope.sources == frozenset({"retro"})
+
+    def test_a_bad_value_degrades_to_the_next_step(self, seeded):
+        selection = res.selection_for("standup", "stanup", fallback={"sources": ["plan"]}, db_path=seeded["db"])
+        assert selection.scope.sources == frozenset({"plan"})

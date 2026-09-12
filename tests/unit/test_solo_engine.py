@@ -458,3 +458,45 @@ class TestArtifactContract:
         review = WeeklyReview(week_label="x")
         with pytest.raises(Exception):
             review.week_label = "y"  # type: ignore[misc]
+
+
+class TestContextScope:
+    """What a review may read, and how it is labelled."""
+
+    def test_incognito_reads_nothing_and_says_so(self, monkeypatch, tmp_path):
+        from yeaboi.context.labels import LabelStore
+
+        db = _seed(tmp_path)
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        phases: list = []
+        review = engine.run_weekly_review(
+            db_path=db,
+            today=TODAY,
+            dry_run=True,
+            context="none",
+            project_label="Apollo",
+            tags=["Q3"],
+            on_progress=lambda e: phases.append(e["component_id"]),
+        )
+        assert phases[0] == "scope"
+        assert sum("switched off" in w for w in review.warnings) == 2
+        with LabelStore(db) as labels:
+            rows = labels.list_labels(mode="review")
+        assert rows and rows[0].project == "Apollo"
+        assert {"q3", "mode:review", "world:solo"} <= set(rows[0].tags)
+        assert any(tag.startswith("week:") for tag in rows[0].tags)
+        assert rows[0].scope == {"sources": [], "window": {"kind": "all"}, "projects": [], "tags": [], "limits": {}}
+
+    def test_an_unscoped_review_reads_as_before(self, monkeypatch, tmp_path):
+        db = _seed(tmp_path)
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        review = engine.run_weekly_review(db_path=db, today=TODAY, dry_run=True)
+        assert not any("switched off" in w for w in review.warnings)
+
+    def test_the_carried_reader_honours_the_selection(self, tmp_path):
+        from yeaboi.context.resolve import Selection
+        from yeaboi.context.scope import ContextScope
+
+        db = _seed(tmp_path)
+        off = Selection(scope=ContextScope(sources=frozenset({"plan"})), by_source={})
+        assert engine.carried_actions(db_path=db, selection=off) == ()

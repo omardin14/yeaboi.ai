@@ -25,18 +25,21 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from yeaboi.agent.state import DeliveredItem, ReviewAction, WeeklyReview
+from yeaboi.context.labels import label_run
+from yeaboi.context.resolve import selection_for
+from yeaboi.context.scope import ContextScope
 from yeaboi.solo.today import REVIEWABLE_STANDUP_STATUSES
 from yeaboi.timeparse import parse_date
 
 logger = logging.getLogger(__name__)
 
 #: Progress phase ids, in order — a surface's checklist keys on these.
-PHASES: tuple[str, ...] = ("standups", "plan", "delivery", "carried", "model", "save")
+PHASES: tuple[str, ...] = ("scope", "standups", "plan", "delivery", "carried", "model", "save")
 
 ACTION_STATUSES = ("pending", "done", "dropped", "carried")
 #: Statuses that keep an action alive into the next review.
@@ -47,6 +50,7 @@ _MAX_LIST = 6
 
 #: The checklist label a surface shows for each phase id.
 PHASE_LABELS: dict[str, str] = {
+    "scope": "Resolving scope",
     "standups": "Reading your standups",
     "plan": "Reading your sprint plan",
     "delivery": "Gathering delivered work",
@@ -148,15 +152,19 @@ def _own_update(report):
     return own
 
 
-def _standups(path: Path, monday: date, end: date, warnings: list[str]) -> dict:
+def _standups(selection, path: Path, monday: date, end: date, warnings: list[str]) -> dict:
     """The user's own standup lines for the week, oldest first, plus sprint context."""
+    if selection is not None and not selection.wants("standup"):
+        warnings.append("standup context is switched off for this run")
+        return {}
     try:
         from yeaboi.standup.insights import yesterday_context
         from yeaboi.standup.store import StandupStore
 
+        run_ids = selection.run_ids("standup") if selection is not None else None
         lo, hi = monday.isoformat(), end.isoformat()
         with StandupStore(path) as store:
-            rows = store.get_all_history(limit=60)
+            rows = store.get_all_history(limit=60, run_ids=run_ids)
             picked = [
                 r
                 for r in rows
@@ -229,17 +237,27 @@ def _delivered(
     return tuple(items)
 
 
-def _plan(path: Path, today: date, warnings: list[str]) -> tuple[dict, str, int, str]:
+def _plan(selection, path: Path, today: date, warnings: list[str]) -> tuple[dict, str, int, str]:
     """``(state, session_id, planned_story_count, sprint_name)`` for the current sprint."""
+    from yeaboi.context.reads import latest_planning_state
     from yeaboi.solo.today import current_sprint, sprint_story_ids
 
+    if selection is not None and not selection.wants("plan"):
+        warnings.append("plan context is switched off for this run")
+        return {}, "", 0, ""
     try:
         from yeaboi.ship.plans import latest_plan_with_work
 
-        found = latest_plan_with_work(db_path=path)
-        if found is None:
-            return {}, "", 0, ""
-        state, session_id, _name = found
+        scoped = latest_planning_state(selection, db_path=path)
+        if scoped is not None:
+            session_id, state = scoped
+        else:
+            found = latest_plan_with_work(
+                db_path=path, session_ids=selection.ids("plan") if selection is not None else None
+            )
+            if found is None:
+                return {}, "", 0, ""
+            state, session_id, _name = found
         sprint = current_sprint(state, today)
         if sprint is None:
             return state, session_id, 0, ""
@@ -286,7 +304,7 @@ def _plan_verdict(
 # ---------------------------------------------------------------------------
 
 
-def carried_actions(*, db_path: Path | None = None, week_label: str = "") -> tuple[ReviewAction, ...]:
+def carried_actions(*, db_path: Path | None = None, week_label: str = "", selection=None) -> tuple[ReviewAction, ...]:
     """Last review's actions still worth tracking, reset to pending carry-overs.
 
     Source = the previous review's new actions plus whatever *it* carried and
@@ -294,18 +312,22 @@ def carried_actions(*, db_path: Path | None = None, week_label: str = "") -> tup
     vanish. Deduplicated by text, ids kept so a surface can mark them.
     ``week_label`` is the week being generated: a review of that same week is
     skipped, so a re-run carries from the last *earlier* week rather than from
-    its own draft. Never raises.
+    its own draft. ``selection`` narrows to the selected reviews (none when
+    reviews are switched off). Never raises.
     """
     from dataclasses import replace
 
+    if selection is not None and not selection.wants("review"):
+        return ()
     try:
         from yeaboi.solo.store import WeeklyReviewStore
 
         path = _resolve_db_path(db_path)
         if not path.exists():
             return ()
+        run_ids = selection.run_ids("review") if selection is not None else None
         with WeeklyReviewStore(path) as store:
-            recent = store.get_recent_reports(limit=12)
+            recent = store.get_recent_reports(limit=12, run_ids=run_ids)
         previous = next((r for r in recent if not week_label or r.week_label != week_label), None)
     except Exception as e:  # noqa: BLE001
         logger.warning("weekly review: could not read the previous review: %s", e)
@@ -417,12 +439,19 @@ def run_weekly_review(
     db_path: Path | None = None,
     today: date | None = None,
     on_progress: Callable[[dict], None] | None = None,
+    context: ContextScope | dict | str | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> WeeklyReview:
     """Review the week ending ``week_end`` (default today) and store the result.
 
     Args:
         session_id: the session this review belongs to (blank reads the newest
             of everything).
+        context: what this review may read — the ``standup``, ``plan`` and
+            ``review`` sources gate the reads here; ``None`` reads the newest
+            of everything.
+        project_label / tags: recorded on the review beside its default tags.
         week_end: ISO date inside the week under review; the window is that
             week's Monday through this date.
         carried_statuses: ``{action_id: status}`` marks for last review's
@@ -442,15 +471,19 @@ def run_weekly_review(
     )
 
     phases = _Phases(on_progress)
+    phases.start("scope")
+    selection = selection_for("review", context, today=today, db_path=path)
     monday, end, week_label = _week_window(week_end, today)
 
     phases.start("standups")
-    standup = _standups(path, monday, end, warnings) if path.exists() else {}
+    standup = _standups(selection, path, monday, end, warnings) if path.exists() else {}
     blockers: list[str] = standup.pop("_blockers", [])
     my_name = standup.get("my_name") or _configured_name()
 
     phases.start("plan")
-    plan_state, plan_session, planned, plan_sprint = _plan(path, end, warnings) if path.exists() else ({}, "", 0, "")
+    plan_state, plan_session, planned, plan_sprint = (
+        _plan(selection, path, end, warnings) if path.exists() else ({}, "", 0, "")
+    )
     project_name = str(plan_state.get("project_name", "") or "")
 
     phases.start("delivery")
@@ -474,7 +507,9 @@ def run_weekly_review(
     )
 
     phases.start("carried")
-    carried = _apply_statuses(carried_actions(db_path=path, week_label=week_label), carried_statuses, warnings)
+    carried = _apply_statuses(
+        carried_actions(db_path=path, week_label=week_label, selection=selection), carried_statuses, warnings
+    )
 
     phases.start("model")
     parsed: dict = {}
@@ -534,7 +569,18 @@ def run_weekly_review(
     )
 
     phases.start("save")
-    _save(review, path)
+    run_id = _save(review, path)
+    label_run(
+        "review",
+        review.session_id,
+        run_id,
+        project_label=project_label or project_name,
+        tags=tags,
+        scope=selection.scope,
+        defaults={"world": "solo", "week_label": week_label},
+        db_path=path,
+        today=today,
+    )
     phases.finish()
     logger.info(
         "run_weekly_review: done week=%s status=%s delivered=%d actions=%d carried=%d warnings=%d",
@@ -554,14 +600,15 @@ def _configured_name() -> str:
     return get_standup_user_name()
 
 
-def _save(review: WeeklyReview, path: Path) -> None:
+def _save(review: WeeklyReview, path: Path) -> int:
     from yeaboi.solo.store import WeeklyReviewStore
 
     with WeeklyReviewStore(path) as store:
-        store.record_run(review)
+        run_id = store.record_run(review)
     try:
         from yeaboi.solo.export import export_weekly_review
 
         export_weekly_review(review)
     except Exception as e:  # noqa: BLE001 — export is best-effort
         logger.warning("weekly review export failed: %s", e)
+    return run_id

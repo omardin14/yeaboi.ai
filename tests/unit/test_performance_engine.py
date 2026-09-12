@@ -532,3 +532,51 @@ class TestTheReviewReportsItsContextPhase:
         events: list = []
         engine.run_six_month_review("Ada", db_path=db_path, on_progress=events.append)
         assert [e for e in events if e["component_id"] == engine.PHASE_CONTEXT][-1]["status"] == "partial"
+
+
+class TestContextScope:
+    """The scope narrows the evidence gather only; the run is labelled with the engineer."""
+
+    def test_prep_hands_the_selection_on_and_labels_the_prep(self, monkeypatch, db_path):
+        from yeaboi.context.labels import LabelStore
+        from yeaboi.performance.evidence import EngineerEvidence
+
+        seen: dict = {}
+        monkeypatch.setattr(
+            engine.evidence_mod,
+            "gather_engineer_evidence",
+            lambda engineer, **kw: (
+                seen.update(kw) or EngineerEvidence(engineer=engineer, activity=EngineerActivity(engineer=engineer))
+            ),
+        )
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        engine.run_one_on_one_prep(
+            "Ada",
+            db_path=db_path,
+            today=date(2026, 9, 11),
+            context="standup@month",
+            project_label="Apollo",
+            tags=["Q3"],
+        )
+        assert seen["selection"].wants("standup") and not seen["selection"].wants("retro")
+        with LabelStore(db_path) as labels:
+            rows = labels.list_labels(mode="performance")
+        assert rows and rows[0].run_id.startswith("prep:") and rows[0].project == "Apollo"
+        assert {"engineer:ada", "kind:1on1", "q3"} <= set(rows[0].tags)
+
+    def test_an_unscoped_prep_hands_on_an_unscoped_selection(self, monkeypatch, db_path):
+        from yeaboi.performance.evidence import EngineerEvidence
+
+        seen: dict = {}
+        monkeypatch.setattr(
+            engine.evidence_mod,
+            "gather_engineer_evidence",
+            lambda engineer, **kw: (
+                seen.update(kw) or EngineerEvidence(engineer=engineer, activity=EngineerActivity(engineer=engineer))
+            ),
+        )
+        monkeypatch.setattr("yeaboi.config.is_llm_configured", lambda: (False, "no key"))
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        engine.run_one_on_one_prep("Ada", db_path=db_path, today=date(2026, 9, 11))
+        assert seen["selection"].scope is None

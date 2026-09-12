@@ -144,3 +144,19 @@ def _log_tool_failure(where: str, fn, exc: BaseException) -> None:
         logger.warning("%s rejected: fn=%s error=%s", where, name, exc)
     else:
         logger.error("%s failed: fn=%s error=%s", where, name, exc, exc_info=True)
+
+
+def context_kwargs(context=None, project_label: str = "", tags=None) -> dict:
+    """The engine kwargs a tool's ``context``/``project_label``/``tags`` map onto — only the ones set.
+
+    An engine's defaults are the unscoped, unlabelled run, so an unset tool
+    param forwards nothing and the call is byte-for-byte what it was.
+    """
+    out: dict = {}
+    if context not in (None, ""):
+        out["context"] = context
+    if project_label:
+        out["project_label"] = project_label
+    if tags:
+        out["tags"] = list(tags)
+    return out

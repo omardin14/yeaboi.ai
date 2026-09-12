@@ -298,3 +298,36 @@ class TestGatherPokerContext:
             {"source": "jira", "key": "PROJ-1", "summary": "Fix user login rate limit", "assignee": "Alex"}
         )
         assert any("similar story" in ln for ln in ctx.planning_lines)  # other sources still gathered
+
+
+class TestSelectionGating:
+    """A resolved scope gates each source the poker gather reads."""
+
+    def _seed(self, tmp_path, monkeypatch):
+        return TestGatherPokerContext._seed_all(TestGatherPokerContext(), tmp_path, monkeypatch)
+
+    def _selection(self, sources):
+        from yeaboi.context.resolve import Selection
+        from yeaboi.context.scope import ContextScope
+
+        return Selection(scope=ContextScope(sources=frozenset(sources)), by_source={})
+
+    def test_only_the_wanted_sources_are_read(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch)
+        ctx = gather_poker_context(
+            TestGatherPokerContext._TICKET, project_name="Login", selection=self._selection({"analysis", "reporting"})
+        )
+        assert ctx.team_lines and ctx.delivery_lines
+        assert not ctx.assignee_lines and not ctx.planning_lines
+
+    def test_the_delivery_read_rides_the_reporting_token(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch)
+        ctx = gather_poker_context(
+            TestGatherPokerContext._TICKET, project_name="Login", selection=self._selection({"analysis"})
+        )
+        assert ctx.team_lines and not ctx.delivery_lines
+
+    def test_incognito_reads_nothing(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch)
+        ctx = gather_poker_context(TestGatherPokerContext._TICKET, project_name="Login", selection=self._selection(()))
+        assert ctx.is_empty

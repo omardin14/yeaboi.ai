@@ -652,3 +652,41 @@ class TestProgressReporting:
 
     def test_no_callback_is_the_default(self, db_path):
         assert evidence.gather_engineer_evidence(ENGINEER, db_path=db_path, **PERIOD).engineer == ENGINEER
+
+
+class TestSelectionGating:
+    """A switched-off source settles its coverage row saying so; a narrowed one reads only its runs."""
+
+    def _selection(self, sources, **by_source):
+        from yeaboi.context.resolve import Selection
+        from yeaboi.context.scope import ContextScope
+
+        return Selection(scope=ContextScope(sources=frozenset(sources)), by_source=by_source)
+
+    def test_switched_off_sources_say_so(self, db_path):
+        ev = _gather(db_path, selection=self._selection({"analysis"}))
+        for source in ("standup", "code", "documentation", "retro"):
+            assert "switched off" in _coverage(ev, source).detail.lower(), source
+        assert "switched off" not in _coverage(ev, "analysis").detail.lower()
+
+    def test_poker_and_delivery_ride_their_own_tokens(self, db_path):
+        ev = _gather(db_path, selection=self._selection({"standup"}))
+        for source in ("poker", "delivery"):
+            assert "switched off" in _coverage(ev, source).detail.lower(), source
+        ev = _gather(db_path, selection=self._selection({"poker", "reporting"}))
+        for source in ("poker", "delivery"):
+            assert "switched off" not in _coverage(ev, source).detail.lower(), source
+
+    def test_incognito_switches_every_source_off(self, db_path):
+        ev = _gather(db_path, selection=self._selection(()))
+        for source in ("standup", "code", "documentation", "analysis", "retro", "poker", "delivery"):
+            assert "switched off" in _coverage(ev, source).detail.lower(), source
+
+    def test_a_narrowed_selection_reads_only_its_runs(self, db_path, monkeypatch):
+        seen: list = []
+        monkeypatch.setattr(
+            "yeaboi.standup.store.StandupStore.get_recent_reports",
+            lambda self, limit=10, run_ids=None: seen.append(run_ids) or [],
+        )
+        _gather(db_path, selection=self._selection({"standup"}, standup=("2",)))
+        assert seen == [(2,)]

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 
+from yeaboi.app._context_body import context_kwargs
 from yeaboi.app.router import HTTPError, Request, Response, json_response
 
 logger = logging.getLogger(__name__)
@@ -45,11 +46,16 @@ def board_host(app, request: Request) -> Response:
 
 
 def start_retro(app, request: Request) -> Response:
-    """``POST /api/boards/retro`` — open a retro board for the latest session."""
+    """``POST /api/boards/retro`` — open a retro board for the latest session.
+
+    The body may carry ``context``, ``project_label`` and ``tags``: what the
+    board reads, and how its run is labelled when it closes.
+    """
     from yeaboi.retro.setup import NO_SESSION_MESSAGE
 
+    reads = context_kwargs(request.json())
     try:
-        session = app.boards.start_retro()
+        session = app.boards.start_retro(**reads)
     except ValueError:
         raise HTTPError(409, NO_SESSION_MESSAGE) from None
     except OSError as exc:
@@ -63,11 +69,13 @@ def start_poker(app, request: Request) -> Response:
     tickets = payload.get("tickets") or []
     if not isinstance(tickets, list) or not tickets:
         raise HTTPError(400, "tickets must be a non-empty list — fetch them with /api/poker/tickets first")
+    reads = context_kwargs(payload)
     try:
         session = app.boards.start_poker(
             source=str(payload.get("source", "demo")),
             scope_label=str(payload.get("scope_label", "")),
             tickets=tickets,
+            **reads,
         )
     except OSError as exc:
         raise HTTPError(503, f"could not start the poker server: {exc}") from None

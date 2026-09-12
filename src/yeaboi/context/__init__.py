@@ -10,11 +10,12 @@ from yeaboi.context.labels import (
     SessionLabels,
     default_tags,
     drop_run_labels,
+    label_run,
     normalize_tag,
     normalize_tags,
 )
 from yeaboi.context.reads import latest_planning_state, recent_standup_blockers
-from yeaboi.context.resolve import Preview, Selection, SourceRow, preview_scope, resolve_scope
+from yeaboi.context.resolve import Preview, Selection, SourceRow, preview_scope, resolve_scope, selection_for
 from yeaboi.context.scope import (
     SOURCE_LABELS,
     SOURCES,
@@ -44,6 +45,7 @@ __all__ = [
     "default_tags",
     "drop_run_labels",
     "incognito",
+    "label_run",
     "latest_planning_state",
     "load_sprint_calendar",
     "normalize_tag",
@@ -53,6 +55,7 @@ __all__ = [
     "recent_standup_blockers",
     "resolve_scope",
     "resolve_window",
+    "selection_for",
     "wants",
     "window_label",
 ]

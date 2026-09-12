@@ -9,7 +9,7 @@ import re
 # stringified type hints (PEP 563) of tool functions against this namespace.
 from mcp.server.fastmcp import Context
 
-from yeaboi.mcp.runtime import run_engine, run_readonly, to_jsonable
+from yeaboi.mcp.runtime import context_kwargs, run_engine, run_readonly, to_jsonable
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,9 @@ def _standup_run(
     documentation_sources: list | None,
     review_transcripts: bool,
     solo: bool,
+    context=None,
+    project_label: str = "",
+    tags: list | None = None,
 ):
     from yeaboi.mcp.tools_sessions import resolve_session_id
     from yeaboi.standup.engine import run_standup
@@ -81,6 +84,7 @@ def _standup_run(
     return run_standup(
         resolved,
         solo=solo,
+        **context_kwargs(context, project_label, tags),
         review_transcripts=review_transcripts,
         deliver=deliver,
         days=days or None,
@@ -305,6 +309,7 @@ def _standup_config_set(
     habit_detection: str | None,
     habit_rules: str | None,
     habit_ai_match: str | None,
+    context: str = "",
 ) -> dict:
     from yeaboi.mcp.tools_sessions import resolve_session_id
     from yeaboi.paths import get_db_path
@@ -424,6 +429,14 @@ def _standup_config_set(
             "habit_ai_match": (current.get("habit_ai_match", "on") if habit_ai_match is None else habit_ai_match),
         }
         store.save_config(resolved, **merged)
+        if context:
+            # '' = unchanged; 'inherit' clears; 'all'/'none'/a spec sets it — a
+            # typo'd token raises rather than silently switching a source off.
+            from yeaboi.context.scope import parse_context_spec
+
+            scope = parse_context_spec(context)
+            store.set_context_scope(resolved, scope)
+            merged["context_scope"] = scope.to_dict() if scope is not None else None
     logger.info("Standup config updated via MCP: session=%s enabled=%s", resolved, merged["enabled"])
     return {"session_id": resolved, "config": merged}
 
@@ -449,6 +462,9 @@ def register(app) -> None:
         documentation_sources: list[str] | None = None,
         review_transcripts: bool = True,
         solo: bool = False,
+        context: str | dict | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """Run a Daily Standup: collect team activity (Jira/AzDO/GitHub/git/docs), score sprint
         confidence, and summarize per member. Returns the report for you to present; deliver=true
@@ -466,7 +482,14 @@ def register(app) -> None:
         transcripts covering earlier dates, so yesterday's corrections inform today's report; it
         drafts issues locally and never writes to GitHub. Blank session_id = most recent session.
         solo=true runs it for one person (the Solo world): self-only roster, no tracker roster
-        discovery, first-person summary; team_members is ignored."""
+        discovery, first-person summary; team_members is ignored.
+        `context`: what this run may read from other sessions — 'all' (default), 'none', or a
+        spec like 'standup,retro:1@2sprints project=apollo tags=q3' (sources, an optional
+        window, project labels and tags); a JSON object of the same shape is accepted. Call
+        context_preview first when the user names a timeframe. `project_label` is the free-text
+        project label recorded on the run; `tags` are recorded beside its default tags.
+        A blank `context` inherits the session's saved standup scope (standup_config_set), then
+        the last one used on this machine."""
         return await run_engine(
             ctx,
             _standup_run,
@@ -485,6 +508,9 @@ def register(app) -> None:
             documentation_sources,
             review_transcripts,
             solo,
+            context,
+            project_label,
+            tags,
         )
 
     @app.tool()
@@ -612,6 +638,7 @@ def register(app) -> None:
         habit_detection: str | None = None,
         habit_rules: str | None = None,
         habit_ai_match: str | None = None,
+        context: str = "",
     ) -> dict:
         """Update a session's standup configuration; omitted fields keep their current value.
         time is HH:MM (the meeting time), weekdays like '1-5' or '1,3,5', delivery_channels from
@@ -634,6 +661,9 @@ def register(app) -> None:
         wip-sprawl, large-change, no-pull-request, commit-messages (empty = all of them).
         habit_ai_match is 'on' (default) or 'off': when on, an LLM pass may excuse a change that
         belongs to a ticket it never names. It can only ever suppress a signal, never raise one.
+        context sets the session's saved context scope — what its standups read from other
+        sessions: '' leaves it unchanged, 'inherit' clears it, 'all' reads everything, 'none' is
+        incognito, or a spec like 'standup,retro@2sprints project=apollo'.
         NOTE: this saves the config only — installing the OS schedule (launchd/cron) is
         machine-local and done from the yeaboi TUI. Blank session_id = most recent session."""
         return await run_readonly(
@@ -662,4 +692,5 @@ def register(app) -> None:
             habit_detection,
             habit_rules,
             habit_ai_match,
+            context,
         )

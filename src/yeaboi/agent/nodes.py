@@ -14,6 +14,7 @@ on the graph object itself.
 """
 
 import dataclasses
+import functools
 import json
 import logging
 import math
@@ -4171,8 +4172,8 @@ def project_intake(state: ScrumState) -> dict:
     if questionnaire is not None:
         # Refresh the stash on every invoke, so a resumed session — whose
         # transients were dropped — reaches the prior-art step with a profile.
-        questionnaire._analysis_profile_id = state.get("analysis_profile_id", "") or ""
-        questionnaire._analysis_enabled = True
+        questionnaire._analysis_profile_id = _effective_analysis_profile_id(state)
+        questionnaire._analysis_enabled = _wants_dep(state, "analysis")
 
     # ── Tracker choice resolution ────────────────────────────────────
     # When both Jira and Azure DevOps are configured, the user picks one
@@ -4222,8 +4223,8 @@ def project_intake(state: ScrumState) -> dict:
         # The prior-art step runs from _show_summary_or_pto, which sees only the
         # questionnaire — stash the profile id rather than thread graph state
         # through eleven call sites. Same pattern as _repo_context.
-        qs._analysis_profile_id = state.get("analysis_profile_id", "") or ""
-        qs._analysis_enabled = True
+        qs._analysis_profile_id = _effective_analysis_profile_id(state)
+        qs._analysis_enabled = _wants_dep(state, "analysis")
 
         # Apply tracker preference from the choice resolution above (if any).
         if _pending_tracker_pref:
@@ -4284,7 +4285,7 @@ def project_intake(state: ScrumState) -> dict:
         # ── Analysis profile auto-fill ────────────────────────────────
         # If the user selected an analysis profile in the profile picker,
         # extract Q6/Q8/Q9 from it. Priority: description > SCRUM.md > analysis.
-        _analysis_profile_id = state.get("analysis_profile_id", "") or ""
+        _analysis_profile_id = _effective_analysis_profile_id(state)
         if _analysis_profile_id:
             _ap, _ap_ex = _load_profile_by_id(_analysis_profile_id)
             if _ap:
@@ -4391,7 +4392,7 @@ def project_intake(state: ScrumState) -> dict:
             # Q28 (bank holidays) choices are prepared so the user sees a confirmation.
             # See docs: "Scrum Standards" — capacity planning
             # ── Derive tracker preference from analysis profile if selected ──
-            _ap_id = state.get("analysis_profile_id", "") or ""
+            _ap_id = _effective_analysis_profile_id(state)
             if _ap_id and not qs._preferred_tracker:
                 from yeaboi import trackers as _trackers
 
@@ -4762,7 +4763,7 @@ def project_intake(state: ScrumState) -> dict:
                     questionnaire.answers[6] = f"{len(_sel_names)} ({_names_str})"
                     logger.info("Q6 member select: %d members: %s", len(_sel_names), _names_str)
 
-                    _ap_id = state.get("analysis_profile_id", "") or ""
+                    _ap_id = _effective_analysis_profile_id(state)
                     if _ap_id:
                         try:
                             _, _ap_ex2 = _load_profile_by_id(_ap_id)
@@ -4964,7 +4965,7 @@ def project_intake(state: ScrumState) -> dict:
                 # Couldn't fetch active sprint from live tracker
                 logger.warning("Tracker sprint fetch failed: %s", jira_status)
                 # Try analysis sprint data as fallback
-                _ap_id = state.get("analysis_profile_id", "") or ""
+                _ap_id = _effective_analysis_profile_id(state)
                 _used_analysis = False
                 if _ap_id:
                     try:
@@ -5674,7 +5675,7 @@ def project_intake(state: ScrumState) -> dict:
                 _names_str = ", ".join(_selected_names)
                 questionnaire.answers[6] = f"{len(_selected_names)} ({_names_str})"
                 # Calculate velocity from selected members
-                _ap_id = state.get("analysis_profile_id", "") or ""
+                _ap_id = _effective_analysis_profile_id(state)
                 if _ap_id:
                     try:
                         _, _ap_ex2 = _load_profile_by_id(_ap_id)
@@ -6476,20 +6477,77 @@ def compute_prompt_quality(qs: QuestionnaireState, *, has_user_context: bool = F
     )
 
 
-def _gather_performance_summary() -> str:
+def _gather_performance_summary(selection=None) -> str:
     """Return the team's Performance signal as a markdown block (empty if unused).
 
     Thin, graceful wrapper around performance.gather_performance_context so the
     analyzer / planner stay decoupled from the Performance package internals and a
-    missing DB or unused mode never affects a plan. See README: "Performance Mode".
+    missing DB or unused mode never affects a plan. A ``selection`` with
+    performance switched off yields "". See README: "Performance Mode".
     """
     try:
         from yeaboi.performance.context import gather_performance_context
 
-        return gather_performance_context().summary_md
+        return gather_performance_context(selection=selection).summary_md
     except Exception:  # noqa: BLE001 — performance context is best-effort
         logger.debug("_gather_performance_summary failed (non-fatal)", exc_info=True)
         return ""
+
+
+def _wants_dep(state, source: str) -> bool:
+    """Whether this run's context scope allows ``source`` (absent key = all on).
+
+    Reads the ``context_scope`` state key seeded by run_planning_pipeline and
+    the chat/TUI launch sites — the JSON twin of ``context.ContextScope``.
+    """
+    raw = state.get("context_scope", "")
+    if not raw:
+        return True
+    from yeaboi.context.scope import coerce_scope, wants
+
+    try:
+        return wants(coerce_scope(raw), source)
+    except (TypeError, ValueError):
+        logger.warning("context_scope on state is unreadable — reading every source")
+        return True
+
+
+@functools.lru_cache(maxsize=16)
+def _resolve_cached(scope_json: str, day: str):
+    from yeaboi.context.resolve import resolve_scope
+
+    return resolve_scope(scope_json)
+
+
+def _state_scope(state):
+    """The run's resolved ``Selection``, or ``None`` when the state carries no scope.
+
+    Cached per scope value and day so the pipeline nodes share one store walk
+    instead of resolving the same scope five times over a run.
+    """
+    raw = state.get("context_scope", "")
+    if not raw:
+        return None
+    from datetime import date
+
+    try:
+        return _resolve_cached(str(raw), date.today().isoformat())
+    except (TypeError, ValueError):
+        logger.warning("context_scope on state is unreadable — reading every source")
+        return None
+
+
+def _effective_analysis_profile_id(state) -> str:
+    """The state's analysis profile id, unless the analysis source is switched off.
+
+    The scope beats an explicit pick: with ``analysis`` off, a seeded or
+    resumed profile id is dropped (logged) so intake never auto-fills from it.
+    """
+    pid = state.get("analysis_profile_id", "") or ""
+    if pid and not _wants_dep(state, "analysis"):
+        logger.info("analysis source off — dropping analysis profile %s for this run", pid)
+        return ""
+    return pid
 
 
 #: How far back the planner's production note looks. Wider than a sprint on
@@ -6622,24 +6680,29 @@ def project_analyzer(state: ScrumState) -> dict:
     # Load team profile for calibration-aware analysis.
     # Non-fatal — if no profile exists, the prompt runs without calibration context.
     # See docs: "Scrum Standards" — team learning, self-calibrating estimates
-    team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
-    team_calibration_text = _format_team_calibration(
-        team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
-    )
+    if _wants_dep(state, "analysis"):
+        team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
+        team_calibration_text = _format_team_calibration(
+            team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
+        )
+    else:
+        team_profile, team_calibration_text = None, ""
     team_profile_summary = team_calibration_text.strip()
 
     # Gather the team's recent Standup + Retro history (graceful — an empty
     # context when nothing has run). Recency-dominant: pre-analysis we have no
     # reliable project name to match on, so we pass "" and let the most recent
-    # ceremonies inform the plan. Action items are stashed for story_writer.
+    # ceremonies inform the plan. A run with a context scope reads only the
+    # sessions it selected. Action items are stashed for story_writer.
     # See docs: "Session Management" — SQLite persistence
-    ceremony = gather_ceremony_context()
+    selection = _state_scope(state)
+    ceremony = gather_ceremony_context(selection=selection)
 
     # Gather per-engineer Performance signal (open 1:1 action items + review focus
     # areas) so the analysis is *person-aware* — e.g. flags an engineer's growth
     # area as a staffing consideration. Graceful: empty when Performance mode is
     # unused. See README: "Performance Mode".
-    performance = _gather_performance_summary()
+    performance = _gather_performance_summary(selection)
 
     # Build the formatted answers block for the prompt
     answers_block = _build_answers_block(questionnaire)
@@ -8422,10 +8485,13 @@ def story_writer(state: ScrumState) -> dict:
 
     # Load team calibration for team-specific estimation rules.
     # See docs: "Scrum Standards" — team learning, self-calibrating estimates
-    team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
-    team_calibration_text = _format_team_calibration(
-        team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
-    )
+    if _wants_dep(state, "analysis"):
+        team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
+        team_calibration_text = _format_team_calibration(
+            team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
+        )
+    else:
+        team_profile, team_calibration_text = None, ""
 
     # Resolve DoD items — custom from analysis or default 7
     from yeaboi.agent.state import resolve_ac_style, resolve_dod_items
@@ -8444,7 +8510,7 @@ def story_writer(state: ScrumState) -> dict:
     # The team's learned ticket-template section headings (naming conventions)
     # — persisted on state so exporters can adopt them on every surface.
     _tpl_sections: list[str] = []
-    _examples = _load_team_examples(state.get("analysis_profile_id", ""))
+    _examples = _load_team_examples(state.get("analysis_profile_id", "")) if _wants_dep(state, "analysis") else None
     if _examples:
         _naming = _examples.get("naming_conventions") or {}
         for entry in (_naming.get("template_sections") or [])[:8]:
@@ -9019,10 +9085,13 @@ def task_decomposer(state: ScrumState) -> dict:
 
     # Load team calibration for team-specific task patterns.
     # See docs: "Scrum Standards" — team learning, self-calibrating estimates
-    team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
-    team_calibration_text = _format_team_calibration(
-        team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
-    )
+    if _wants_dep(state, "analysis"):
+        team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
+        team_calibration_text = _format_team_calibration(
+            team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
+        )
+    else:
+        team_profile, team_calibration_text = None, ""
 
     # ── Parallel task decomposition by feature ────────────────────────────
     # Split stories into per-feature groups and decompose concurrently.
@@ -9827,10 +9896,13 @@ def sprint_planner(state: ScrumState) -> dict:
 
     # Load team calibration for velocity-aware sprint planning.
     # See docs: "Scrum Standards" — team learning, self-calibrating estimates
-    team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
-    team_calibration_text = _format_team_calibration(
-        team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
-    )
+    if _wants_dep(state, "analysis"):
+        team_profile = _load_team_profile(state.get("analysis_profile_id", ""))
+        team_calibration_text = _format_team_calibration(
+            team_profile, examples=_load_team_examples(state.get("analysis_profile_id", ""))
+        )
+    else:
+        team_profile, team_calibration_text = None, ""
 
     prompt = get_sprint_planner_prompt(
         project_name=analysis.project_name,
@@ -9845,7 +9917,7 @@ def sprint_planner(state: ScrumState) -> dict:
         team_override_from=original_team_size if state.get("_capacity_team_override", 0) > 0 else None,
         team_calibration=team_calibration_text,
         ceremony_history=state.get("_ceremony_history", "") or "",
-        performance_context=state.get("_performance_context", "") or _gather_performance_summary(),
+        performance_context=state.get("_performance_context", "") or _gather_performance_summary(_state_scope(state)),
         # Planner only. The analyzer's output feeds feature generation, and a
         # feature invented from an incident is a story nobody asked for.
         production_context=_gather_ops_summary(),

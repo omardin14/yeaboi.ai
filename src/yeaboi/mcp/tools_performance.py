@@ -9,7 +9,7 @@ import logging
 from mcp.server.fastmcp import Context
 
 from yeaboi.beta import PERFORMANCE_BETA_NOTICE
-from yeaboi.mcp.runtime import run_engine, run_readonly
+from yeaboi.mcp.runtime import context_kwargs, run_engine, run_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,9 @@ def _one_on_one_prep(
     jira_project: str,
     azdo_project: str,
     deep_scan: bool,
+    context=None,
+    project_label: str = "",
+    tags: list | None = None,
 ):
     _check_engineer(engineer, jira_project, azdo_project)
     from yeaboi.performance.engine import run_one_on_one_prep
@@ -52,11 +55,19 @@ def _one_on_one_prep(
         jira_project=jira_project,
         azdo_project=azdo_project,
         deep_scan=deep_scan,
+        **context_kwargs(context, project_label, tags),
     )
 
 
 def _one_on_one_complete(
-    engineer: str, transcript: str, session_id: str, deliver: bool, recipients: list | None, images: list | None
+    engineer: str,
+    transcript: str,
+    session_id: str,
+    deliver: bool,
+    recipients: list | None,
+    images: list | None,
+    project_label: str = "",
+    tags: list | None = None,
 ):
     if not transcript.strip():
         raise ValueError("transcript is required — the 1:1 notes or transcript text.")
@@ -70,6 +81,7 @@ def _one_on_one_complete(
         deliver=deliver,
         recipients=recipients or None,
         images=tuple(images or ()),
+        **context_kwargs(None, project_label, tags),
     )
 
 
@@ -93,6 +105,9 @@ def _six_month_review(
     jira_project: str,
     azdo_project: str,
     deep_scan: bool,
+    context=None,
+    project_label: str = "",
+    tags: list | None = None,
 ):
     _check_engineer(engineer, jira_project, azdo_project)
     from yeaboi.performance.engine import run_six_month_review
@@ -104,6 +119,7 @@ def _six_month_review(
         azdo_project=azdo_project,
         period_months=period_months,
         deep_scan=deep_scan,
+        **context_kwargs(context, project_label, tags),
     )
 
 
@@ -151,6 +167,9 @@ def register(app) -> None:
         jira_project: str = "",
         azdo_project: str = "",
         deep_scan: bool = False,
+        context: str | dict | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """BETA — Prepare a 1:1 for an engineer: talking points, feedback, goals and growth areas
         from every source that knows them — their tickets, the code/documentation/self-report
@@ -158,6 +177,10 @@ def register(app) -> None:
         poker history, plus open action items from the previous 1:1. The result reports which
         sources were scanned and which were not. deep_scan=true additionally runs one capped live
         scan of the stretch no saved standup covered — it costs API calls and is slower.
+        context narrows the cross-mode evidence only ('all', 'none', or a spec like
+        'standup,retro@2sprints'); a switched-off source says so in its coverage row. The
+        engineer's own 1:1 history stays unscoped — it is engineer-keyed. project_label and
+        tags are recorded on the prep.
 
         Performance mode is in beta — its output is not yet verified against real delivery data.
         Present it as a draft for the lead to edit, not a verdict."""
@@ -170,6 +193,9 @@ def register(app) -> None:
                 jira_project,
                 azdo_project,
                 deep_scan,
+                context,
+                project_label,
+                tags,
             )
         )
 
@@ -182,16 +208,29 @@ def register(app) -> None:
         deliver: bool = False,
         recipients: list[str] | None = None,
         images: list[str] | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """BETA — Complete a held 1:1 from its notes/transcript: produces a summary and tracked
         action items (carried into the next prep). images takes local file paths of photographed
         notes to include in the multimodal call. deliver=true emails the summary via the configured
-        SMTP — ask the user before enabling.
+        SMTP — ask the user before enabling. project_label and tags are recorded on the record.
 
         Performance mode is in beta — its output is not yet verified against real delivery data.
         Present it as a draft for the lead to edit, not a verdict."""
         return _with_beta(
-            await run_engine(ctx, _one_on_one_complete, engineer, transcript, session_id, deliver, recipients, images)
+            await run_engine(
+                ctx,
+                _one_on_one_complete,
+                engineer,
+                transcript,
+                session_id,
+                deliver,
+                recipients,
+                images,
+                project_label,
+                tags,
+            )
         )
 
     @app.tool()
@@ -211,6 +250,9 @@ def register(app) -> None:
         jira_project: str = "",
         azdo_project: str = "",
         deep_scan: bool = False,
+        context: str | dict | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """BETA — Draft an engineer's periodic performance review from past 1:1s, delivery history,
         the per-member code/documentation/self-report evidence saved by standups over the period,
@@ -218,6 +260,9 @@ def register(app) -> None:
         framework (bundled default, or PERFORMANCE_FRAMEWORK_PATH). The result reports which
         sources were scanned and which were not — an unscanned source is unknown, not absent.
         deep_scan=true additionally runs one capped live scan of the uncovered stretch.
+        context narrows the cross-mode evidence and the ceremony summary only ('all', 'none',
+        or a spec like 'standup,retro@2sprints'); the engineer's own review history stays
+        unscoped. project_label and tags are recorded on the review.
 
         Performance mode is in beta — its output is not yet verified against real delivery data.
         Present it as a draft for the lead to edit, not a verdict."""
@@ -231,5 +276,8 @@ def register(app) -> None:
                 jira_project,
                 azdo_project,
                 deep_scan,
+                context,
+                project_label,
+                tags,
             )
         )

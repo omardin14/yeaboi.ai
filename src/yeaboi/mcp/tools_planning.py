@@ -12,7 +12,7 @@ import anyio
 # stringified type hints (PEP 563) of tool functions against this namespace.
 from mcp.server.fastmcp import Context
 
-from yeaboi.mcp.runtime import run_engine, run_readonly
+from yeaboi.mcp.runtime import context_kwargs, run_engine, run_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,9 @@ def _plan_generate(
     ac_format: str,
     architecture_spike: str,
     solo: bool,
+    context,
+    project_label: str,
+    tags: list | None,
     on_progress,
 ) -> dict:
     from yeaboi.agent.headless import run_planning_pipeline
@@ -142,6 +145,7 @@ def _plan_generate(
         ac_format=ac_format,
         architecture_spike=architecture_spike or "auto",
         solo=solo,
+        **context_kwargs(context, project_label, tags),
     )
     plan = json.loads(export_plan_json(state))
     plan["session_id"] = state.get("_session_id", "")
@@ -333,6 +337,9 @@ def register(app) -> None:
         ac_format: str = "",
         architecture_spike: str = "auto",
         solo: bool = False,
+        context: str | dict | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """Generate a full sprint plan (analysis, epics, stories, tasks, sprints) from a project
         description. Gather the intake_questions smart_essentials from the user first and pass
@@ -347,7 +354,12 @@ def register(app) -> None:
         whether to add a validation spike — 'include' / 'skip', or 'auto' (default: add it
         unless the analyzer's confidence is high).
         `solo`: true when the user is running their own delivery with no team — the team
-        questions default to one developer and no member picker is offered."""
+        questions default to one developer and no member picker is offered.
+        `context`: what this run may read from other sessions — 'all' (default), 'none', or a
+        spec like 'standup,retro:1@2sprints project=apollo tags=q3' (sources, an optional
+        window, project labels and tags); a JSON object of the same shape is accepted. Call
+        context_preview first when the user names a timeframe. `project_label` is the free-text
+        project label recorded on the run; `tags` are recorded beside its default tags."""
 
         def report(node_name: str, step: int) -> None:
             # Called from the engine's worker thread — bridge the async
@@ -369,6 +381,9 @@ def register(app) -> None:
             ac_format,
             architecture_spike,
             solo,
+            context,
+            project_label,
+            tags,
             report,
         )
 

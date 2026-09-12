@@ -8,7 +8,7 @@ import logging
 # stringified type hints (PEP 563) of tool functions against this namespace.
 from mcp.server.fastmcp import Context
 
-from yeaboi.mcp.runtime import run_engine, run_readonly, to_jsonable
+from yeaboi.mcp.runtime import context_kwargs, run_engine, run_readonly, to_jsonable
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,9 @@ def _weekly_review_run(
     session_id: str,
     week_end: str,
     carried_statuses: dict | None,
+    context=None,
+    project_label: str = "",
+    tags: list | None = None,
 ):
     from yeaboi.solo.engine import run_weekly_review
 
@@ -24,6 +27,7 @@ def _weekly_review_run(
         session_id=session_id,
         week_end=week_end,
         carried_statuses=carried_statuses,
+        **context_kwargs(context, project_label, tags),
     )
 
 
@@ -70,6 +74,9 @@ def register(app) -> None:
         session_id: str = "",
         week_end: str = "",
         carried_statuses: dict[str, str] | None = None,
+        context: str | dict | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """BETA — Review your own week (the Solo world): what went well, what to change, and
         whether you are on track against your sprint plan, from your own standups, delivered
@@ -77,8 +84,16 @@ def register(app) -> None:
         week_end (YYYY-MM-DD) picks the week — its Monday through that date; blank
         is this week so far. carried_statuses marks last review's actions by id (from
         weekly_review_history's 'carried'): {id: 'done'|'dropped'|'pending'|'carried'}. The
-        review is stored and exported to Markdown."""
-        return await run_engine(ctx, _weekly_review_run, session_id, week_end, carried_statuses)
+        review is stored and exported to Markdown.
+        `context`: what this run may read from other sessions — 'all' (default), 'none', or a
+        spec like 'standup,retro:1@2sprints project=apollo tags=q3' (sources, an optional
+        window, project labels and tags); a JSON object of the same shape is accepted. Call
+        context_preview first when the user names a timeframe. `project_label` is the free-text
+        project label recorded on the run; `tags` are recorded beside its default tags.
+        The standup, plan and review sources gate the reads here."""
+        return await run_engine(
+            ctx, _weekly_review_run, session_id, week_end, carried_statuses, context, project_label, tags
+        )
 
     @app.tool()
     async def weekly_review_history(session_id: str = "", limit: int = 12) -> dict:

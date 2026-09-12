@@ -273,8 +273,12 @@ def format_poker_context_md(ctx: PokerEstimationContext) -> str:
 # ---------------------------------------------------------------------------
 
 
-def gather_poker_context(ticket: dict, *, project_name: str = "") -> PokerEstimationContext:
+def gather_poker_context(ticket: dict, *, project_name: str = "", selection=None) -> PokerEstimationContext:
     """Read the other modes' history relevant to one poker ticket. Never raises.
+
+    ``selection`` (a resolved ``context.Selection``) applies the run's scope:
+    each source is gated by its toggle (the delivery read rides ``reporting``)
+    and every read is narrowed to the selected runs.
 
     Each source sits in its own try/except so one broken store doesn't cost the
     rest; any unexpected failure yields an empty context and the perspective
@@ -308,9 +312,12 @@ def gather_poker_context(ticket: dict, *, project_name: str = "") -> PokerEstima
     retro_lines: tuple[str, ...] = ()
     planning_lines: tuple[str, ...] = ()
 
+    def _wants(name: str) -> bool:
+        return selection is None or selection.wants(name)
+
     # Analysis mode: the team calibration profile for this tracker project.
     try:
-        project_key = _project_key_for(source, key)
+        project_key = _project_key_for(source, key) if _wants("analysis") else ""
         if project_key:
             from yeaboi.team_profile import TeamProfileStore
 
@@ -326,7 +333,7 @@ def gather_poker_context(ticket: dict, *, project_name: str = "") -> PokerEstima
     try:
         from yeaboi.agent.ceremony_history import gather_ceremony_context
 
-        ceremony = gather_ceremony_context(project_name)
+        ceremony = gather_ceremony_context(project_name, selection=selection)
         if ceremony.confidence_trend:
             team_lines.append(f"Recent standup sprint confidence: {ceremony.confidence_trend}.")
         retro_lines = tuple(
@@ -338,35 +345,44 @@ def gather_poker_context(ticket: dict, *, project_name: str = "") -> PokerEstima
 
     # Standup: the ticket assignee's latest blockers + progress.
     try:
-        from yeaboi.standup.store import StandupStore
+        if _wants("standup"):
+            from yeaboi.standup.store import StandupStore
 
-        with StandupStore(db_path) as sstore:
-            recent = sstore.get_recent_reports(1)
-        assignee_lines = _assignee_lines(recent[0] if recent else None, assignee)
+            run_ids = selection.run_ids("standup") if selection is not None else None
+            with StandupStore(db_path) as sstore:
+                recent = sstore.get_recent_reports(1, run_ids=run_ids)
+            assignee_lines = _assignee_lines(recent[0] if recent else None, assignee)
     except Exception:  # noqa: BLE001
         logger.debug("gather_poker_context: standup read failed (non-fatal)", exc_info=True)
 
     # Reporting: recently delivered tickets (real keys) for citable comparisons.
     try:
-        from yeaboi.reporting.store import ReportingStore
+        if _wants("reporting"):
+            from yeaboi.reporting.store import ReportingStore
 
-        with ReportingStore(db_path) as rstore:
-            delivery = rstore.get_latest_report()
-        if delivery is not None:
-            delivery_lines = _delivery_lines(delivery.delivered_items, assignee, summary, key)
+            run_ids = selection.run_ids("reporting") if selection is not None else None
+            with ReportingStore(db_path) as rstore:
+                delivery = rstore.get_latest_report(run_ids=run_ids)
+            if delivery is not None:
+                delivery_lines = _delivery_lines(delivery.delivered_items, assignee, summary, key)
     except Exception:  # noqa: BLE001
         logger.debug("gather_poker_context: reporting read failed (non-fatal)", exc_info=True)
 
     # Planning: similar stories this team already sized, with confidence.
     try:
-        from yeaboi.sessions import SessionStore
+        if _wants("plan"):
+            from yeaboi.sessions import SessionStore
 
-        stories: list = []
-        with SessionStore(db_path) as sessions:
-            for meta in sessions.list_sessions()[:_MAX_SESSIONS_SCANNED]:
-                state = sessions.load_state(meta["session_id"]) or {}
-                stories.extend(state.get("stories") or [])
-        planning_lines = _planning_lines(stories, summary)
+            stories: list = []
+            allowed = selection.ids("plan") if selection is not None else None
+            with SessionStore(db_path) as sessions:
+                metas = sessions.list_sessions()
+                if allowed is not None:
+                    metas = [m for m in metas if m.get("session_id") in set(allowed)]
+                for meta in metas[:_MAX_SESSIONS_SCANNED]:
+                    state = sessions.load_state(meta["session_id"]) or {}
+                    stories.extend(state.get("stories") or [])
+            planning_lines = _planning_lines(stories, summary)
     except Exception:  # noqa: BLE001
         logger.debug("gather_poker_context: planning read failed (non-fatal)", exc_info=True)
 

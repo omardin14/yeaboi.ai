@@ -8,7 +8,7 @@ import logging
 # stringified type hints (PEP 563) of tool functions against this namespace.
 from mcp.server.fastmcp import Context
 
-from yeaboi.mcp.runtime import run_engine, run_readonly, to_jsonable
+from yeaboi.mcp.runtime import context_kwargs, run_engine, run_readonly, to_jsonable
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,9 @@ def _report_delivery(
     theme: str,
     sources: dict | None,
     solo: bool,
+    context=None,
+    project_label: str = "",
+    tags: list | None = None,
 ):
     if period not in _PERIODS:
         raise ValueError(f"period must be one of {', '.join(_PERIODS)} — got {period!r}")
@@ -96,6 +99,7 @@ def _report_delivery(
         theme=theme or "midnight",
         sources=sources,
         solo=solo,
+        **context_kwargs(context, project_label, tags),
     )
 
 
@@ -116,6 +120,9 @@ def register(app) -> None:
         theme: str = "midnight",
         sources: dict[str, list[str]] | None = None,
         solo: bool = False,
+        context: str | dict | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """Generate a stakeholder-friendly delivery report of completed work from the team's
         tracker (Jira/Azure DevOps): executive summary, outcome themes, metrics, highlights.
@@ -130,7 +137,12 @@ def register(app) -> None:
         (azdevops/azure_devops accepted as aliases); omit for all configured. Blank
         session_id = most recent session (sprint length/project name).
         solo=true writes a one-person report (the Solo world): first-person narrative, never
-        'the team'."""
+        'the team'.
+        `context`: what this run may read from other sessions — 'all' (default), 'none', or a
+        spec like 'standup,retro:1@2sprints project=apollo tags=q3' (sources, an optional
+        window, project labels and tags); a JSON object of the same shape is accepted. Call
+        context_preview first when the user names a timeframe. `project_label` is the free-text
+        project label recorded on the run; `tags` are recorded beside its default tags."""
         return await run_engine(
             ctx,
             _report_delivery,
@@ -145,6 +157,9 @@ def register(app) -> None:
             theme,
             sources,
             solo,
+            context,
+            project_label,
+            tags,
         )
 
     @app.tool()
