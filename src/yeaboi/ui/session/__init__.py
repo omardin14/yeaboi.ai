@@ -97,6 +97,8 @@ def run_session(
     _read_key_fn=None,
     analysis_profile_id: str = "",
     initial_description: str = "",
+    context=None,
+    project_label: str = "",
 ) -> None:
     """Drive the full TUI session inside an existing Live context.
 
@@ -120,6 +122,8 @@ def run_session(
         initial_description: Pre-fill for the Phase A description editor (e.g.
             a project description extracted from the quarterly roadmap). The
             user can still edit before submitting.
+        context: The ContextScope this plan reads other sessions under (None =
+            unscoped); project_label: the free-text label the plan is recorded with.
     """
     logger.info(
         "run_session started: mode=%s resume=%s export_only=%s dry_run=%s preseeded=%s",
@@ -162,6 +166,8 @@ def run_session(
             dry_run=dry_run,
             analysis_profile_id=analysis_profile_id,
             initial_description=initial_description,
+            context=context,
+            project_label=project_label,
         )
     finally:
         logger.info("Session ended: project_id=%s", project_id)
@@ -180,12 +186,26 @@ def _intake_complete(graph_state: dict) -> bool:
     return isinstance(qs, QuestionnaireState) and qs.completed and graph_state.get("pending_review") != "project_intake"
 
 
-def _scope_state_keys() -> dict:
-    """The world key a TUI planning run seeds.
+def _scope_state_keys(context=None, project_label: str = "") -> dict:
+    """The world, scope and label keys a TUI planning run seeds.
 
     Best-effort: a failure here never blocks a session.
     """
+    import json
+
+    from yeaboi.context.scope import coerce_scope
+
     keys: dict = {}
+    try:
+        scope = coerce_scope(context)
+        if scope is not None:
+            # Declared on ScrumState, so the graph keeps it across invokes.
+            keys["context_scope"] = json.dumps(scope.to_dict(), sort_keys=True)
+            logger.info("Planning session reads under %s", scope.to_spec())
+    except (TypeError, ValueError):
+        logger.warning("Planning session's context scope ignored", exc_info=True)
+    if project_label:
+        keys["project_label"] = project_label
     try:
         from yeaboi.config import is_solo_mode
 
@@ -212,6 +232,8 @@ def _run_session_body(
     dry_run,
     analysis_profile_id="",
     initial_description="",
+    context=None,
+    project_label="",
 ):
     """Session body — extracted so run_session can use try/finally for log cleanup."""
     # Compile graph once for the session (skipped in dry-run — no LLM calls)
@@ -225,7 +247,7 @@ def _run_session_body(
     else:
         graph_state: dict = {"messages": []}
         graph_state["_intake_mode"] = intake_mode
-        graph_state.update(_scope_state_keys())
+        graph_state.update(_scope_state_keys(context, project_label))
         from yeaboi.agent.chat_intake import seed_analysis_profile
 
         seed_analysis_profile(graph_state, analysis_profile_id)

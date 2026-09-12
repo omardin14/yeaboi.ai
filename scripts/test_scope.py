@@ -111,6 +111,8 @@ AREAS: tuple[Area, ...] = (
             "src/yeaboi/context/",
             "src/yeaboi/app/routes_context.py",
             "src/yeaboi/mcp/tools_context.py",
+            "src/yeaboi/ui/mode_select/_context.py",
+            "src/yeaboi/ui/mode_select/screens/_screens_context.py",
         ),
         tests=("tests/unit/test_context_*.py", "tests/unit/test_mcp_server.py"),
     ),
