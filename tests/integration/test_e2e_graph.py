@@ -688,7 +688,7 @@ class TestSessionResume:
     def test_roundtrip_serialization_preserves_all_artifacts(self):
         """Serialize → deserialize should preserve all artifact types exactly."""
         state = {
-            "messages": [HumanMessage(content="test")],  # skipped in serialization
+            "messages": [HumanMessage(content="test")],
             "questionnaire": _completed_questionnaire(),
             "project_analysis": _dummy_analysis(),
             "features": [
@@ -720,8 +720,8 @@ class TestSessionResume:
         json_str = _serialize_state(state)
         restored = _deserialize_state(json_str)
 
-        # Messages are not serialized — restored gets empty list
-        assert restored["messages"] == []
+        # The transcript rides along, so a resumed chat keeps its history
+        assert [m.content for m in restored["messages"]] == ["test"]
 
         # Questionnaire
         assert restored["questionnaire"].completed is True
