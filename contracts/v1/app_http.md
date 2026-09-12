@@ -167,13 +167,13 @@ and a plan started here is one plan everywhere.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/chat/sessions` | body `{description, intake_mode?: "small_project"\|"smart", solo?: false, analysis_profile_id?, title?, context?, project_label?, tags?}` → 201 with the session view. An absent `intake_mode` is classified from the description. `solo: true` opens a one-person intake (the Solo world). `analysis_profile_id` seeds the team calibration and must name a saved profile (400 otherwise). `context`, `project_label` and `tags` are the three keys every run body takes — see *Context scope and labels*; the plan is labelled with them plus the tags every plan gets (`mode:planning`, `world:…`, the month, `size:…`) |
+| POST | `/api/chat/sessions` | body `{description, intake_mode?: "small_project"\|"smart", solo?: false, analysis_profile_id?, title?, context?, project_label?, tags?}` → 201 with the session view. An absent `intake_mode` is classified from the description. `solo: true` opens a one-person intake (the Solo world). `analysis_profile_id` seeds the team calibration and must name a saved profile (400 otherwise). `context`, `project_label` and `tags` are the three keys every run body takes — see *Context scope and labels*; an absent `context` inherits the scope last used for planning on this machine, like every other run; the plan is labelled with them plus the tags every plan gets (`mode:planning`, `world:…`, the month, `size:…`) |
 | GET | `/api/chat/sessions` | `?limit=&project_label=&tag=` → `{sessions: [{session_id, title, project_name, project_label, tags, stage, created_at, last_modified, last_node_completed, counts: {features, stories, tasks, sprints}}]}` — every plan, newest first; `limit` defaults to 50 and `0` means every row |
 | GET | `/api/chat/commands` | `{commands: [{name, help, availability}]}` — the slash verbs the window runs itself (below) |
 | GET | `/api/chat/sessions/{session_id}` | the session view; 404 when no such conversation is open or stored |
 | POST | `/api/chat/sessions/{session_id}/send` | body `{text, images?: [..]}` → a chunked NDJSON turn; 400 when `text` starts with `/`; 409 while a turn is already running, or while the stage is `pipeline` or `epic` (call `advance`) |
 | POST | `/api/chat/sessions/{session_id}/advance` | no body → a chunked NDJSON turn that runs the one step needing no reply: a build stage, or the epic reformat; 409 in any other stage |
-| POST | `/api/chat/sessions/{session_id}/update` | body `{title?, project_label?, tags?, context?}` → `{session_id, title, project_label, tags, context}`. Only the keys present change; `tags` replaces the list; `context` null or blank clears the scope |
+| POST | `/api/chat/sessions/{session_id}/update` | body `{title?, project_label?, tags?, context?}` → `{session_id, title, project_label, tags, context}`. Only the keys present change; `tags` replaces the list; a blank `project_label` clears the label; `context` null or blank clears the scope |
 | POST | `/api/chat/sessions/{session_id}/delete` | → `{deleted: true, session_id}` — the row, its versions, labels, pasted images and log; 404 when unknown |
 | GET | `/api/chat/sessions/{session_id}/questions` | `{questions: [{number, label, answer, remaining, skipped}], total, completed, derived}` |
 | POST | `/api/chat/sessions/{session_id}/size` | body `{mode: "small_project"\|"smart"}` → `{changed, mode, reopened?}`; 409 in dry-run |
@@ -1080,14 +1080,17 @@ What a run may read from other sessions, and the labels every run carries.
 Every run route (`/api/chat/sessions`, `/api/standup/run`, `/api/analysis/run`,
 `/api/reporting/run`, `/api/solo/review/run`, `/api/boards/retro`,
 `/api/boards/poker`) accepts the same three body keys; these routes are what a
-picker talks to before the run starts.
+picker talks to before the run starts. One precedence rule holds for every
+run, planning included: the body's `context`, else the mode's own saved scope
+(a standup session's), else the scope last used for that mode on this machine,
+else unscoped.
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/context/options` | `?mode=` → `{sources: [{key, label, hint, count}], windows: [{kind, label, needs_count, needs_range}], projects: [str], tags: [{tag, count}], calendar: {source, length_weeks, anchor_date, current: {number, start, end}}, default: scope \| null, defaults: {tags: [str]}}` — `sources` are the eight producer modes with how many runs each has on this machine; `windows` the kinds a scope can read over; `projects` and `tags` the labels in use, most recent first; `calendar` the sprint grid a "last N sprints" window resolves against and where it came from (`tracker` \| `plan` \| `settings` \| `default`); `default` the scope last used for `mode` on this machine; `defaults.tags` the fixed `key:value` tags a run of `mode` gets. An unknown `mode` is a 400 |
 | POST | `/api/context/preview` | `{context, mode?, rows?}` → `{scope, window: {start, end, label}, summary, sources: [{key, count, rows: [{session_id, run_id, title, date, project_label, tags}]}], warnings}` — what the scope would read, without running anything. `summary` is the picker's line (`12 standups · 2 retros · 4 Aug – 11 Sep`); `rows` are listed only when `rows: true`. A scope that names an unknown source is a 400 naming the valid ones |
 | GET | `/api/sessions/{mode}/{session_id}/labels` | `?run_id=` → a labels row; 404 when the run carries none, 400 on an unknown mode |
-| POST | `/api/sessions/{mode}/{session_id}/labels` | `{run_id?, project_label?, tags?, merge_tags?}` → the labels row. `tags` are added to the run's existing tags unless `merge_tags: false` replaces them; a blank `project_label` keeps the old one |
+| POST | `/api/sessions/{mode}/{session_id}/labels` | `{run_id?, project_label?, tags?, merge_tags?}` → the labels row. `tags` are added to the run's existing tags unless `merge_tags: false` replaces them; an absent `project_label` keeps the old one and a blank one clears it |
 
 A **scope** is `{sources: [str] | null, window: {kind, count?, start?, end?}, projects: [str], tags: [str], limits: {source: n}}`:
 

@@ -1294,6 +1294,18 @@ class TestContextScopeGating:
         assert _wants_dep({"context_scope": "{"}, "analysis")
         assert _state_scope({"context_scope": "{"}) is None
 
+    def test_every_call_resolves_afresh(self, monkeypatch):
+        """A run must see what was recorded since the last one — no day-long cache."""
+        import json
+
+        from yeaboi.agent.nodes import _state_scope
+
+        answers = iter(["first", "second"])
+        monkeypatch.setattr("yeaboi.context.resolve.resolve_scope", lambda *_a, **_k: next(answers))
+        state = {"context_scope": json.dumps({"sources": ["standup"]})}
+        assert _state_scope(state) == "first"
+        assert _state_scope(state) == "second"
+
     def test_the_analyzer_skips_calibration_and_hands_the_selection_on(self, monkeypatch):
         import json
 

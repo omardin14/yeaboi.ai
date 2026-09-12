@@ -39,6 +39,7 @@ class LiveChat:
     session: ChatSession
     turn: threading.Lock = field(default_factory=threading.Lock)
     title: str = ""  # a user-given title, written with the first save
+    closed: bool = False  # deleted while open — nothing about it is written again
 
 
 def _compile_graph():
@@ -80,6 +81,10 @@ def _remove_attachments(session_id: str) -> None:
 
 class UnknownChatError(LookupError):
     """No conversation with that id is open or stored."""
+
+
+class ChatBusyError(RuntimeError):
+    """A turn is running, so the conversation cannot be removed yet."""
 
 
 class ChatSupervisor:
@@ -218,6 +223,9 @@ class ChatSupervisor:
         return chat
 
     def save(self, chat: LiveChat) -> None:
+        if chat.closed:
+            logger.info("Chat %s was deleted mid-turn — not saved", chat.session_id)
+            return
         self._saver(chat.session_id, chat.session.state)
         if chat.title:
             # After the state, so the row exists; once, so a later rename sticks.
@@ -239,7 +247,20 @@ class ChatSupervisor:
             self._chats.clear()
 
     def delete(self, session_id: str) -> bool:
-        """Remove a conversation everywhere: the store, its labels, attachments and log."""
+        """Remove a conversation everywhere: the store, its labels, attachments and log.
+
+        Raises :class:`ChatBusyError` while a turn is running — the worker
+        would otherwise write the row straight back.
+        """
+        with self._lock:
+            chat = self._chats.get(session_id)
+        if chat is not None:
+            if not chat.turn.acquire(blocking=False):
+                raise ChatBusyError(f"a turn is running for {session_id}")
+            try:
+                chat.closed = True
+            finally:
+                chat.turn.release()
         self.close(session_id)
         with self._store() as store:
             deleted = store.delete_session(session_id)
@@ -288,7 +309,7 @@ class ChatSupervisor:
         self,
         chat: LiveChat,
         *,
-        project_label: str = "",
+        project_label: str | None = None,
         tags=None,
         scope=None,
         defaults: bool = False,
@@ -296,9 +317,10 @@ class ChatSupervisor:
     ) -> dict:
         """Write a plan's labels.
 
-        ``tags`` None leaves the tags alone and a list replaces them; ``defaults``
-        adds the tags every plan gets; ``clear_scope`` records that the plan
-        reads unscoped now.
+        ``project_label`` None keeps the label and ``""`` clears it; ``tags``
+        None leaves the tags alone and a list replaces them; ``defaults`` adds
+        the tags every plan gets; ``clear_scope`` records that the plan reads
+        unscoped now.
         """
         from yeaboi.context.labels import default_tags
 
@@ -338,7 +360,7 @@ class ChatSupervisor:
             label = by_id.get(row["session_id"])
             row_label = label.project if label else ""
             row_tags = list(label.tags) if label else []
-            if project_label and row_label != project_label:
+            if project_label and row_label.casefold() != project_label.casefold():
                 continue
             if tag and tag not in row_tags:
                 continue

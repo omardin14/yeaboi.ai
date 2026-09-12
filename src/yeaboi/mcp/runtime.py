@@ -149,8 +149,9 @@ def _log_tool_failure(where: str, fn, exc: BaseException) -> None:
 def context_kwargs(context=None, project_label: str = "", tags=None) -> dict:
     """The engine kwargs a tool's ``context``/``project_label``/``tags`` map onto — only the ones set.
 
-    An engine's defaults are the unscoped, unlabelled run, so an unset tool
-    param forwards nothing and the call is byte-for-byte what it was.
+    An unset ``context`` forwards nothing, and the engine then reads under the
+    mode's saved or last-used scope on this machine — unscoped only when there
+    is none. Labels default to the run's own tags.
     """
     out: dict = {}
     if context not in (None, ""):

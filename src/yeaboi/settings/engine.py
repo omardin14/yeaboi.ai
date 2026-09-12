@@ -503,7 +503,10 @@ def set_setting(key: str, value: str) -> SettingWrite:
 
 def _check_sprint_value(key: str, value: str) -> None:
     """The two sprint-grid fields carry a number and a date; refuse anything else."""
+    from yeaboi.context.window import clear_calendar_memo
+
     if not value:
+        clear_calendar_memo()
         return
     if key == "YEABOI_SPRINT_LENGTH_WEEKS":
         if not value.isdigit() or int(value) < 1:
@@ -515,9 +518,7 @@ def _check_sprint_value(key: str, value: str) -> None:
             parse_date(value)
         except (TypeError, ValueError):
             raise ValueError("Sprint Anchor Date must be an ISO date (YYYY-MM-DD)") from None
-        from yeaboi.context.window import clear_calendar_memo
-
-        clear_calendar_memo()
+    clear_calendar_memo()
 
 
 #: What one item of each ``item_kind`` may be. Deliberately loose for email —

@@ -459,6 +459,11 @@ def parked_gate(state: dict) -> AwaitReview | AwaitChoice | None:
     return None
 
 
+def is_synthetic(message) -> bool:
+    """True for a turn the driver injected (an advance's "continue")."""
+    return bool(getattr(message, "additional_kwargs", {}).get("synthetic"))
+
+
 def replay(state: dict) -> list[ReplayItem]:
     """Rebuild the whole conversation from stored state, in order.
 
@@ -479,7 +484,8 @@ def replay(state: dict) -> list[ReplayItem]:
         if not isinstance(message.content, str):
             continue
         if isinstance(message, HumanMessage):
-            items.append(UserSaid(message.content))
+            if not is_synthetic(message):
+                items.append(UserSaid(message.content))
         elif isinstance(message, AIMessage) and message.content:
             if i == plan.summary_at:
                 items.append(AwaitConfirm(kind="intake_summary", prompt=CONFIRM_VERDICT_PROMPT))
@@ -571,6 +577,9 @@ def apply_edit_feedback(state: dict, pending: str, feedback: str, images: list[s
     node = "project_analyzer" if pending == EPIC_REVIEW_NODE else pending
     serialized = _serialize_artifacts_for_review(state, node)
     _clear_downstream_artifacts(state, node)
+    if node == "project_analyzer":
+        # A redone analysis is formatted and reviewed as an epic again.
+        state.pop("_epic_reviewed", None)
     state["last_review_decision"] = ReviewDecision.EDIT
     if images:
         state["review_feedback_images"] = list(images)
@@ -742,9 +751,9 @@ def start_state(
     }
     if solo:
         state["solo"] = True
-    seed_analysis_profile(state, analysis_profile_id)
     if context_scope:
         state["context_scope"] = context_scope if isinstance(context_scope, str) else json.dumps(context_scope)
+    seed_analysis_profile(state, analysis_profile_id)
     if project_label:
         state["project_label"] = project_label
     return state
@@ -874,7 +883,7 @@ class ChatSession:
         on_event(Progress(node, step, total, "running"))
         if kind:
             on_event(SectionChanged(kind, "generating", self.versions.get(kind, 0)))
-        if not self._turn("continue", on_event, images=None, cancel=cancel, show_reply=False):
+        if not self._turn("continue", on_event, images=None, cancel=cancel, show_reply=False, synthetic=True):
             on_event(Done())
             return False
         on_event(Progress(node, step, total, "done"))
@@ -892,10 +901,13 @@ class ChatSession:
         images: list[str] | None,
         cancel: threading.Event | None,
         show_reply: bool = True,
+        synthetic: bool = False,
     ) -> bool:
         messages = list(self.state.get("messages", []))
         if text:
-            messages.append(HumanMessage(content=text))
+            # A synthetic turn is the driver's own "continue", not something
+            # the person typed — replay leaves it out of the transcript.
+            messages.append(HumanMessage(content=text, additional_kwargs={"synthetic": True} if synthetic else {}))
         intake_turn = next_node(self.state) == "project_intake"
         if intake_turn:
             # The intake confirmation is the one turn sent while a review gate

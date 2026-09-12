@@ -1369,7 +1369,8 @@ class SessionStore:
         """Delete all sessions. Returns the number of rows deleted."""
         cursor = self._conn.execute("DELETE FROM sessions_meta")
         self._conn.execute("DELETE FROM plan_versions")
-        self._conn.execute("DELETE FROM session_labels WHERE mode IN ('planning', 'analysis')")
+        # Analysis labels are keyed by team id, not by a session row.
+        self._conn.execute("DELETE FROM session_labels WHERE mode = 'planning'")
         logger.info("Deleted all sessions (count=%d)", cursor.rowcount)
         return cursor.rowcount
 

@@ -55,8 +55,8 @@ def read_context(payload: Mapping) -> tuple[ContextScope | None, str, tuple[str,
 def context_kwargs(payload: Mapping) -> dict:
     """The engine kwargs for a run body — only the keys the body actually carried.
 
-    An engine's defaults are the unscoped, unlabelled run, so a blank body
-    forwards nothing and the call is byte-for-byte what it was.
+    A blank body forwards nothing; the engine then reads under the mode's
+    saved or last-used scope on this machine, unscoped only when there is none.
     """
     scope, label, tags = read_context(payload)
     out: dict = {}

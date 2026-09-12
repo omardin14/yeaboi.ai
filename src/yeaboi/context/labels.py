@@ -166,7 +166,7 @@ class LabelStore:
         session_id: str,
         run_id: str = "",
         *,
-        project: str = "",
+        project: str | None = None,
         tags=(),
         scope: ContextScope | dict | None = None,
         merge_tags: bool = True,
@@ -174,9 +174,9 @@ class LabelStore:
     ) -> SessionLabels:
         """Upsert one row.
 
-        ``merge_tags`` keeps the tags already there and adds; a blank ``project``
-        keeps the old one; a ``None`` scope keeps the old one unless
-        ``clear_scope`` says the run reads unscoped now.
+        ``merge_tags`` keeps the tags already there and adds; ``project`` None
+        keeps the old label and ``""`` clears it; a ``None`` scope keeps the
+        old one unless ``clear_scope`` says the run reads unscoped now.
         """
         if mode not in LABEL_MODES:
             raise ValueError(f"unknown label mode {mode!r} — one of {', '.join(LABEL_MODES)}")
@@ -186,7 +186,10 @@ class LabelStore:
         new_tags = set(normalize_tags(tags))
         if existing and merge_tags:
             new_tags |= set(existing.tags)
-        project = (project or "").strip() or (existing.project if existing else "")
+        if project is None:
+            project = existing.project if existing else ""
+        else:
+            project = project.strip()
         scope_dict = scope.to_dict() if isinstance(scope, ContextScope) else scope
         if clear_scope:
             scope_json = ""
@@ -238,11 +241,11 @@ class LabelStore:
         rows = self._conn.execute(
             "SELECT session_id, run_id, project, tags_json FROM session_labels WHERE mode = ?", (mode,)
         ).fetchall()
-        wanted_projects = {p.strip().lower() for p in projects if p.strip()}
+        wanted_projects = {p.strip().casefold() for p in projects if p.strip()}
         wanted_tags = set(normalize_tags(tags))
         found: set[str] = set()
         for session_id, run_id, project, tags_json in rows:
-            if wanted_projects and (project or "").strip().lower() not in wanted_projects:
+            if wanted_projects and (project or "").strip().casefold() not in wanted_projects:
                 continue
             if wanted_tags and not wanted_tags <= set(_tags(tags_json)):
                 continue
@@ -356,7 +359,7 @@ def label_run(
                 mode,
                 session_id,
                 str(run_id or ""),
-                project=project_label,
+                project=project_label or None,
                 tags=merged,
                 scope=scope,
                 clear_scope=scope is None,

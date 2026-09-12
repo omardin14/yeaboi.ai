@@ -107,6 +107,13 @@ class TestLabels:
     def test_missing_row_is_a_404(self, app):
         assert request(app, "GET", "/api/sessions/retro/p9/labels").code == 404
 
+    def test_an_absent_label_keeps_and_a_blank_one_clears(self, app, seeded):
+        path = "/api/sessions/standup/p1/labels"
+        kept = json.loads(request(app, "POST", path, {"run_id": str(seeded), "tags": ["x"]}).body)
+        assert kept["project_label"] == "Apollo"
+        cleared = json.loads(request(app, "POST", path, {"run_id": str(seeded), "project_label": ""}).body)
+        assert cleared["project_label"] == ""
+
     def test_unknown_mode_is_a_400(self, app):
         assert request(app, "GET", "/api/sessions/nope/p1/labels").code == 400
         assert request(app, "POST", "/api/sessions/nope/p1/labels", {}).code == 400

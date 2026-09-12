@@ -42,7 +42,7 @@ def _labels_get(mode: str, session_id: str, run_id: str) -> dict:
 
 
 def _labels_set(
-    mode: str, session_id: str, run_id: str, project_label: str, tags: list | None, merge_tags: bool
+    mode: str, session_id: str, run_id: str, project_label: str | None, tags: list | None, merge_tags: bool
 ) -> dict:
     from yeaboi.context.engine import set_session_labels
 
@@ -91,13 +91,13 @@ def register(app) -> None:
         mode: str,
         session_id: str,
         run_id: str = "",
-        project_label: str = "",
+        project_label: str | None = None,
         tags: list[str] | None = None,
         merge_tags: bool = True,
     ) -> dict:
-        """Label a run after the fact: set its free-text project label and add tags (the run's
-        default `key:value` tags stay); merge_tags=false replaces the tags instead. Same ids as
-        session_labels_get."""
+        """Label a run after the fact: set its free-text project label (omit to keep it, "" to
+        clear it) and add tags (the run's default `key:value` tags stay); merge_tags=false
+        replaces the tags instead. Same ids as session_labels_get."""
         return await run_readonly(_labels_set, mode, session_id, run_id, project_label, tags, merge_tags)
 
     @app.tool()

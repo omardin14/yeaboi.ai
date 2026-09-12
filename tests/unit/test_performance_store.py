@@ -595,8 +595,32 @@ class TestContextRows:
         with PerformanceStore(db_path) as store:
             prep_id = store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-07-12"), session_id="s1")
         with LabelStore(db_path) as labels:
-            labels.set_labels("performance", "s1", f"1on1:{prep_id}")
+            labels.set_labels("performance", "s1", f"prep:{prep_id}")
         with PerformanceStore(db_path) as store:
             assert store.delete_one_on_one(prep_id)
         with LabelStore(db_path) as labels:
-            assert labels.get_labels("performance", "s1", f"1on1:{prep_id}") is None
+            assert labels.get_labels("performance", "s1", f"prep:{prep_id}") is None
+
+
+class TestLabelsFollowTheRow:
+    """A 1:1's label row is keyed by its kind, and goes with it."""
+
+    @pytest.mark.parametrize("kind", ["prep", "completion"])
+    def test_delete_drops_the_rows_own_label(self, db_path, kind):
+        from yeaboi.context.labels import LabelStore
+
+        with PerformanceStore(db_path) as store:
+            if kind == "prep":
+                run_id = store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-07-01"))
+            else:
+                run_id = store.record_completion(OneOnOneRecord(engineer="Ada", date="2026-07-05"))
+        with LabelStore(db_path) as labels:
+            labels.set_labels("performance", "", f"{kind}:{run_id}", project="Apollo")
+        with PerformanceStore(db_path) as store:
+            assert store.delete_one_on_one(run_id)
+        with LabelStore(db_path) as labels:
+            assert labels.get_labels("performance", "", f"{kind}:{run_id}") is None
+
+    def test_deleting_a_missing_row_touches_no_label(self, db_path):
+        with PerformanceStore(db_path) as store:
+            assert store.delete_one_on_one(999) is False

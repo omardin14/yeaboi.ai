@@ -89,12 +89,16 @@ def labels_get(app, request: Request) -> Response:
 
 
 def labels_set(app, request: Request) -> Response:
-    """``POST /api/sessions/{mode}/{session_id}/labels`` — ``{run_id?, project_label?, tags?, merge_tags?}``."""
+    """``POST /api/sessions/{mode}/{session_id}/labels`` — ``{run_id?, project_label?, tags?, merge_tags?}``.
+
+    An absent ``project_label`` keeps the label; a blank one clears it.
+    """
     from yeaboi.context.engine import set_session_labels
 
     mode, session_id = _mode_and_id(request)
     payload = request.json()
-    _scope, project_label, tags = read_context(payload)
+    _scope, label, tags = read_context(payload)
+    project_label = label if "project_label" in payload else None
     run_id = str(payload.get("run_id", "") or "").strip()
     merge_tags = bool(payload.get("merge_tags", True))
     try:

@@ -193,11 +193,11 @@ def _scope_state_keys(context=None, project_label: str = "") -> dict:
     """
     import json
 
-    from yeaboi.context.scope import coerce_scope
+    from yeaboi.context.resolve import scope_for
 
     keys: dict = {}
     try:
-        scope = coerce_scope(context)
+        scope = scope_for("planning", context)
         if scope is not None:
             # Declared on ScrumState, so the graph keeps it across invokes.
             keys["context_scope"] = json.dumps(scope.to_dict(), sort_keys=True)

@@ -38,7 +38,8 @@ from langchain_core.messages import HumanMessage
 
 from yeaboi.agent.state import QuestionnaireState, prior_art_refs
 from yeaboi.context.labels import label_run
-from yeaboi.context.scope import ContextScope, coerce_scope
+from yeaboi.context.resolve import scope_for
+from yeaboi.context.scope import ContextScope
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +291,7 @@ def run_planning_pipeline(
         if solo:
             graph_state["solo"] = True
             logger.info("Headless: solo run — team questions default to one developer")
-        scope = coerce_scope(context)
+        scope = scope_for("planning", context)
         if scope is not None:
             # The JSON twin on state, so the nodes' _wants_dep and the saved
             # session both carry what this run may read.

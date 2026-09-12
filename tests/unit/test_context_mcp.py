@@ -88,6 +88,14 @@ class TestContextTools:
         payload = call_tool("session_labels_get", {"mode": "retro", "session_id": "p9"})
         assert payload["ok"] is False and "no labels" in payload["error"]["message"]
 
+    def test_labels_set_without_a_label_keeps_it(self, seeded):
+        ids = {"mode": "standup", "session_id": "p1", "run_id": "1"}
+        call_tool("session_labels_set", {**ids, "project_label": "Apollo"})
+        kept = call_tool("session_labels_set", {**ids, "tags": ["x"]})
+        assert kept["data"]["project_label"] == "Apollo"
+        cleared = call_tool("session_labels_set", {**ids, "project_label": ""})
+        assert cleared["data"]["project_label"] == ""
+
     def test_labels_set_unknown_mode_is_an_error_envelope(self, tmp_db):
         payload = call_tool("session_labels_set", {"mode": "nope", "session_id": "p1"})
         assert payload["ok"] is False

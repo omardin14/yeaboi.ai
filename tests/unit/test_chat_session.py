@@ -25,9 +25,11 @@ from yeaboi.agent.chat_session import (
     SwitchSize,
     Token,
     TrackerSync,
+    UserSaid,
     at_intake_summary,
     at_prior_art,
     clear_review_state,
+    is_synthetic,
     next_node,
     replay_plan,
     reply_event,
@@ -496,6 +498,16 @@ class TestReviewHelpers:
         assert apply_edit_feedback(state, EPIC_REVIEW_NODE, "shorter") == "epic"
         assert "project_analysis" not in state
         assert state["last_review_feedback"] == "shorter"
+        # The redone analysis is formatted and reviewed as an epic again.
+        assert "_epic_reviewed" not in state
+        assert ShowArtifact("epic") not in replay(state)
+
+    def test_edit_feedback_downstream_of_the_epic_keeps_it_reviewed(self, monkeypatch):
+        monkeypatch.setattr("yeaboi.repl._review._serialize_artifacts_for_review", lambda _s, _n: "")
+        state = {"pending_review": "story_writer", "stories": [1], "project_analysis": _ANALYSIS}
+        state["_epic_reviewed"] = True
+        assert apply_edit_feedback(state, "story_writer", "shorter") == "stories"
+        assert state["_epic_reviewed"] is True
 
 
 class TestChoices:
@@ -827,3 +839,27 @@ class TestAdvance:
         with pytest.raises(RuntimeError):
             session.advance(lambda _e: None)
         assert session.state is before
+
+
+class TestSyntheticTurns:
+    """An advance's own "continue" is not something the person said."""
+
+    def test_advance_marks_its_turn_and_replay_leaves_it_out(self):
+        graph = FakeGraph(
+            [
+                {
+                    "messages": [AIMessage(content="# Analysis")],
+                    "project_analysis": _ANALYSIS,
+                    "pending_review": "project_analyzer",
+                }
+            ]
+        )
+        session = ChatSession(graph, {"questionnaire": _built_qs()}, typewriter=False)
+        assert session.advance(lambda _e: None) is True
+        sent = graph.invocations[0]["messages"][-1]
+        assert sent.content == "continue" and is_synthetic(sent)
+        assert not any(isinstance(item, UserSaid) for item in replay(session.state))
+
+    def test_a_typed_turn_is_not_synthetic(self):
+        assert not is_synthetic(HumanMessage(content="four engineers"))
+        assert UserSaid("four engineers") in replay({"messages": [HumanMessage(content="four engineers")]})

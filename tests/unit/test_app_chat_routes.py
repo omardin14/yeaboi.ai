@@ -549,6 +549,14 @@ class TestCreateSeedsProfileAndContext:
         monkeypatch.setattr(app.chats, "set_labels", boom)
         assert open_chat(app, project_label="Apollo")["session_id"] == "proj-1"
 
+    def test_no_context_inherits_the_scope_last_used_for_planning(self, app, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: {"sources": ["retro"]})
+        open_chat(app)
+        assert json.loads(app.saved["proj-1"]["context_scope"])["sources"] == ["retro"]
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        open_chat(app)  # the same fixture id — a fresh state
+        assert "context_scope" not in app.saved["proj-1"]
+
 
 class TestSendRefusesSlash:
     def test_slash_input_never_reaches_the_model(self, app, graph):
@@ -595,6 +603,11 @@ class TestAdvance:
 
 
 class TestList:
+    def test_the_label_filter_ignores_case(self, store_app):
+        open_chat(store_app, project_label="Apollo")
+        rows = json.loads(request(store_app, "GET", "/api/chat/sessions?project_label=apollo").body)["sessions"]
+        assert [row["project_label"] for row in rows] == ["Apollo"]
+
     def test_plans_list_newest_first_with_their_stage_and_counts(self, store_app):
         first = open_chat(store_app, title="First")
         second = open_chat(store_app, title="Second")
@@ -672,6 +685,16 @@ class TestUpdate:
         assert request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"context": "stanup"}).code == 400
         assert request(store_app, "POST", "/api/chat/sessions/nope/update", {"title": "x"}).code == 404
 
+    def test_a_blank_project_label_clears_it_and_an_absent_one_keeps_it(self, store_app):
+        sid = open_chat(store_app, project_label="Apollo")["session_id"]
+        kept = json.loads(request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"title": "T"}).body)
+        assert kept["project_label"] == "Apollo"
+        cleared = json.loads(request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"project_label": ""}).body)
+        assert cleared["project_label"] == ""
+        assert "project_label" not in store_app.chats.open(sid).session.state
+        view = json.loads(request(store_app, "GET", f"/api/chat/sessions/{sid}").body)
+        assert view["project_label"] == ""
+
 
 class TestDelete:
     def test_the_plan_its_versions_and_files_go(self, store_app):
@@ -693,6 +716,28 @@ class TestDelete:
 
     def test_an_unknown_plan_is_a_404(self, store_app):
         assert request(store_app, "POST", "/api/chat/sessions/nope/delete").code == 404
+
+    def test_a_running_turn_refuses_the_delete(self, store_app):
+        sid = open_chat(store_app)["session_id"]
+        chat = store_app.chats.open(sid)
+        assert chat.turn.acquire(blocking=False)  # the worker holds it for the whole turn
+        try:
+            resp = request(store_app, "POST", f"/api/chat/sessions/{sid}/delete")
+            assert resp.code == 409 and "turn is running" in json.loads(resp.body)["error"]
+            assert request(store_app, "GET", f"/api/chat/sessions/{sid}").code == 200
+        finally:
+            chat.turn.release()
+        assert request(store_app, "POST", f"/api/chat/sessions/{sid}/delete").code == 200
+
+    def test_a_deleted_chat_is_never_saved_again(self, store_app):
+        from yeaboi.sessions import SessionStore
+
+        sid = open_chat(store_app)["session_id"]
+        chat = store_app.chats.open(sid)
+        assert store_app.chats.delete(sid)
+        store_app.chats.save(chat)  # the worker's late save after the row went
+        with SessionStore(store_app.db) as store:
+            assert store.get_session(sid) is None
 
 
 class TestPlan:

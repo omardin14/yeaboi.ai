@@ -451,7 +451,10 @@ class TestSessionLabelsMigration:
             assert labels.get_labels("planning", "p1") is None
             assert labels.get_labels("planning", "p2") is not None
             assert labels.get_labels("standup", "p1", "1") is not None  # a run's row belongs to its own store
+        with LabelStore(db) as labels:
+            labels.set_labels("analysis", "jira-PROJ-20260401", project="Apollo")  # keyed by team id
         with SessionStore(db) as store:
             store.delete_all_sessions()
         with LabelStore(db) as labels:
             assert labels.get_labels("planning", "p2") is None
+            assert labels.get_labels("analysis", "jira-PROJ-20260401") is not None

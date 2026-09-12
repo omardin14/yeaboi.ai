@@ -491,3 +491,17 @@ class TestSprintFields:
         sections = {f.env: f.section for f in engine._fields()}
         assert sections["YEABOI_SPRINT_LENGTH_WEEKS"] == "advanced"
         assert sections["YEABOI_SPRINT_ANCHOR_DATE"] == "advanced"
+
+    @pytest.mark.parametrize(("key", "value"), [("YEABOI_SPRINT_LENGTH_WEEKS", "3"), ("YEABOI_SPRINT_ANCHOR_DATE", "")])
+    def test_either_field_clears_the_calendar_memo(self, monkeypatch, key, value):
+        cleared: list[bool] = []
+        monkeypatch.setattr("yeaboi.context.window.clear_calendar_memo", lambda: cleared.append(True))
+        assert engine.set_setting(key, value).ok
+        assert cleared == [True]
+
+    def test_a_refused_value_leaves_the_memo_alone(self, monkeypatch):
+        cleared: list[bool] = []
+        monkeypatch.setattr("yeaboi.context.window.clear_calendar_memo", lambda: cleared.append(True))
+        with pytest.raises(ValueError):
+            engine.set_setting("YEABOI_SPRINT_LENGTH_WEEKS", "0")
+        assert cleared == []

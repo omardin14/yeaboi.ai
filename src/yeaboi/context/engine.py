@@ -138,12 +138,16 @@ def set_session_labels(
     session_id: str,
     run_id: str = "",
     *,
-    project_label: str = "",
+    project_label: str | None = None,
     tags: Sequence[str] = (),
     merge_tags: bool = True,
     db_path: Path | None = None,
 ) -> SessionLabels:
-    """Write a run's project label and tags. Raises ``ValueError`` on an unknown mode or a blank id."""
+    """Write a run's project label and tags.
+
+    ``project_label`` None keeps the label it has, ``""`` clears it. Raises
+    ``ValueError`` on an unknown mode or a blank id.
+    """
     from yeaboi.paths import get_db_path
 
     with LabelStore(db_path or get_db_path()) as store:

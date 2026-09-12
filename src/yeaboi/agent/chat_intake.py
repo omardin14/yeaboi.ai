@@ -125,6 +125,12 @@ def seed_analysis_profile(state: dict, profile_id: str) -> None:
     """
     if not profile_id:
         return
+    from yeaboi.agent.nodes import _wants_dep
+
+    if not _wants_dep(state, "analysis"):
+        # The scope on state beats the pick: nothing from the profile reaches the run.
+        logger.info("analysis source off — analysis profile %s not seeded", profile_id)
+        return
     state["analysis_profile_id"] = profile_id
     try:
         from yeaboi.agent.nodes import _load_profile_by_id

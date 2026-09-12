@@ -383,10 +383,12 @@ class PerformanceStore:
 
     def delete_one_on_one(self, run_id: int) -> bool:
         """Delete a single 1:1 (prep or completion) row. Returns True if removed."""
+        row = self._conn.execute("SELECT kind FROM performance_one_on_ones WHERE id = ?", (run_id,)).fetchone()
         cursor = self._conn.execute("DELETE FROM performance_one_on_ones WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
-            drop_run_labels(self._db_path, "performance", f"1on1:{run_id}")
+            kind = row[0] if row and row[0] else "prep"
+            drop_run_labels(self._db_path, "performance", f"{kind}:{run_id}")
             logger.info("Deleted 1:1 run id=%s", run_id)
         return deleted
 

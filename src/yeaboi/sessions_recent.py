@@ -101,7 +101,8 @@ def recent_sessions(
             logger.warning("recent_sessions: %s listing failed", name, exc_info=True)
     rows = _with_labels(path, rows)
     if project_label:
-        rows = [row for row in rows if row.project_label == project_label]
+        wanted = project_label.casefold()
+        rows = [row for row in rows if row.project_label.casefold() == wanted]
     rows.sort(key=lambda r: r.last_modified, reverse=True)
     if limit > 0:
         rows = rows[:limit]

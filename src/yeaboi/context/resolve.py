@@ -396,20 +396,19 @@ _SOURCE_READERS: dict[str, Callable[[Path], list[SourceRow]]] = {
 }
 
 
-def selection_for(
+def scope_for(
     mode: str,
     context: ContextScope | Mapping | str | None,
     *,
-    fallback: Mapping | None = None,
-    today: date | None = None,
-    db_path: Path | None = None,
-) -> Selection:
-    """Resolve a run's scope with the surfaces' precedence, then read the stores.
+    fallback: Mapping | str | None = None,
+) -> ContextScope | None:
+    """The scope a run reads under, by the one precedence every engine shares.
 
     Caller value → the mode's own persisted scope (``fallback``, standup's config
-    column) → the last scope used for ``mode`` on this machine → ``None``, which
-    resolves without a store read and keeps the run byte-for-byte unscoped.
-    A value that fails to parse degrades to the next step with a warning.
+    column) → the last scope used for ``mode`` on this machine → ``None``
+    (unscoped). A caller value that fails to parse raises — a typo is the
+    caller's to fix; a stored value that fails degrades to the next step
+    with a warning.
     """
     from yeaboi.config import get_last_context_scope
 
@@ -421,9 +420,26 @@ def selection_for(
         try:
             scope = coerce_scope(candidate)
         except (TypeError, ValueError) as exc:
+            if source == "caller":
+                raise
             logger.warning("%s: %s context scope ignored: %s", mode, source, exc)
             continue
         if scope is not None:
             logger.info("%s: context scope from %s (%s)", mode, source, scope.to_spec())
-            return resolve_scope(scope, today=today, db_path=db_path)
-    return resolve_scope(None, today=today, db_path=db_path)
+            return scope
+    return None
+
+
+def selection_for(
+    mode: str,
+    context: ContextScope | Mapping | str | None,
+    *,
+    fallback: Mapping | None = None,
+    today: date | None = None,
+    db_path: Path | None = None,
+) -> Selection:
+    """Resolve a run's scope with :func:`scope_for`, then read the stores.
+
+    ``None`` resolves without a store read and keeps the run unscoped.
+    """
+    return resolve_scope(scope_for(mode, context, fallback=fallback), today=today, db_path=db_path)

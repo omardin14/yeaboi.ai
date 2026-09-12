@@ -195,6 +195,16 @@ class TestPreview:
 
 
 class TestSelectionFor:
+    def test_scope_for_is_the_rule_planning_shares(self, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: {"sources": ["retro"]})
+        assert res.scope_for("planning", "standup@month").sources == frozenset({"standup"})
+        assert res.scope_for("planning", None).sources == frozenset({"retro"})
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        assert res.scope_for("planning", None) is None
+        assert res.scope_for("planning", None, fallback="stanup") is None  # a stored typo degrades
+        with pytest.raises(ValueError, match="stanup"):
+            res.scope_for("planning", "stanup")
+
     """The surfaces' precedence: caller → the mode's saved scope → last used → unscoped."""
 
     @pytest.fixture(autouse=True)
@@ -223,6 +233,10 @@ class TestSelectionFor:
         selection = res.selection_for("standup", None, db_path=seeded["db"])
         assert selection.scope.sources == frozenset({"retro"})
 
-    def test_a_bad_value_degrades_to_the_next_step(self, seeded):
-        selection = res.selection_for("standup", "stanup", fallback={"sources": ["plan"]}, db_path=seeded["db"])
-        assert selection.scope.sources == frozenset({"plan"})
+    def test_a_bad_caller_value_raises_and_a_bad_stored_one_degrades(self, seeded, monkeypatch):
+        with pytest.raises(ValueError, match="stanup"):
+            res.selection_for("standup", "stanup", fallback={"sources": ["plan"]}, db_path=seeded["db"])
+        selection = res.selection_for("standup", None, fallback="stanup", db_path=seeded["db"])
+        assert selection.scope is None
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: "stanup")
+        assert res.selection_for("standup", None, db_path=seeded["db"]).scope is None

@@ -14,7 +14,6 @@ on the graph object itself.
 """
 
 import dataclasses
-import functools
 import json
 import logging
 import math
@@ -6512,26 +6511,19 @@ def _wants_dep(state, source: str) -> bool:
         return True
 
 
-@functools.lru_cache(maxsize=16)
-def _resolve_cached(scope_json: str, day: str):
-    from yeaboi.context.resolve import resolve_scope
-
-    return resolve_scope(scope_json)
-
-
 def _state_scope(state):
     """The run's resolved ``Selection``, or ``None`` when the state carries no scope.
 
-    Cached per scope value and day so the pipeline nodes share one store walk
-    instead of resolving the same scope five times over a run.
+    Resolved on each call: a run must see what was recorded since the last
+    one, and only two nodes ask.
     """
     raw = state.get("context_scope", "")
     if not raw:
         return None
-    from datetime import date
+    from yeaboi.context.resolve import resolve_scope
 
     try:
-        return _resolve_cached(str(raw), date.today().isoformat())
+        return resolve_scope(str(raw))
     except (TypeError, ValueError):
         logger.warning("context_scope on state is unreadable — reading every source")
         return None

@@ -114,6 +114,19 @@ class TestStore:
             again = store.set_labels("planning", "p1", tags=["x"])
         assert again.scope == {"sources": None}
 
+    def test_project_none_keeps_and_blank_clears(self, db):
+        with LabelStore(db) as store:
+            store.set_labels("planning", "p1", project="Apollo")
+            assert store.set_labels("planning", "p1", tags=["x"]).project == "Apollo"
+            assert store.set_labels("planning", "p1", project=None).project == "Apollo"
+            assert store.set_labels("planning", "p1", project="").project == ""
+
+    def test_find_ids_ignores_case(self, db):
+        with LabelStore(db) as store:
+            store.set_labels("standup", "s1", "1", project="Apollo")
+            assert store.find_ids("standup", projects=["APOLLO"]) == {"1"}
+            assert store.find_ids("standup", projects=["apollo two"]) == set()
+
     def test_unknown_mode_and_empty_key_raise(self, db):
         with LabelStore(db) as store:
             with pytest.raises(ValueError, match="unknown label mode"):
@@ -194,6 +207,15 @@ class TestDropRunLabels:
 
 
 class TestLabelRun:
+    def test_a_blank_label_at_record_time_keeps_the_old_one(self, db):
+        from yeaboi.context.labels import label_run
+
+        with LabelStore(db) as store:
+            store.set_labels("standup", "s1", "7", project="Apollo")
+        label_run("standup", "s1", "7", project_label="", tags=(), scope=None, defaults={"today": TODAY}, db_path=db)
+        with LabelStore(db) as store:
+            assert store.get_labels("standup", "s1", "7").project == "Apollo"
+
     def test_writes_the_defaults_and_the_users_tags(self, db):
         from datetime import date
 

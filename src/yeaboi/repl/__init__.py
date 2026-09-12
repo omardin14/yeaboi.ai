@@ -17,6 +17,7 @@ from yeaboi.agent.nodes import _build_intake_summary, _parse_review_intent
 from yeaboi.agent.state import TOTAL_QUESTIONS, QuestionnaireState, ReviewDecision
 from yeaboi.config import get_session_prune_days
 from yeaboi.context.labels import label_run
+from yeaboi.context.resolve import scope_for
 from yeaboi.context.scope import coerce_scope
 from yeaboi.input_guardrails import validate_input
 from yeaboi.output_guardrails import validate_output
@@ -485,7 +486,7 @@ def run_repl(
             # A declared ScrumState key — the intake reads it.
             graph_state["solo"] = True
             logger.info("REPL: solo run — team questions default to one developer")
-        _scope = coerce_scope(context)
+        _scope = scope_for("planning", context)
         if _scope is not None:
             # The JSON twin on state, so the nodes' _wants_dep and the saved
             # session both carry what this run may read.

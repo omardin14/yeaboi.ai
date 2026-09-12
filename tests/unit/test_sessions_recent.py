@@ -127,6 +127,7 @@ class TestLabels:
             labels.set_labels("retro", "other", "1", project="borealis")
         rows = recent_sessions(project_label="apollo", db_path=seeded["db"])
         assert [(r.mode, r.session_id) for r in rows] == [("planning", "p1")]
+        assert [r.session_id for r in recent_sessions(project_label="APOLLO", db_path=seeded["db"])] == ["p1"]
         assert recent_sessions(project_label="nobody", db_path=seeded["db"]) == []
 
     def test_a_missing_label_table_leaves_rows_unlabelled(self, seeded, monkeypatch):

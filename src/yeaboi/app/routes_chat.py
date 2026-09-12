@@ -43,7 +43,7 @@ from yeaboi.agent.chat_session import (
 )
 from yeaboi.agent.plan_view import pipeline_progress, plan_view, section_status
 from yeaboi.app._context_body import read_context
-from yeaboi.app.chats import LiveChat, UnknownChatError
+from yeaboi.app.chats import ChatBusyError, LiveChat, UnknownChatError
 from yeaboi.app.router import HTTPError, Request, Response, json_response
 from yeaboi.mcp.runtime import to_jsonable
 
@@ -122,7 +122,11 @@ def create(app, request: Request) -> Response:
     if profile_id and not _profile_exists(profile_id):
         raise HTTPError(400, f"no analysis profile {profile_id!r}")
     title = _read_title(payload)
+    from yeaboi.context.resolve import scope_for
+
     scope, project_label, tags = read_context(payload)
+    # The rule every run shares: an absent scope inherits the last one used.
+    scope = scope_for("planning", scope)
     chat = app.chats.create(
         description,
         intake_mode=intake_mode,
@@ -168,8 +172,9 @@ def update(app, request: Request) -> Response:
     """``POST /api/chat/sessions/{session_id}/update`` — rename, relabel or rescope a plan.
 
     Only the keys present change. ``tags`` replaces the list (the picker
-    sends every tag it shows, the fixed ones included); ``context`` null or
-    blank clears the scope.
+    sends every tag it shows, the fixed ones included); a blank
+    ``project_label`` clears the label; ``context`` null or blank clears the
+    scope.
     """
     payload = request.json()
     chat = _chat(app, request)
@@ -193,7 +198,7 @@ def update(app, request: Request) -> Response:
         _label(
             app,
             chat,
-            project_label=project_label if "project_label" in touched else "",
+            project_label=project_label if "project_label" in touched else None,
             tags=tags if "tags" in touched else None,
             scope=scope if "context" in touched else None,
             clear_scope="context" in touched and scope is None,
@@ -215,7 +220,11 @@ def update(app, request: Request) -> Response:
 def delete(app, request: Request) -> Response:
     """``POST /api/chat/sessions/{session_id}/delete`` — the plan, its versions, labels and files."""
     session_id = request.params.get("session_id", "")
-    if not app.chats.delete(session_id):
+    try:
+        deleted = app.chats.delete(session_id)
+    except ChatBusyError:
+        raise HTTPError(409, "a turn is running for this conversation — try again when it lands") from None
+    if not deleted:
         raise HTTPError(404, f"no conversation {session_id!r}")
     return json_response({"deleted": True, "session_id": session_id})
 

@@ -285,7 +285,16 @@ class TestContextOnHeadless:
         assert {"q3", "mode:planning", "world:team"} <= set(row.tags)
         assert set(row.scope["sources"]) == {"standup", "retro"}
 
-    def test_no_context_seeds_nothing(self, fake_graph, tmp_path):
+    def test_no_context_inherits_the_scope_last_used_for_planning(self, fake_graph, tmp_path, monkeypatch):
+        import json
+
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: {"sources": ["retro"]})
+        qs = build_questionnaire_from_answers({1: "Plain project", 6: "4", 8: "2"})
+        state = run_planning_pipeline(qs, session_id="new-cafe1234-2026-07-22", db_path=tmp_path / "sessions.db")
+        assert json.loads(state["context_scope"])["sources"] == ["retro"]
+
+    def test_no_context_seeds_nothing(self, fake_graph, tmp_path, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
         qs = build_questionnaire_from_answers({1: "Plain project", 6: "4", 8: "2"})
         state = run_planning_pipeline(qs, session_id="new-cafe1234-2026-07-21", db_path=tmp_path / "sessions.db")
         assert "context_scope" not in state and "project_label" not in state

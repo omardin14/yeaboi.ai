@@ -141,3 +141,13 @@ class TestSeedAnalysisProfile:
             state: dict = {}
             seed_analysis_profile(state, "jira-PROJ")
         assert state == {"analysis_profile_id": "jira-PROJ"}
+
+    def test_nothing_is_seeded_when_the_analysis_source_is_off(self):
+        import json
+
+        from yeaboi.agent.chat_intake import seed_analysis_profile
+
+        with patch("yeaboi.agent.nodes._load_profile_by_id", side_effect=AssertionError("must not be read")):
+            state: dict = {"context_scope": json.dumps({"sources": ["standup"]})}
+            seed_analysis_profile(state, "jira-PROJ")
+        assert "analysis_profile_id" not in state and "custom_dod_items" not in state

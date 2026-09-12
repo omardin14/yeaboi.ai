@@ -6886,12 +6886,9 @@ _SETTINGS_WIDE_COL_W = 76
 # focus lands, and that gutter reads as a stray indent inside an already-indented
 # box. A background stripe costs no columns.
 _SETTINGS_FOCUS_BG = "rgb(44,52,68)"
-# Rows a short column may gain so its bottom border lines up with the tall one.
-# Beyond this the stretch reads as padding rather than alignment, so the leftover
-# is simply left as space below the column. The balancing pass keeps the shortfall
-# small, so this is enough to land level in practice — it exists to stop a lone
-# one-row box being blown up to match a column of six-row ones.
-_SETTINGS_MAX_STRETCH = 7  # per-box leveling allowance — grew with the Advanced and Privacy boxes (news, sprint rows)
+# Rows a short settings box may gain so the columns end level; past this the
+# stretch reads as padding, so the leftover stays as space below the column.
+_SETTINGS_MAX_STRETCH = 7
 
 _TAB_NOT_READY = "rgb(74,74,90)"  # visibly present, clearly behind the ready ones
 _TAB_INDENT = 4  # left margin of the tab bar — aligned with the SETTINGS title
