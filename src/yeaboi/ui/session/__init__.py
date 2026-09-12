@@ -144,6 +144,8 @@ def run_session(
     # can be upserted by ID across save points.
     project_id = resume_project_id or create_project_id()
     logger.info("Session %s: project_id=%s", "resumed" if resume_project_id else "started", project_id)
+    if not resume_project_id:
+        label_new_plan(project_id, intake_mode, context=context, project_label=project_label)
 
     # Attach a per-session log file so each session's diagnostics are isolated.
     # The log lives at ~/.scrum-agent/logs/{project_id}.log and is cleaned up
@@ -184,6 +186,31 @@ def _intake_complete(graph_state: dict) -> bool:
     """
     qs = graph_state.get("questionnaire")
     return isinstance(qs, QuestionnaireState) and qs.completed and graph_state.get("pending_review") != "project_intake"
+
+
+def label_new_plan(project_id: str, intake_mode: str, *, context=None, project_label: str = "", db_path=None) -> None:
+    """Write the label row a TUI plan gets at creation — the same defaults as a headless run.
+
+    Best-effort: a failed label never blocks a session.
+    """
+    try:
+        from yeaboi.config import is_solo_mode
+        from yeaboi.context.labels import label_run
+        from yeaboi.context.resolve import scope_for
+
+        label_run(
+            "planning",
+            project_id,
+            project_label=project_label,
+            scope=scope_for("planning", context),
+            defaults={
+                "world": "solo" if is_solo_mode() else "team",
+                "plan_size": intake_mode if intake_mode in ("small_project", "smart") else "",
+            },
+            db_path=db_path,
+        )
+    except Exception:  # noqa: BLE001 — a label is a convenience for later runs, not part of this one
+        logger.warning("Planning session %s was not labelled", project_id, exc_info=True)
 
 
 def _scope_state_keys(context=None, project_label: str = "") -> dict:

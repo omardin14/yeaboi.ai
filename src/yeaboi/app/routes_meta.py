@@ -188,10 +188,7 @@ def _after_tool(app, name: str, arguments: dict) -> None:
     if name != "plan_sync" or getattr(app, "chats", None) is None:
         return
     session_id = str(arguments.get("session_id") or "")
-    if session_id:
-        app.chats.close(session_id)
-    else:
-        app.chats.close_all()
+    app.chats.evict(session_id)
     logger.info("tool call: %s evicted the live chat (%s)", name, session_id or "all")
 
 

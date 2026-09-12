@@ -11990,7 +11990,7 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
             from yeaboi.retro.engine import record_retro_run
 
             report = board_to_report(board, sprint_name=sprint_name)
-            record_retro_run(report, db_path=_ana_dbp)
+            record_retro_run(report, db_path=_ana_dbp, scope=selection.scope)
         except Exception as e:
             logger.warning("retro: flush to store failed: %s", e)
         link.stop()
@@ -12613,7 +12613,7 @@ def _run_poker_page(console: Console, live, read_key, frame_time: float, support
             from yeaboi.poker.engine import record_poker_run
 
             report = board_to_report(board)
-            record_poker_run(report, db_path=_ana_dbp)
+            record_poker_run(report, db_path=_ana_dbp, scope=board.selection.scope)
             if any(t.estimated for t in report.tickets):
                 _duck_react("poker_done")  # lands on the hub the page returns to
         except Exception as e:

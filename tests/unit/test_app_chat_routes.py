@@ -863,3 +863,76 @@ class TestDescribedAs:
         assert described_as({"_chat_opening": "opening", "messages": [HumanMessage(content="first")]}) == "opening"
         assert described_as({"messages": [AIMessage(content="hi"), HumanMessage(content="first")]}) == "first"
         assert described_as({"messages": [HumanMessage(content=[{"type": "text", "text": "x"}])]}) == ""
+
+
+class TestWritesWaitForTheTurn:
+    def test_a_running_turn_refuses_the_update(self, store_app):
+        sid = open_chat(store_app)["session_id"]
+        chat = store_app.chats.open(sid)
+        assert chat.turn.acquire(blocking=False)
+        try:
+            resp = request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"title": "Barbers"})
+            assert resp.code == 409 and "turn is running" in json.loads(resp.body)["error"]
+        finally:
+            chat.turn.release()
+        resp = request(store_app, "POST", f"/api/chat/sessions/{sid}/update", {"title": "Barbers"})
+        assert resp.code == 200 and json.loads(resp.body)["title"] == "Barbers"
+
+    def test_a_running_turn_refuses_the_size_switch(self, app):
+        open_chat(app)
+        chat = app.chats.open("proj-1")
+        assert chat.turn.acquire(blocking=False)
+        try:
+            resp = request(app, "POST", "/api/chat/sessions/proj-1/size", {"mode": "small_project"})
+            assert resp.code == 409
+        finally:
+            chat.turn.release()
+        assert request(app, "POST", "/api/chat/sessions/proj-1/size", {"mode": "small_project"}).code == 200
+
+
+class TestSlashVerbsOnly:
+    def test_a_known_verb_is_refused_but_a_path_is_a_message(self, app):
+        open_chat(app)
+        for verb in ("/finish", "/quit", "  /Help me"):
+            resp = request(app, "POST", "/api/chat/sessions/proj-1/send", {"text": verb})
+            assert resp.code == 400, verb
+        lines = turn(app, "proj-1", "/api/health is the route the shell polls")
+        assert lines[0]["type"] == "op" and lines[-1]["type"] == "done"
+
+
+class TestListReadsTheRowItself:
+    def test_no_second_query_per_row(self, store_app, monkeypatch):
+        from yeaboi.sessions import SessionStore
+
+        sid = open_chat(store_app)["session_id"]
+        store_app.chats.close(sid)  # not live: the row's own blob is what the list summarises
+
+        def boom(self, session_id):
+            raise AssertionError("the list must not load the state a second time")
+
+        monkeypatch.setattr(SessionStore, "load_state", boom)
+        rows = json.loads(request(store_app, "GET", "/api/chat/sessions").body)["sessions"]
+        assert [row["session_id"] for row in rows] == [sid]
+        assert rows[0]["stage"] and rows[0]["counts"] == {"features": 0, "stories": 0, "tasks": 0, "sprints": 0}
+
+
+class TestPlanSyncDuringATurn:
+    def test_a_mid_turn_chat_is_marked_stale_and_takes_the_synced_keys_on_save(self, app):
+        from yeaboi.app.routes_meta import _after_tool
+
+        open_chat(app)
+        chat = app.chats.open("proj-1")
+        assert chat.turn.acquire(blocking=False)
+        try:
+            _after_tool(app, "plan_sync", {"session_id": "proj-1"})
+            assert "proj-1" in app.chats._chats and chat.stale
+            _after_tool(app, "plan_sync", {})
+            assert "proj-1" in app.chats._chats
+        finally:
+            chat.turn.release()
+        app.saved["proj-1"] = {**app.saved["proj-1"], "jira_epic_key": "PROJ-1", "jira_story_keys": {"S1": "PROJ-2"}}
+        app.chats.save(chat)
+        assert chat.session.state["jira_epic_key"] == "PROJ-1"
+        assert chat.session.state["jira_story_keys"] == {"S1": "PROJ-2"}
+        assert not chat.stale
+        assert app.saved["proj-1"]["jira_epic_key"] == "PROJ-1"

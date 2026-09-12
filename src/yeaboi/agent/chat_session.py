@@ -849,15 +849,22 @@ class ChatSession:
             on_event(Notice("The plan is being built — there is nothing to answer yet."))
             on_event(Done())
             return False
+        if self._blocked(text, on_event):
+            return False
+        return self.send(text, on_event, images=images, cancel=cancel)
+
+    @staticmethod
+    def _blocked(text: str, on_event: EventSink) -> bool:
+        """Run the input guardrails on text the person wrote; True (and a Notice) when it must not reach the model."""
         from yeaboi.input_guardrails import validate_chat_input
 
         block = validate_chat_input(text)
-        if block is not None:
-            logger.info("Chat input blocked: layer=%s len=%d", block.layer, len(text))
-            on_event(Notice(block.message))
-            on_event(Done())
+        if block is None:
             return False
-        return self.send(text, on_event, images=images, cancel=cancel)
+        logger.info("Chat input blocked: layer=%s len=%d", block.layer, len(text))
+        on_event(Notice(block.message))
+        on_event(Done())
+        return True
 
     def advance(self, on_event: EventSink, *, cancel: threading.Event | None = None) -> bool:
         """Run the one step that needs no answer: a build stage, or the epic reformat.
@@ -974,6 +981,10 @@ class ChatSession:
         elif self.dry_run:
             on_event(Notice("Edits are not available in dry-run — reply accept to continue."))
         else:
+            # Edit feedback is the person's own words and lands in a prompt:
+            # the same guardrails as a chat turn, whichever gate it came in on.
+            if self._blocked(verdict.text, on_event):
+                return False
             kind = apply_edit_feedback(self.state, pending, verdict.text, images)
             on_event(SectionChanged(kind, "empty", self.versions.get(kind, 0)))
         on_event(Done())

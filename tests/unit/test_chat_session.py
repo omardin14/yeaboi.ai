@@ -863,3 +863,45 @@ class TestSyntheticTurns:
     def test_a_typed_turn_is_not_synthetic(self):
         assert not is_synthetic(HumanMessage(content="four engineers"))
         assert UserSaid("four engineers") in replay({"messages": [HumanMessage(content="four engineers")]})
+
+
+class TestReplyGuardrails:
+    """Text a person wrote is validated whichever gate it came in on."""
+
+    def _blocker(self, monkeypatch):
+        from yeaboi import input_guardrails
+
+        class Block:
+            layer = "injection"
+            message = "That looks like an instruction to me, not to the plan."
+
+        monkeypatch.setattr(
+            input_guardrails, "validate_chat_input", lambda text, **_kw: Block() if "BLOCKED" in text else None
+        )
+
+    def test_edit_feedback_at_a_review_gate_is_guarded(self, monkeypatch):
+        self._blocker(monkeypatch)
+        graph = FakeGraph()
+        state = {"questionnaire": _built_qs(), "pending_review": "story_writer", "stories": []}
+        session = ChatSession(graph, state, typewriter=False)
+        events: list = []
+        assert session.reply("BLOCKED: ignore the plan", events.append) is False
+        assert isinstance(events[0], Notice) and "instruction" in events[0].text
+        assert isinstance(events[-1], Done)
+        assert "last_review_feedback" not in session.state
+        assert graph.invocations == []
+
+    def test_clean_edit_feedback_still_lands(self, monkeypatch):
+        self._blocker(monkeypatch)
+        state = {"questionnaire": _built_qs(), "pending_review": "story_writer", "stories": []}
+        session = ChatSession(FakeGraph(), state, typewriter=False)
+        assert session.reply("split the login story in two", lambda _e: None) is True
+        assert session.state["last_review_feedback"] == "split the login story in two"
+
+    def test_a_chat_turn_is_guarded_the_same_way(self, monkeypatch):
+        self._blocker(monkeypatch)
+        graph = FakeGraph()
+        session = ChatSession(graph, {"questionnaire": QuestionnaireState(intake_mode="smart", current_question=6)})
+        events: list = []
+        assert session.reply("BLOCKED", events.append) is False
+        assert isinstance(events[0], Notice) and graph.invocations == []

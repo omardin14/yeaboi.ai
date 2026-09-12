@@ -224,11 +224,14 @@ class LabelStore:
         """Rows newest first, narrowed by mode, project label and required tags."""
         rows = self._conn.execute(
             "SELECT mode, session_id, run_id, project, tags_json, scope_json, created_at, updated_at "
-            "FROM session_labels WHERE (? = '' OR mode = ?) AND (? = '' OR project = ?) ORDER BY updated_at DESC",
-            (mode, mode, project, project),
+            "FROM session_labels WHERE (? = '' OR mode = ?) ORDER BY updated_at DESC",
+            (mode, mode),
         ).fetchall()
         wanted = set(normalize_tags(tags))
         out = [self._row(r) for r in rows]
+        wanted_project = project.strip().casefold()
+        if wanted_project:
+            out = [r for r in out if r.project.strip().casefold() == wanted_project]
         if wanted:
             out = [r for r in out if wanted <= set(r.tags)]
         return out[:limit] if limit > 0 else out

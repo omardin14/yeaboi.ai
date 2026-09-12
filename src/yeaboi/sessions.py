@@ -460,7 +460,11 @@ def _deserialize_state(json_str: str) -> dict:
         json.JSONDecodeError: If json_str is not valid JSON.
         KeyError/TypeError: If required dataclass fields are missing or wrong type.
     """
-    raw = json.loads(json_str)
+    return state_from_raw(json.loads(json_str))
+
+
+def state_from_raw(raw: dict) -> dict:
+    """The deserialiser over an already-parsed blob (the list reads one straight from its row)."""
     state: dict = {"messages": []}
 
     for key, value in raw.items():

@@ -15,7 +15,9 @@ can be tested without an LLM or a home directory.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import shutil
 import threading
 from collections.abc import Callable
@@ -41,6 +43,11 @@ class LiveChat:
     turn: threading.Lock = field(default_factory=threading.Lock)
     title: str = ""  # a user-given title, written with the first save
     closed: bool = False  # deleted while open — nothing about it is written again
+    stale: bool = False  # a tracker sync rewrote the row mid-turn — merge its keys before saving
+
+
+#: The state keys a tracker sync writes; what a stale chat takes back from the store.
+_SYNC_KEY = re.compile(r"^(jira|azdevops|linear|trello)_")
 
 
 def _compile_graph():
@@ -241,6 +248,8 @@ class ChatSupervisor:
         if chat.closed:
             logger.info("Chat %s was deleted mid-turn — not saved", chat.session_id)
             return
+        if chat.stale:
+            self._take_sync_keys(chat)
         self._saver(chat.session_id, chat.session.state)
         if chat.title:
             # After the state, so the row exists; once, so a later rename sticks.
@@ -252,10 +261,39 @@ class ChatSupervisor:
         self._meta_saver(chat.session_id, title=title)
         chat.title = ""
 
+    def _take_sync_keys(self, chat: LiveChat) -> None:
+        """Overlay the tracker keys a sync wrote while this turn ran, so the save keeps them."""
+        stored = self._loader(chat.session_id) or {}
+        for key, value in stored.items():
+            if _SYNC_KEY.match(key) and value:
+                chat.session.state[key] = value
+        chat.stale = False
+        logger.info("Chat %s took the synced tracker keys before saving", chat.session_id)
+
     def close(self, session_id: str) -> None:
         """Forget a conversation (it stays on disk and can be reopened)."""
         with self._lock:
             self._chats.pop(session_id, None)
+
+    def evict(self, session_id: str = "") -> None:
+        """Drop a conversation (blank: every one) after its row was rewritten on disk.
+
+        A conversation mid-turn cannot be dropped — the worker still owns it —
+        so it is marked stale and takes the rewritten keys when its turn saves.
+        """
+        with self._lock:
+            chats = [self._chats[session_id]] if session_id in self._chats else []
+            if not session_id:
+                chats = list(self._chats.values())
+        for chat in chats:
+            if chat.turn.acquire(blocking=False):
+                try:
+                    self.close(chat.session_id)
+                finally:
+                    chat.turn.release()
+            else:
+                chat.stale = True
+                logger.info("Chat %s is mid-turn — marked stale rather than evicted", chat.session_id)
 
     def close_all(self) -> None:
         with self._lock:
@@ -379,7 +417,7 @@ class ChatSupervisor:
                 continue
             if tag and tag not in row_tags:
                 continue
-            state = self._peek(row["session_id"])
+            state = self._peek(row["session_id"], row.get("session_state_raw") or "")
             out.append(
                 {
                     "session_id": row["session_id"],
@@ -403,14 +441,20 @@ class ChatSupervisor:
         logger.info("Chat list: %d row(s) (label=%r tag=%r)", len(out), project_label, tag)
         return out
 
-    def _peek(self, session_id: str) -> dict | None:
+    def _peek(self, session_id: str, raw: str) -> dict | None:
+        """The state a list row is summarised from: the live one, else the row's own blob minus its transcript."""
+        from yeaboi.sessions import state_from_raw
+
         with self._lock:
             chat = self._chats.get(session_id)
         if chat is not None:
             return chat.session.state
+        if not raw:
+            return None
         try:
-            with self._store() as store:
-                return store.load_state(session_id)
+            data = json.loads(raw)
+            data.pop("messages", None)  # the transcript is the bulk of the blob and says nothing a row shows
+            return state_from_raw(data)
         except Exception:  # noqa: BLE001 — one unreadable blob must not empty the list
             logger.warning("Plan %s could not be read for the list", session_id, exc_info=True)
             return None

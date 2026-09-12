@@ -205,6 +205,15 @@ COMMANDS: tuple[SlashCommand, ...] = (
 _BY_NAME = {cmd.name: cmd for cmd in COMMANDS}
 
 
+def is_slash_verb(text: str) -> bool:
+    """True when ``text`` opens with a slash verb this chat knows; a path such as ``/api …`` is not one."""
+    head = text.lstrip()
+    if not head.startswith("/"):
+        return False
+    verb = head[1:].split(None, 1)[0].lower() if head[1:].strip() else ""
+    return verb in _BY_NAME or verb in TERMINAL_ONLY_COMMANDS
+
+
 def wire_commands() -> list[dict]:
     """The verbs a window runs itself, as ``{name, help, availability}`` rows."""
     return [

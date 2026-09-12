@@ -292,3 +292,15 @@ class TestWireCommands:
             "the wire hides a verb the parity ledger does not name (or the other way round); "
             "add it to TERMINAL_ONLY with a reason, or serve it"
         )
+
+
+class TestIsSlashVerb:
+    def test_known_and_terminal_only_verbs_count_and_paths_do_not(self):
+        from yeaboi.ui.session.chat._commands import is_slash_verb
+
+        assert is_slash_verb("/finish")
+        assert is_slash_verb("  /Help me")
+        assert is_slash_verb("/quit")  # terminal-only, still never a message
+        assert not is_slash_verb("/api/health is what the shell polls")
+        assert not is_slash_verb("/")
+        assert not is_slash_verb("finish")

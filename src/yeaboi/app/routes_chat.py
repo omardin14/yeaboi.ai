@@ -179,31 +179,37 @@ def update(app, request: Request) -> Response:
     """
     payload = request.json()
     chat = _chat(app, request)
-    if "title" in payload:
-        app.chats.rename(chat, _read_title(payload))
     scope, project_label, tags = read_context(payload)
     touched = {key for key in ("context", "project_label", "tags") if key in payload}
-    if touched:
-        state = chat.session.state
-        if "context" in touched:
-            if scope is None:
-                state.pop("context_scope", None)
-            else:
-                state["context_scope"] = json.dumps(scope.to_dict())
-        if "project_label" in touched:
-            if project_label:
-                state["project_label"] = project_label
-            else:
-                state.pop("project_label", None)
-        app.chats.save(chat)
-        _label(
-            app,
-            chat,
-            project_label=project_label if "project_label" in touched else None,
-            tags=tags if "tags" in touched else None,
-            scope=scope if "context" in touched else None,
-            clear_scope="context" in touched and scope is None,
-        )
+    # A running turn ends by replacing the state wholesale; a write that
+    # slipped in beside it would be lost, so the update waits its turn.
+    _hold_turn(chat)
+    try:
+        if "title" in payload:
+            app.chats.rename(chat, _read_title(payload))
+        if touched:
+            state = chat.session.state
+            if "context" in touched:
+                if scope is None:
+                    state.pop("context_scope", None)
+                else:
+                    state["context_scope"] = json.dumps(scope.to_dict())
+            if "project_label" in touched:
+                if project_label:
+                    state["project_label"] = project_label
+                else:
+                    state.pop("project_label", None)
+            app.chats.save(chat)
+            _label(
+                app,
+                chat,
+                project_label=project_label if "project_label" in touched else None,
+                tags=tags if "tags" in touched else None,
+                scope=scope if "context" in touched else None,
+                clear_scope="context" in touched and scope is None,
+            )
+    finally:
+        chat.turn.release()
     logger.info("Chat updated: session=%s keys=%s", chat.session_id, sorted(set(payload) & {"title", *touched}))
     meta = app.chats.meta(chat.session_id)
     labels = app.chats.labels(chat.session_id)
@@ -244,11 +250,12 @@ def send(app, request: Request) -> Response:
     an ``[image #N]`` chip detaches its image on this surface exactly as it
     does in the terminal — one implementation of the rule, not two.
     """
+    from yeaboi.ui.session.chat._commands import is_slash_verb
     from yeaboi.ui.shared._attachments import referenced_images
 
     payload = request.json()
     text = str(payload.get("text", ""))
-    if text.lstrip().startswith("/"):
+    if is_slash_verb(text):
         raise HTTPError(400, "slash commands run on the client — see GET /api/chat/commands")
     attachments = [str(name) for name in payload.get("images") or []]
     images = referenced_images(text, attachments) if attachments else []
@@ -270,6 +277,12 @@ def advance(app, request: Request) -> Response:
         raise HTTPError(409, "nothing to run — the conversation is waiting for a reply")
     logger.info("Chat advance start: session=%s stage=%s", chat.session_id, chat.session.awaiting)
     return _stream(app, chat, lambda on_event, cancel: chat.session.advance(on_event, cancel=cancel))
+
+
+def _hold_turn(chat: LiveChat) -> None:
+    """Take the conversation's turn lock now or answer 409; the caller releases it."""
+    if not chat.turn.acquire(blocking=False):
+        raise HTTPError(409, "a turn is running for this conversation — try again when it lands")
 
 
 def _stream(app, chat: LiveChat, run: Callable) -> Response:
@@ -387,20 +400,24 @@ def size(app, request: Request) -> Response:
     chat = _chat(app, request)
     if chat.session.dry_run:
         raise HTTPError(409, "Size switching is not available in dry-run")
-    state = chat.session.state
-    if state.get("_intake_mode") == mode:
-        return json_response({"changed": False, "mode": mode})
-    if state.get("questionnaire") is None:
-        # Pre-intake there is nothing to reset — record the preference and the
-        # size exchange honours it.
-        state["_intake_mode"] = mode
+    _hold_turn(chat)
+    try:
+        state = chat.session.state
+        if state.get("_intake_mode") == mode:
+            return json_response({"changed": False, "mode": mode})
+        if state.get("questionnaire") is None:
+            # Pre-intake there is nothing to reset — record the preference and the
+            # size exchange honours it.
+            state["_intake_mode"] = mode
+            app.chats.save(chat)
+            return json_response({"changed": True, "mode": mode, "reopened": False})
+        apply_size_switch(state, mode)
+        # The prior-art step re-runs under the new mode, so its old card has no
+        # data left to render from.
+        state.pop("_prior_art_preview", None)
         app.chats.save(chat)
-        return json_response({"changed": True, "mode": mode, "reopened": False})
-    apply_size_switch(state, mode)
-    # The prior-art step re-runs under the new mode, so its old card has no
-    # data left to render from.
-    state.pop("_prior_art_preview", None)
-    app.chats.save(chat)
+    finally:
+        chat.turn.release()
     logger.info("Chat size switched: session=%s mode=%s", chat.session_id, mode)
     return json_response({"changed": True, "mode": mode, "reopened": True})
 

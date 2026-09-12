@@ -251,3 +251,16 @@ class TestHubWiring:
         # Backing out reads as last time — the plan still starts.
         monkeypatch.setattr(page, "run_context_page", lambda *a, **k: None)
         assert mode_select._pick_planning_context(_Console(), _Live(), lambda **_k: "esc", 0.001, True) == scope
+
+
+class TestBoardPagesRecordTheirScope:
+    """The retro and poker pages read under a selection; the run they record must say so."""
+
+    def test_the_two_record_sites_pass_the_scope_they_read_under(self):
+        from pathlib import Path
+
+        import yeaboi.ui.mode_select as mode_select
+
+        source = Path(mode_select.__file__).read_text()
+        assert "record_retro_run(report, db_path=_ana_dbp, scope=selection.scope)" in source
+        assert "record_poker_run(report, db_path=_ana_dbp, scope=board.selection.scope)" in source

@@ -252,3 +252,21 @@ class TestLabelRun:
         from yeaboi.context.labels import label_run
 
         assert label_run("standup", "s1", 1, db_path=tmp_path) is None  # a directory is not a database
+
+
+class TestProjectLabelCase:
+    def test_list_labels_matches_the_project_in_any_case(self, db):
+        from yeaboi.context.labels import LabelStore
+
+        with LabelStore(db) as store:
+            store.set_labels("standup", "s1", "1", project="apollo")
+            assert [r.run_id for r in store.list_labels(project="Apollo")] == ["1"]
+            assert [r.run_id for r in store.list_labels(project="APOLLO", mode="standup")] == ["1"]
+            assert store.list_labels(project="zeus") == []
+
+    def test_the_engine_list_matches_the_same_way(self, tmp_path):
+        from yeaboi.context.engine import list_session_labels, set_session_labels
+
+        path = tmp_path / "labels.db"
+        set_session_labels("standup", "s1", "1", project_label="apollo", db_path=path)
+        assert [r.run_id for r in list_session_labels(project_label="Apollo", db_path=path)] == ["1"]
