@@ -256,3 +256,51 @@ class TestRunPlanningPipeline:
         qs = build_questionnaire_from_answers({1: "A test project"})
         run_planning_pipeline(qs, save_session=False)
         assert not db.exists()
+
+
+class TestContextOnHeadless:
+    """What a headless plan may read rides on state; how it is labelled lands on the session."""
+
+    def test_the_scope_and_the_labels_are_recorded(self, fake_graph, tmp_path):
+        import json
+
+        from yeaboi.context.labels import LabelStore
+
+        db = tmp_path / "sessions.db"
+        qs = build_questionnaire_from_answers({1: "Scoped project", 6: "4", 8: "2"})
+        state = run_planning_pipeline(
+            qs,
+            session_id="new-cafe1234-2026-07-20",
+            db_path=db,
+            context="standup,retro:1@month",
+            project_label="Apollo",
+            tags=["Q3"],
+        )
+        scope = json.loads(state["context_scope"])
+        assert set(scope["sources"]) == {"standup", "retro"} and scope["window"]["kind"] == "month"
+        assert state["project_label"] == "Apollo"
+        with LabelStore(db) as labels:
+            row = labels.get_labels("planning", "new-cafe1234-2026-07-20")
+        assert row is not None and row.project == "Apollo"
+        assert {"q3", "mode:planning", "world:team"} <= set(row.tags)
+        assert set(row.scope["sources"]) == {"standup", "retro"}
+
+    def test_no_context_inherits_the_scope_last_used_for_planning(self, fake_graph, tmp_path, monkeypatch):
+        import json
+
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: {"sources": ["retro"]})
+        qs = build_questionnaire_from_answers({1: "Plain project", 6: "4", 8: "2"})
+        state = run_planning_pipeline(qs, session_id="new-cafe1234-2026-07-22", db_path=tmp_path / "sessions.db")
+        assert json.loads(state["context_scope"])["sources"] == ["retro"]
+
+    def test_no_context_seeds_nothing(self, fake_graph, tmp_path, monkeypatch):
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        qs = build_questionnaire_from_answers({1: "Plain project", 6: "4", 8: "2"})
+        state = run_planning_pipeline(qs, session_id="new-cafe1234-2026-07-21", db_path=tmp_path / "sessions.db")
+        assert "context_scope" not in state and "project_label" not in state
+
+    def test_a_typo_in_the_spec_is_refused_before_anything_runs(self, fake_graph, tmp_path):
+        qs = build_questionnaire_from_answers({1: "Plain project", 6: "4", 8: "2"})
+        with pytest.raises(ValueError, match="stanup"):
+            run_planning_pipeline(qs, db_path=tmp_path / "sessions.db", context="stanup")
+        assert fake_graph.invocations == []

@@ -242,3 +242,22 @@ class TestPredictNextNode:
     def test_routes_agent_when_plan_complete(self):
         assert predict_next_node(_agent_ready_state()) == "agent"
         assert predict_next_node(_intake_state()) == "project_intake"
+
+
+class TestTypewriterOff:
+    """A socket wants the reply once, from the state — never paced out."""
+
+    def test_a_deterministic_turn_emits_nothing_and_returns_the_state(self):
+        graph = FakeStreamGraph(invoke_result={**_intake_state(), "messages": [AIMessage(content="Next question?")]})
+        tokens: list[str] = []
+        result = stream_chat_turn(graph, _intake_state(), tokens.append, typewriter=False)
+        assert tokens == []
+        assert result["messages"][-1].content == "Next question?"
+
+    def test_the_agent_path_still_streams(self):
+        graph = FakeStreamGraph(
+            events=[("messages", (AIMessageChunk(content="hi"), {"langgraph_node": "agent"})), ("values", {"ok": 1})]
+        )
+        tokens: list[str] = []
+        assert stream_chat_turn(graph, _agent_ready_state(), tokens.append, typewriter=False) == {"ok": 1}
+        assert tokens == ["hi"]

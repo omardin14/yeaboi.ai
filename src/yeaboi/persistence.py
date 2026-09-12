@@ -218,6 +218,13 @@ def save_graph_state(project_id: str, graph_state: dict[str, Any]) -> None:
         "_chat_greeting_done",
         "_chat_preamble",
         "_chat_fast_forward",
+        "_epic_reviewed",
+        "solo",
+        "analysis_profile_id",
+        "custom_dod_items",
+        "selected_team_members",
+        "context_scope",
+        "project_label",
     ):
         if key in graph_state:
             val = graph_state[key]
@@ -434,9 +441,18 @@ def load_graph_state(project_id: str) -> dict[str, Any] | None:
         "_chat_greeting_done",
         "_chat_preamble",
         "_chat_fast_forward",
+        "_epic_reviewed",
+        "solo",
+        "analysis_profile_id",
+        "context_scope",
+        "project_label",
     ):
         if key in raw:
             graph_state[key] = raw[key]
+    # Tuples on the state, lists in JSON.
+    for key in ("custom_dod_items", "selected_team_members"):
+        if isinstance(raw.get(key), list):
+            graph_state[key] = tuple(raw[key])
 
     # Restore ReviewDecision enum
     if "last_review_decision" in raw:
@@ -497,8 +513,50 @@ def load_projects() -> list[ProjectSummary]:
             )
         )
 
-    logger.debug("Loaded %d project(s) from %s", len(summaries), _PROJECTS_FILE)
+    known = {row.id for row in summaries}
+    summaries.extend(row for row in _store_planning_rows() if row.id not in known)
+    summaries.sort(key=lambda row: row.updated_at, reverse=True)
+    logger.debug("Loaded %d project(s) from %s and the session store", len(summaries), _PROJECTS_FILE)
     return summaries
+
+
+def _store_planning_rows() -> list[ProjectSummary]:
+    """Plans the session store holds (the app's conversations), as list rows.
+
+    Reads metadata only — never a state blob. Best-effort: no store, no rows.
+    """
+    try:
+        from yeaboi.paths import get_db_path
+        from yeaboi.sessions import SessionStore, make_display_name
+
+        with SessionStore(get_db_path()) as store:
+            rows = store.list_sessions(mode="planning")
+    except Exception:  # noqa: BLE001 — the list must render without the store
+        logger.warning("Session store plans could not be listed", exc_info=True)
+        return []
+    summaries = []
+    for row in rows:
+        pipeline = _pipeline_from_last_node(row.get("last_node_completed", ""))
+        summaries.append(
+            ProjectSummary(
+                name=row.get("title") or make_display_name(row),
+                id=row["session_id"],
+                created=_relative_time(row.get("last_modified", "")),
+                status=_compute_status(pipeline),
+                progress=_compute_progress(pipeline),
+                updated_at=row.get("last_modified", ""),
+            )
+        )
+    return summaries
+
+
+def _pipeline_from_last_node(last_node: str) -> dict[str, bool]:
+    """Stage booleans from the store's last completed node (the epic step counts as the analyzer's)."""
+    node = "project_analyzer" if last_node == "epic_review" else last_node
+    reached = _PIPELINE_STAGES.index(node) if node in _PIPELINE_STAGES else -1
+    if reached < 0 and last_node:
+        reached = 1  # a run with an unknown last node has at least passed intake
+    return {stage: i <= reached for i, stage in enumerate(_PIPELINE_STAGES)}
 
 
 def delete_project(project_id: str) -> bool:
@@ -516,8 +574,7 @@ def delete_project(project_id: str) -> bool:
     projects = [p for p in projects if p.get("id") != project_id]
 
     if len(projects) == original_len:
-        logger.debug("Project not found for deletion: %s", project_id)
-        return False  # not found
+        return _delete_store_plan(project_id)
 
     data["projects"] = projects
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -537,6 +594,22 @@ def delete_project(project_id: str) -> bool:
 
     logger.info("Deleted project %s", project_id)
     return True
+
+
+def _delete_store_plan(session_id: str) -> bool:
+    """Delete a plan that lives only in the session store (an app conversation)."""
+    try:
+        from yeaboi.paths import get_db_path
+        from yeaboi.sessions import SessionStore
+
+        with SessionStore(get_db_path()) as store:
+            deleted = store.delete_session(session_id)
+    except Exception:  # noqa: BLE001 — reported as "not found" below
+        logger.warning("Session store delete failed for %s", session_id, exc_info=True)
+        deleted = False
+    if not deleted:
+        logger.debug("Project not found for deletion: %s", session_id)
+    return deleted
 
 
 # ---------------------------------------------------------------------------

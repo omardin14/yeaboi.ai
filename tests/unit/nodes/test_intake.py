@@ -1,5 +1,6 @@
 """Tests for project_intake node and questionnaire-related helpers."""
 
+import re
 from unittest.mock import MagicMock
 
 import pytest
@@ -2981,6 +2982,15 @@ class TestScrumMdAutoPopulation:
         result = project_intake(state)
         msg = result["messages"][0].content
         assert "from SCRUM.md" in msg
+
+    def test_preamble_reads_as_a_sentence(self, monkeypatch):
+        monkeypatch.setattr(
+            "yeaboi.agent.nodes._extract_answers_from_description", lambda desc: {1: "An AI agent", 8: "2 weeks"}
+        )
+        state = {"messages": [HumanMessage(content="An AI agent")], "_intake_mode": "smart"}
+        msg = project_intake(state)["messages"][0].content
+        assert re.search(r"^I extracted \*\*\d+\*\* from your description and filled \*\*\d+\*\* with defaults\.", msg)
+        assert "** extracted" not in msg
 
     def test_summary_provenance_shows_scrum_md(self):
         """Intake summary should show *(from SCRUM.md)* for SCRUM.md-sourced questions."""

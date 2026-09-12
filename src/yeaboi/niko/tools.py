@@ -337,6 +337,30 @@ def navigate(route: str) -> dict:
     return {"route": route}
 
 
+@tool
+def context_preview(context: str = "all", mode: str = "") -> dict:
+    """What a run would read from other sessions under a context spec, without running
+    anything: counts per source, the resolved date window and a one-line summary.
+    `context` is 'all', 'none', or a spec like 'standup,retro:1@2sprints project=apollo
+    tags=q3'. Use it when the user asks what a planning or standup session over the
+    last sprints would see, or how many runs carry a label.
+    """
+    from yeaboi.mcp.tools_context import _context_preview
+
+    return _guard("context_preview", _context_preview, context, mode, False)
+
+
+@tool
+def session_labels_list(mode: str = "", project_label: str = "", tag: str = "") -> dict:
+    """The runs carrying labels, newest first — narrowed by mode (planning, standup, retro,
+    poker, performance, analysis, reporting, review), by project label and by one tag.
+    The way to answer "what have we run for project X" or "which runs are tagged q3".
+    """
+    from yeaboi.mcp.tools_context import _labels_list
+
+    return _guard("session_labels_list", _labels_list, mode, project_label, [tag] if tag else None, 100)
+
+
 #: Every tool Niko may call, in the order the prompt introduces them.
 NIKO_TOOLS = [
     list_capabilities,
@@ -360,6 +384,8 @@ NIKO_TOOLS = [
     ceremonies_history,
     provenance_audit,
     provenance_trace,
+    context_preview,
+    session_labels_list,
     navigate,
 ]
 

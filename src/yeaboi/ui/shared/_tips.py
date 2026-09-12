@@ -105,6 +105,20 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
         is_new=True,
     ),
     FeatureTip(
+        "planning",
+        "\U0001f4d0 Tip: the Blueprint drawer keeps every accepted version of your plan — "
+        "open any one from its history",
+        mode_key="project-planning",
+        is_new=True,
+        surfaces=("desktop",),
+    ),
+    FeatureTip(
+        "context",
+        "\U0001f9ed Tip: every run can choose what it reads — sources, a timeframe, a project label, tags — "
+        "from the '+ New' card",
+        is_new=True,
+    ),
+    FeatureTip(
         "standup",
         "☀️ Tip: Paste or drop a standup transcript in Review — Standup learns what it missed",
         mode_key="daily-standup",
@@ -186,6 +200,11 @@ _FEATURE_TIPS: tuple[FeatureTip, ...] = (
         "sessions",
         "\U0001f5c2️ Tip: every plan is saved — resume any past session with --resume",
         surfaces=("tui",),
+    ),
+    FeatureTip(
+        "sessions",
+        "\U0001f5c2️ Tip: every mode card opens on its saved runs — reopen, export or delete any of them",
+        surfaces=("desktop",),
     ),
     FeatureTip(
         "sessions",

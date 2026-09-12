@@ -176,3 +176,31 @@ class TestProvenanceSelfHeal:
         with ReportingStore(db_path) as store:
             cols = {r[1] for r in store._conn.execute("PRAGMA table_info(reporting_history)")}
         assert {"origin", "edited_from_id"} <= cols
+
+
+class TestScopeFilter:
+    """``run_ids`` is the hard filter a resolved context scope hands over."""
+
+    def test_latest_and_history(self, db_path):
+        with ReportingStore(db_path) as store:
+            first = store.record_run(_report(), session_id="s1")
+            second = store.record_run(_report(), session_id="s2")
+            assert store.get_latest_report(run_ids=(first,)) is not None
+            assert store.get_latest_report(run_ids=()) is None
+            assert store.get_latest_report(session_id="s2", run_ids=(first,)) is None
+            assert store.get_latest_report(session_id="s2", run_ids=(second,)) is not None
+            assert [r["id"] for r in store.get_all_history(run_ids=(first,))] == [first]
+            assert store.get_all_history(run_ids=()) == []
+            assert len(store.get_all_history(limit=0)) == 2
+
+    def test_delete_drops_the_label_row(self, db_path):
+        from yeaboi.context.labels import LabelStore
+
+        with ReportingStore(db_path) as store:
+            run_id = store.record_run(_report(), session_id="s1")
+        with LabelStore(db_path) as labels:
+            labels.set_labels("reporting", "s1", str(run_id))
+        with ReportingStore(db_path) as store:
+            assert store.delete_run(run_id)
+        with LabelStore(db_path) as labels:
+            assert labels.get_labels("reporting", "s1", str(run_id)) is None

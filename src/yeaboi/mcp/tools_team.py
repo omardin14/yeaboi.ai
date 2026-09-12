@@ -8,7 +8,7 @@ import logging
 # stringified type hints (PEP 563) of tool functions against this namespace.
 from mcp.server.fastmcp import Context
 
-from yeaboi.mcp.runtime import run_engine, run_readonly
+from yeaboi.mcp.runtime import context_kwargs, run_engine, run_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,9 @@ def _team_analyze(
     analysis_model=None,
     analysis_features=None,
     progress=None,
+    context=None,
+    project_label: str = "",
+    tags: list | None = None,
 ):
     if source not in ("", "jira", "azdevops", "both"):
         raise ValueError(f"source must be 'jira', 'azdevops', or 'both' (blank auto-detects) — got {source!r}")
@@ -98,6 +101,7 @@ def _team_analyze(
         components=components,
         members=members,
         progress=progress,
+        **context_kwargs(context, project_label, tags),
     )
 
 
@@ -153,6 +157,9 @@ def register(app) -> None:
         analysis_scope: dict[str, list[str]] | None = None,
         analysis_model: str | None = None,
         analysis_features: list[str] | None = None,
+        context: str | dict | None = None,
+        project_label: str = "",
+        tags: list[str] | None = None,
     ) -> dict:
         """Analyse the team's tracker history (closed sprints) into a calibration profile:
         velocity, story-point calibration, writing style, DoD signals, plus coaching insights
@@ -186,7 +193,9 @@ def register(app) -> None:
         for code analysis, e.g. {"jira": ["Alice","Bob"]}. Code results contain only matched
         selected-user commits, authored PRs, activity, and changed files; a blank or unmatched
         scope never falls back to whole-team code. Discover names with team_roster.
-        A solo-world run is simply members=None — whole-history, no roster narrowing."""
+        A solo-world run is simply members=None — whole-history, no roster narrowing.
+        Analysis reads no other session, so `context` narrows nothing here; it is recorded on
+        the profile beside `project_label` and `tags` so later exports and filters know it."""
         import asyncio
 
         try:
@@ -211,6 +220,9 @@ def register(app) -> None:
             analysis_model,
             analysis_features,
             progress,
+            context,
+            project_label,
+            tags,
         )
 
     @app.tool()

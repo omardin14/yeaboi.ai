@@ -341,3 +341,18 @@ class TestPerspectiveFailureMessages:
         result = self._run(monkeypatch, RuntimeError("something else"))
         assert "poker.log" in result["warnings"][0]
         assert "see logs" not in result["warnings"][0]
+
+
+class TestRecordPokerRun:
+    def test_records_the_run_and_labels_it(self, tmp_path):
+        from yeaboi.agent.state import PokerReport
+        from yeaboi.context.labels import LabelStore
+        from yeaboi.poker.store import PokerStore
+
+        db = tmp_path / "sessions.db"
+        run_id = engine.record_poker_run(PokerReport(session_id="s1", date="2026-09-04"), db_path=db, tags=["Q3"])
+        with PokerStore(db) as store:
+            assert store.get_run_by_id(run_id) is not None
+        with LabelStore(db) as labels:
+            row = labels.get_labels("poker", "s1", str(run_id))
+        assert row is not None and {"q3", "mode:poker"} <= set(row.tags)

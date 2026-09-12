@@ -129,3 +129,33 @@ class TestMigration:
         conn.close()
         assert "poker_history" in tables
         assert version == CURRENT_SCHEMA_VERSION
+
+
+class TestScopeFilter:
+    """``run_ids`` is the hard filter a resolved context scope hands over."""
+
+    def test_history_and_recent_reports(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        with PokerStore(db) as store:
+            first = store.record_run(_report("a", "2026-07-01"))
+            second = store.record_run(_report("b", "2026-07-02"))
+            assert [r["id"] for r in store.get_all_history(run_ids=(second,))] == [second]
+            assert store.get_all_history(run_ids=()) == []
+            assert len(store.get_all_history(limit=0)) == 2
+            assert [r.session_id for r in store.get_recent_reports()] == ["b", "a"]
+            assert [r.session_id for r in store.get_recent_reports(run_ids=(first,))] == ["a"]
+            assert store.get_recent_reports(run_ids=()) == []
+            assert len(store.get_recent_reports(limit=0)) == 2
+
+    def test_delete_drops_the_label_row(self, tmp_path):
+        from yeaboi.context.labels import LabelStore
+
+        db = tmp_path / "sessions.db"
+        with PokerStore(db) as store:
+            run_id = store.record_run(_report())
+        with LabelStore(db) as labels:
+            labels.set_labels("poker", "sess-1", str(run_id))
+        with PokerStore(db) as store:
+            assert store.delete_run(run_id)
+        with LabelStore(db) as labels:
+            assert labels.get_labels("poker", "sess-1", str(run_id)) is None

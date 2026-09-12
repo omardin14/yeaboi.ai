@@ -1339,3 +1339,56 @@ class TestLastDoor:
         cfg.set_last_door("windows")
         assert "YEABOI_LAST_DOOR" not in os.environ
         assert not (tmp_path / ".env").exists()
+
+
+class TestLastContextScope:
+    """The per-mode scope a run inherits when none is given."""
+
+    def test_unset_is_none(self, monkeypatch):
+        monkeypatch.delenv("YEABOI_CONTEXT_STANDUP", raising=False)
+        from yeaboi.config import get_last_context_scope
+
+        assert get_last_context_scope("standup") is None
+
+    def test_round_trip_and_clear(self, monkeypatch, tmp_path):
+        from yeaboi import config as cfg
+
+        monkeypatch.setattr(cfg, "get_config_file", lambda: tmp_path / ".env")
+        monkeypatch.delenv("YEABOI_CONTEXT_STANDUP", raising=False)
+        cfg.set_last_context_scope("standup", {"sources": ["retro"]})
+        assert cfg.get_last_context_scope("standup") == {"sources": ["retro"]}
+        assert "YEABOI_CONTEXT_STANDUP" in (tmp_path / ".env").read_text()
+        cfg.set_last_context_scope("standup", None)
+        assert cfg.get_last_context_scope("standup") is None
+
+    def test_bad_json_and_non_dict_read_as_none(self, monkeypatch):
+        from yeaboi.config import get_last_context_scope
+
+        monkeypatch.setenv("YEABOI_CONTEXT_WEEKLY_REVIEW", "{bad")
+        assert get_last_context_scope("weekly-review") is None
+        monkeypatch.setenv("YEABOI_CONTEXT_WEEKLY_REVIEW", "[1]")
+        assert get_last_context_scope("weekly-review") is None
+
+
+class TestSprintSettings:
+    def test_length_defaults_and_rejects_junk(self, monkeypatch):
+        from yeaboi.config import get_sprint_length_weeks
+
+        monkeypatch.delenv("YEABOI_SPRINT_LENGTH_WEEKS", raising=False)
+        assert get_sprint_length_weeks() == 2
+        monkeypatch.setenv("YEABOI_SPRINT_LENGTH_WEEKS", "3")
+        assert get_sprint_length_weeks() == 3
+        monkeypatch.setenv("YEABOI_SPRINT_LENGTH_WEEKS", "0")
+        assert get_sprint_length_weeks() == 2
+        monkeypatch.setenv("YEABOI_SPRINT_LENGTH_WEEKS", "two")
+        assert get_sprint_length_weeks() == 2
+
+    def test_anchor_is_an_iso_date_or_blank(self, monkeypatch):
+        from yeaboi.config import get_sprint_anchor_date
+
+        monkeypatch.delenv("YEABOI_SPRINT_ANCHOR_DATE", raising=False)
+        assert get_sprint_anchor_date() == ""
+        monkeypatch.setenv("YEABOI_SPRINT_ANCHOR_DATE", "2026-08-31")
+        assert get_sprint_anchor_date() == "2026-08-31"
+        monkeypatch.setenv("YEABOI_SPRINT_ANCHOR_DATE", "31/08/2026")
+        assert get_sprint_anchor_date() == ""

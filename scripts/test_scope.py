@@ -104,6 +104,19 @@ AREAS: tuple[Area, ...] = (
         ),
     ),
     Area(
+        # What a run may read from other sessions: the scope grammar, the
+        # sprint calendar, the label store and the resolver every mode calls.
+        "context",
+        src=(
+            "src/yeaboi/context/",
+            "src/yeaboi/app/routes_context.py",
+            "src/yeaboi/mcp/tools_context.py",
+            "src/yeaboi/ui/mode_select/_context.py",
+            "src/yeaboi/ui/mode_select/screens/_screens_context.py",
+        ),
+        tests=("tests/unit/test_context_*.py", "tests/unit/test_mcp_server.py"),
+    ),
+    Area(
         # The Solo world's own modules: the welcome's Today snapshot and the
         # desktop route that serves it. The engines it reads stay in their areas.
         "solo",

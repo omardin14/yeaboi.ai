@@ -1,5 +1,6 @@
 """Interactive REPL loop for yeaboi."""
 
+import json
 import logging
 import re
 import time
@@ -15,6 +16,9 @@ from yeaboi.agent.graph import create_graph
 from yeaboi.agent.nodes import _build_intake_summary, _parse_review_intent
 from yeaboi.agent.state import TOTAL_QUESTIONS, QuestionnaireState, ReviewDecision
 from yeaboi.config import get_session_prune_days
+from yeaboi.context.labels import label_run
+from yeaboi.context.resolve import scope_for
+from yeaboi.context.scope import coerce_scope
 from yeaboi.input_guardrails import validate_input
 from yeaboi.output_guardrails import validate_output
 from yeaboi.prompts.intake import PHASE_LABELS, QUESTION_METADATA, is_choice_question
@@ -185,6 +189,9 @@ def run_repl(
     output_format: str | None = None,
     prior_art: list[str] | None = None,
     solo: bool = False,
+    context=None,
+    project_label: str = "",
+    tags=(),
 ) -> None:
     """Run the interactive REPL loop.
 
@@ -476,9 +483,17 @@ def run_repl(
     if resume_state is None:
         graph_state["_intake_mode"] = intake_mode or "smart"
         if solo:
-            # A declared ScrumState key, like project_id — the intake reads it.
+            # A declared ScrumState key — the intake reads it.
             graph_state["solo"] = True
             logger.info("REPL: solo run — team questions default to one developer")
+        _scope = scope_for("planning", context)
+        if _scope is not None:
+            # The JSON twin on state, so the nodes' _wants_dep and the saved
+            # session both carry what this run may read.
+            graph_state["context_scope"] = json.dumps(_scope.to_dict(), sort_keys=True)
+            logger.info("REPL: context scope %s", _scope.to_spec())
+        if project_label:
+            graph_state["project_label"] = project_label
 
     while True:
         # ── Auto-drive for --export-only mode ─────────────────────────
@@ -1290,11 +1305,19 @@ def run_repl(
             _session_has_data = True
             try:
                 if not _session_created:
-                    # The run's project link, so a scoped Standup or Reporting
-                    # later finds this plan (graph state carries it; headless
-                    # passes its own).
-                    _store.create_session(_session_id, project_id=graph_state.get("project_id", "") or "")
+                    _store.create_session(_session_id)
                     _session_created = True
+                    label_run(
+                        "planning",
+                        _session_id,
+                        project_label=project_label,
+                        tags=tags,
+                        scope=coerce_scope(graph_state.get("context_scope") or None),
+                        defaults={
+                            "world": "solo" if graph_state.get("solo") else "team",
+                            "plan_size": graph_state.get("_intake_mode", ""),
+                        },
+                    )
                 _store.save_state(_session_id, graph_state)
                 _pa = result.get("project_analysis")
                 if _pa and getattr(_pa, "project_name", "") and not _project_name_recorded:

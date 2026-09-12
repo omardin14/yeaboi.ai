@@ -176,9 +176,20 @@ def call_tool(app, request: Request) -> Response:
         raise ValueError("op_id must be a string")
     logger.info("tool call: %s (op_id=%s)", name, op_id)
     try:
-        return json_response(dispatcher.call_tool(name, arguments, op_id=op_id))
+        result = dispatcher.call_tool(name, arguments, op_id=op_id)
     except DispatcherUnavailableError as exc:  # pragma: no cover - post-start crash path
         raise HTTPError(503, str(exc)) from exc
+    _after_tool(app, name, arguments)
+    return json_response(result)
+
+
+def _after_tool(app, name: str, arguments: dict) -> None:
+    """A tracker sync rewrites the saved plan; the live chat reloads it on its next read."""
+    if name != "plan_sync" or getattr(app, "chats", None) is None:
+        return
+    session_id = str(arguments.get("session_id") or "")
+    app.chats.evict(session_id)
+    logger.info("tool call: %s evicted the live chat (%s)", name, session_id or "all")
 
 
 def cancel_op(app, request: Request) -> Response:

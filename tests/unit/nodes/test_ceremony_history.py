@@ -263,3 +263,44 @@ class TestGather:
             _seed_standup(s, "s0", "2026-06-02T00:00:00+00:00", 0, status="error")
             reports = s.get_recent_reports(limit=10)
         assert len(reports) == 1
+
+
+class TestSelectionGating:
+    """A resolved context scope gates each producer and narrows the reads to its runs."""
+
+    def _seed(self, tmp_path, monkeypatch):
+        db = tmp_path / "sessions.db"
+        monkeypatch.setattr("yeaboi.config.get_sessions_db", lambda: db)
+        with RetroStore(db) as store:
+            _seed_retro(store, "s1", "2026-06-01T10:00:00+00:00", "Apollo", [_ac("ship the docs")])
+            _seed_retro(store, "s1", "2026-06-15T10:00:00+00:00", "Apollo", [_ac("fix ci")])
+        with StandupStore(db) as store:
+            _seed_standup(store, "s1", "2026-06-02T09:00:00+00:00", 70)
+            _seed_standup(store, "s1", "2026-06-03T09:00:00+00:00", 80)
+        return db
+
+    def _selection(self, sources, **by_source):
+        from yeaboi.context.resolve import Selection
+        from yeaboi.context.scope import ContextScope
+
+        return Selection(scope=ContextScope(sources=frozenset(sources)), by_source=by_source)
+
+    def test_both_off_reads_nothing(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch)
+        assert gather_ceremony_context(selection=self._selection({"plan"})) == CeremonyContext()
+
+    def test_retro_off_keeps_the_standups(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch)
+        ctx = gather_ceremony_context(selection=self._selection({"standup"}))
+        assert ctx.retro_count == 0 and ctx.standup_count == 2
+
+    def test_run_ids_narrow_the_read(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch)
+        ctx = gather_ceremony_context(selection=self._selection({"retro", "standup"}, retro=("1",), standup=("2",)))
+        assert ctx.retro_count == 1 and ctx.standup_count == 1
+        assert [a for a in ctx.action_items] and all("fix ci" not in a for a in ctx.action_items)
+
+    def test_no_selection_is_the_team_wide_read(self, tmp_path, monkeypatch):
+        self._seed(tmp_path, monkeypatch)
+        ctx = gather_ceremony_context()
+        assert ctx.retro_count == 2 and ctx.standup_count == 2

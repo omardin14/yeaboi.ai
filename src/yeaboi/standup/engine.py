@@ -25,12 +25,16 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from yeaboi import html_theme
 from yeaboi.agent.state import MEMBER_EVIDENCE_CAP, ActivityEvidence, MemberUpdate, StandupReport
+from yeaboi.context.labels import label_run
+from yeaboi.context.reads import latest_planning_state
+from yeaboi.context.resolve import selection_for
+from yeaboi.context.scope import ContextScope
 
 if TYPE_CHECKING:
     from yeaboi.agent.state import IssueFilingResult, TranscriptNudge, TranscriptReview, TranscriptSource
@@ -1401,6 +1405,14 @@ def _summarize_members(
 # ---------------------------------------------------------------------------
 
 
+def _tracker_key_for(state: dict) -> str:
+    """The tracker project a plan syncs to, for the ``tracker:<KEY>`` default tag."""
+    epic = str(state.get("jira_epic_key", "") or "")
+    if epic:
+        return epic.split("-")[0]
+    return str(state.get("azdevops_epic_id", "") or "")
+
+
 def run_standup(
     session_id: str,
     *,
@@ -1423,6 +1435,9 @@ def run_standup(
     today: date | None = None,
     on_progress=None,
     on_run_id: Callable[[int], None] | None = None,
+    context: ContextScope | dict | str | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> StandupReport:
     """Run a full standup for ``session_id`` and return the StandupReport.
 
@@ -1499,6 +1514,20 @@ def run_standup(
         # rather than taken as a parameter: it belongs to the session, so every
         # surface that runs a standup gets it without having to remember to.
         feedback_ledger = practice_feedback.load(store, session_id)
+
+    # Planning→standup edge: a run told to read plans frames itself with the
+    # newest selected sprint plan instead of this session's own state, so a
+    # standup session created beside the plan still knows the sprint, capacity
+    # and roster. Precedence: the caller, else the session's saved scope, else
+    # the last one used for standups on this machine, else unscoped.
+    selection = selection_for(
+        "standup", context, fallback=(config or {}).get("context_scope"), today=today, db_path=db_path
+    )
+    if selection.scope is not None and selection.wants("plan"):
+        planned = latest_planning_state(selection, db_path=db_path)
+        if planned is not None:
+            logger.info("run_standup: sprint context from plan %s", planned[0])
+            state = planned[1]
 
     # What the team corrected on the previous standup, if they corrected it.
     # The corrected *text* already reaches this run for free — a corrected row
@@ -1955,6 +1984,21 @@ def run_standup(
 
     with StandupStore(db_path) as store:
         run_id = store.record_run(report, delivery_status=delivery_status, status=status)
+        label_run(
+            "standup",
+            session_id,
+            run_id,
+            project_label=project_label,
+            tags=tags,
+            scope=selection.scope,
+            defaults={
+                "world": "solo" if solo else "team",
+                "sprint_day": getattr(report, "sprint_day", 0) or None,
+                "tracker_key": _tracker_key_for(state),
+            },
+            db_path=db_path,
+            today=today,
+        )
         if on_run_id is not None:
             # Fires once, as soon as the id exists. A caller that needs to point
             # at this run later — the Slack lane anchoring a post to it — must

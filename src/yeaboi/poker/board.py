@@ -167,6 +167,9 @@ class PokerBoard:
         self.project_name = project_name
         self.source = source
         self.scope_label = scope_label
+        # The run's resolved context selection, for the AI perspective's
+        # cross-mode gather. Set by the host; never serialised into a snapshot.
+        self.selection = None
         self.created_at = _now_iso()
         self._tickets: list[dict] = []
         for t in tickets or []:

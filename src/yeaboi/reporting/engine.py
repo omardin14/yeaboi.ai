@@ -21,10 +21,15 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import date, timedelta
 
 from yeaboi.agent.state import DeliveredItem, DeliveryReport
+from yeaboi.context.labels import label_run
+from yeaboi.context.reads import latest_planning_state
+from yeaboi.context.resolve import selection_for
+from yeaboi.context.scope import ContextScope
 from yeaboi.reporting import activity as activity_mod
 from yeaboi.timeparse import parse_date
 
@@ -297,6 +302,9 @@ def run_delivery_report(
     solo: bool = False,
     on_progress=None,
     cancel_event=None,
+    context: ContextScope | dict | str | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> DeliveryReport:
     """Generate a business-friendly delivery report for ``period``.
 
@@ -342,6 +350,14 @@ def run_delivery_report(
 
     _emit(on_progress, "Loading session state")
     state = _load_state(session_id, db_path)
+    # Planning→reporting edge: a run told to read plans frames itself with the
+    # newest selected sprint plan, mirroring run_standup.
+    selection = selection_for("reporting", context, today=today, db_path=db_path)
+    if selection.scope is not None and selection.wants("plan"):
+        planned = latest_planning_state(selection, db_path=db_path)
+        if planned is not None:
+            logger.info("run_delivery_report: sprint framing from plan %s", planned[0])
+            state = planned[1]
     project_name = str(state.get("project_name", "") or "")
     _check_cancel(cancel_event)
 
@@ -496,7 +512,18 @@ def run_delivery_report(
     _check_cancel(cancel_event)
     _emit(on_progress, "Saving & exporting…")
     with _store(db_path) as store:
-        store.record_run(report, session_id=session_id)
+        run_id = store.record_run(report, session_id=session_id)
+        label_run(
+            "reporting",
+            session_id,
+            run_id,
+            project_label=project_label,
+            tags=tags,
+            scope=selection.scope,
+            defaults={"world": "solo" if solo else "team", "period": period},
+            db_path=db_path,
+            today=today,
+        )
         # Fetched AFTER record_run so this report is part of the volume trend.
         run_history = store.get_history(session_id, limit=30)
 

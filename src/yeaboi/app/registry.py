@@ -25,6 +25,7 @@ from yeaboi.app import (
     routes_ceremonies,
     routes_chat,
     routes_consent,
+    routes_context,
     routes_feedback,
     routes_meta,
     routes_music,
@@ -89,6 +90,11 @@ ROUTES: tuple[AppRoute, ...] = (
     # connected source's rows for the reference picker.
     AppRoute("GET", "/api/sessions/recent", routes_sessions.recent, "sessions"),
     AppRoute("GET", "/api/references", routes_sessions.references, "planning"),
+    # -- context scope and labels --
+    AppRoute("GET", "/api/context/options", routes_context.options, "context"),
+    AppRoute("POST", "/api/context/preview", routes_context.preview, "context"),
+    AppRoute("GET", "/api/sessions/{mode}/{session_id}/labels", routes_context.labels_get, "context"),
+    AppRoute("POST", "/api/sessions/{mode}/{session_id}/labels", routes_context.labels_set, "context"),
     AppRoute("GET", "/api/tools", routes_meta.tools),
     AppRoute("POST", "/api/tool/{name}", routes_meta.call_tool),
     AppRoute("GET", "/api/events", routes_meta.events),
@@ -122,14 +128,24 @@ ROUTES: tuple[AppRoute, ...] = (
     AppRoute("POST", "/api/settings/signin/cancel", routes_settings.signin_cancel, "settings"),
     # -- the planning chat (capability "planning" — the M5 surface) ----------
     AppRoute("POST", "/api/chat/sessions", routes_chat.create, "planning"),
-    AppRoute("GET", "/api/chat/sessions/{project_id}", routes_chat.get, "planning"),
-    AppRoute("POST", "/api/chat/sessions/{project_id}/send", routes_chat.send, "planning"),
-    # The three the slash menu needs (M12): the question plan behind
-    # /questions, /form and a bare /edit; the size switch behind /small and
-    # /large; and the attachment store behind a pasted screenshot.
-    AppRoute("GET", "/api/chat/sessions/{project_id}/questions", routes_chat.questions, "planning"),
-    AppRoute("POST", "/api/chat/sessions/{project_id}/size", routes_chat.size, "planning"),
-    AppRoute("POST", "/api/chat/sessions/{project_id}/attachments", routes_chat.attach, "planning"),
+    AppRoute("GET", "/api/chat/sessions", routes_chat.list_sessions, "planning"),
+    AppRoute("GET", "/api/chat/commands", routes_chat.commands, "planning"),
+    AppRoute("GET", "/api/chat/sessions/{session_id}", routes_chat.get, "planning"),
+    AppRoute("POST", "/api/chat/sessions/{session_id}/send", routes_chat.send, "planning"),
+    AppRoute("POST", "/api/chat/sessions/{session_id}/advance", routes_chat.advance, "planning"),
+    AppRoute("POST", "/api/chat/sessions/{session_id}/update", routes_chat.update, "planning"),
+    AppRoute("POST", "/api/chat/sessions/{session_id}/delete", routes_chat.delete, "planning"),
+    AppRoute("GET", "/api/chat/sessions/{session_id}/questions", routes_chat.questions, "planning"),
+    AppRoute("POST", "/api/chat/sessions/{session_id}/size", routes_chat.size, "planning"),
+    AppRoute("POST", "/api/chat/sessions/{session_id}/attachments", routes_chat.attach, "planning"),
+    AppRoute("GET", "/api/chat/sessions/{session_id}/plan", routes_chat.plan, "planning"),
+    AppRoute("GET", "/api/chat/sessions/{session_id}/plan/versions", routes_chat.plan_versions, "planning"),
+    AppRoute(
+        "GET",
+        "/api/chat/sessions/{session_id}/plan/versions/{section}/{version}",
+        routes_chat.plan_version,
+        "planning",
+    ),
     # -- Niko, the global assistant (capability "niko") ----------------------
     # Chrome rather than a page: the panel opens over whatever route is showing,
     # which is why its desktop parity row claims `action:ask-niko` instead of a

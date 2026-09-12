@@ -21,6 +21,7 @@ import queue
 import threading
 from collections.abc import Iterator
 
+from yeaboi.app._context_body import context_kwargs, read_context
 from yeaboi.app.router import HTTPError, Request, Response, json_response
 from yeaboi.mcp.runtime import to_jsonable
 
@@ -198,6 +199,7 @@ def run(app, request: Request) -> Response:
         raise HTTPError(400, str(exc)) from None
     if setup.needs_window(period) and not (window_start and window_end):
         raise HTTPError(400, "a custom range needs both window_start and window_end")
+    read_context(payload)  # validated here so a bad scope is a 400, not a stream error
     op = app.ops.create()
     logger.info(
         "Reporting run start: period=%s window=%s→%s solo=%s",
@@ -278,6 +280,7 @@ def _run(app, op, payload: dict, period: str, window_start: str, window_end: str
                     solo=bool(payload.get("solo", False)),
                     on_progress=progress.put,
                     cancel_event=op.cancel,
+                    **context_kwargs(payload),
                 )
         except BaseException as exc:  # noqa: BLE001 — reported on the stream below
             result_box[1] = exc

@@ -73,8 +73,13 @@ def load_plan_state(identifier: str, db_path: Path | None = None) -> dict | None
     return session_state or project_state
 
 
-def latest_plan_with_work(db_path: Path | None = None) -> tuple[dict, str, str] | None:
+def latest_plan_with_work(
+    db_path: Path | None = None, *, session_ids: tuple[str, ...] | None = None
+) -> tuple[dict, str, str] | None:
     """The most recent plan that actually has work in it: ``(state, id, name)``.
+
+    ``session_ids`` is the hard filter a resolved context scope hands over:
+    ``None`` reads every plan, ``()`` none, a tuple only those ids (in order).
 
     Prefers the interactive project store (where the planning chat saves), then
     falls back to a bounded scan of the newest SQLite sessions. Returns ``None``
@@ -86,11 +91,16 @@ def latest_plan_with_work(db_path: Path | None = None) -> tuple[dict, str, str] 
     outline over epics, stories and tasks, and the engine resolves an id at any
     of the three.
     """
+    if session_ids is not None and not session_ids:
+        return None
+    allowed = set(session_ids) if session_ids is not None else None
     # 1) Interactive projects — load_projects() is sorted most-recent-first.
     try:
         from yeaboi.persistence import load_graph_state, load_projects  # noqa: PLC0415
 
         for project in load_projects():
+            if allowed is not None and project.id not in allowed:
+                continue
             state = load_graph_state(project.id)
             if _has_work(state):
                 return state, project.id, getattr(project, "name", "")
@@ -103,7 +113,8 @@ def latest_plan_with_work(db_path: Path | None = None) -> tuple[dict, str, str] 
         from yeaboi.sessions import SessionStore  # noqa: PLC0415
 
         with SessionStore(db_path or get_db_path()) as sessions:
-            for sid in sessions.recent_session_ids(_SESSION_SCAN):
+            candidates = list(session_ids) if session_ids is not None else sessions.recent_session_ids(_SESSION_SCAN)
+            for sid in candidates:
                 state = sessions.load_state(sid)
                 if _has_work(state):
                     name = str(state.get("project_name") or "")

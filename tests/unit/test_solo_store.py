@@ -114,3 +114,32 @@ class TestStore:
             store._conn.execute("UPDATE weekly_review_history SET report_json = '{not json' WHERE id = ?", (run_id,))
             assert store.get_run_by_id(run_id) is None
             assert store.get_recent_reports() == []
+
+
+class TestScopeFilter:
+    """``run_ids`` is the hard filter a resolved context scope hands over."""
+
+    def test_filters_every_read(self, db):
+        with WeeklyReviewStore(db) as store:
+            first = store.record_run(_review(week="2026-W35"))
+            second = store.record_run(_review(week="2026-W36"))
+            assert store.get_latest_report(run_ids=(first,)).week_label == "2026-W35"
+            assert store.get_latest_report(run_ids=()) is None
+            assert [r.week_label for r in store.get_recent_reports(run_ids=(second,))] == ["2026-W36"]
+            assert store.get_recent_reports(run_ids=()) == []
+            assert len(store.get_recent_reports(limit=0)) == 2
+            assert [r["id"] for r in store.get_all_history(run_ids=(first,))] == [first]
+            assert store.get_all_history(run_ids=()) == []
+            assert len(store.get_all_history(limit=0)) == 2
+
+    def test_delete_drops_the_label_row(self, db):
+        from yeaboi.context.labels import LabelStore
+
+        with WeeklyReviewStore(db) as store:
+            run_id = store.record_run(_review())
+        with LabelStore(db) as labels:
+            labels.set_labels("review", "s1", str(run_id))
+        with WeeklyReviewStore(db) as store:
+            assert store.delete_run(run_id)
+        with LabelStore(db) as labels:
+            assert labels.get_labels("review", "s1", str(run_id)) is None

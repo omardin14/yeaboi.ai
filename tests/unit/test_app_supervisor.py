@@ -271,3 +271,39 @@ class TestStopAll:
 
     def test_stop_all_on_an_empty_supervisor(self):
         BoardSupervisor().stop_all()
+
+
+class TestBoardContext:
+    """A board carries what it reads and how its run will be labelled; the flush hands both on."""
+
+    def test_snapshot_carries_the_labels_and_the_scope(self):
+        from yeaboi.context.scope import ContextScope
+
+        session = _board()
+        session.project_label, session.tags = "Apollo", ("q3",)
+        session.scope = ContextScope(sources=frozenset({"standup"}))
+        snap = session.snapshot()
+        assert snap["project_label"] == "Apollo" and snap["tags"] == ["q3"]
+        assert snap["context"]["sources"] == ["standup"]
+
+    def test_an_unscoped_board_reports_no_context(self):
+        snap = _board().snapshot()
+        assert snap["context"] is None and snap["tags"] == [] and snap["project_label"] == ""
+
+    def test_flush_records_through_the_engine_with_the_labels(self, monkeypatch, tmp_path):
+        seen: dict = {}
+        monkeypatch.setattr("yeaboi.retro.engine.record_retro_run", lambda report, **kw: seen.update(kw) or 7)
+        session = _board()
+        session.project_label, session.tags = "Apollo", ("q3",)
+        monkeypatch.setattr(type(session), "report", lambda _self: "the report")
+        assert session.stop(db_path=tmp_path / "db") == 7
+        assert seen["project_label"] == "Apollo" and seen["tags"] == ("q3",) and seen["scope"] is None
+        assert seen["db_path"] == tmp_path / "db"
+
+    def test_a_poker_flush_goes_through_its_engine(self, monkeypatch, tmp_path):
+        seen: dict = {}
+        monkeypatch.setattr("yeaboi.poker.engine.record_poker_run", lambda report, **kw: seen.update(kw) or 3)
+        session = _board("poker")
+        monkeypatch.setattr(type(session), "report", lambda _self: "the table")
+        assert session.stop(db_path=tmp_path / "db") == 3
+        assert seen["db_path"] == tmp_path / "db"

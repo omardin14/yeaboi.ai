@@ -1265,3 +1265,74 @@ class TestComputePromptQuality:
         rating = compute_prompt_quality(qs)
         suggestion_text = " ".join(rating.suggestions)
         assert "Q14" in suggestion_text or "Q17" in suggestion_text
+
+
+class TestContextScopeGating:
+    """The state's ``context_scope`` decides what the planning nodes may read."""
+
+    def test_no_scope_wants_everything(self):
+        from yeaboi.agent.nodes import _effective_analysis_profile_id, _state_scope, _wants_dep
+
+        state = {"analysis_profile_id": "jira-PROJ"}
+        assert _wants_dep(state, "analysis") and _state_scope(state) is None
+        assert _effective_analysis_profile_id(state) == "jira-PROJ"
+
+    def test_analysis_off_drops_the_profile(self):
+        import json
+
+        from yeaboi.agent.nodes import _effective_analysis_profile_id, _state_scope, _wants_dep
+
+        state = {"analysis_profile_id": "jira-PROJ", "context_scope": json.dumps({"sources": ["standup"]})}
+        assert not _wants_dep(state, "analysis")
+        assert _effective_analysis_profile_id(state) == ""
+        selection = _state_scope(state)
+        assert selection is not None and not selection.wants("analysis") and selection.wants("standup")
+
+    def test_an_unreadable_scope_reads_everything(self):
+        from yeaboi.agent.nodes import _state_scope, _wants_dep
+
+        assert _wants_dep({"context_scope": "{"}, "analysis")
+        assert _state_scope({"context_scope": "{"}) is None
+
+    def test_every_call_resolves_afresh(self, monkeypatch):
+        """A run must see what was recorded since the last one — no day-long cache."""
+        import json
+
+        from yeaboi.agent.nodes import _state_scope
+
+        answers = iter(["first", "second"])
+        monkeypatch.setattr("yeaboi.context.resolve.resolve_scope", lambda *_a, **_k: next(answers))
+        state = {"context_scope": json.dumps({"sources": ["standup"]})}
+        assert _state_scope(state) == "first"
+        assert _state_scope(state) == "second"
+
+    def test_the_analyzer_skips_calibration_and_hands_the_selection_on(self, monkeypatch):
+        import json
+
+        from yeaboi.agent.ceremony_history import CeremonyContext
+
+        fake_response = MagicMock()
+        fake_response.content = VALID_ANALYSIS_JSON
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = fake_response
+        monkeypatch.setattr("yeaboi.agent.nodes.get_llm", lambda **kw: mock_llm)
+
+        def never(*_a, **_k):
+            raise AssertionError("the team profile must not be read with analysis switched off")
+
+        monkeypatch.setattr("yeaboi.agent.nodes._load_team_profile", never)
+        seen: dict = {}
+        monkeypatch.setattr(
+            "yeaboi.agent.nodes.gather_ceremony_context", lambda *a, **kw: seen.update(kw) or CeremonyContext()
+        )
+        state = {
+            "messages": [HumanMessage(content="continue")],
+            "questionnaire": make_completed_questionnaire(),
+            "team_size": 3,
+            "velocity_per_sprint": 15,
+            "analysis_profile_id": "jira-PROJ",
+            "context_scope": json.dumps({"sources": ["standup"]}),
+        }
+        result = project_analyzer(state)
+        assert isinstance(result["project_analysis"], ProjectAnalysis)
+        assert seen["selection"] is not None and not seen["selection"].wants("retro")

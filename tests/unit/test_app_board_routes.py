@@ -411,3 +411,48 @@ class TestArtifactEdits:
 
     def test_a_bad_run_id_is_a_400(self, app):
         assert request(app, "GET", "/api/artifacts/standup/edits?run_id=soon").code == 400
+
+
+class TestStartBoardsContext:
+    """The body's context keys reach the supervisor only when present, and a bad spec is a 400."""
+
+    def test_the_keys_reach_the_supervisor_only_when_present(self, app, monkeypatch):
+        import yeaboi.app.supervisor as supervisor
+
+        seen: list[dict] = []
+
+        def spy(_self, **kw):
+            seen.append(kw)
+            raise ValueError("no project session yet")
+
+        monkeypatch.setattr(supervisor.BoardSupervisor, "start_retro", spy)
+        request(app, "POST", "/api/boards/retro", {})
+        request(
+            app, "POST", "/api/boards/retro", {"context": "standup@month", "project_label": "Apollo", "tags": ["Q3"]}
+        )
+        assert seen[0] == {}
+        assert seen[1]["project_label"] == "Apollo" and seen[1]["tags"] == ("q3",)
+        assert seen[1]["context"].wants("standup") and not seen[1]["context"].wants("retro")
+
+    def test_a_bad_spec_is_a_400(self, app):
+        response = request(app, "POST", "/api/boards/retro", {"context": "stanup"})
+        assert response.code == 400 and "stanup" in json.loads(response.body)["error"]
+
+    def test_poker_forwards_them_too(self, app, monkeypatch):
+        import yeaboi.app.supervisor as supervisor
+
+        seen: dict = {}
+
+        def spy(_self, **kw):
+            seen.update(kw)
+            raise OSError("no port")
+
+        monkeypatch.setattr(supervisor.BoardSupervisor, "start_poker", spy)
+        response = request(
+            app,
+            "POST",
+            "/api/boards/poker",
+            {"source": "demo", "tickets": [{"key": "P-1"}], "context": "none", "project_label": "Apollo"},
+        )
+        assert response.code == 503
+        assert seen["project_label"] == "Apollo" and seen["context"].incognito and "tags" not in seen

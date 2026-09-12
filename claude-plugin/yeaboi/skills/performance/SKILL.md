@@ -37,6 +37,17 @@ description: "(beta) Manage engineers with yeaboi: 1:1 prep from real delivery d
    don't post it anywhere external unless explicitly asked. Exports auto-save
    under `~/.yeaboi/exports/performance/<engineer>/`.
 
+## Scoping what it reads
+
+`perf_one_on_one_prep` and `perf_six_month_review` take three optional inputs (`perf_one_on_one_complete` takes the two labels): `context` — what this run may read from other
+sessions (`"all"`, `"none"`, or a spec like `standup,retro:1@2sprints project=apollo tags=q3`:
+sources, an optional window of `N sprints` / `month` / `quarter` / `year` / `YYYY-MM-DD..YYYY-MM-DD`,
+project labels and tags; the JSON object of the same shape works too) — plus `project_label` (the
+free-text project label recorded on the run) and `tags` (recorded beside the defaults every run gets,
+such as `mode:performance` and the month). When the user names a timeframe ("the last two sprints of
+standups"), call `context_preview` with the spec first and show the counts before running. When the
+user names a project, always pass `project_label` so later runs can filter by it.
+
 ## Error handling
 
 Every tool returns `{ok, llm_mode, warnings, data}`. If `ok` is false, relay

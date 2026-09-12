@@ -149,3 +149,22 @@ class TestExportRoadmapViaPicker:
         rid = _seed_roadmap(db_path)
         monkeypatch.setattr(mode_select, "_pick_dest", lambda *a, **k: None)
         assert self._export(rid) is None
+
+
+class TestLoadStorePlanState:
+    """Resume falls back to the session store for the app's plans."""
+
+    def test_a_stored_plan_state_is_returned(self, db_path):
+        from yeaboi.sessions import SessionStore
+
+        with SessionStore(db_path) as store:
+            store.create_session("new-1")
+            store.save_state("new-1", {"messages": [], "solo": True})
+        assert mode_select._load_store_plan_state("new-1")["solo"] is True
+
+    def test_an_unknown_plan_is_none(self, db_path):
+        assert mode_select._load_store_plan_state("nope") is None
+
+    def test_a_broken_store_is_none(self, db_path, monkeypatch):
+        monkeypatch.setattr(mode_select, "_ana_dbp", db_path / "not" / "there.db")
+        assert mode_select._load_store_plan_state("new-1") is None

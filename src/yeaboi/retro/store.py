@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from yeaboi.agent.state import RetroCard, RetroReport, annotations_from
+from yeaboi.context._sql import id_filter, limit_clause
+from yeaboi.context.labels import drop_run_labels
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +258,7 @@ class RetroStore:
         cursor = self._conn.execute("DELETE FROM retro_history WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "retro", run_id)
             logger.info("Deleted retro run id=%s", run_id)
         return deleted
 
@@ -263,22 +266,29 @@ class RetroStore:
     #    Planning / Analysis with the team's recent retros regardless of which
     #    session they ran under. See docs: "Session Management".
 
-    def get_recent_reports(self, limit: int = 5, project_name: str = "") -> list[RetroReport]:
+    def get_recent_reports(
+        self, limit: int = 5, project_name: str = "", run_ids: tuple[int, ...] | None = None
+    ) -> list[RetroReport]:
         """Return recent RetroReports across ALL sessions, newest first.
 
         When ``project_name`` is given, rows matching it sort first (project-first),
         then by recency — so a plan for project X sees X's retros ahead of others'.
+        ``run_ids`` is the hard filter a resolved context scope hands over
+        (``None`` = every row, ``()`` = none) and replaces the name bias when given.
+        ``limit`` 0 means no limit.
         """
-        if project_name:
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
+        if project_name and run_ids is None:
             # (project_name = ?) is 1 for matches, 0 otherwise → matches sort first.
             rows = self._conn.execute(
-                "SELECT report_json FROM retro_history ORDER BY (project_name = ?) DESC, run_at DESC LIMIT ?",
-                (project_name, limit),
+                f"SELECT report_json FROM retro_history ORDER BY (project_name = ?) DESC, run_at DESC{limit_sql}",  # noqa: S608
+                (project_name, *limit_params),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT report_json FROM retro_history ORDER BY run_at DESC LIMIT ?",
-                (limit,),
+                f"SELECT report_json FROM retro_history WHERE {where} ORDER BY run_at DESC{limit_sql}",  # noqa: S608 — placeholders only
+                (*params, *limit_params),
             ).fetchall()
         reports: list[RetroReport] = []
         for row in rows:
@@ -290,12 +300,17 @@ class RetroStore:
                 logger.warning("Failed to deserialize a retro report: %s", exc)
         return reports
 
-    def get_all_history(self, limit: int = 100) -> list[dict]:
-        """Return recent retro run metadata across ALL sessions (for cadence + the hub)."""
+    def get_all_history(self, limit: int = 100, run_ids: tuple[int, ...] | None = None) -> list[dict]:
+        """Return recent retro run metadata across ALL sessions (for cadence + the hub).
+
+        ``run_ids`` narrows to those rows (``()`` = none); ``limit`` 0 = every row.
+        """
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
         rows = self._conn.execute(
-            "SELECT id, session_id, run_at, retro_date, project_name, card_count "
-            "FROM retro_history ORDER BY run_at DESC LIMIT ?",
-            (limit,),
+            "SELECT id, session_id, run_at, retro_date, project_name, card_count "  # noqa: S608 — placeholders only
+            f"FROM retro_history WHERE {where} ORDER BY run_at DESC{limit_sql}",
+            (*params, *limit_params),
         ).fetchall()
         return [
             {

@@ -97,6 +97,8 @@ def run_session(
     _read_key_fn=None,
     analysis_profile_id: str = "",
     initial_description: str = "",
+    context=None,
+    project_label: str = "",
 ) -> None:
     """Drive the full TUI session inside an existing Live context.
 
@@ -120,6 +122,8 @@ def run_session(
         initial_description: Pre-fill for the Phase A description editor (e.g.
             a project description extracted from the quarterly roadmap). The
             user can still edit before submitting.
+        context: The ContextScope this plan reads other sessions under (None =
+            unscoped); project_label: the free-text label the plan is recorded with.
     """
     logger.info(
         "run_session started: mode=%s resume=%s export_only=%s dry_run=%s preseeded=%s",
@@ -140,6 +144,8 @@ def run_session(
     # can be upserted by ID across save points.
     project_id = resume_project_id or create_project_id()
     logger.info("Session %s: project_id=%s", "resumed" if resume_project_id else "started", project_id)
+    if not resume_project_id:
+        label_new_plan(project_id, intake_mode, context=context, project_label=project_label)
 
     # Attach a per-session log file so each session's diagnostics are isolated.
     # The log lives at ~/.scrum-agent/logs/{project_id}.log and is cleaned up
@@ -162,6 +168,8 @@ def run_session(
             dry_run=dry_run,
             analysis_profile_id=analysis_profile_id,
             initial_description=initial_description,
+            context=context,
+            project_label=project_label,
         )
     finally:
         logger.info("Session ended: project_id=%s", project_id)
@@ -180,12 +188,51 @@ def _intake_complete(graph_state: dict) -> bool:
     return isinstance(qs, QuestionnaireState) and qs.completed and graph_state.get("pending_review") != "project_intake"
 
 
-def _scope_state_keys() -> dict:
-    """The world key a TUI planning run seeds.
+def label_new_plan(project_id: str, intake_mode: str, *, context=None, project_label: str = "", db_path=None) -> None:
+    """Write the label row a TUI plan gets at creation — the same defaults as a headless run.
+
+    Best-effort: a failed label never blocks a session.
+    """
+    try:
+        from yeaboi.config import is_solo_mode
+        from yeaboi.context.labels import label_run
+        from yeaboi.context.resolve import scope_for
+
+        label_run(
+            "planning",
+            project_id,
+            project_label=project_label,
+            scope=scope_for("planning", context),
+            defaults={
+                "world": "solo" if is_solo_mode() else "team",
+                "plan_size": intake_mode if intake_mode in ("small_project", "smart") else "",
+            },
+            db_path=db_path,
+        )
+    except Exception:  # noqa: BLE001 — a label is a convenience for later runs, not part of this one
+        logger.warning("Planning session %s was not labelled", project_id, exc_info=True)
+
+
+def _scope_state_keys(context=None, project_label: str = "") -> dict:
+    """The world, scope and label keys a TUI planning run seeds.
 
     Best-effort: a failure here never blocks a session.
     """
+    import json
+
+    from yeaboi.context.resolve import scope_for
+
     keys: dict = {}
+    try:
+        scope = scope_for("planning", context)
+        if scope is not None:
+            # Declared on ScrumState, so the graph keeps it across invokes.
+            keys["context_scope"] = json.dumps(scope.to_dict(), sort_keys=True)
+            logger.info("Planning session reads under %s", scope.to_spec())
+    except (TypeError, ValueError):
+        logger.warning("Planning session's context scope ignored", exc_info=True)
+    if project_label:
+        keys["project_label"] = project_label
     try:
         from yeaboi.config import is_solo_mode
 
@@ -212,6 +259,8 @@ def _run_session_body(
     dry_run,
     analysis_profile_id="",
     initial_description="",
+    context=None,
+    project_label="",
 ):
     """Session body — extracted so run_session can use try/finally for log cleanup."""
     # Compile graph once for the session (skipped in dry-run — no LLM calls)
@@ -225,27 +274,10 @@ def _run_session_body(
     else:
         graph_state: dict = {"messages": []}
         graph_state["_intake_mode"] = intake_mode
-        graph_state.update(_scope_state_keys())
-        if analysis_profile_id:
-            graph_state["analysis_profile_id"] = analysis_profile_id
-            # Extract custom DoD items from the analysis profile
-            try:
-                from yeaboi.agent.nodes import _load_profile_by_id
+        graph_state.update(_scope_state_keys(context, project_label))
+        from yeaboi.agent.chat_intake import seed_analysis_profile
 
-                _p, _ex = _load_profile_by_id(analysis_profile_id)
-                if _ex:
-                    proposed = _ex.get("proposed_dod", {})
-                    if isinstance(proposed, dict):
-                        _dod = [
-                            it["practice"]
-                            for it in proposed.get("items", [])
-                            if isinstance(it, dict) and it.get("status") in ("established", "emerging")
-                        ]
-                        if _dod:
-                            graph_state["custom_dod_items"] = tuple(_dod)
-                            logger.info("Custom DoD from analysis: %s", _dod)
-            except Exception:
-                pass
+        seed_analysis_profile(graph_state, analysis_profile_id)
 
     # Where Ctrl+V screenshots for this session are saved (~/.yeaboi/attachments/
     # <scope>/). Stashed in state so nested input loops don't need project_id

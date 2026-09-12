@@ -49,6 +49,9 @@ class BoardSession:
     started_at: str
     project_name: str = ""
     sprint_name: str = ""
+    project_label: str = ""
+    tags: tuple[str, ...] = ()
+    scope: Any = None  # the ContextScope the board reads under; None = unscoped
     _stopped: bool = field(default=False, repr=False)
 
     def snapshot(self) -> dict:
@@ -71,6 +74,9 @@ class BoardSession:
             "display_code": self.server.display_code,
             "link": self.link.snapshot(),
             "state": self._state(),
+            "project_label": self.project_label,
+            "tags": list(self.tags),
+            "context": self.scope.to_dict() if self.scope is not None else None,
         }
 
     @property
@@ -119,15 +125,14 @@ class BoardSession:
         return run_id
 
     def _flush(self, db_path: Path) -> int:
+        labels = {"project_label": self.project_label, "tags": self.tags, "scope": self.scope}
         if self.kind == BOARD_RETRO:
-            from yeaboi.retro.store import RetroStore
+            from yeaboi.retro.engine import record_retro_run
 
-            with RetroStore(db_path) as store:
-                return store.record_run(self.report())
-        from yeaboi.poker.store import PokerStore
+            return record_retro_run(self.report(), db_path=db_path, **labels)
+        from yeaboi.poker.engine import record_poker_run
 
-        with PokerStore(db_path) as store:
-            return store.record_run(self.report())
+        return record_poker_run(self.report(), db_path=db_path, **labels)
 
 
 @dataclass
@@ -224,30 +229,38 @@ class BoardSupervisor:
 
     # -- boards ------------------------------------------------------------
 
-    def start_retro(self) -> BoardSession:
-        """Open a retro board for the latest session, seeded with carried actions."""
+    def start_retro(self, *, context=None, project_label: str = "", tags=()) -> BoardSession:
+        """Open a retro board for the latest session, seeded with carried actions.
+
+        ``context`` is what the board may read (a ``ContextScope``, its dict or
+        spec): it narrows the carry-forward and the history browser, and a
+        scoped board also seeds the selected standups' blockers as review cards.
+        """
         from yeaboi.config import get_retro_server_port
+        from yeaboi.context.resolve import selection_for
         from yeaboi.retro.board import RetroBoard
-        from yeaboi.retro.engine import carried_action_items_for_session, history_providers
+        from yeaboi.retro.engine import carried_action_items_for_session, history_providers, standup_blocker_cards
         from yeaboi.retro.server import RetroServer
         from yeaboi.retro.setup import resolve_session
 
         target = resolve_session(db_path=self._db_path)
         if not target:
             raise ValueError("no project session yet")
+        selection = selection_for("retro", context, db_path=self.db_path)
         board = RetroBoard(target.session_id, project_name=target.project_name, sprint_name=target.sprint_name)
         # Seeded before the server starts, so the first browser poll already
         # shows the "Last sprint's actions" column.
         carried = carried_action_items_for_session(
-            target.session_id, project_name=target.project_name, db_path=self.db_path
+            target.session_id, project_name=target.project_name, db_path=self.db_path, selection=selection
         )
+        carried = (*carried, *standup_blocker_cards(selection, db_path=self.db_path, existing=carried))
         if carried:
             board.seed_carried(list(carried))
         server = RetroServer(board, port=get_retro_server_port())
         # Read lazily, so a store that cannot be opened costs a board with no
         # history rather than a board.
         server.history_list, server.history_report = history_providers(
-            project_name=target.project_name, db_path=self.db_path
+            project_name=target.project_name, db_path=self.db_path, selection=selection
         )
         server.start()
         session = BoardSession(
@@ -261,21 +274,38 @@ class BoardSupervisor:
             started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             project_name=target.project_name,
             sprint_name=target.sprint_name,
+            project_label=project_label,
+            tags=tuple(tags),
+            scope=selection.scope,
         )
         with self._lock:
             self._boards[session.board_id] = session
         logger.info("retro board opened (board_id=%s session=%s)", session.board_id, target.session_id)
         return session
 
-    def start_poker(self, *, source: str, scope_label: str, tickets: list[dict]) -> BoardSession:
-        """Open a poker board over an already-fetched ticket list."""
+    def start_poker(
+        self,
+        *,
+        source: str,
+        scope_label: str,
+        tickets: list[dict],
+        context=None,
+        project_label: str = "",
+        tags=(),
+    ) -> BoardSession:
+        """Open a poker board over an already-fetched ticket list.
+
+        ``context`` narrows the AI perspective's cross-mode gather.
+        """
         from yeaboi.config import get_poker_server_port
+        from yeaboi.context.resolve import selection_for
         from yeaboi.poker.board import PokerBoard
         from yeaboi.poker.server import PokerServer
         from yeaboi.retro.setup import resolve_session
 
         if not tickets:
             raise ValueError("no tickets to estimate")
+        selection = selection_for("poker", context, db_path=self.db_path)
         target = resolve_session(db_path=self._db_path)
         # A poker session does not need a planning session to exist — fall back
         # to a stable quick-session id so history still records and groups.
@@ -287,6 +317,7 @@ class BoardSupervisor:
             scope_label=scope_label,
             tickets=tickets,
         )
+        board.selection = selection
         server = PokerServer(board, port=get_poker_server_port())
         server.start()
         session = BoardSession(
@@ -299,6 +330,9 @@ class BoardSupervisor:
             link=self._link(server, surface=BOARD_POKER),
             started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             project_name=target.project_name if target else "",
+            project_label=project_label,
+            tags=tuple(tags),
+            scope=selection.scope,
         )
         with self._lock:
             self._boards[session.board_id] = session

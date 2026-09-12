@@ -18,6 +18,7 @@ import logging
 import threading
 from collections.abc import Iterator
 
+from yeaboi.app._context_body import context_kwargs, read_context
 from yeaboi.app.router import HTTPError, Request, Response, json_response
 from yeaboi.mcp.runtime import to_jsonable
 
@@ -142,6 +143,7 @@ def run(app, request: Request) -> Response:
     depth = str(payload.get("depth", setup.DEFAULT_DEPTH))
     if depth not in setup.DEPTHS:
         raise HTTPError(400, f"depth must be one of {', '.join(setup.DEPTHS)}")
+    read_context(payload)  # validated here so a bad scope is a 400, not a stream error
     op = app.ops.create()
     logger.info(
         "Analysis run start: source=%s depth=%s features=%s",
@@ -184,6 +186,7 @@ def _run(app, op, payload: dict, depth: str) -> Iterator[dict]:
                     analysis_features=payload.get("features"),
                     progress=progress,
                     cancel_event=op.cancel,
+                    **context_kwargs(payload),
                 )
         except BaseException as exc:  # noqa: BLE001 — reported on the stream below
             result_box[1] = exc

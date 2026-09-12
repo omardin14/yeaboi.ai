@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from yeaboi.agent.state import PokerReport, PokerTicketResult, PokerVote
+from yeaboi.context._sql import id_filter, limit_clause
+from yeaboi.context.labels import drop_run_labels
 
 logger = logging.getLogger(__name__)
 
@@ -232,14 +234,41 @@ class PokerStore:
         cursor = self._conn.execute("DELETE FROM poker_history WHERE id = ?", (run_id,))
         deleted = (cursor.rowcount or 0) > 0
         if deleted:
+            drop_run_labels(self._db_path, "poker", run_id)
             logger.info("Deleted poker run id=%s", run_id)
         return deleted
 
-    def get_all_history(self, limit: int = 100) -> list[dict]:
-        """Return recent poker run metadata across ALL sessions (for the hub)."""
+    def get_all_history(self, limit: int = 100, run_ids: tuple[int, ...] | None = None) -> list[dict]:
+        """Return recent poker run metadata across ALL sessions (for the hub).
+
+        ``run_ids`` narrows to those rows (``()`` = none); ``limit`` 0 = every row.
+        """
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
         rows = self._conn.execute(
-            "SELECT id, run_at, poker_date, project_name, source, scope_label, ticket_count, estimated_count, "
-            "session_id FROM poker_history ORDER BY run_at DESC LIMIT ?",
-            (limit,),
+            "SELECT id, run_at, poker_date, project_name, source, scope_label, ticket_count, estimated_count, "  # noqa: S608 — placeholders only
+            f"session_id FROM poker_history WHERE {where} ORDER BY run_at DESC{limit_sql}",
+            (*params, *limit_params),
         ).fetchall()
         return [{**self._history_row(r), "session_id": r[8]} for r in rows]
+
+    def get_recent_reports(self, limit: int = 5, run_ids: tuple[int, ...] | None = None) -> list[PokerReport]:
+        """Recent PokerReports across ALL sessions, newest first — the cross-mode read.
+
+        ``run_ids`` is the hard filter a resolved context scope hands over; ``limit`` 0 = no limit.
+        """
+        where, params = id_filter(run_ids)
+        limit_sql, limit_params = limit_clause(limit)
+        rows = self._conn.execute(
+            f"SELECT report_json FROM poker_history WHERE {where} ORDER BY run_at DESC{limit_sql}",  # noqa: S608
+            (*params, *limit_params),
+        ).fetchall()
+        reports: list[PokerReport] = []
+        for row in rows:
+            if not row[0]:
+                continue
+            try:
+                reports.append(_dict_to_poker_report(json.loads(row[0])))
+            except (json.JSONDecodeError, TypeError, KeyError) as exc:
+                logger.warning("Failed to deserialize a poker report: %s", exc)
+        return reports

@@ -24,6 +24,17 @@ description: "Generate a business-friendly delivery report of the team's complet
    `~/.yeaboi/exports/reporting/` — mention this when the user wants something
    to circulate or present.
 
+## Scoping what it reads
+
+Every run tool takes three optional inputs: `context` — what this run may read from other
+sessions (`"all"`, `"none"`, or a spec like `standup,retro:1@2sprints project=apollo tags=q3`:
+sources, an optional window of `N sprints` / `month` / `quarter` / `year` / `YYYY-MM-DD..YYYY-MM-DD`,
+project labels and tags; the JSON object of the same shape works too) — plus `project_label` (the
+free-text project label recorded on the run) and `tags` (recorded beside the defaults every run gets,
+such as `mode:reporting` and the month). When the user names a timeframe ("the last two sprints of
+standups"), call `context_preview` with the spec first and show the counts before running. When the
+user names a project, always pass `project_label` so later runs can filter by it.
+
 ## Error handling
 
 Every tool returns `{ok, llm_mode, warnings, data}`. If `ok` is false, relay

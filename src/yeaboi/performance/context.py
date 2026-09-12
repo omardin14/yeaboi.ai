@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from yeaboi.context.resolve import Selection
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +51,19 @@ def _bullets(items) -> str:
     return "\n".join(f"  - {it}" for it in items)
 
 
-def gather_performance_context() -> PerformanceContext:
+def gather_performance_context(*, selection: Selection | None = None) -> PerformanceContext:
     """Read the team's recent 1:1 actions + reviews and distil them (team-wide).
 
-    Graceful: a missing DB / empty tables / any error yields an empty context, so
-    planning and analysis behave exactly as before Performance mode existed.
+    ``selection`` never narrows by run: performance data is keyed by engineer,
+    and a person's history must not shrink because a scope is active. Its
+    ``performance`` source toggle is honoured, though — off means an empty
+    context. Graceful: a missing DB / empty tables / any error yields an empty
+    context, so planning and analysis behave exactly as before Performance
+    mode existed.
     """
+    if selection is not None and not selection.wants("performance"):
+        logger.info("gather_performance_context: performance switched off for this run")
+        return PerformanceContext()
     try:
         from yeaboi.config import get_sessions_db
         from yeaboi.performance.store import PerformanceStore

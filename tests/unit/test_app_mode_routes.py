@@ -439,3 +439,32 @@ class TestReportingSolo:
         drain(request(app, "POST", "/api/reporting/run", {"period": "last_month"}))
         drain(request(app, "POST", "/api/reporting/run", {"period": "last_month", "solo": True}))
         assert seen == [False, True]
+
+
+class TestReportingRunContext:
+    """The three context keys reach the engine only when the body carries them; a bad spec is a 400."""
+
+    def test_the_keys_are_forwarded_when_present(self, app, monkeypatch):
+        @dataclass
+        class _Report:
+            delivered_items: tuple = ()
+            period_label: str = "Last month"
+            warnings: tuple = ()
+
+        seen: list[dict] = []
+        monkeypatch.setattr("yeaboi.reporting.engine.run_delivery_report", lambda p, **kw: seen.append(kw) or _Report())
+        drain(request(app, "POST", "/api/reporting/run", {"period": "last_month"}))
+        drain(
+            request(
+                app,
+                "POST",
+                "/api/reporting/run",
+                {"period": "last_month", "context": "plan", "project_label": "Apollo", "tags": ["Q3"]},
+            )
+        )
+        assert not {"context", "project_label", "tags"} & set(seen[0])
+        assert seen[1]["project_label"] == "Apollo" and seen[1]["tags"] == ("q3",) and seen[1]["context"].wants("plan")
+
+    def test_a_bad_spec_is_a_400(self, app):
+        response = request(app, "POST", "/api/reporting/run", {"period": "last_month", "context": "stanup"})
+        assert response.code == 400 and "stanup" in json.loads(response.body)["error"]

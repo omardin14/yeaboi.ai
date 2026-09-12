@@ -2,6 +2,26 @@
   "schema_version": 2,
   "entries": [
     {
+      "version": "4.1.0",
+      "date": "2026-09-12",
+      "headline": "Plan in conversation and choose run context",
+      "summary": "Planning is now a live conversation with typed event responses. Every run chooses which sessions, timeframe and labels it reads, giving you control over what shapes each decision.",
+      "highlights": [
+        {
+          "text": "Chat with the planner instead of filling out forms",
+          "areas": ["planning"]
+        },
+        {
+          "text": "Pick which sessions and time windows each run reads",
+          "areas": ["planning"]
+        },
+        {
+          "text": "Label sessions to organize and filter across modes",
+          "areas": ["planning", "general"]
+        }
+      ]
+    },
+    {
       "version": "4.0.0",
       "date": "2026-09-11",
       "headline": "One kind of thing: a session",

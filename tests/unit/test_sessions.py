@@ -10,7 +10,7 @@ import stat
 
 import pytest
 
-from yeaboi.sessions import CURRENT_SCHEMA_VERSION, SessionStore
+from yeaboi.sessions import CURRENT_SCHEMA_VERSION, SessionStore, plan_title, provisional_title
 
 
 class TestSessionStoreFilePermissions:
@@ -297,3 +297,197 @@ class TestProjectsRemovedMigration:
         SessionStore(db).close()
         with SessionStore(db) as store:
             assert store.schema_mismatch is False
+
+
+class TestPlanVersionsMigration:
+    """Migration v35 — a title column and the plan_versions table."""
+
+    def _v34_db(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript(
+            """CREATE TABLE sessions_meta (
+                   session_id          TEXT PRIMARY KEY,
+                   project_name        TEXT NOT NULL DEFAULT '',
+                   created_at          TEXT NOT NULL,
+                   last_modified       TEXT NOT NULL,
+                   last_node_completed TEXT NOT NULL DEFAULT '',
+                   session_state       TEXT NOT NULL DEFAULT '',
+                   session_mode        TEXT NOT NULL DEFAULT 'planning'
+               );
+               CREATE TABLE schema_info (schema_version INT NOT NULL);"""
+        )
+        conn.execute("INSERT INTO schema_info VALUES (34)")
+        conn.execute("INSERT INTO sessions_meta (session_id, created_at, last_modified) VALUES ('old-1', 't', 't')")
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_the_column_and_table_arrive_and_rows_survive(self, tmp_path):
+        db = self._v34_db(tmp_path)
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+            (row,) = store.list_sessions()
+            assert row["session_id"] == "old-1" and row["title"] == ""
+            store.update_session_meta("old-1", title="Apollo")
+            assert store.get_session("old-1")["title"] == "Apollo"
+            assert store.record_plan_version("old-1", "features", {"items": []}) == 1
+        conn = sqlite3.connect(str(db))
+        try:
+            assert conn.execute("SELECT schema_version FROM schema_info").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        finally:
+            conn.close()
+
+    def test_reopen_is_idempotent(self, tmp_path):
+        db = self._v34_db(tmp_path)
+        SessionStore(db).close()
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+
+
+class TestMessagesRoundTrip:
+    def test_messages_survive_a_save_including_tool_calls(self, tmp_path):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        call = {"name": "jira_create_epic", "args": {"summary": "Login"}, "id": "call-1", "type": "tool_call"}
+        with SessionStore(tmp_path / "s.db") as store:
+            store.create_session("new-1")
+            store.save_state(
+                "new-1", {"messages": [HumanMessage(content="hi"), AIMessage(content="", tool_calls=[call])]}
+            )
+            back = store.load_state("new-1")
+        assert [type(m).__name__ for m in back["messages"]] == ["HumanMessage", "AIMessage"]
+        assert back["messages"][1].tool_calls == [call]
+
+    def test_a_blob_without_messages_loads_an_empty_list(self, tmp_path):
+        with SessionStore(tmp_path / "s.db") as store:
+            store.create_session("new-1")
+            store.save_state("new-1", {"solo": True})
+            assert store.load_state("new-1")["messages"] == []
+
+
+class TestPlanVersions:
+    def test_versions_count_up_per_section(self, tmp_path):
+        with SessionStore(tmp_path / "s.db") as store:
+            store.create_session("new-1")
+            assert store.record_plan_version("new-1", "features", {"items": [1]}) == 1
+            assert store.record_plan_version("new-1", "features", {"items": [2]}) == 2
+            assert store.record_plan_version("new-1", "stories", {"items": []}) == 1
+            assert [(v["section"], v["version"]) for v in store.list_plan_versions("new-1")] == [
+                ("features", 1),
+                ("features", 2),
+                ("stories", 1),
+            ]
+            assert [v["version"] for v in store.list_plan_versions("new-1", "stories")] == [1]
+            assert store.get_plan_version("new-1", "features", 2)["payload"] == {"items": [2]}
+
+    def test_an_unknown_version_is_none(self, tmp_path):
+        with SessionStore(tmp_path / "s.db") as store:
+            assert store.get_plan_version("new-1", "features", 1) is None
+
+    def test_deleting_the_session_drops_its_versions(self, tmp_path):
+        with SessionStore(tmp_path / "s.db") as store:
+            store.create_session("new-1")
+            store.record_plan_version("new-1", "features", {})
+            assert store.delete_session("new-1") is True
+            assert store.list_plan_versions("new-1") == []
+
+
+class TestSessionTitle:
+    def test_a_title_is_kept_beside_the_project_name(self, tmp_path):
+        with SessionStore(tmp_path / "s.db") as store:
+            store.create_session("new-1", "Derived", title="Given")
+            row = store.get_session("new-1")
+            assert (row["project_name"], row["title"], row["session_mode"]) == ("Derived", "Given", "planning")
+            store.update_session_meta("new-1", title=None)
+            assert store.get_session("new-1")["title"] == "Given"
+
+
+class TestSessionLabelsMigration:
+    """Migration v35 also creates ``session_labels``, and deletes clear a session's rows."""
+
+    def test_the_table_arrives_with_its_key(self, tmp_path):
+        db = TestPlanVersionsMigration()._v34_db(tmp_path)
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+        conn = sqlite3.connect(str(db))
+        try:
+            names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master").fetchall()}
+            assert "session_labels" in names and "idx_session_labels_project" in names
+            columns = [r[1] for r in conn.execute("PRAGMA table_info(session_labels)").fetchall()]
+            assert columns == [
+                "mode",
+                "session_id",
+                "run_id",
+                "project",
+                "tags_json",
+                "scope_json",
+                "created_at",
+                "updated_at",
+            ]
+        finally:
+            conn.close()
+
+    def test_reopen_is_idempotent(self, tmp_path):
+        db = TestPlanVersionsMigration()._v34_db(tmp_path)
+        SessionStore(db).close()
+        with SessionStore(db) as store:
+            assert store.schema_mismatch is False
+
+    def test_deleting_a_session_drops_its_label_rows_only(self, tmp_path):
+        from yeaboi.context.labels import LabelStore
+
+        db = tmp_path / "sessions.db"
+        with SessionStore(db) as store:
+            store.create_session("p1", "Apollo")
+            store.create_session("p2", "Ares")
+        with LabelStore(db) as labels:
+            labels.set_labels("planning", "p1", project="Apollo")
+            labels.set_labels("planning", "p2", project="Ares")
+            labels.set_labels("standup", "p1", "1", project="Apollo")
+        with SessionStore(db) as store:
+            assert store.delete_session("p1")
+        with LabelStore(db) as labels:
+            assert labels.get_labels("planning", "p1") is None
+            assert labels.get_labels("planning", "p2") is not None
+            assert labels.get_labels("standup", "p1", "1") is not None  # a run's row belongs to its own store
+        with LabelStore(db) as labels:
+            labels.set_labels("analysis", "jira-PROJ-20260401", project="Apollo")  # keyed by team id
+        with SessionStore(db) as store:
+            store.delete_all_sessions()
+        with LabelStore(db) as labels:
+            assert labels.get_labels("planning", "p2") is None
+            assert labels.get_labels("analysis", "jira-PROJ-20260401") is not None
+
+
+class TestProvisionalTitle:
+    def test_blank_description_has_no_title(self):
+        assert provisional_title("") == ""
+        assert provisional_title("   \n ") == ""
+
+    def test_a_short_description_is_its_own_title(self):
+        assert provisional_title("A booking app for barbers") == "A booking app for barbers"
+
+    def test_only_the_first_sentence_is_used(self):
+        assert provisional_title("A booking app for barbers. It needs payments.") == "A booking app for barbers."
+
+    def test_a_long_first_sentence_is_cut_at_a_word(self):
+        text = "A booking platform for independent barbers with online payments and reminders for every customer"
+        title = provisional_title(text)
+        assert title.endswith("…") and len(title) <= 61
+        assert title == "A booking platform for independent barbers with online…"
+
+    def test_a_single_long_word_is_cut_hard(self):
+        assert provisional_title("x" * 80) == "x" * 60 + "…"
+
+
+class TestPlanTitle:
+    def test_the_users_title_wins(self):
+        assert plan_title("Mine", "Analysed", "described") == "Mine"
+
+    def test_the_analysed_name_beats_the_description(self):
+        assert plan_title("", "Analysed", "described") == "Analysed"
+
+    def test_the_description_is_the_last_resort(self):
+        assert plan_title("", "", "A booking app. More.") == "A booking app."
+        assert plan_title("", "", "") == ""

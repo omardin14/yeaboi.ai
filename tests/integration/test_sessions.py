@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
+from langchain_core.messages import HumanMessage
 
 from yeaboi.agent.state import (
     AcceptanceCriterion,
@@ -319,10 +320,10 @@ class TestSerializeState:
         parsed = json.loads(result)
         assert isinstance(parsed, dict)
 
-    def test_messages_excluded(self):
-        state = {"messages": ["should be skipped"], "team_size": 5}
+    def test_messages_persisted(self):
+        state = {"messages": [HumanMessage(content="kept")], "team_size": 5}
         result = json.loads(_serialize_state(state))
-        assert "messages" not in result
+        assert [m["data"]["content"] for m in result["messages"]] == ["kept"]
         assert result["team_size"] == 5
 
     def test_none_values_excluded(self):

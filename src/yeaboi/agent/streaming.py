@@ -116,6 +116,7 @@ def stream_chat_turn(
     cancel: threading.Event | None = None,
     typewriter_cps: int = 400,
     typewriter_max_chars: int = _TYPEWRITER_MAX_CHARS,
+    typewriter: bool = True,
 ) -> dict:
     """Run one chat turn, emitting display text through on_token as it forms.
 
@@ -136,6 +137,9 @@ def stream_chat_turn(
             no tokens are emitted and the finished state returns immediately,
             so big documents land as their card instead of scrolling the
             chat. 0 disables the cap.
+        typewriter: False skips the replay entirely on the deterministic
+            path — the reply reaches the caller once, from the returned
+            state, which is what a socket wants.
 
     Returns:
         The final graph state for this turn.
@@ -148,6 +152,8 @@ def stream_chat_turn(
     node = predict_next_node(invoke_state)
     if node == "agent":
         return _stream_agent_turn(graph, invoke_state, on_token, cancel)
+    if not typewriter:
+        return graph.invoke(invoke_state)
     return _typewriter_turn(graph, invoke_state, on_token, cancel, typewriter_cps, typewriter_max_chars)
 
 

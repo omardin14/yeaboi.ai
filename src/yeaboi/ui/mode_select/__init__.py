@@ -1494,6 +1494,8 @@ def _collect_settings_data() -> dict:
         "AWS_PROFILE",
         "LOG_LEVEL",
         "SESSION_PRUNE_DAYS",
+        "YEABOI_SPRINT_LENGTH_WEEKS",
+        "YEABOI_SPRINT_ANCHOR_DATE",
         "TUNNEL_TIMEOUT_MINUTES",
         # The share tier and its Cloudflare Access configuration. None of these
         # is a secret — the tunnel's actual credential stays in a file on disk
@@ -6188,6 +6190,7 @@ def _run_mode_hub(
     new_message: str = "New run recorded.",
     extra_label=None,
     extra_action=None,
+    context_mode: str = "",
 ) -> None:
     """Generic saved-runs hub loop shared by standup / retro / reporting.
 
@@ -6223,13 +6226,88 @@ def _run_mode_hub(
     returns the card text (recomputed on every reload so status stays fresh; empty
     string hides the card); Enter on it calls ``extra_action()`` and shows the
     returned message. Modes that pass neither are byte-identical to before.
+
+    ``context_mode`` names the label mode (``standup``, ``retro`` …) whose runs
+    choose what they read: "+ New" then opens the context page first and keeps
+    the answer as the mode's remembered scope, ``c`` opens the page on its own,
+    the subtitle says what the next run reads, and every row shows its labels.
     """
     from yeaboi.ui.mode_select.screens._run_hub_screen import _build_run_hub_screen
     from yeaboi.ui.shared._click import parse_click
     from yeaboi.ui.shared._duck_voice import duck_voice
 
     voice = duck_voice()  # toasts + the delete confirmation speak through the duck
-    runs = load_runs()
+
+    def _labelled(rows):
+        """Each run's project label and free tags on its second line."""
+        if not context_mode:
+            return rows
+        try:
+            from yeaboi.context.labels import LabelStore
+
+            with LabelStore(_ana_dbp) as labels:
+                by_id = {(r.run_id or r.session_id): r for r in labels.list_labels(mode=context_mode, limit=0)}
+        except Exception:  # noqa: BLE001 — a hub without labels is still a hub
+            logger.debug("%s hub: labels could not be read", mode, exc_info=True)
+            return rows
+        for run in rows:
+            key = f"{run.kind}:{run.run_id}" if run.kind else str(run.run_id)
+            row = by_id.get(key)
+            if row is None:
+                continue
+            parts = [run.subtitle, row.project, *(t for t in row.tags if ":" not in t)]
+            run.subtitle = " · ".join(part for part in parts if part)
+        return rows
+
+    def _context_line() -> str:
+        if not context_mode:
+            return ""
+        from yeaboi.config import get_last_context_scope
+        from yeaboi.context.scope import coerce_scope
+
+        try:
+            scope = coerce_scope(get_last_context_scope(context_mode))
+        except (TypeError, ValueError):
+            return ""
+        return f"  ·  reads {scope.to_spec()}" if scope is not None and scope.narrows else ""
+
+    def _pick_context() -> bool:
+        """Open the context page; keep the answer for this mode. False when the user backed out."""
+        from yeaboi.config import get_last_context_scope, set_last_context_scope
+        from yeaboi.context.scope import coerce_scope
+        from yeaboi.ui.mode_select._context import run_context_page
+
+        try:
+            initial = coerce_scope(get_last_context_scope(context_mode))
+        except (TypeError, ValueError):
+            initial = None
+        scope = run_context_page(
+            console,
+            live,
+            read_key,
+            frame_time,
+            supports_timeout,
+            mode=context_mode,
+            initial=initial,
+            theme=share_theme,
+            title_fn=title_fn,
+            db_path=_ana_dbp,
+        )
+        if scope is None:
+            return False
+        set_last_context_scope(context_mode, scope.to_dict() if scope.narrows else None)
+        if context_mode == "standup":
+            _remember_standup_scope(scope)
+        return True
+
+    def _new_run() -> bool:
+        """The "+ New" card: the context page first (when the mode has one), then the live page."""
+        if context_mode and not _pick_context():
+            return False
+        run_new()
+        return True
+
+    runs = _labelled(load_runs())
     extra_text = extra_label() if extra_label is not None else ""
     selected = 0
     focus = 0  # 0 = card, 1 = Delete, 2 = Export (only on a run row)
@@ -6244,7 +6322,7 @@ def _run_mode_hub(
 
     def _reload(msg: str = "") -> None:
         nonlocal runs, selected, focus, message, confirm, extra_text
-        runs = load_runs()
+        runs = _labelled(load_runs())
         extra_text = extra_label() if extra_label is not None else ""
         selected = min(selected, _n_items() - 1)  # keep within the item range
         focus = 0
@@ -6265,7 +6343,7 @@ def _run_mode_hub(
             selected,
             title_fn=title_fn,
             theme=share_theme,
-            subtitle=subtitle,
+            subtitle=subtitle + _context_line(),
             message=message,
             width=w,
             height=max(10, h - 1),
@@ -6344,7 +6422,8 @@ def _run_mode_hub(
             _reload(delete_run(run) or "Run deleted.")
             return True, None
         if act == "Run again":
-            run_new()
+            if not _new_run():
+                return False, None
             _reload(new_message)
             return True, None
         if act == "Reload":
@@ -6472,8 +6551,8 @@ def _run_mode_hub(
                     if _hit >= len(runs):  # the "+ New" card
                         if new_breaks_out:
                             break  # Performance: hand control back to the roster
-                        run_new()
-                        _reload(new_message)
+                        if _new_run():
+                            _reload(new_message)
                     else:
                         _open_snapshot(runs[_hit])
                 _render_list()
@@ -6511,8 +6590,8 @@ def _run_mode_hub(
                     # create actions live) instead of running a live page in place.
                     break
                 # "+ New run" card → run the live page, then reload the list.
-                run_new()
-                _reload(new_message)
+                if _new_run():
+                    _reload(new_message)
                 _render_list()
                 continue
             run = runs[selected]
@@ -6540,11 +6619,61 @@ def _run_mode_hub(
                     message = msg
                     logger.info("%s hub: %s", mode, msg)
                     voice.say(msg)
+        elif k == "c" and context_mode:
+            # Choose what the next run reads without starting one.
+            if _pick_context():
+                _reload("Context kept for the next run.")
         elif k in ("esc", "q"):
             break
         _render_list()
     voice.clear_sticky()  # never carry a modal prompt onto the next page
     logger.info("%s hub: closed", mode)
+
+
+def _pick_planning_context(console: Console, live, read_key, frame_time: float, supports_timeout: bool):
+    """The context page for a new plan; keeps the answer as planning's remembered scope.
+
+    Returns the scope to seed (None when the plan reads unscoped) — a new plan
+    always starts, so backing out of the page means "read as last time".
+    """
+    from yeaboi.config import get_last_context_scope, set_last_context_scope
+    from yeaboi.context.scope import coerce_scope
+    from yeaboi.ui.mode_select._context import run_context_page
+    from yeaboi.ui.shared._components import PLANNING_THEME, planning_title
+
+    try:
+        initial = coerce_scope(get_last_context_scope("planning"))
+    except (TypeError, ValueError):
+        initial = None
+    scope = run_context_page(
+        console,
+        live,
+        read_key,
+        frame_time,
+        supports_timeout,
+        mode="planning",
+        initial=initial,
+        theme=PLANNING_THEME,
+        title_fn=planning_title,
+        db_path=_ana_dbp,
+    )
+    if scope is None:
+        return initial
+    set_last_context_scope("planning", scope.to_dict() if scope.narrows else None)
+    return scope if scope.narrows else None
+
+
+def _remember_standup_scope(scope) -> None:
+    """Standup's own config column beats the remembered scope, so keep the two in step."""
+    try:
+        from yeaboi.standup.store import StandupStore
+
+        with StandupStore(_ana_dbp) as store:
+            session_id = store.get_latest_configured_session()
+            if session_id:
+                store.set_context_scope(session_id, scope.to_dict() if scope.narrows else None)
+    except Exception:  # noqa: BLE001 — the remembered scope still applies through the fallback chain
+        logger.debug("standup hub: could not persist the scope on the config row", exc_info=True)
 
 
 def _run_standup_hub(console: Console, live, read_key, frame_time: float, supports_timeout: bool) -> None:
@@ -6798,6 +6927,7 @@ def _run_standup_hub(console: Console, live, read_key, frame_time: float, suppor
         get_editable_session=get_editable_session,
         share_theme=STANDUP_THEME,
         delete_run=delete_run,
+        context_mode="standup",
         run_new=lambda: _run_standup_page(console, live, read_key, frame_time, supports_timeout),
         extra_label=_schedule_label,
         extra_action=_open_schedule,
@@ -6938,6 +7068,7 @@ def _run_retro_hub(console: Console, live, read_key, frame_time: float, supports
         get_editable_session=get_editable_session,
         share_theme=RETRO_THEME,
         delete_run=delete_run,
+        context_mode="retro",
         run_new=lambda: _run_retro_page(console, live, read_key, frame_time, supports_timeout),
     )
 
@@ -7070,6 +7201,7 @@ def _run_reporting_hub(console: Console, live, read_key, frame_time: float, supp
         get_editable_session=get_editable_session,
         share_theme=REPORTING_THEME,
         delete_run=delete_run,
+        context_mode="reporting",
         run_new=lambda: _run_reporting_page(console, live, read_key, frame_time, supports_timeout),
     )
 
@@ -7163,6 +7295,7 @@ def _run_solo_review_hub(console: Console, live, read_key, frame_time: float, su
         get_document=get_document,
         share_theme=SOLO_THEME,
         delete_run=delete_run,
+        context_mode="review",
         run_new=lambda: run_solo_review_page(console, live, read_key, frame_time, supports_timeout),
     )
 
@@ -7337,6 +7470,7 @@ def _run_performance_hub(
         get_share_document=get_share_document,
         share_theme=PERFORMANCE_THEME,
         delete_run=delete_run,
+        context_mode="performance",
         # Scoped: "+ New" breaks back out to the roster that opened this hub. Team-wide:
         # the roster IS the create surface, so open it in place and reload on return.
         run_new=(
@@ -10902,6 +11036,22 @@ def _pick_analysis_profile(
     return selected_profile_id
 
 
+def _load_store_plan_state(session_id: str) -> dict | None:
+    """The saved state of a plan the app's chat holds in the session store.
+
+    The TUI's own saves still go to the file store, so a plan edited here
+    forks from the app's copy on its first save.
+    """
+    try:
+        from yeaboi.sessions import SessionStore
+
+        with SessionStore(_ana_dbp) as store:
+            return store.load_state(session_id)
+    except Exception:  # noqa: BLE001 — a missing store is "no saved state"
+        logger.warning("Session store state could not be read for %s", session_id, exc_info=True)
+        return None
+
+
 def _load_planning_rows() -> list[ProjectSummary]:
     """Merged "Your projects" rows: planning projects + saved roadmaps, newest first.
 
@@ -11482,23 +11632,31 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
         return
 
     from yeaboi.config import get_retro_server_port
+    from yeaboi.context.resolve import selection_for
     from yeaboi.retro.board import RetroBoard, board_to_report
-    from yeaboi.retro.engine import carried_action_items_for_session, history_providers
+    from yeaboi.retro.engine import carried_action_items_for_session, history_providers, standup_blocker_cards
     from yeaboi.retro.server import RetroServer
     from yeaboi.retro.store import RetroStore
 
     board = RetroBoard(session_id, project_name=project_name, sprint_name=sprint_name)
+    # What this retro reads: the scope the hub's context page kept for retros.
+    selection = selection_for("retro", None, db_path=_ana_dbp)
     # Seed last sprint's action items for review before the server starts, so the
     # first browser poll already shows the "Last sprint's actions" column. Best-effort:
     # carried_action_items_for_session returns () when there's no prior retro.
-    carried = carried_action_items_for_session(session_id, project_name=project_name, db_path=_ana_dbp)
+    carried = carried_action_items_for_session(
+        session_id, project_name=project_name, db_path=_ana_dbp, selection=selection
+    )
+    carried = (*carried, *standup_blocker_cards(selection, db_path=_ana_dbp, existing=carried))
     if carried:
         board.seed_carried(list(carried))
         logger.info("retro: seeded %d carried-over action item(s) (session=%s)", len(carried), session_id)
     server = RetroServer(board, port=get_retro_server_port())
     # Previous retros, for the board's back arrow. Read lazily, so a store that
     # cannot be opened costs a board with no history rather than a board.
-    server.history_list, server.history_report = history_providers(project_name=project_name, db_path=_ana_dbp)
+    server.history_list, server.history_report = history_providers(
+        project_name=project_name, db_path=_ana_dbp, selection=selection
+    )
     try:
         server.start()
         logger.info("retro: server started on port %s (session=%s)", server.port, session_id)
@@ -11829,9 +11987,10 @@ def _run_retro_page(console: Console, live, read_key, frame_time: float, support
         # Always flush the board, stop the tunnel, and tear the server down — even
         # on exception or Ctrl-C — so the retro persists and no process leaks.
         try:
+            from yeaboi.retro.engine import record_retro_run
+
             report = board_to_report(board, sprint_name=sprint_name)
-            with RetroStore(_ana_dbp) as store:
-                store.record_run(report)
+            record_retro_run(report, db_path=_ana_dbp, scope=selection.scope)
         except Exception as e:
             logger.warning("retro: flush to store failed: %s", e)
         link.stop()
@@ -12245,6 +12404,7 @@ def _run_poker_page(console: Console, live, read_key, frame_time: float, support
         session_id, session_name, project_name = "quick-poker", "", ""
 
     from yeaboi.config import get_poker_server_port
+    from yeaboi.context.resolve import selection_for
     from yeaboi.poker.board import PokerBoard, board_to_report
     from yeaboi.poker.server import PokerServer
     from yeaboi.poker.store import PokerStore
@@ -12256,6 +12416,8 @@ def _run_poker_page(console: Console, live, read_key, frame_time: float, support
         scope_label=setup["scope_label"],
         tickets=setup["tickets"],
     )
+    # What this table reads: the scope the hub's context page kept for poker.
+    board.selection = selection_for("poker", None, db_path=_ana_dbp)
     server = PokerServer(board, port=get_poker_server_port())
     try:
         server.start()
@@ -12448,9 +12610,10 @@ def _run_poker_page(console: Console, live, read_key, frame_time: float, support
         # Always flush the session and tear the server down — even on exception
         # or Ctrl-C — so the estimates' record persists and no process leaks.
         try:
+            from yeaboi.poker.engine import record_poker_run
+
             report = board_to_report(board)
-            with PokerStore(_ana_dbp) as store:
-                store.record_run(report)
+            record_poker_run(report, db_path=_ana_dbp, scope=board.selection.scope)
             if any(t.estimated for t in report.tickets):
                 _duck_react("poker_done")  # lands on the hub the page returns to
         except Exception as e:
@@ -12562,6 +12725,7 @@ def _run_poker_hub(console: Console, live, read_key, frame_time: float, supports
         get_document=get_document,
         share_theme=POKER_THEME,
         delete_run=delete_run,
+        context_mode="poker",
         run_new=lambda: _run_poker_page(console, live, read_key, frame_time, supports_timeout),
     )
 
@@ -16124,6 +16288,9 @@ def select_mode(
                                         _read_key_fn=_read_key_fn,
                                         analysis_profile_id=_selected_profile_id,
                                         initial_description=_rm[1],
+                                        context=_pick_planning_context(
+                                            console, live, read_key, _FRAME_TIME, _supports_timeout
+                                        ),
                                     )
                                 # None / "done" → back to the project list.
                                 projects = _load_planning_rows()
@@ -16140,7 +16307,7 @@ def select_mode(
                             from yeaboi.persistence import load_graph_state
                             from yeaboi.ui.session import run_session
 
-                            saved_state = load_graph_state(project.id)
+                            saved_state = load_graph_state(project.id) or _load_store_plan_state(project.id)
 
                             # Fallback: if no state file exists (project created before
                             # state persistence was added), build a minimal graph state
@@ -16816,6 +16983,7 @@ def select_mode(
                                 _read_key_fn=_read_key_fn,
                                 analysis_profile_id=_selected_profile_id,
                                 initial_description=_rm_desc,
+                                context=_pick_planning_context(console, live, read_key, _FRAME_TIME, _supports_timeout),
                             )
                             # Session ended (Esc or completed) — return to project list
                             projects = _load_planning_rows()
@@ -16842,6 +17010,7 @@ def select_mode(
                                 dry_run=dry_run,
                                 _read_key_fn=_read_key_fn,
                                 analysis_profile_id=_selected_profile_id,
+                                context=_pick_planning_context(console, live, read_key, _FRAME_TIME, _supports_timeout),
                             )
                             # Session ended (Esc or completed) — return to project list
                             projects = _load_planning_rows()

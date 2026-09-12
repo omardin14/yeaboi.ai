@@ -21,16 +21,27 @@ import logging
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from yeaboi.agent.state import RetroCard, RetroReport
+from yeaboi.context.labels import label_run
 from yeaboi.retro.board import CARRIED_OPEN_STATUSES, RetroBoard
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from yeaboi.context.resolve import Selection
+    from yeaboi.context.scope import ContextScope
 
 logger = logging.getLogger(__name__)
 
 
 def carried_action_items_for_session(
-    session_id: str, *, project_name: str = "", db_path: Path | None = None
+    session_id: str,
+    *,
+    project_name: str = "",
+    db_path: Path | None = None,
+    selection: Selection | None = None,
 ) -> tuple[RetroCard, ...]:
     """Return the previous retro's action items for review, reset to ``pending``.
 
@@ -50,19 +61,26 @@ def carried_action_items_for_session(
     genuinely prior retro. ``project_name`` biases toward the same project's retros;
     ``session_id`` is used only for logging.
 
-    Graceful — returns an empty tuple when there's no prior retro or on any read error
-    (never raises).
+    A ``selection`` with retros switched off carries nothing; its run ids
+    replace the name bias with a hard filter. Graceful — returns an empty tuple
+    when there's no prior retro or on any read error (never raises).
 
     # See CLAUDE.md — Retro action-item carry-forward loop (mirrors Performance 1:1s)
     """
+    if selection is not None and not selection.wants("retro"):
+        logger.info("retro: carry-forward switched off for session=%s", session_id)
+        return ()
     try:
         from yeaboi.paths import get_db_path
         from yeaboi.retro.store import RetroStore
 
         path = db_path or get_db_path()
+        run_ids = selection.run_ids("retro") if selection is not None else None
         with RetroStore(path) as store:
             # Project-first, newest-first across ALL sessions (see docstring).
-            reports = store.get_recent_reports(limit=5, project_name=project_name)
+            reports = store.get_recent_reports(
+                limit=5, project_name=project_name if run_ids is None else "", run_ids=run_ids
+            )
     except Exception as exc:  # pragma: no cover - defensive; carry-forward is best-effort
         logger.warning("retro: could not load carried action items (session=%s): %s", session_id, exc)
         return ()
@@ -79,6 +97,70 @@ def carried_action_items_for_session(
     if prior_report is None:
         return ()
     return _carried_from_report(prior_report)
+
+
+def standup_blocker_cards(
+    selection: Selection | None, *, db_path: Path | None = None, existing: tuple[RetroCard, ...] = ()
+) -> tuple[RetroCard, ...]:
+    """The standup→retro edge: the selected standups' recent blockers as review cards.
+
+    Returns dismissible ``pending`` cards (text badged ``[Standup]``), deduped
+    against the ``existing`` carried cards they are seeded beside. An unscoped
+    board (``selection`` None or unscoped) gets none — the team-wide board
+    keeps its carry-forward-only seeding. Never raises.
+    """
+    from yeaboi.context.reads import recent_standup_blockers
+
+    blockers = recent_standup_blockers(selection, db_path=db_path)
+    if not blockers:
+        return ()
+    seen = {c.text.strip().lower() for c in existing}
+    cards: list[RetroCard] = []
+    for i, blocker in enumerate(blockers):
+        text = f"[Standup] {blocker}"
+        if text.lower() in seen:
+            continue
+        cards.append(
+            RetroCard(
+                id=f"standup-{i}",
+                grid="action_items",
+                text=text,
+                author="Standup",
+                origin="carryover",
+                status="pending",
+            )
+        )
+    if cards:
+        logger.info("retro: %d standup blocker card(s) seeded", len(cards))
+    return tuple(cards)
+
+
+def record_retro_run(
+    report: RetroReport,
+    *,
+    db_path: Path | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
+    scope: ContextScope | dict | None = None,
+) -> int:
+    """Persist a finished retro and label it. The one record site every host calls."""
+    from yeaboi.paths import get_db_path
+    from yeaboi.retro.store import RetroStore
+
+    path = db_path or get_db_path()
+    with RetroStore(path) as store:
+        run_id = store.record_run(report)
+    label_run(
+        "retro",
+        report.session_id,
+        run_id,
+        project_label=project_label or report.project_name,
+        tags=tags,
+        scope=scope,
+        db_path=path,
+    )
+    logger.info("retro: run %d recorded for session=%s", run_id, report.session_id)
+    return run_id
 
 
 def _carried_from_report(prior_report: RetroReport) -> tuple[RetroCard, ...]:
@@ -109,7 +191,7 @@ def _carried_from_report(prior_report: RetroReport) -> tuple[RetroCard, ...]:
 
 
 def history_providers(
-    *, project_name: str = "", db_path: Path | None = None
+    *, project_name: str = "", db_path: Path | None = None, selection: Selection | None = None
 ) -> tuple[Callable[[], list[dict]], Callable[[int], dict | None]]:
     """Readers the browser board uses to step back through previous retros.
 
@@ -117,9 +199,13 @@ def history_providers(
     retro is persisted in, and a board with nothing behind it (a dev fixture, a
     retro run outside a session) simply reports no history.
 
-    Both are best-effort — a store that cannot be read is a board with no past,
-    never a board that fails to load.
+    ``selection`` narrows both readers: with retros switched off they report
+    nothing, and a run-narrowed selection only lists (and can only fetch by id)
+    its own retros. Both are best-effort — a store that cannot be read is a
+    board with no past, never a board that fails to load.
     """
+    want = selection is None or selection.wants("retro")
+    run_ids = selection.run_ids("retro") if selection is not None else None
 
     def _open() -> Any:
         from yeaboi.paths import get_db_path
@@ -128,13 +214,15 @@ def history_providers(
         return RetroStore(db_path or get_db_path())
 
     def listing() -> list[dict]:
+        if not want:
+            return []
         # Across sessions, like the carry-forward reader above and for the same
         # reason: a retro runs under whatever quick session was open that day,
         # so a same-session history is almost always empty. Project-first, so a
         # board for project X shows X's retros before anyone else's.
         try:
             with _open() as store:
-                runs = store.get_all_history(limit=48)
+                runs = store.get_all_history(limit=48, run_ids=run_ids)
         except Exception as exc:  # pragma: no cover - defensive; history is best-effort
             logger.warning("retro: could not list previous retros: %s", exc)
             return []
@@ -145,6 +233,8 @@ def history_providers(
         return runs[:24]
 
     def one(run_id: int) -> dict | None:
+        if not want or (run_ids is not None and run_id not in run_ids):
+            return None
         try:
             with _open() as store:
                 report = store.get_run_by_id(run_id)

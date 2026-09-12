@@ -233,7 +233,7 @@ def _style_preamble_line(line: str) -> Text:
     """Render a preamble line with **bold** segments in bright white, rest dim.
 
     Markdown bold markers (**...**) are common in extraction summaries
-    (e.g. "I **3** extracted from your description").
+    (e.g. "I extracted **3** from your description").
     """
     t = Text(justify="left")
     pos = 0

@@ -13,6 +13,7 @@ import queue
 import threading
 from collections.abc import Iterator
 
+from yeaboi.app._context_body import context_kwargs
 from yeaboi.app.router import HTTPError, Request, Response, json_response
 from yeaboi.mcp.runtime import to_jsonable
 
@@ -110,6 +111,7 @@ def review_run(app, request: Request) -> Response:
     carried_statuses = payload.get("carried_statuses")
     if carried_statuses is not None and not isinstance(carried_statuses, dict):
         raise HTTPError(400, "carried_statuses must be an object of {action_id: status}")
+    reads = context_kwargs(payload)
     op = app.ops.create()
     logger.info(
         "Weekly review run start: session=%s week_end=%s marks=%d",
@@ -119,12 +121,12 @@ def review_run(app, request: Request) -> Response:
     )
     return Response(
         content_type="application/x-ndjson",
-        stream=_lines(_run(app, op, session_id, week_end, carried_statuses)),
+        stream=_lines(_run(app, op, session_id, week_end, carried_statuses, reads)),
         headers=(("X-Accel-Buffering", "no"),),
     )
 
 
-def _run(app, op, session_id, week_end, carried_statuses) -> Iterator[dict]:
+def _run(app, op, session_id, week_end, carried_statuses, reads: dict | None = None) -> Iterator[dict]:
     from yeaboi.mcp.runtime import _ENGINE_LOCK
 
     events: queue.Queue = queue.Queue()
@@ -155,6 +157,7 @@ def _run(app, op, session_id, week_end, carried_statuses) -> Iterator[dict]:
                     week_end=week_end,
                     carried_statuses=carried_statuses,
                     on_progress=on_progress,
+                    **(reads or {}),
                 )
         except BaseException as exc:  # noqa: BLE001 — reported on the stream below
             result[1] = exc

@@ -27,8 +27,12 @@ import logging
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from yeaboi.timeparse import parse_datetime
+
+if TYPE_CHECKING:
+    from yeaboi.context.resolve import Selection
 
 logger = logging.getLogger(__name__)
 
@@ -232,17 +236,30 @@ def format_ceremony_history_md(ctx: CeremonyContext) -> str:
 
 
 def gather_ceremony_context(
-    project_name: str = "", *, retro_limit: int = 5, standup_limit: int = 10
+    project_name: str = "",
+    *,
+    retro_limit: int = 5,
+    standup_limit: int = 10,
+    selection: Selection | None = None,
 ) -> CeremonyContext:
     """Read the team's recent retros + standups and distil them (team-wide).
 
     Retros are fetched project-first (matching ``project_name`` sort ahead of
     others); standups are recency-based (their table has no project column).
-    Graceful: a missing DB / empty tables / any error yields an empty context —
-    planning/analysis then behave exactly as before.
+    A ``selection`` (a resolved context scope) gates each producer — retros
+    off skips every retro read, standups likewise — and its run ids replace
+    the name bias with a hard filter pushed into the query, so the 100-row
+    trend window is the selection's own. Graceful: a missing DB / empty
+    tables / any error yields an empty context — planning/analysis then
+    behave exactly as before.
 
     # See docs: "Session Management" — SQLite persistence
     """
+    want_retro = selection is None or selection.wants("retro")
+    want_standup = selection is None or selection.wants("standup")
+    if not want_retro and not want_standup:
+        logger.info("gather_ceremony_context: retro and standup both switched off")
+        return CeremonyContext()
     try:
         from yeaboi.config import get_sessions_db
         from yeaboi.retro.store import RetroStore
@@ -252,12 +269,22 @@ def gather_ceremony_context(
         if not db_path.exists():
             return CeremonyContext()
 
-        with RetroStore(db_path) as rstore:
-            retros = rstore.get_recent_reports(retro_limit, project_name)
-            retro_hist = rstore.get_all_history(100)
-        with StandupStore(db_path) as sstore:
-            standups = sstore.get_recent_reports(standup_limit)
-            standup_hist = sstore.get_all_history(100)
+        retro_ids = selection.run_ids("retro") if selection is not None else None
+        standup_ids = selection.run_ids("standup") if selection is not None else None
+        retros: list = []
+        retro_hist: list[dict] = []
+        standups: list = []
+        standup_hist: list[dict] = []
+        if want_retro:
+            with RetroStore(db_path) as rstore:
+                retros = rstore.get_recent_reports(
+                    retro_limit, project_name if retro_ids is None else "", run_ids=retro_ids
+                )
+                retro_hist = rstore.get_all_history(100, run_ids=retro_ids)
+        if want_standup:
+            with StandupStore(db_path) as sstore:
+                standups = sstore.get_recent_reports(standup_limit, run_ids=standup_ids)
+                standup_hist = sstore.get_all_history(100, run_ids=standup_ids)
     except Exception:  # noqa: BLE001 — ceremony history is best-effort; never abort a plan
         logger.debug("gather_ceremony_context failed (non-fatal)", exc_info=True)
         return CeremonyContext()

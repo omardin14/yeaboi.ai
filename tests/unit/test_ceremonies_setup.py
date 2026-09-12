@@ -174,7 +174,7 @@ class TestOptions:
             options[0]
         )
         standup = next(o for o in options if o["key"] == "standup")
-        assert [p["name"] for p in standup["params"]] == ["days", "solo"]
+        assert [p["name"] for p in standup["params"]] == ["days", "solo", "context"]
         report = next(o for o in options if o["key"] == "report")
         assert "solo" in [p["name"] for p in report["params"]]
 

@@ -296,3 +296,90 @@ class TestHistoryProviders:
         listing, one = engine.history_providers(db_path=tmp_path / "not-a-dir" / "nope.db")
         assert listing() == []
         assert one(1) is None
+
+
+def _selection(sources=None, **by_source):
+    from yeaboi.context.resolve import Selection
+    from yeaboi.context.scope import ContextScope
+
+    return Selection(scope=ContextScope(sources=None if sources is None else frozenset(sources)), by_source=by_source)
+
+
+class TestSelectionNarrowing:
+    """A resolved scope gates the retro reads and narrows them to its own runs."""
+
+    def _seed(self, tmp_path):
+        db = tmp_path / "sessions.db"
+        with RetroStore(db) as store:
+            store.record_run(_prior_report("proj-sess", project_name="Alpha", date="2026-07-01"))
+            store.record_run(_prior_report("other-sess", project_name="Beta", date="2026-07-09"))
+        return db
+
+    def test_retro_off_carries_nothing(self, tmp_path):
+        db = self._seed(tmp_path)
+        assert engine.carried_action_items_for_session("x", db_path=db, selection=_selection({"standup"})) == ()
+
+    def test_run_ids_replace_the_project_bias(self, tmp_path):
+        db = self._seed(tmp_path)
+        listing, one = engine.history_providers(project_name="Beta", db_path=db, selection=_selection(retro=("1",)))
+        assert [r["session_id"] for r in listing()] == ["proj-sess"]
+        assert one(1) is not None and one(2) is None
+
+    def test_history_off_is_a_board_with_no_past(self, tmp_path):
+        db = self._seed(tmp_path)
+        listing, one = engine.history_providers(db_path=db, selection=_selection({"plan"}))
+        assert listing() == [] and one(1) is None
+
+
+class TestStandupBlockerCards:
+    def _standups(self, tmp_path):
+        from yeaboi.agent.state import MemberUpdate, StandupReport
+        from yeaboi.standup.store import StandupStore
+
+        db = tmp_path / "sessions.db"
+        with StandupStore(db) as store:
+            store.record_run(
+                StandupReport(
+                    date="2026-07-24",
+                    session_id="s1",
+                    member_updates=(MemberUpdate(name="Alex", blockers="waiting on API keys"),),
+                )
+            )
+        return db
+
+    def test_an_unscoped_board_gets_none(self, tmp_path):
+        db = self._standups(tmp_path)
+        assert engine.standup_blocker_cards(None, db_path=db) == ()
+
+    def test_a_scoped_board_seeds_the_selected_blockers(self, tmp_path):
+        db = self._standups(tmp_path)
+        cards = engine.standup_blocker_cards(_selection({"standup"}), db_path=db)
+        assert [c.text for c in cards] == ["[Standup] Alex: waiting on API keys"]
+        assert cards[0].origin == "carryover" and cards[0].status == "pending" and cards[0].grid == "action_items"
+
+    def test_existing_cards_are_not_seeded_twice(self, tmp_path):
+        from yeaboi.agent.state import RetroCard
+
+        db = self._standups(tmp_path)
+        existing = (RetroCard(id="x", grid="action_items", text="[Standup] Alex: waiting on API keys", author="A"),)
+        assert engine.standup_blocker_cards(_selection({"standup"}), db_path=db, existing=existing) == ()
+
+
+class TestRecordRetroRun:
+    def test_records_the_run_and_labels_it(self, tmp_path):
+        from yeaboi.context.labels import LabelStore
+        from yeaboi.context.scope import ContextScope
+
+        db = tmp_path / "sessions.db"
+        run_id = engine.record_retro_run(
+            _prior_report("s1", project_name="Alpha"),
+            db_path=db,
+            tags=["Q3"],
+            scope=ContextScope(sources=frozenset({"standup"})),
+        )
+        with RetroStore(db) as store:
+            assert store.get_run_by_id(run_id) is not None
+        with LabelStore(db) as labels:
+            row = labels.get_labels("retro", "s1", str(run_id))
+        assert row.project == "Alpha" and {"q3", "mode:retro"} <= set(row.tags)
+        assert row.scope["sources"] == ["standup"]

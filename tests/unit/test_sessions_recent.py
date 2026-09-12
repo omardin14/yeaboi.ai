@@ -19,12 +19,25 @@ def db(tmp_path):
 @pytest.fixture
 def seeded(db):
     """One run per mode; the retro belongs to a different session."""
+    from dataclasses import dataclass, field
+
+    from yeaboi.agent.state import OneOnOnePrep, PokerReport, RoadmapAnalysis
+    from yeaboi.agentwatch.store import AgentWatchStore
+    from yeaboi.performance.store import PerformanceStore
+    from yeaboi.poker.store import PokerStore
     from yeaboi.reporting.store import ReportingStore
     from yeaboi.retro.store import RetroStore
+    from yeaboi.roadmap.ingest import RoadmapSource
+    from yeaboi.roadmap.store import RoadmapStore
     from yeaboi.sessions import SessionStore
     from yeaboi.ship.store import ShipStore
     from yeaboi.solo.store import WeeklyReviewStore
     from yeaboi.standup.store import StandupStore
+
+    @dataclass
+    class _Report:
+        period_start: str = "2026-08-01"
+        warnings: tuple = field(default_factory=tuple)
 
     with SessionStore(db) as store:
         store.create_session("p1", "Apollo")
@@ -39,6 +52,18 @@ def seeded(db):
         store.record_run(ShipRun(run_id="r1", item_id="S-1", session_id="p1"))
     with WeeklyReviewStore(db) as store:
         store.record_run(WeeklyReview(session_id="p1", week_label="2026-W35"))
+    with PokerStore(db) as store:
+        store.record_run(PokerReport(date="2026-09-02", session_id="p1", source="jira", scope_label="Sprint 42"))
+    with PerformanceStore(db) as store:
+        store.record_prep(OneOnOnePrep(engineer="Ada", date="2026-09-03"))
+    with RoadmapStore(db) as store:
+        store.save_roadmap(
+            RoadmapSource(source_type="local", locator="/tmp/q3.md", label="q3.md"),
+            RoadmapAnalysis(source_type="local", source_locator="/tmp/q3.md", source_label="q3.md"),
+        )
+    with AgentWatchStore(db) as store:
+        for kind in ("usage", "advisor", "security"):
+            store.record_report(kind, _Report(), key_date="2026-08-08")
     return {"db": db}
 
 
@@ -56,6 +81,11 @@ class TestUnion:
             "title",
             "created_at",
             "last_modified",
+            "subtitle",
+            "kind",
+            "project_label",
+            "tags",
+            "engineer",
         ]
 
     def test_titles_and_run_ids(self, seeded):
@@ -67,6 +97,48 @@ class TestUnion:
         assert by_mode["review"].title == "Week 2026-W35"
         assert by_mode["planning"].title.startswith("apollo-") and by_mode["planning"].run_id == ""
         assert by_mode["analysis"].session_id == "a1"
+        assert by_mode["poker"].title == "Poker — 2026-09-02" and by_mode["poker"].subtitle.startswith("Sprint 42")
+        assert by_mode["performance"].run_id == "prep:1" and by_mode["performance"].engineer == "Ada"
+        assert by_mode["performance"].kind == "prep"
+        assert by_mode["roadmap"].title == "Q3" and by_mode["roadmap"].run_id == "1"
+        assert by_mode["agent-usage"].title == "Agent usage — 2026-08-08"
+        assert by_mode["agent-security"].mode == "agent-security"
+
+
+class TestLabels:
+    def test_rows_carry_their_project_label_and_tags(self, seeded):
+        from yeaboi.context.labels import LabelStore
+
+        with LabelStore(seeded["db"]) as labels:
+            labels.set_labels("planning", "p1", project="apollo", tags=("q3",))
+            labels.set_labels("standup", "p1", "1", project="apollo", tags=("mode:standup",))
+            labels.set_labels("performance", "", "prep:1", project="borealis")
+        by_mode = {r.mode: r for r in recent_sessions(db_path=seeded["db"])}
+        assert by_mode["planning"].project_label == "apollo" and by_mode["planning"].tags == ("q3",)
+        assert by_mode["standup"].tags == ("mode:standup",)
+        assert by_mode["performance"].project_label == "borealis"
+        assert by_mode["retro"].project_label == "" and by_mode["retro"].tags == ()
+
+    def test_a_project_label_narrows_the_list(self, seeded):
+        from yeaboi.context.labels import LabelStore
+
+        with LabelStore(seeded["db"]) as labels:
+            labels.set_labels("planning", "p1", project="apollo")
+            labels.set_labels("retro", "other", "1", project="borealis")
+        rows = recent_sessions(project_label="apollo", db_path=seeded["db"])
+        assert [(r.mode, r.session_id) for r in rows] == [("planning", "p1")]
+        assert [r.session_id for r in recent_sessions(project_label="APOLLO", db_path=seeded["db"])] == ["p1"]
+        assert recent_sessions(project_label="nobody", db_path=seeded["db"]) == []
+
+    def test_a_missing_label_table_leaves_rows_unlabelled(self, seeded, monkeypatch):
+        from yeaboi.context import labels as labels_module
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("no labels")
+
+        monkeypatch.setattr(labels_module.LabelStore, "list_labels", boom)
+        rows = recent_sessions(db_path=seeded["db"])
+        assert rows and all(r.project_label == "" for r in rows)
 
     def test_absent_modes_are_absent_not_invented(self, db):
         from yeaboi.sessions import SessionStore

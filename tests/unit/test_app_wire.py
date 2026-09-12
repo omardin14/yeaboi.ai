@@ -113,16 +113,142 @@ class TestSessionsWire:
             "title",
             "created_at",
             "last_modified",
+            "subtitle",
+            "kind",
+            "project_label",
+            "tags",
+            "engineer",
         ]
 
     def test_mode_vocabulary_is_pinned(self):
         from yeaboi.sessions_recent import MODES
 
-        assert MODES == ("planning", "analysis", "standup", "retro", "reporting", "ship", "review")
+        assert MODES == (
+            "planning",
+            "analysis",
+            "standup",
+            "retro",
+            "reporting",
+            "ship",
+            "review",
+            "poker",
+            "performance",
+            "roadmap",
+            "agent-usage",
+            "agent-advisor",
+            "agent-security",
+        )
 
     def test_doc_has_the_section(self):
         text = CONTRACT.read_text(encoding="utf-8")
         assert "## Sessions and references" in text
+
+
+class TestPlanningRoomWire:
+    """The planning room's shapes: the session view, the turn's line types, the plan view."""
+
+    def test_session_view_keys_are_pinned(self):
+        from yeaboi.app.routes_chat import SESSION_VIEW_KEYS
+
+        assert SESSION_VIEW_KEYS == (
+            "session_id",
+            "project_id",
+            "title",
+            "project_label",
+            "tags",
+            "stage",
+            "intake_mode",
+            "opening",
+            "created_at",
+            "last_modified",
+            "transcript",
+            "question",
+            "progress",
+            "pending",
+            "sections",
+        )
+
+    def test_line_types_are_pinned(self):
+        from yeaboi.app.routes_chat import WIRE_TYPES
+
+        assert set(WIRE_TYPES) == {
+            "op",
+            "token",
+            "assistant",
+            "user",
+            "question",
+            "await_confirm",
+            "await_review",
+            "await_choice",
+            "artifact",
+            "progress",
+            "section",
+            "notice",
+            "action",
+            "done",
+            "cancelled",
+            "error",
+        }
+
+    def test_every_line_type_is_documented(self):
+        from yeaboi.app.routes_chat import WIRE_TYPES
+
+        text = CONTRACT.read_text(encoding="utf-8")
+        for line_type in WIRE_TYPES:
+            assert f"| `{line_type}` |" in text, f"line type {line_type} missing from the contract"
+
+    def test_plan_sections_and_statuses_are_pinned(self):
+        from yeaboi.agent.chat_session import SECTION_KINDS
+        from yeaboi.agent.plan_view import STATUSES
+
+        assert SECTION_KINDS == ("intake", "analysis", "epic", "features", "stories", "tasks", "sprints")
+        assert STATUSES == ("empty", "generating", "awaiting_review", "accepted")
+
+    def test_doc_has_the_sections(self):
+        text = CONTRACT.read_text(encoding="utf-8")
+        assert "## Planning room routes" in text
+        assert "### Plan view" in text and "### Plan versions" in text
+
+
+class TestContextWire:
+    """The context scope and the labels row the desktop's picker and drawers parse."""
+
+    def test_labels_row_keys_are_pinned(self):
+        from yeaboi.context.labels import SessionLabels
+
+        assert list(SessionLabels("standup", "s1").to_dict()) == [
+            "mode",
+            "session_id",
+            "run_id",
+            "project_label",
+            "tags",
+            "scope",
+            "created_at",
+            "updated_at",
+        ]
+
+    def test_scope_dict_keys_are_pinned(self):
+        from yeaboi.context.scope import ContextScope
+
+        assert list(ContextScope().to_dict()) == ["sources", "window", "projects", "tags", "limits"]
+
+    def test_options_keys_are_pinned(self):
+        from dataclasses import fields
+
+        from yeaboi.context.engine import ContextOptions
+
+        assert [f.name for f in fields(ContextOptions)] == [
+            "sources",
+            "windows",
+            "projects",
+            "tags",
+            "calendar",
+            "default",
+            "defaults",
+        ]
+
+    def test_doc_has_the_section(self):
+        assert "## Context scope and labels" in CONTRACT.read_text(encoding="utf-8")
 
 
 class TestReferencesWire:

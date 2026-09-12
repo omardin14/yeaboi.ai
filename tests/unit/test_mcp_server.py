@@ -24,6 +24,11 @@ from yeaboi.mcp.server import create_app  # noqa: E402
 EXPECTED_TOOLS = {
     "connections_list",
     "connections_fetch",
+    "context_options",
+    "context_preview",
+    "session_labels_get",
+    "session_labels_set",
+    "session_labels_list",
     "artifact_edit_apply",
     "niko_ask",
     "ceremonies_list",
@@ -1524,3 +1529,59 @@ class TestWeeklyReviewTools:
         payload = call_tool("weekly_review_export", {"run_id": 99})
         assert payload["ok"] is False
         assert "run 99" in payload["error"]["message"]
+
+
+class TestPlanToolsOnChatSessions:
+    """A conversation the app opens is a session every plan tool can read."""
+
+    def test_plan_get_reads_a_chat_created_session(self, tmp_db):
+        from yeaboi.app.chats import ChatSupervisor
+
+        chats = ChatSupervisor(graph_factory=lambda: None, id_factory=lambda: "new-chat0001-2026-09-11")
+        chat = chats.create("a booking app", intake_mode="smart", title="Barbers")
+        chat.session.state.update(
+            questionnaire=make_completed_questionnaire(),
+            project_analysis=make_dummy_analysis(),
+            features=make_sample_features(),
+            stories=make_sample_stories(),
+            sprints=make_sample_sprints(),
+        )
+        chats.save(chat)
+        payload = call_tool("plan_get", {"session_id": chat.session_id})
+        assert payload["ok"] is True, payload
+        assert payload["data"]["session_id"] == chat.session_id
+        assert payload["data"]["stories"]
+
+
+class TestContextParams:
+    """The run tools forward context/project_label/tags only when set; the config tool persists a scope."""
+
+    def test_the_three_are_forwarded_when_set(self, seeded_session, provider_mode, monkeypatch):
+        seen: dict = {}
+
+        def fake_run(**kwargs):
+            seen.update(kwargs)
+            return TestWeeklyReviewTools()._review()
+
+        monkeypatch.setattr("yeaboi.solo.engine.run_weekly_review", fake_run)
+        payload = call_tool(
+            "weekly_review_run", {"context": "standup@month", "project_label": "Apollo", "tags": ["Q3"]}
+        )
+        assert payload["ok"] is True, payload
+        assert seen["context"] == "standup@month" and seen["project_label"] == "Apollo" and seen["tags"] == ["Q3"]
+
+    def test_standup_config_set_persists_the_scope(self, seeded_session, provider_mode):
+        payload = call_tool("standup_config_set", {"context": "standup,retro@2sprints"})
+        assert payload["ok"] is True, payload
+        assert set(payload["data"]["config"]["context_scope"]["sources"]) == {"standup", "retro"}
+        current = call_tool("standup_config_get")
+        assert current["data"]["config"]["context_scope"]["window"] == {"kind": "sprints", "count": 2}
+
+    def test_inherit_clears_the_saved_scope(self, seeded_session, provider_mode):
+        call_tool("standup_config_set", {"context": "none"})
+        payload = call_tool("standup_config_set", {"context": "inherit"})
+        assert payload["data"]["config"]["context_scope"] is None
+
+    def test_a_typo_in_the_spec_is_an_error_envelope(self, seeded_session, provider_mode):
+        payload = call_tool("standup_config_set", {"context": "stanup"})
+        assert payload["ok"] is False and "stanup" in payload["error"]["message"]

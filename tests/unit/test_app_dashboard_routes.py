@@ -388,3 +388,37 @@ class TestStandupSolo:
         request(app, "POST", "/api/standup/schedule", payload)
         request(app, "POST", "/api/standup/schedule", {**payload, "solo": True})
         assert applied == [False, True]
+
+
+class TestRunBodyContext:
+    """The three context keys reach the engine only when the body carries them; a bad spec is a 400."""
+
+    def test_standup_forwards_the_keys_when_present(self, app, monkeypatch):
+        seen: list[dict] = []
+        monkeypatch.setattr("yeaboi.standup.engine.run_standup", lambda sid, **kw: seen.append(kw) or _report())
+        drain(request(app, "POST", "/api/standup/run", {"session_id": "s1"}))
+        drain(
+            request(
+                app,
+                "POST",
+                "/api/standup/run",
+                {"session_id": "s1", "context": "standup@month", "project_label": "Apollo", "tags": ["Q3"]},
+            )
+        )
+        assert not {"context", "project_label", "tags"} & set(seen[0])
+        assert seen[1]["project_label"] == "Apollo" and seen[1]["tags"] == ("q3",)
+        assert seen[1]["context"].wants("standup") and not seen[1]["context"].wants("retro")
+
+    def test_standup_refuses_a_bad_spec_before_streaming(self, app):
+        response = request(app, "POST", "/api/standup/run", {"session_id": "s1", "context": "stanup"})
+        assert response.code == 400 and "stanup" in json.loads(response.body)["error"]
+
+    def test_analysis_forwards_the_keys_when_present(self, app, monkeypatch):
+        seen: list[dict] = []
+        monkeypatch.setattr(
+            "yeaboi.analysis.engine.run_team_analysis", lambda **kw: seen.append(kw) or {"delivery": {}}
+        )
+        drain(request(app, "POST", "/api/analysis/run", {"source": "jira"}))
+        drain(request(app, "POST", "/api/analysis/run", {"source": "jira", "project_label": "Apollo"}))
+        assert "project_label" not in seen[0] and seen[1]["project_label"] == "Apollo"
+        assert request(app, "POST", "/api/analysis/run", {"context": "stanup"}).code == 400

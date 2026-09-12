@@ -519,3 +519,36 @@ class TestSoloReport:
         monkeypatch.setattr(prompts, "get_delivery_report_prompt", spy)
         engine.run_delivery_report("last_sprint", session_id="", db_path=db_path, solo=True)
         assert seen["solo"] is True
+
+
+class TestContextScope:
+    """What a report may read from other sessions, and how its run is labelled."""
+
+    _LLM = json.dumps({"headline": "H", "executive_summary": "S", "themes": [], "highlights": [], "emoji_theme": {}})
+
+    def _run(self, monkeypatch, db_path, **kw):
+        _patch_activity(monkeypatch, items=_items(1), sprints=["Sprint 5"])
+        _patch_llm(monkeypatch, self._LLM)
+        monkeypatch.setattr("yeaboi.config.get_last_context_scope", lambda mode: None)
+        seen: list = []
+        monkeypatch.setattr(
+            engine,
+            "latest_planning_state",
+            lambda selection, **_k: seen.append(selection) or ("plan-9", {"project_name": "Scoped plan"}),
+        )
+        return engine.run_delivery_report("last_sprint", session_id="", db_path=db_path, **kw), seen
+
+    def test_a_scoped_run_frames_itself_with_the_selected_plan(self, monkeypatch, db_path):
+        from yeaboi.context.labels import LabelStore
+
+        report, seen = self._run(monkeypatch, db_path, context="plan", project_label="Apollo", tags=["Q3"])
+        assert len(seen) == 1 and seen[0].wants("plan")
+        assert report.project_name == "Scoped plan"
+        with LabelStore(db_path) as labels:
+            rows = labels.list_labels(mode="reporting")
+        assert rows and rows[0].project == "Apollo"
+        assert {"q3", "period:last_sprint", "mode:reporting"} <= set(rows[0].tags)
+
+    def test_an_unscoped_run_reads_no_plan(self, monkeypatch, db_path):
+        report, seen = self._run(monkeypatch, db_path)
+        assert seen == [] and report.project_name != "Scoped plan"

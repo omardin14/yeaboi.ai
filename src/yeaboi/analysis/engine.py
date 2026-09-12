@@ -24,14 +24,18 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from yeaboi.analysis import repo_inventory
+from yeaboi.analysis.cancellation import AnalysisCancelledError
+from yeaboi.analysis.setup import available_doc_sources, available_trackers, scannable_code_sources
 
 # Re-exported: callers (TUI worker, tests) import the error from the engine,
 # but it lives in analysis/cancellation.py so the fetch layers can raise it
 # without importing this module (engine imports them — reverse would cycle).
-from yeaboi.analysis import repo_inventory
-from yeaboi.analysis.cancellation import AnalysisCancelledError
-from yeaboi.analysis.setup import available_doc_sources, available_trackers, scannable_code_sources
+from yeaboi.context.labels import label_run
+from yeaboi.context.scope import ContextScope, coerce_scope
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +299,9 @@ def run_team_analysis(
     progress: list | None = None,
     db_path=None,
     cancel_event: threading.Event | None = None,
+    context: ContextScope | dict | str | None = None,
+    project_label: str = "",
+    tags: Sequence[str] = (),
 ) -> dict:
     """Analyse the team into decoupled Delivery / Code / Docs components.
 
@@ -641,6 +648,22 @@ def run_team_analysis(
     # Attach the global code/docs signals to every delivery profile, then persist.
     if delivery:
         _persist_delivery(delivery, code, docs, effective_db_path)
+        # Analysis is a producer, so ``context`` narrows nothing here; it is
+        # recorded on the profile's label row so the export that reads ceremony
+        # history later runs under the scope this analysis was asked for.
+        scope = coerce_scope(context)
+        for tracker, sub in delivery.items():
+            team_id = getattr(sub.get("profile"), "team_id", "") if isinstance(sub, dict) else ""
+            if team_id:
+                label_run(
+                    "analysis",
+                    team_id,
+                    project_label=project_label,
+                    tags=tags,
+                    scope=scope,
+                    defaults={"tracker_key": getattr(sub.get("profile"), "project_key", "") or ""},
+                    db_path=effective_db_path,
+                )
     for sub in delivery.values():
         warnings.extend(sub.get("warnings", []))
 
